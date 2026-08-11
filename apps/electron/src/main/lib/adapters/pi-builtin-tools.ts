@@ -961,7 +961,7 @@ function buildBrowserTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefiniti
     sdk.defineTool({
       name: 'BrowserPreviewOpen',
       label: '打开本地网页预览',
-      description: 'Open an HTML file or a directory containing index.html from the current project or an authorized attached directory in a dedicated in-app browser tab. This is read-only preview access; do not use it to read arbitrary local files.',
+      description: 'Open an HTML file or a directory containing index.html from the current project or an authorized attached directory in a dedicated, visible in-app browser tab. This is read-only preview access; do not use it to read arbitrary local files.',
       parameters: Type.Object({ path: Type.String({ description: 'Absolute or current-workspace-relative path to an HTML file or directory with index.html.' }), tabId: Type.Optional(Type.String({ description: 'Optional tab id. Defaults to a new preview tab.' })) }),
       async execute(_id, params, signal?: AbortSignal) {
         const args = params as Record<string, unknown>
@@ -985,7 +985,7 @@ function buildBrowserTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefiniti
     sdk.defineTool({
       name: 'BrowserNewTab',
       label: '新建浏览器标签',
-      description: 'Create a new Agent working tab without changing the tab currently visible to the user. Optionally navigate it to a public HTTP/HTTPS URL.',
+      description: 'Create a new Agent working tab and activate it in the visible in-app browser. Optionally navigate it to a public HTTP/HTTPS URL.',
       parameters: Type.Object({ url: Type.Optional(Type.String({ description: 'Optional public HTTP/HTTPS URL.' })) }),
       async execute(_id, params) {
         const url = typeof (params as Record<string, unknown>).url === 'string' ? (params as Record<string, string>).url : undefined
@@ -995,7 +995,7 @@ function buildBrowserTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefiniti
     sdk.defineTool({
       name: 'BrowserSelectTab',
       label: '切换浏览器标签',
-      description: 'Switch the Agent working tab by tab id without changing the tab visible in the browser panel.',
+      description: 'Switch the Agent working tab by tab id and activate that tab in the visible browser panel.',
       parameters: Type.Object({ tabId: Type.String({ description: 'Tab id from BrowserListTabs or BrowserNewTab.' }) }),
       async execute(_id, params) {
         const value = (params as Record<string, unknown>).tabId

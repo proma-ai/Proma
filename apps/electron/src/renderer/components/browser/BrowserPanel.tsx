@@ -135,11 +135,11 @@ export function BrowserPanel({ sessionId, state, onClose }: BrowserPanelProps): 
             disabled={riskBlocked}
             onClick={() => void selectTab(tab.tabId)}
             className={`group flex items-center gap-1.5 h-6 min-w-[120px] max-w-[220px] px-2 rounded text-[11px] disabled:cursor-not-allowed disabled:opacity-50 ${tab.tabId === activeTabId ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'}`}
-            aria-label={`切换到 ${tab.title || '新建标签页'}`}
+            aria-label={`切换到 ${tab.title || '新建标签页'}${tab.openedByAgent ? '（由 Agent 创建）' : ''}`}
           >
             <Globe2 className="size-3 shrink-0" />
             <span className="truncate flex-1 text-left">{tab.title || '新建标签页'}</span>
-            {tab.tabId === agentTabId && <span className="shrink-0 rounded bg-primary/10 px-1 py-px text-[9px] font-medium text-primary">Agent</span>}
+            {tab.openedByAgent && <span className="shrink-0 rounded bg-primary/10 px-1 py-px text-[9px] font-medium text-primary">Agent</span>}
             <span
               role="button"
               tabIndex={0}

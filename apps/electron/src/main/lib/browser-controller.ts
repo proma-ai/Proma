@@ -3,6 +3,7 @@ import type { BrowserExecutionSource, BrowserOperationStatus, BrowserTraceAction
 import { AGENT_IPC_CHANNELS } from '@proma/shared'
 import { assertSafeBrowserDestination, assertSafeBrowserUrl } from './browser-policy'
 import { createAuthorizedPreviewUrl, isAuthorizedPreviewProtocol } from './browser-preview-service'
+import { handlePromaFileRequest } from './local-file-protocol'
 import { BrowserCdpTimeoutError, BrowserOperationAbortedError, BROWSER_OBSERVE_TIMEOUT_MS, resolveBrowserObserveAxDepth, throwIfBrowserOperationAborted, withBrowserCdpTimeout } from './browser-cdp'
 import { parseBrowserPressAction } from './browser-key-policy'
 import { browserObservationNameLimit, prioritizeBrowserObservationCandidates, resolveBrowserObserveMaxElements } from './browser-observation-policy'
@@ -13,6 +14,8 @@ import { assertBrowserScript, buildBrowserDomActionExpression, type BrowserDomAc
 import { getSettings } from './settings-service'
 
 const MAX_TRACE_ITEMS = 30
+/** 总数超限时只回收 Agent 创建且未在使用的标签，绝不自动关闭用户标签。 */
+const MAX_BROWSER_TABS = 20
 const MAX_SCREENSHOT_BYTES = 3 * 1024 * 1024
 const ACTION_HIGHLIGHT_DURATION_MS = 900
 const MAX_BROWSER_SCRIPT_RESULT_CHARS = 64_000
@@ -29,6 +32,10 @@ type BrowserTabRecord = {
   /** 防止 UI 与 Agent 在同一 Tab 上交错下发命令。 */
   commandTail: Promise<void>
   isLocalPreview: boolean
+  /** 仅表示来源：由 Agent 创建的标签始终保留标识，不随当前工作标签切换而丢失。 */
+  openedByAgent: boolean
+  /** 用于在超限时优先回收最久未使用的 Agent 标签。 */
+  lastActivityAt: number
   highlightTimer?: ReturnType<typeof setTimeout>
   lastBounds?: BrowserViewLayout['bounds']
 }
@@ -142,6 +149,8 @@ export class BrowserController {
   private readonly configurations = new Map<string, BrowserSessionConfiguration>()
   /** Electron persistent partition 生命周期长于 Agent session；同一 Session 只安装一次 guard。 */
   private readonly guardedSessions = new WeakSet<Session>()
+  /** 自定义 partition 不继承 default session 的协议处理器，必须单独注册本地预览协议。 */
+  private readonly previewProtocolSessions = new WeakSet<Session>()
 
   configureSession(sessionId: string, input: ConfigureBrowserSessionInput): void {
     const previous = this.configurations.get(sessionId)
@@ -191,6 +200,7 @@ export class BrowserController {
         url: tab.state.url,
         title: tab.state.title,
         loading: tab.state.loading,
+        openedByAgent: tab.openedByAgent,
       })),
       url: active.state.url,
       title: active.state.title,
@@ -251,6 +261,7 @@ export class BrowserController {
   }
 
   private trace(browserSession: BrowserSessionRecord, tab: BrowserTabRecord, action: BrowserTraceAction, summary: string, status: BrowserOperationStatus = 'verified'): void {
+    tab.lastActivityAt = Date.now()
     let domain: string | null = null
     try { domain = new URL(tab.state.url).host || null } catch { /* 新建标签页或本地预览 */ }
     const item: BrowserTraceItem = {
@@ -343,6 +354,12 @@ export class BrowserController {
     browserSession.on('will-download', (_event, item) => item.cancel())
   }
 
+  private installPreviewProtocol(browserSession: Session): void {
+    if (this.previewProtocolSessions.has(browserSession)) return
+    browserSession.protocol.handle('proma-file', handlePromaFileRequest)
+    this.previewProtocolSessions.add(browserSession)
+  }
+
   private createSession(sessionId: string, allowedRoots: string[] = []): BrowserSessionRecord {
     if (!this.owner || this.owner.isDestroyed()) throw new Error('主窗口尚未就绪，无法创建内置浏览器。')
     const configuration = this.configurations.get(sessionId)
@@ -365,6 +382,7 @@ export class BrowserController {
       lastLayoutRevision: 0,
     }
     this.installSessionGuards(browserSession)
+    this.installPreviewProtocol(browserSession)
     this.sessions.set(sessionId, record)
     return record
   }
@@ -381,7 +399,17 @@ export class BrowserController {
         webSecurity: true,
       },
     })
-    const tab: BrowserTabRecord = { tabId, view, state: emptyTabState(tabId), refs: new Map(), generation: 0, commandTail: Promise.resolve(), isLocalPreview }
+    const tab: BrowserTabRecord = {
+      tabId,
+      view,
+      state: emptyTabState(tabId),
+      refs: new Map(),
+      generation: 0,
+      commandTail: Promise.resolve(),
+      isLocalPreview,
+      openedByAgent: claimAsAgent,
+      lastActivityAt: Date.now(),
+    }
     this.owner.contentView.addChildView(view)
     view.setVisible(false)
     view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -419,10 +447,10 @@ export class BrowserController {
     return tab
   }
 
-  private getOrCreateSession(sessionId: string, allowedRoots: string[] = []): BrowserSessionRecord {
+  private getOrCreateSession(sessionId: string, allowedRoots: string[] = [], createAgentTab = true): BrowserSessionRecord {
     const browserSession = this.sessions.get(sessionId) ?? this.createSession(sessionId, allowedRoots)
     if (allowedRoots.length > 0) this.setAllowedRoots(sessionId, allowedRoots)
-    if (browserSession.tabs.size === 0) this.createTab(browserSession, false, true)
+    if (browserSession.tabs.size === 0) this.createTab(browserSession, false, createAgentTab)
     // 每个 Browser* 调用都先发布可渲染状态：即使后续操作失败，当前激活会话也能立即展示浏览器。
     this.emit(browserSession)
     return browserSession
@@ -490,7 +518,8 @@ export class BrowserController {
   }
 
   open(sessionId: string): BrowserViewState {
-    const browserSession = this.getOrCreateSession(sessionId)
+    // 用户从界面手动打开浏览器时，初始标签不应伪装成 Agent 标签。
+    const browserSession = this.getOrCreateSession(sessionId, [], false)
     this.emit(browserSession)
     return structuredClone(this.buildState(browserSession))
   }
@@ -536,26 +565,74 @@ export class BrowserController {
     if (tab.state.visible !== visible) { tab.state.visible = visible; this.emit(browserSession) }
   }
 
-  /** Agent 新建工作 tab，不改变用户正在浏览的 tab。 */
+  /** 将指定标签置于前台；复用当前显示区域，避免等待 renderer layout 往返时仍显示旧页面。 */
+  private activateDisplayTab(browserSession: BrowserSessionRecord, tab: BrowserTabRecord): void {
+    const previous = browserSession.tabs.get(browserSession.activeTabId)
+    tab.lastActivityAt = Date.now()
+    browserSession.activeTabId = tab.tabId
+    for (const other of browserSession.tabs.values()) {
+      if (other.tabId !== tab.tabId) other.view.setVisible(false)
+    }
+    if (!tab.lastBounds && previous?.lastBounds) {
+      tab.view.setBounds(previous.lastBounds)
+      tab.lastBounds = { ...previous.lastBounds }
+    }
+    const visible = !!tab.lastBounds && !!this.owner && !this.owner.isDestroyed() && this.owner.isVisible()
+    tab.view.setVisible(visible)
+    if (tab.state.visible !== visible) tab.state.visible = visible
+    this.emit(browserSession)
+  }
+
+  private disposeTab(browserSession: BrowserSessionRecord, tab: BrowserTabRecord): void {
+    browserSession.tabs.delete(tab.tabId)
+    this.clearAgentTargetHighlight(tab)
+    try { if (tab.view.webContents.debugger.isAttached()) tab.view.webContents.debugger.detach() } catch { /* 已销毁 */ }
+    try { this.owner?.contentView.removeChildView(tab.view) } catch { /* owner 已销毁 */ }
+    if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close()
+  }
+
+  /**
+   * 达到上限时回收最久未使用的 Agent 标签。用户创建的标签、当前前台标签和 Agent 当前工作标签
+   * 一律保留；若没有安全候选，宁可暂时超过限制也不擅自关闭用户内容。
+   */
+  private reclaimExcessAgentTabs(browserSession: BrowserSessionRecord): number {
+    const candidates = [...browserSession.tabs.values()]
+      .filter((tab) => tab.openedByAgent && tab.tabId !== browserSession.activeTabId && tab.tabId !== browserSession.agentTabId)
+      .sort((left, right) => left.lastActivityAt - right.lastActivityAt)
+    let reclaimed = 0
+    while (browserSession.tabs.size > MAX_BROWSER_TABS && candidates.length > 0) {
+      const tab = candidates.shift()
+      if (!tab || !browserSession.tabs.has(tab.tabId)) continue
+      this.disposeTab(browserSession, tab)
+      reclaimed += 1
+    }
+    return reclaimed
+  }
+
+  /** Agent 新建工作 tab，并立即切到该标签让用户能看到接下来的操作。 */
   async createNewTab(sessionId: string, url?: string): Promise<BrowserViewState> {
     const browserSession = this.getOrCreateSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.createTab(browserSession, false, true)
     browserSession.agentTabId = tab.tabId
-    this.trace(browserSession, tab, 'tab', `Agent 新建工作标签 ${tab.tabId}`)
+    this.activateDisplayTab(browserSession, tab)
+    const reclaimed = this.reclaimExcessAgentTabs(browserSession)
+    this.trace(browserSession, tab, 'tab', reclaimed > 0
+      ? `Agent 新建并打开工作标签；已回收 ${reclaimed} 个最久未使用的 Agent 标签`
+      : `Agent 新建并打开工作标签 ${tab.tabId}`)
     if (url?.trim()) return this.navigate(sessionId, url, tab.tabId)
-    this.emit(browserSession)
     return structuredClone(this.buildState(browserSession))
   }
 
   /** 用户在浏览器面板中新建 tab；不会抢占 Agent 的工作 tab。 */
   async createDisplayTab(sessionId: string, url?: string): Promise<BrowserViewState> {
-    const browserSession = this.getOrCreateSession(sessionId)
+    const browserSession = this.getOrCreateSession(sessionId, [], false)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.createTab(browserSession)
-    browserSession.activeTabId = tab.tabId
+    this.activateDisplayTab(browserSession, tab)
+    const reclaimed = this.reclaimExcessAgentTabs(browserSession)
+    if (reclaimed > 0) this.trace(browserSession, tab, 'tab', `标签超过 ${MAX_BROWSER_TABS} 个上限，已回收 ${reclaimed} 个最久未使用的 Agent 标签`)
     if (url?.trim()) return this.navigateDisplay(sessionId, url)
-    this.emit(browserSession)
     return structuredClone(this.buildState(browserSession))
   }
 
@@ -564,30 +641,25 @@ export class BrowserController {
     const browserSession = this.getSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getDisplayTab(browserSession, tabId)
-    browserSession.activeTabId = tab.tabId
-    for (const other of browserSession.tabs.values()) other.view.setVisible(false)
-    this.emit(browserSession)
+    this.activateDisplayTab(browserSession, tab)
     return structuredClone(this.buildState(browserSession))
   }
 
-  /** Agent 显式切换自己的工作 tab，不切换用户面板。 */
+  /** Agent 显式切换工作 tab，并同步激活用户可见的前台标签。 */
   selectAgentTab(sessionId: string, tabId: string): BrowserViewState {
     const browserSession = this.getSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
     browserSession.agentTabId = tab.tabId
-    this.trace(browserSession, tab, 'tab', `Agent 切换工作标签 ${tab.tabId}`)
+    this.activateDisplayTab(browserSession, tab)
+    this.trace(browserSession, tab, 'tab', `Agent 切换并打开工作标签 ${tab.tabId}`)
     return structuredClone(this.buildState(browserSession))
   }
 
   async closeTab(sessionId: string, tabId: string): Promise<BrowserViewState | null> {
     const browserSession = this.getSession(sessionId)
     const tab = this.getDisplayTab(browserSession, tabId)
-    browserSession.tabs.delete(tab.tabId)
-    this.clearAgentTargetHighlight(tab)
-    try { if (tab.view.webContents.debugger.isAttached()) tab.view.webContents.debugger.detach() } catch { /* 已销毁 */ }
-    try { this.owner?.contentView.removeChildView(tab.view) } catch { /* owner 已销毁 */ }
-    if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close()
+    this.disposeTab(browserSession, tab)
     if (browserSession.tabs.size === 0) {
       this.sessions.delete(sessionId)
       return null
@@ -601,9 +673,13 @@ export class BrowserController {
   async previewOpen(sessionId: string, inputPath: string, tabId: string | undefined, allowedRoots: string[], baseDir?: string, signal?: AbortSignal): Promise<BrowserViewState> {
     const browserSession = this.getOrCreateSession(sessionId, allowedRoots)
     this.assertRiskDisclaimerAcknowledged()
+    // 先校验路径，避免无效路径遗留一个空白的 Agent 预览标签。
+    const preview = createAuthorizedPreviewUrl(inputPath, browserSession.allowedRoots, baseDir)
     const tab = tabId ? this.getAgentTab(browserSession, tabId) : this.createTab(browserSession, true, true)
     browserSession.agentTabId = tab.tabId
-    const preview = createAuthorizedPreviewUrl(inputPath, browserSession.allowedRoots, baseDir)
+    this.activateDisplayTab(browserSession, tab)
+    const reclaimed = this.reclaimExcessAgentTabs(browserSession)
+    if (reclaimed > 0) this.trace(browserSession, tab, 'tab', `已回收 ${reclaimed} 个最久未使用的 Agent 标签以保持最多 ${MAX_BROWSER_TABS} 个标签`)
     return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
       tab.isLocalPreview = true
       try {
