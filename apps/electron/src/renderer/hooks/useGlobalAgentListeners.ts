@@ -615,6 +615,24 @@ export function useGlobalAgentListeners(): void {
       }
     }
 
+    const getWorkspaceAttachmentsForSession = async (sid: string): Promise<{
+      directories: string[]
+      files: string[]
+      complete: boolean
+    }> => {
+      const slug = getWorkspaceSlugForSession(sid)
+      if (!slug) return { directories: [], files: [], complete: true }
+      try {
+        const [directories, files] = await Promise.all([
+          window.electronAPI.getWorkspaceDirectories(slug),
+          window.electronAPI.getWorkspaceAttachedFiles(slug),
+        ])
+        return { directories, files, complete: true }
+      } catch {
+        return { directories: [], files: [], complete: false }
+      }
+    }
+
     const buildWrittenFilePreviewInfo = async (sid: string, targetPath: string) => {
       const sessionPath = store.get(agentSessionPathMapAtom).get(sid) ?? ''
       const parentDir = getParentDir(targetPath)
@@ -673,26 +691,23 @@ export function useGlobalAgentListeners(): void {
           .map(([sessionId]) => sessionId)
 
         const candidates = await Promise.all(candidateIds.map(async (sessionId) => {
+          const session = store.get(agentSessionsAtom).find((item) => item.id === sessionId)
           const sessionPath = sessionPaths.get(sessionId)
-          const workspaceId = getWorkspaceIdForSession(sessionId)
           const workspaceFilesPath = await getWorkspaceFilesPathForSession(sessionId)
-          const sessionAttachedDirs = store.get(agentAttachedDirectoriesMapAtom).get(sessionId) ?? []
-          const sessionAttachedFiles = store.get(agentAttachedFilesMapAtom).get(sessionId) ?? []
-          const workspaceAttachedDirs = workspaceId
-            ? (store.get(workspaceAttachedDirectoriesMapAtom).get(workspaceId) ?? [])
-            : []
-          const workspaceAttachedFiles = workspaceId
-            ? (store.get(workspaceAttachedFilesMapAtom).get(workspaceId) ?? [])
-            : []
+          const workspaceAttachments = await getWorkspaceAttachmentsForSession(sessionId)
+          if (!session || !workspaceAttachments.complete) {
+            // 缺少运行会话的权威附件配置时，任何路径都不能安全归属给其他会话。
+            return { sessionId, matchingPaths: [...filePaths] }
+          }
           const directoryRoots = uniqueTruthyPaths([
             sessionPath,
             workspaceFilesPath,
-            ...sessionAttachedDirs,
-            ...workspaceAttachedDirs,
+            ...(session.attachedDirectories ?? []),
+            ...workspaceAttachments.directories,
           ])
           const attachedFiles = uniqueTruthyPaths([
-            ...sessionAttachedFiles,
-            ...workspaceAttachedFiles,
+            ...(session.attachedFiles ?? []),
+            ...workspaceAttachments.files,
           ])
           const matchingPaths = filePaths.filter((changedPath) => (
             directoryRoots.some((rootPath) => isPathWithinRoot(rootPath, changedPath, isWindows))
