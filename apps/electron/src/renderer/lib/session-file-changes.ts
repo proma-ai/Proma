@@ -1,3 +1,13 @@
+export function isPathWithinRoot(rootPath: string, targetPath: string, caseInsensitive = false): boolean {
+  const normalize = (value: string): string => {
+    const normalized = value.replace(/\\/g, '/').replace(/\/+/g, '/')
+    return caseInsensitive ? normalized.toLowerCase() : normalized
+  }
+  const root = normalize(rootPath).replace(/\/$/, '')
+  const target = normalize(targetPath)
+  return target === root || target.startsWith(`${root}/`)
+}
+
 export type SessionFileChangeKind = "created" | "edited";
 
 export interface SessionFileChange {

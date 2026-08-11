@@ -57,17 +57,21 @@ const unavailableDirectoryParents = new Map<string, string>()
 
 /** 附加目录防抖定时器 */
 let attachedFilesTimer: ReturnType<typeof setTimeout> | null = null
+/** 附加目录最近一次变化路径，随 debounce 事件一起发送。 */
+const attachedChangedPaths = new Set<string>()
 /** 主窗口引用（供附加目录监听器使用） */
 let mainWin: BrowserWindow | null = null
 
-function notifyWorkspaceFilesChanged(): void {
+function notifyWorkspaceFilesChanged(changedPath?: string): void {
   if (!mainWin || mainWin.isDestroyed()) return
 
   if (attachedFilesTimer) clearTimeout(attachedFilesTimer)
+  if (changedPath) attachedChangedPaths.add(changedPath)
   attachedFilesTimer = setTimeout(() => {
     if (mainWin && !mainWin.isDestroyed()) {
-      mainWin.webContents.send(AGENT_IPC_CHANNELS.WORKSPACE_FILES_CHANGED)
+      mainWin.webContents.send(AGENT_IPC_CHANNELS.WORKSPACE_FILES_CHANGED, [...attachedChangedPaths])
     }
+    attachedChangedPaths.clear()
     attachedFilesTimer = null
   }, DEBOUNCE_MS)
 }
@@ -78,6 +82,15 @@ function isExistingDirectory(dirPath: string): boolean {
     return statSync(dirPath).isDirectory()
   } catch {
     return false
+  }
+}
+
+/** 文件删除后路径不可 stat，仍需发出刷新；存在时跳过纯目录事件。 */
+function isFileOrMissing(filePath: string): boolean {
+  try {
+    return !statSync(filePath).isDirectory()
+  } catch {
+    return true
   }
 }
 
@@ -199,6 +212,7 @@ export function startWorkspaceWatcher(win: BrowserWindow): void {
   // 防抖定时器：按事件类型分别 debounce
   let capabilitiesTimer: ReturnType<typeof setTimeout> | null = null
   let filesTimer: ReturnType<typeof setTimeout> | null = null
+  const changedFilePaths = new Set<string>
 
   try {
     watcher = watch(watchDir, { recursive: true }, (_eventType, filename) => {
@@ -235,12 +249,15 @@ export function startWorkspaceWatcher(win: BrowserWindow): void {
           capabilitiesTimer = null
         }, DEBOUNCE_MS)
       } else {
+        if (!isFileOrMissing(join(watchDir, normalizedFilename))) return
         // 其他文件变化 → 通知文件浏览器刷新
         if (filesTimer) clearTimeout(filesTimer)
+        changedFilePaths.add(join(watchDir, normalizedFilename))
         filesTimer = setTimeout(() => {
           if (!win.isDestroyed()) {
-            win.webContents.send(AGENT_IPC_CHANNELS.WORKSPACE_FILES_CHANGED)
+            win.webContents.send(AGENT_IPC_CHANNELS.WORKSPACE_FILES_CHANGED, [...changedFilePaths])
           }
+          changedFilePaths.clear()
           filesTimer = null
         }, DEBOUNCE_MS)
       }
@@ -289,6 +306,7 @@ export function stopWorkspaceWatcher(): void {
   unavailableDirectoryParents.clear()
   if (attachedFilesTimer) clearTimeout(attachedFilesTimer)
   attachedFilesTimer = null
+  attachedChangedPaths.clear()
   mainWin = null
 }
 
@@ -311,8 +329,10 @@ export function watchAttachedDirectory(dirPath: string): void {
     const w = watch(dirPath, { recursive: true }, (_eventType, filename) => {
       const normalizedFilename = normalizeWatchFilename(filename)
       if (normalizedFilename === null || !shouldNotifyForWatchFilename(normalizedFilename)) return
-      invalidateGitDiffCache(join(dirPath, normalizedFilename))
-      notifyWorkspaceFilesChanged()
+      const changedPath = join(dirPath, normalizedFilename)
+      if (!isFileOrMissing(changedPath)) return
+      invalidateGitDiffCache(changedPath)
+      notifyWorkspaceFilesChanged(changedPath)
     })
 
     // 同主 watcher：监听 'error' 防止运行时异常拖死主进程。

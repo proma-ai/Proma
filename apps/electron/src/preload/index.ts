@@ -953,9 +953,10 @@ export interface ElectronAPI {
   listReleases: (options?: GitHubReleaseListOptions) => Promise<GitHubRelease[]>
   getReleaseByTag: (tag: string) => Promise<GitHubRelease | null>
 
-  // 工作区文件变化通知
+  /** 工作区能力变化通知 */
   onCapabilitiesChanged: (callback: () => void) => () => void
-  onWorkspaceFilesChanged: (callback: () => void) => () => void
+  /** 工作区文件变化通知；可选携带 debounce 窗口内的实际变化绝对路径 */
+  onWorkspaceFilesChanged: (callback: (changedPaths?: string[]) => void) => () => void
 
   // ===== 飞书集成 =====
 
@@ -2061,8 +2062,12 @@ const electronAPI: ElectronAPI = {
     return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.CAPABILITIES_CHANGED, listener) }
   },
 
-  onWorkspaceFilesChanged: (callback: () => void) => {
-    const listener = (): void => callback()
+  onWorkspaceFilesChanged: (callback: (changedPaths?: string[]) => void) => {
+    const listener = (_event: unknown, changedPaths?: unknown): void => {
+      callback(Array.isArray(changedPaths)
+        ? changedPaths.filter((path): path is string => typeof path === 'string')
+        : undefined)
+    }
     ipcRenderer.on(AGENT_IPC_CHANNELS.WORKSPACE_FILES_CHANGED, listener)
     return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.WORKSPACE_FILES_CHANGED, listener) }
   },
