@@ -1139,7 +1139,7 @@ export function useGlobalAgentListeners(): void {
         }
 
         // 发送桌面通知（仅真正成功完成时播放提示音，错误/中断/异常完成不伪装成完成）
-        const completionSession = store.get(agentSessionsAtom)
+        const completionSession = data.session ?? store.get(agentSessionsAtom)
           .find((session) => session.id === data.sessionId)
         const enabled = store.get(notificationsEnabledAtom)
         const soundEnabled = store.get(notificationSoundEnabledAtom)
@@ -1198,6 +1198,7 @@ export function useGlobalAgentListeners(): void {
           activeTabId: store.get(activeTabIdAtom),
           currentAgentSessionId: currentSessionId,
           sessionId: data.sessionId,
+          session: completionSession,
           documentHasFocus: document.hasFocus(),
         })
         if (completionMarkers.markUnviewedCompleted && !backgroundTasksPending) {

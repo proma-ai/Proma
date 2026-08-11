@@ -114,6 +114,15 @@ function getTitle(sessionId: string): string {
   }
 }
 
+/** 协作子会话的结果由父会话汇总，不进入用户级未读收件箱。 */
+function isDelegatedChildSession(sessionId: string): boolean {
+  try {
+    return Boolean(getAgentSessionMeta(sessionId)?.sourceDelegationId)
+  } catch {
+    return false
+  }
+}
+
 function ensureSession(sessionId: string): InternalSessionSnapshot {
   let s = sessions.get(sessionId)
   if (!s) {
@@ -285,10 +294,11 @@ function handleSdkMessage(sessionId: string, message: import('@proma/shared').SD
       if (aMsg.isReplay) return
       if (aMsg.error) {
         const session = ensureSession(sessionId)
+        const isChildSession = isDelegatedChildSession(sessionId)
         session.phase = 'error'
         session.detail = truncate(aMsg.error.message || '发生错误', 60)
-        session.unread = true
-        session.attention = true
+        session.unread = !isChildSession
+        session.attention = !isChildSession
         session.terminalAt = Date.now()
         session.lastActivityAt = Date.now()
         pushActivity(session, 'status', `❌ ${truncate(aMsg.error.message || '错误', 50)}`)
@@ -332,18 +342,19 @@ function handleSdkMessage(sessionId: string, message: import('@proma/shared').SD
     case 'result': {
       const rMsg = message as import('@proma/shared').SDKResultMessage
       const session = ensureSession(sessionId)
+      const isChildSession = isDelegatedChildSession(sessionId)
       if (rMsg.subtype === 'success') {
         session.phase = 'completed'
         session.detail = '已完成'
-        session.unread = true
-        session.attention = true
+        session.unread = !isChildSession
+        session.attention = !isChildSession
         session.terminalAt = Date.now()
         pushActivity(session, 'status', '✅ 任务完成')
       } else {
         session.phase = 'error'
         session.detail = truncate(rMsg.errors?.[0] || rMsg.terminal_reason || '执行出错', 60)
-        session.unread = true
-        session.attention = true
+        session.unread = !isChildSession
+        session.attention = !isChildSession
         session.terminalAt = Date.now()
         pushActivity(session, 'status', `❌ ${truncate(rMsg.errors?.[0] || rMsg.terminal_reason || '错误', 50)}`)
       }
@@ -414,6 +425,8 @@ function handleSdkMessage(sessionId: string, message: import('@proma/shared').SD
 
 function isIslandSession(session: InternalSessionSnapshot, now: number): boolean {
   if (now - session.lastActivityAt >= 24 * 60 * 60_000) return false
+  // 委派子会话只在需要用户交互时露出；执行和结束均由父会话收敛。
+  if (isDelegatedChildSession(session.sessionId)) return session.phase === 'needs-interaction'
   // Running is deliberately visible: the island is also a live execution pulse,
   // not only a handoff/error inbox. Terminal sessions retain their existing
   // unread window to avoid becoming permanent history.
