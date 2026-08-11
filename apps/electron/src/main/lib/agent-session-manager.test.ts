@@ -279,6 +279,45 @@ describe('Agent 会话 runtime 元数据', () => {
     expect(manager.getAgentSessionMeta(session.id)).toMatchObject({ reasoningLevel: 'xhigh' })
   })
 
+  test('Given an explicitly selected worktree When session metadata is reloaded Then it persists the active context', () => {
+    const session = manager.createAgentSession('Worktree 会话')
+    const worktreePath = join(tempHome, 'linked-worktree')
+    mkdirSync(worktreePath, { recursive: true })
+
+    const updated = manager.updateAgentSessionMeta(session.id, {
+      activeWorktree: {
+        path: worktreePath,
+        mainRepoRoot: join(tempHome, 'main-repo'),
+        branch: 'feat/session-worktree',
+        selectedAt: 123,
+      },
+    })
+
+    expect(updated.activeWorktree?.path).toBe(worktreePath)
+    expect(manager.getAgentSessionMeta(session.id)?.activeWorktree).toMatchObject({
+      path: worktreePath,
+      branch: 'feat/session-worktree',
+    })
+    expect(manager.getActiveWorktreePath(updated)).toBe(worktreePath)
+  })
+
+  test('Given a removed active worktree When resolving its path Then it falls back safely', () => {
+    const session = manager.createAgentSession('失效 Worktree 会话')
+    const worktreePath = join(tempHome, 'removed-worktree')
+    mkdirSync(worktreePath, { recursive: true })
+    const updated = manager.updateAgentSessionMeta(session.id, {
+      activeWorktree: {
+        path: worktreePath,
+        mainRepoRoot: join(tempHome, 'main-repo'),
+        branch: 'feat/removed-worktree',
+        selectedAt: 123,
+      },
+    })
+    rmSync(worktreePath, { recursive: true, force: true })
+
+    expect(manager.getActiveWorktreePath(updated)).toBeUndefined()
+  })
+
   test('Given a session When star state is updated Then it persists without changing freshness or archive state', () => {
     const session = manager.createAgentSession('星标会话')
     const archived = manager.updateAgentSessionMeta(session.id, { archived: true })

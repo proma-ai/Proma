@@ -38,6 +38,7 @@ import type {
   RecentMessagesResult,
   MessageSearchResult,
   AgentSessionMeta,
+  SetAgentSessionActiveWorktreeInput,
   SDKMessage,
   AgentSendInput,
   AgentThinkingLevel,
@@ -508,6 +509,9 @@ export interface ElectronAPI {
 
   /** 更新 Agent 会话模型选择 */
   updateAgentSessionModel: (id: string, channelId?: string, modelId?: string) => Promise<AgentSessionMeta>
+
+  /** 选择或清除当前会话的活动 worktree */
+  setAgentSessionActiveWorktree: (input: SetAgentSessionActiveWorktreeInput) => Promise<AgentSessionMeta>
 
   /** 删除 Agent 会话 */
   deleteAgentSession: (id: string) => Promise<void>
@@ -1681,6 +1685,10 @@ const electronAPI: ElectronAPI = {
 
   updateAgentSessionModel: (id: string, channelId?: string, modelId?: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.UPDATE_SESSION_MODEL, id, channelId, modelId)
+  },
+
+  setAgentSessionActiveWorktree: (input: SetAgentSessionActiveWorktreeInput) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SET_ACTIVE_WORKTREE, input)
   },
 
   deleteAgentSession: (id: string) => {

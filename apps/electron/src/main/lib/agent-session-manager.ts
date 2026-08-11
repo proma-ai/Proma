@@ -8,12 +8,12 @@
  * 照搬 conversation-manager.ts 的模式。
  */
 
-import { readFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, readdirSync, createReadStream, createWriteStream, type WriteStream } from 'node:fs'
+import { readFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, readdirSync, createReadStream, createWriteStream, statSync, type WriteStream } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { writeJsonFileAtomic, writeTextFileAtomic, readJsonFileSafe } from './safe-file'
 import { randomUUID } from 'node:crypto'
 import { rmSyncWithRetry, renameWithRetry } from './fs-retry'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import {
   getAgentSessionsIndexPath,
   getAgentSessionsDir,
@@ -39,6 +39,7 @@ import type {
   AgentSessionReferenceSearchInput,
   AgentSessionReferenceSearchResult,
   AgentCwdMode,
+  AgentActiveWorktree,
   SessionWorkbenchLayout,
 } from '@proma/shared'
 import { migratePermissionMode } from '@proma/shared'
@@ -265,6 +266,19 @@ export function getAgentCwdMode(meta?: Pick<AgentSessionMeta, 'agentCwdMode'>): 
   return meta?.agentCwdMode ?? 'session'
 }
 
+/** 只接受仍存在的绝对目录；Git 归属校验由调用主进程在启动 Agent 前完成。 */
+export function getActiveWorktreePath(
+  meta?: Pick<AgentSessionMeta, 'activeWorktree'>,
+): string | undefined {
+  const activeWorktree = meta?.activeWorktree
+  if (!activeWorktree?.path || !isAbsolute(activeWorktree.path)) return undefined
+  try {
+    return statSync(activeWorktree.path).isDirectory() ? activeWorktree.path : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /** 缺少标记的历史会话继续使用 `.context/`，避免失效的计划和工具历史路径。 */
 export function getSessionWorkbenchLayout(
   meta?: Pick<AgentSessionMeta, 'sessionWorkbenchLayout'>,
@@ -288,8 +302,11 @@ export function resolveAgentCwd(
   workspace: Pick<AgentWorkspace, 'slug'> | undefined,
   sessionId: string,
   agentCwdMode?: AgentCwdMode,
+  activeWorktree?: AgentActiveWorktree,
 ): string | undefined {
   if (!workspace) return undefined
+  const activeWorktreePath = getActiveWorktreePath({ activeWorktree })
+  if (activeWorktreePath) return activeWorktreePath
   return getAgentCwdMode({ agentCwdMode }) === 'project'
     ? getProjectFilesPath(workspace.slug)
     : getAgentSessionWorkspacePath(workspace.slug, sessionId)
@@ -505,7 +522,7 @@ export function getAgentSessionSDKMessages(id: string): SDKMessage[] {
  */
 export function updateAgentSessionMeta(
   id: string,
-  updates: Partial<Pick<AgentSessionMeta, 'title' | 'channelId' | 'modelId' | 'sdkSessionId' | 'piSessionFile' | 'piEntryBindings' | 'codexFastMode' | 'reasoningLevel' | 'openAIThinkingLevel' | 'workspaceId' | 'pinned' | 'starred' | 'archived' | 'attachedDirectories' | 'attachedFiles' | 'forkSourceDir' | 'stoppedByUser' | 'permissionMode' | 'completedButUnconfirmed' | 'sourceAutomationId' | 'automationGraduated' | 'parentSessionId' | 'rootSessionId' | 'sourceDelegationId' | 'delegationRole' | 'delegationStatus' | 'delegationDepth' | 'delegationGoal'>>,
+  updates: Partial<Pick<AgentSessionMeta, 'title' | 'channelId' | 'modelId' | 'sdkSessionId' | 'piSessionFile' | 'piEntryBindings' | 'codexFastMode' | 'reasoningLevel' | 'openAIThinkingLevel' | 'workspaceId' | 'activeWorktree' | 'pinned' | 'starred' | 'archived' | 'attachedDirectories' | 'attachedFiles' | 'forkSourceDir' | 'stoppedByUser' | 'permissionMode' | 'completedButUnconfirmed' | 'sourceAutomationId' | 'automationGraduated' | 'parentSessionId' | 'rootSessionId' | 'sourceDelegationId' | 'delegationRole' | 'delegationStatus' | 'delegationDepth' | 'delegationGoal'>>,
 ): AgentSessionMeta {
   const index = readIndex()
   const idx = index.sessions.findIndex((s) => s.id === id)
@@ -686,6 +703,8 @@ export function moveSessionToWorkspace(sessionId: string, targetWorkspaceId: str
       sdkSessionId: undefined,
       piSessionFile: undefined,
       piEntryBindings: undefined,
+      // 已切换到另一项目，不能沿用旧项目授权下选择的 worktree。
+      activeWorktree: undefined,
       updatedAt: now,
     }
     index.sessions[i] = updated
@@ -771,7 +790,8 @@ async function forkPiAgentSession(sourceMeta: AgentSessionMeta, input: ForkSessi
   const workspace = sourceMeta.workspaceId ? getAgentWorkspace(sourceMeta.workspaceId) : undefined
   const sourceCwdMode = getAgentCwdMode(sourceMeta)
   const sourceWorkbenchLayout = getSessionWorkbenchLayout(sourceMeta)
-  const sourceDir = resolveAgentCwd(workspace, sourceMeta.id, sourceCwdMode)
+  const sourceActiveWorktree = getActiveWorktreePath(sourceMeta) ? sourceMeta.activeWorktree : undefined
+  const sourceDir = resolveAgentCwd(workspace, sourceMeta.id, sourceCwdMode, sourceActiveWorktree)
   const sourceWorkbenchDir = resolveAgentWorkbenchDir(workspace, sourceMeta.id)
   const newMeta = createAgentSession(
     `${sourceMeta.title} (fork)`,
@@ -781,7 +801,7 @@ async function forkPiAgentSession(sourceMeta: AgentSessionMeta, input: ForkSessi
     sourceCwdMode,
     sourceWorkbenchLayout,
   )
-  const destDir = resolveAgentCwd(workspace, newMeta.id, newMeta.agentCwdMode)
+  const destDir = resolveAgentCwd(workspace, newMeta.id, newMeta.agentCwdMode, sourceActiveWorktree)
   const destWorkbenchDir = resolveAgentWorkbenchDir(workspace, newMeta.id)
 
   try {
@@ -805,11 +825,13 @@ async function forkPiAgentSession(sourceMeta: AgentSessionMeta, input: ForkSessi
       sdkSessionId: forkedManager.getSessionId(),
       piSessionFile,
       piEntryBindings: branchBindings,
+      activeWorktree: sourceActiveWorktree,
       forkSourceDir: sourceDir,
     })
     newMeta.sdkSessionId = forkedManager.getSessionId()
     newMeta.piSessionFile = piSessionFile
     newMeta.piEntryBindings = branchBindings
+    newMeta.activeWorktree = sourceActiveWorktree
 
     if (sourceWorkbenchDir && destWorkbenchDir) copyForkWorkspaceFiles(sourceWorkbenchDir, destWorkbenchDir)
     await copyForkStoredSDKMessages({
@@ -851,7 +873,7 @@ export async function rewindPiAgentSession(sessionId: string, assistantMessageUu
   const truncatedContent = kept.map((message) => JSON.stringify(message)).join('\n') + (kept.length > 0 ? '\n' : '')
 
   const workspace = meta.workspaceId ? getAgentWorkspace(meta.workspaceId) : undefined
-  const cwd = resolveAgentCwd(workspace, meta.id, meta.agentCwdMode) ?? process.cwd()
+  const cwd = resolveAgentCwd(workspace, meta.id, meta.agentCwdMode, meta.activeWorktree) ?? process.cwd()
   const sdk = await import('@earendil-works/pi-coding-agent')
   const manager = sdk.SessionManager.open(meta.piSessionFile, join(getSdkConfigDir(), 'sessions'), cwd)
   const branchFile = manager.createBranchedSession(entryId)

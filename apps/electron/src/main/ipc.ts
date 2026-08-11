@@ -47,6 +47,7 @@ import type {
   FileOrFolderDialogResult,
   RecentMessagesResult,
   AgentSessionMeta,
+  SetAgentSessionActiveWorktreeInput,
   AgentSendInput,
   AgentThinkingLevel,
   AgentWorkspace,
@@ -410,6 +411,9 @@ function getAuthorizedRoots(options?: FileAccessOptions): string[] {
     const meta = getAgentSessionMeta(options.sessionId)
     if (meta?.attachedDirectories) {
       roots.push(...meta.attachedDirectories)
+    }
+    if (meta?.activeWorktree?.path) {
+      roots.push(meta.activeWorktree.path)
     }
     if (meta?.attachedFiles) {
       roots.push(...meta.attachedFiles)
@@ -2039,6 +2043,43 @@ export function registerIpcHandlers(): void {
       // 模型切换允许在运行中提交；当前 query 继续使用启动时的模型，下一轮读取新配置。
       return updateAgentSessionMeta(id, { channelId, modelId })
     }
+  )
+
+  // 选择或清除 Agent 会话的活动 worktree
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.SET_ACTIVE_WORKTREE,
+    async (_, input: SetAgentSessionActiveWorktreeInput): Promise<AgentSessionMeta> => {
+      if (!input || typeof input.sessionId !== 'string' || (input.worktreePath !== null && typeof input.worktreePath !== 'string')) {
+        throw new Error('活动 worktree 参数无效')
+      }
+      const session = getAgentSessionMeta(input.sessionId)
+      if (!session) throw new Error(`Agent 会话不存在: ${input.sessionId}`)
+      if (input.worktreePath === null) {
+        return updateAgentSessionMeta(input.sessionId, { activeWorktree: undefined })
+      }
+
+      const access = normalizeFileAccessOptions({ sessionId: input.sessionId })
+      if (!(await ensurePathAllowedWithWorktree(input.worktreePath, access))) {
+        throw new Error('无权将该目录设为活动 worktree')
+      }
+
+      const requestedPath = normalizePathForCompare(realpathOrResolve(input.worktreePath))
+      const selected = (await listWorktrees(input.worktreePath)).find((worktree) =>
+        !worktree.isMain && normalizePathForCompare(realpathOrResolve(worktree.path)) === requestedPath,
+      )
+      if (!selected) throw new Error('指定目录不是可用的 linked worktree')
+
+      const mainRepoRoot = await getMainRepoRoot(selected.path)
+      if (!mainRepoRoot) throw new Error('无法确认 worktree 的主仓库')
+      return updateAgentSessionMeta(input.sessionId, {
+        activeWorktree: {
+          path: realpathOrResolve(selected.path),
+          mainRepoRoot: realpathOrResolve(mainRepoRoot),
+          branch: selected.branch,
+          selectedAt: Date.now(),
+        },
+      })
+    },
   )
 
   // 生成 Agent 会话标题

@@ -637,6 +637,24 @@ export type AgentCwdMode = 'session' | 'project'
 /** 会话私有工作台的文件布局。缺失字段兼容旧版 `.context/` 子目录。 */
 export type SessionWorkbenchLayout = 'legacy-context' | 'root'
 
+/** 经主进程校验后持久化的 Agent 会话活动 worktree。 */
+export interface AgentActiveWorktree {
+  /** linked worktree 的绝对路径 */
+  path: string
+  /** worktree 所属主仓库根目录 */
+  mainRepoRoot: string
+  /** 选择时 Git 报告的分支名 */
+  branch: string
+  /** 用户明确选择的时间戳 */
+  selectedAt: number
+}
+
+/** 更新 Agent 会话活动 worktree 的输入；null 表示回到默认 cwd。 */
+export interface SetAgentSessionActiveWorktreeInput {
+  sessionId: string
+  worktreePath: string | null
+}
+
 /**
  * Agent 会话轻量索引项
  *
@@ -676,6 +694,11 @@ export interface AgentSessionMeta {
    * session workbench cwd。
    */
   agentCwdMode?: AgentCwdMode
+  /**
+   * 当前会话显式激活的 linked worktree。缺失时保持 agentCwdMode 定义的默认 cwd；
+   * worktree 失效时主进程会主动清除，不会猜测切换到其它分支。
+   */
+  activeWorktree?: AgentActiveWorktree
   /**
    * 会话私有工作台的文件布局。新会话在 workbench 根目录直接存放计划、handoff
    * 等私有资料；缺失字段的历史会话保留 `.context/` 路径以兼容工具历史。
@@ -1559,6 +1582,8 @@ export const AGENT_IPC_CHANNELS = {
   UPDATE_TITLE: 'agent:update-title',
   /** 更新会话模型选择 */
   UPDATE_SESSION_MODEL: 'agent:update-session-model',
+  /** 选择或清除当前会话的活动 worktree */
+  SET_ACTIVE_WORKTREE: 'agent:set-active-worktree',
   /** 删除会话 */
   DELETE_SESSION: 'agent:delete-session',
   /** 迁移 Chat 对话记录到 Agent 会话 */

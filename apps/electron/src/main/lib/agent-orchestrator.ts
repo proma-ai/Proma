@@ -36,6 +36,7 @@ import {
 } from '@proma/shared'
 import type { PromaPermissionMode, AskUserRequest, ExitPlanModeRequest, SDKSystemMessage } from '@proma/shared'
 import type { PiAgentQueryOptions } from './adapters/pi-agent-adapter'
+import { getMainRepoRoot } from './git-diff-service'
 import { getPiAssistantErrorDetails, hasPiAssistantTextContent, stripPiAssistantError } from './adapters/pi-message-adapter'
 import { friendlyErrorMessage, isPromptTooLongError, isThinkingSignatureError, mapAgentErrorToTypedError } from './agent-error-utils'
 import { isSessionNotFoundError } from './error-patterns'
@@ -45,7 +46,7 @@ import { getAdapter, fetchTitle } from '@proma/core'
 import pkg from '../../../package.json' with { type: 'json' }
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
-import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, removeSDKErrorMessage, rewindPiAgentSession, resolveAgentCwd, getAgentCwdMode, getSessionWorkbenchLayout } from './agent-session-manager'
+import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, removeSDKErrorMessage, rewindPiAgentSession, resolveAgentCwd, getActiveWorktreePath, getAgentCwdMode, getSessionWorkbenchLayout } from './agent-session-manager'
 import { getAgentWorkspace, getLocalProjectRootStatus, getProjectFilesPath, getWorkspaceMcpConfig, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles, getWorkspaceAgentsMdPath, readWorkspaceAgentsMd, getWorkspaceMemoryGuidance, isWorkspaceProjectKnowledgeMaintenanceApproved } from './agent-workspace-manager'
 import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getSdkConfigDir, getWorkspaceSkillsDir } from './config-paths'
 import { getRuntimeStatus } from './runtime-init'
@@ -143,6 +144,7 @@ function collectAttachedDirectories(params: {
   }
 
   for (const d of extraDirs ?? []) push(d)
+  if (sessionMeta?.activeWorktree?.path) push(sessionMeta.activeWorktree.path)
   if (workspaceSlug && sessionMeta) push(getAgentSessionWorkspacePath(workspaceSlug, sessionMeta.id))
   for (const d of sessionMeta?.attachedDirectories ?? []) push(d)
   for (const file of sessionMeta?.attachedFiles ?? []) push(dirname(file))
@@ -849,12 +851,23 @@ export class AgentOrchestrator {
         if (!ws) {
           throw new Error(`指定的 Agent 项目不存在或已删除: ${workspaceId}`)
         }
-        agentCwd = resolveAgentCwd(ws, sessionId, sessionMeta?.agentCwdMode) ?? homedir()
+        let activeWorktree = sessionMeta?.activeWorktree
+        if (activeWorktree) {
+          const activeWorktreePath = getActiveWorktreePath(sessionMeta)
+          const currentMainRepoRoot = activeWorktreePath ? await getMainRepoRoot(activeWorktreePath) : null
+          if (!activeWorktreePath || !currentMainRepoRoot || normalizePathForCompare(currentMainRepoRoot) !== normalizePathForCompare(activeWorktree.mainRepoRoot)) {
+            console.warn(`[Agent 编排] 活动 worktree 已失效，回退默认 cwd: ${activeWorktree.path}`)
+            sessionMeta = updateAgentSessionMeta(sessionId, { activeWorktree: undefined })
+            activeWorktree = undefined
+          }
+        }
+        agentCwd = resolveAgentCwd(ws, sessionId, sessionMeta?.agentCwdMode, activeWorktree) ?? homedir()
         workspaceSlug = ws.slug
         workspace = ws
         runtimeEnv.env.PROMA_WORKSPACE_DIR = getAgentWorkspacePath(ws.slug)
         runtimeEnv.env.PROMA_WORKSPACE_SLUG = ws.slug
-        console.log(`[Agent 编排] 使用 ${getAgentCwdMode(sessionMeta)} cwd: ${agentCwd} (${ws.name}/${sessionId})`)
+        const cwdKind = activeWorktree ? `worktree ${activeWorktree.branch}` : getAgentCwdMode(sessionMeta)
+        console.log(`[Agent 编排] 使用 ${cwdKind} cwd: ${agentCwd} (${ws.name}/${sessionId})`)
 
 
         if (existingSdkSessionId) {
