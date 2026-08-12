@@ -26,7 +26,7 @@ interface AutomationsIndex {
   automations: Automation[]
 }
 
-const INDEX_VERSION = 3
+const INDEX_VERSION = 4
 
 /**
  * 兼容历史字段：
@@ -134,12 +134,13 @@ function writeIndex(index: AutomationsIndex): void {
  * - daily：今天/明天的 timeOfDay
  * - weekly：本周/下周 dayOfWeek 的 timeOfDay
  * - once：直接返回固定的 scheduledAt（不做任何前进推算），跑完后由 appendRun 自动停用
+ * - interval 叠加 activeWindowStart/activeWindowEnd 时，仅在每日窗口内运行；窗口外自动跳至下一天窗口开始
  *
  * 返回值保证为有限正整数。输入非法时回退到 from + 10min 并打印警告。
  */
 export function computeNextRunAt(
   a: { scheduleType: Automation['scheduleType'] } & Partial<
-    Pick<Automation, 'intervalMinutes' | 'timeOfDay' | 'dayOfWeek' | 'dayOfMonth' | 'scheduledAt'>
+    Pick<Automation, 'intervalMinutes' | 'activeWindowStart' | 'activeWindowEnd' | 'activeWeekdays' | 'timeOfDay' | 'dayOfWeek' | 'dayOfMonth' | 'scheduledAt'>
   >,
   from: number = Date.now(),
 ): number {
@@ -163,7 +164,69 @@ export function computeNextRunAt(
       console.warn(`[定时任务] computeNextRunAt: intervalMinutes 非法 (${a.intervalMinutes})，回退到 10 分钟`)
       result = from + FALLBACK_INTERVAL_MS
     } else {
-      result = from + Math.max(1, minutes) * 60_000
+      const step = Math.max(1, minutes) * 60_000
+      const parseWindowTime = (value: string | undefined): [number, number] | undefined => {
+        if (!value || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) return undefined
+        const [hours, minutes] = value.split(':').map(Number)
+        return [hours!, minutes!]
+      }
+      const start = parseWindowTime(a.activeWindowStart)
+      const end = parseWindowTime(a.activeWindowEnd)
+      const hasWindow = !!start && !!end && start[0] * 60 + start[1] < end[0] * 60 + end[1]
+      const weekdays = [...new Set((a.activeWeekdays ?? []).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))]
+      const isAllowedDay = (date: Date): boolean => weekdays.length === 0 || weekdays.includes(date.getDay())
+      const nextAllowedDay = (date: Date): Date => {
+        const next = new Date(date)
+        for (let i = 0; i < 7; i++) {
+          if (i > 0) next.setDate(next.getDate() + 1)
+          if (isAllowedDay(next)) return next
+        }
+        return next
+      }
+
+      if (hasWindow) {
+        const windowStart = new Date(from)
+        windowStart.setHours(start![0], start![1], 0, 0)
+        const windowEnd = new Date(from)
+        windowEnd.setHours(end![0], end![1], 0, 0)
+        if (!isAllowedDay(windowStart) || from >= windowEnd.getTime()) {
+          windowStart.setDate(windowStart.getDate() + (from >= windowEnd.getTime() ? 1 : 0))
+          const next = nextAllowedDay(windowStart)
+          next.setHours(start![0], start![1], 0, 0)
+          result = next.getTime()
+        } else if (from < windowStart.getTime()) {
+          result = windowStart.getTime()
+        } else {
+          // 窗口起点是 interval 锚点，避免执行耗时造成 10:00、10:20… 的漂移。
+          const elapsed = from - windowStart.getTime()
+          const candidate = windowStart.getTime() + (Math.floor(elapsed / step) + 1) * step
+          if (candidate < windowEnd.getTime()) {
+            result = candidate
+          } else {
+            const next = new Date(windowStart)
+            next.setDate(next.getDate() + 1)
+            const allowed = nextAllowedDay(next)
+            allowed.setHours(start![0], start![1], 0, 0)
+            result = allowed.getTime()
+          }
+        }
+      } else {
+        const current = new Date(from)
+        if (isAllowedDay(current)) {
+          const candidate = from + step
+          if (isAllowedDay(new Date(candidate))) {
+            result = candidate
+          } else {
+            const next = nextAllowedDay(new Date(candidate))
+            next.setHours(current.getHours(), current.getMinutes(), current.getSeconds(), current.getMilliseconds())
+            result = next.getTime()
+          }
+        } else {
+          const next = nextAllowedDay(current)
+          next.setHours(current.getHours(), current.getMinutes(), current.getSeconds(), current.getMilliseconds())
+          result = next.getTime()
+        }
+      }
     }
   } else {
     const timeOfDay = a.timeOfDay ?? '09:00'
@@ -279,6 +342,9 @@ export function createAutomation(input: CreateAutomationInput): Automation {
     active,
     scheduleType: input.scheduleType,
     intervalMinutes: input.intervalMinutes,
+    activeWindowStart: input.activeWindowStart,
+    activeWindowEnd: input.activeWindowEnd,
+    activeWeekdays: input.activeWeekdays,
     timeOfDay: input.timeOfDay,
     dayOfWeek: input.dayOfWeek,
     dayOfMonth: input.dayOfMonth,
@@ -328,12 +394,18 @@ export function updateAutomation(input: UpdateAutomationInput): Automation | und
   const scheduleChanged =
     (input.scheduleType !== undefined && input.scheduleType !== target.scheduleType) ||
     (input.intervalMinutes !== undefined && input.intervalMinutes !== target.intervalMinutes) ||
+    (input.activeWindowStart !== undefined && input.activeWindowStart !== target.activeWindowStart) ||
+    (input.activeWindowEnd !== undefined && input.activeWindowEnd !== target.activeWindowEnd) ||
+    (input.activeWeekdays !== undefined && JSON.stringify(input.activeWeekdays ?? []) !== JSON.stringify(target.activeWeekdays ?? [])) ||
     (input.timeOfDay !== undefined && input.timeOfDay !== target.timeOfDay) ||
     (input.dayOfWeek !== undefined && input.dayOfWeek !== target.dayOfWeek) ||
     (input.dayOfMonth !== undefined && input.dayOfMonth !== target.dayOfMonth) ||
     (input.scheduledAt !== undefined && input.scheduledAt !== target.scheduledAt)
   if (input.scheduleType !== undefined) target.scheduleType = input.scheduleType
   if (input.intervalMinutes !== undefined) target.intervalMinutes = input.intervalMinutes
+  if (input.activeWindowStart !== undefined) target.activeWindowStart = input.activeWindowStart ?? undefined
+  if (input.activeWindowEnd !== undefined) target.activeWindowEnd = input.activeWindowEnd ?? undefined
+  if (input.activeWeekdays !== undefined) target.activeWeekdays = input.activeWeekdays ?? undefined
   if (input.timeOfDay !== undefined) target.timeOfDay = input.timeOfDay
   if (input.dayOfWeek !== undefined) target.dayOfWeek = input.dayOfWeek
   if (input.dayOfMonth !== undefined) target.dayOfMonth = input.dayOfMonth

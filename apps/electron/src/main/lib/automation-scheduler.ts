@@ -79,9 +79,10 @@ function formatScheduleLabel(a: Automation): string {
   }
   if (a.scheduleType === 'monthly') return `每月 ${a.dayOfMonth ?? 1} 号 ${a.timeOfDay ?? '09:00'}`
   const min = a.intervalMinutes
-  if (min < 60) return `每 ${min} 分钟`
-  if (min < 1440) return `每 ${min / 60} 小时`
-  return `每 ${min / 1440} 天`
+  const intervalLabel = min < 60 ? `每 ${min} 分钟` : min < 1440 ? `每 ${min / 60} 小时` : `每 ${min / 1440} 天`
+  return a.activeWindowStart && a.activeWindowEnd
+    ? `${intervalLabel}（每日 ${a.activeWindowStart}–${a.activeWindowEnd}）`
+    : intervalLabel
 }
 
 let tickTimer: NodeJS.Timeout | undefined

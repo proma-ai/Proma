@@ -2,7 +2,7 @@
 name: automation
 description: Proma 内嵌自动任务与定时任务 Skill，属于 Proma 自带能力而不是用户临时安装的外部 Skill。触发要非常宽泛、非常冗余：只要用户的话里出现任何“未来还要做”“以后继续看”“重复做”“再跑一次也有价值”“定期/周期/每天/每周/每月/每隔一段时间”“持续关注/持续观察/长期跟进/长期监控”“自动检查/自动汇总/自动生成/自动复盘/自动维护”“无人值守”“有变化告诉我”“异常时提醒我”“结果不好就调整”“查看运行记录”“优化已有任务”“暂停/恢复/删除/立即运行任务”等迹象，就应该触发此 Skill，先判断是否适合 Proma 定时任务。也要覆盖一次性与有限次的延时执行信号：“X 小时/天后跑一次”“过一会儿/晚点/稍后自动做”“到某个具体时间点执行一次”“跑几次/连续观察 N 次就停”——这类未来无人值守的延时任务现在同样适合 Proma 定时任务（用 once 或 maxRuns），不要再一概当成不支持。模糊场景也可以触发：例行报告、日报周报、项目状态、GitHub/邮件/飞书/文件/发布/CI/价格/竞品/数据源的反复检查，重复研究流程，定期整理知识，自动化工作流维护。高频触发不代表必须创建任务；纯提醒/闹钟/倒计时、需要用户实时参与判断、或结果没有任何留存价值的事，要明确说明不推荐创建 Proma 定时任务，并给出替代做法。
 group: proma
-version: "1.0.11"
+version: "1.0.12"
 ---
 
 # Proma Automation
@@ -55,9 +55,13 @@ Proma 已提供内置 `automation` MCP 工具。你必须通过这些工具操�
 创建定时任务前，至少明确这些信息：
 
 - `name`：短名称，描述任务目标。循环任务用持续性的名字（如"每日 PR 汇总"），`once` 任务可以直接写成具体动作（如"周五检查发布构建"）。
-- `scheduleType` + 对应字段：循环任务频率要克制，除非确实需要高频监控；一次性延时任务用 `once`。选择策略见下表。
+- `scheduleType` + 对应字段：循环任务频率要克制，优先用一条任务表达完整的时间规则；一次性延时任务用 `once`。选择策略见下表。
 - `prompt`：每次自动执行时发给 Agent 的完整指令。
-- 权限模式：默认 `bypassPermissions` 适合无人值守；高风险场景可以设为 `auto`，但可能因为需要审批而挂起。
+- **时间窗口型重复任务**：当用户表达“每天/工作日/周末/指定星期几，在某个时间段内每隔 X 分钟/小时执行”时，必须创建**一条** `scheduleType=interval` 任务，使用 `activeWindowStart`、`activeWindowEnd` 和 `activeWeekdays` 表达约束；不得拆成多个 daily/once 任务。
+  - `activeWindowStart` / `activeWindowEnd` 使用 `HH:MM`，开始包含、结束不包含；例如“10:00–22:00 每 20 分钟”触发 10:00、10:20 … 21:40。
+  - `activeWeekdays` 使用数字数组：0=周日、1=周一 … 6=周六；每天可以省略或传空数组，工作日传 `[1,2,3,4,5]`，周末传 `[0,6]`。
+  - 这三个字段是同一条 interval 任务的调度维度，不需要为每个时间点、每一天创建独立任务。
+- 权限模式：定时任务默认使用 `bypassPermissions` 以支持无人值守；涉及高风险操作时不要依赖权限模式解决，应缩小 prompt 的授权范围，必要时改为先汇报、等待用户确认的流程。
 - 会话模式（`sessionMode`）：默认 `daily`，同一自然日内的触发复用同一个子会话、跨日自动新建；`reuse` 始终复用同一个子会话保留长期上下文。选择策略见下文。
 
 ### 调度类型怎么选
@@ -95,7 +99,71 @@ Proma 已提供内置 `automation` MCP 工具。你必须通过这些工具操�
 
 用户说"每月底"时，建议**主动用 28 号**而不是 31 号，否则用户可能误以为每月都跑、实际并非如此；或者明确告知这个回退行为，让用户自己决定。
 
-### sessionMode 怎么选
+### 组合调度规则（必须遵守）
+
+Automation 的调度规则由多个独立维度组合而成，不要把每个维度展开成多个任务。创建前先把用户描述拆成：**执行动作、间隔/固定时刻、每日时间窗口、周内运行日、结束条件**，再映射到同一条 Automation。
+
+| 用户表达 | 调度配置 |
+|---|---|
+| 每隔 X 分钟/小时 | `scheduleType: 'interval'` + `intervalMinutes: X` |
+| 每天某个时间段内 | `activeWindowStart` + `activeWindowEnd` |
+| 工作日/周一至周五 | `activeWeekdays: [1,2,3,4,5]` |
+| 周末 | `activeWeekdays: [0,6]` |
+| 周一、三、五 | `activeWeekdays: [1,3,5]` |
+| 每天/不限制星期 | `activeWeekdays` 省略或传 `[]` |
+| 只运行 N 次 | `maxRuns: N` |
+| 某个绝对时刻只运行一次 | `scheduleType: 'once'` + `scheduledAt` |
+
+#### 单任务优先原则
+
+- “工作日 10:00–22:00 每 20 分钟检查一次”必须是**一条**任务：
+
+      scheduleType: interval
+      intervalMinutes: 20
+      activeWindowStart: 10:00
+      activeWindowEnd: 22:00
+      activeWeekdays: [1, 2, 3, 4, 5]
+
+- “每天 10:00–22:00 每 20 分钟”同样只创建一条任务，只省略 `activeWeekdays` 或传空数组。
+- 禁止按时间点创建 36/37 条 daily 任务，禁止按星期创建 5 条任务，禁止把一个时间窗口拆成多条 `once` 任务。
+- 如果 `list_automations` 已发现同一目标已有多条由旧规则拆出的相似任务，优先提出或执行合并迁移：保留一条共同 prompt，转换为上述组合字段；删除其余任务前遵守删除确认规则，不要静默删除。
+- `activeWindowStart` 包含，`activeWindowEnd` 不包含。窗口必须是同一自然日且开始早于结束；暂不支持跨午夜窗口。窗口内以窗口开始为间隔锚点，例如 10:00–22:00、20 分钟间隔的触发点为 10:00、10:20 … 21:40。
+- `activeWeekdays` 只对 `scheduleType: 'interval'` 生效；空数组/省略表示每天。`weekly` 只用于“每周某一天的一个固定时刻”，不用于表达工作日内的高频运行。
+
+#### 选择流程
+
+1. 先判断用户是否描述了“每隔 X”或“时间段内反复执行”。有则使用 `interval`。
+2. 再提取是否有每日时间段。有则同时设置 `activeWindowStart`、`activeWindowEnd`。
+3. 再提取是否有周内范围。有则一次性设置 `activeWeekdays`，不要创建多条任务。
+4. 再设置 `maxRuns` 或长期运行；没有结束条件时不设置 `maxRuns`。
+5. 创建前调用 `list_automations` 检查近似任务，避免重复创建；若用户明确要把拆分任务收敛为一条，先列出将保留/合并/待删除的任务和影响，再执行需要确认的删除。
+
+#### 示例
+
+用户：“每天上午 9 点到下午 6 点，每隔 30 分钟检查一次 GitHub Issue。”
+
+      scheduleType: interval
+      intervalMinutes: 30
+      activeWindowStart: 09:00
+      activeWindowEnd: 18:00
+      activeWeekdays: []
+
+用户：“工作日 10 点到 22 点，每隔 20 分钟巡检小红书官方群。”
+
+      scheduleType: interval
+      intervalMinutes: 20
+      activeWindowStart: 10:00
+      activeWindowEnd: 22:00
+      activeWeekdays: [1, 2, 3, 4, 5]
+
+用户：“每周一上午 10 点生成周报。”
+
+      scheduleType: weekly
+      dayOfWeek: 1
+      timeOfDay: 10:00
+
+这里没有“时间段内反复执行”，所以使用 `weekly`，而不是 `interval`。
+
 
 - `daily`（默认）：同一自然日内的所有触发写入同一个子会话，跨日时自动新建。**绝大多数定时任务用这个**——既能让一天内的多次运行共享上下文（少占左侧栏 tab），又能每天自动归零、避免 token 长期累积。低频任务（间隔 ≥ 24 小时）的实际行为等价于"每次新建"，无需用户单独配置。
 - `reuse`：始终复用同一个子会话，保留长期对话历史。适合**真的需要跨日记忆、且明知会有 token 成本**的任务——持续追踪同一个长期 issue、迭代优化同一个文档。
@@ -148,7 +216,7 @@ Proma 已提供内置 `automation` MCP 工具。你必须通过这些工具操�
 - `list_automations`：查看已有任务，避免重复创建，也用于了解启用/暂停状态。
 - `get_automation`：查看单个任务详情和运行记录；自动任务执行中可省略 `id` 读取当前任务。
 - `create_automation`：创建新的 Proma 定时任务，只用于确认值得长期反复执行的场景。
-- `update_automation`：修改任意字段——`name`、`prompt`、`scheduleType`/`intervalMinutes`/`timeOfDay`/`dayOfWeek`/`dayOfMonth`/`scheduledAt`（频率）、`maxRuns`（运行次数上限）、`permissionMode`（权限模式）、`sessionMode`（会话模式）、`active`（启用/暂停）。调度相关字段变化时会自动重算下次运行时间；改 `maxRuns` 会重置已执行次数计数；把 `active` 从 false 改回 true 会重置运行配额（已完成的任务可借此再跑一轮）。**改 `maxRuns` 想让停用/已完成任务继续跑时，必须连带处理启用状态，见下文「调整 maxRuns 时连带判断启用状态」。** 自动任务执行中可省略 `id` 更新当前任务。
+- `update_automation`：修改任意字段——`name`、`prompt`、`scheduleType`/`intervalMinutes`/`activeWindowStart`/`activeWindowEnd`/`activeWeekdays`/`timeOfDay`/`dayOfWeek`/`dayOfMonth`/`scheduledAt`（频率和时间约束）、`maxRuns`（运行次数上限）、`permissionMode`（权限模式）、`sessionMode`（会话模式）、`active`（启用/暂停）。`activeWeekdays` 传空数组或 null 表示取消星期限制；`activeWindowStart` 与 `activeWindowEnd` 必须成对传入，传 null 清除窗口。调度相关字段变化时会自动重算下次运行时间；改 `maxRuns` 会重置已执行次数计数；把 `active` 从 false 改回 true 会重置运行配额（已完成的任务可借此再跑一轮）。**改 `maxRuns` 想让停用/已完成任务继续跑时，必须连带处理启用状态，见下文「调整 maxRuns 时连带判断启用状态」。** 自动任务执行中可省略 `id` 更新当前任务。
 - `delete_automation`：删除任务。除非用户明确要求，否则删除前要确认。
 - `run_automation_now`：用户要求立即验证，或你刚修改任务后需要试跑时使用。自动任务执行中不要触发自身重入。
 

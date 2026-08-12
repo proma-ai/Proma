@@ -222,6 +222,9 @@ function summarizeAutomation(a: import('@proma/shared').Automation, includeHisto
     active: a.active,
     scheduleType: a.scheduleType,
     intervalMinutes: a.intervalMinutes,
+    activeWindowStart: a.activeWindowStart,
+    activeWindowEnd: a.activeWindowEnd,
+    activeWeekdays: a.activeWeekdays,
     timeOfDay: a.timeOfDay,
     dayOfWeek: a.dayOfWeek,
     dayOfMonth: a.dayOfMonth,
@@ -271,6 +274,15 @@ function validateScheduleFields(input: Partial<CreateAutomationInput | UpdateAut
   }
   if (input.timeOfDay !== undefined && !TIME_OF_DAY_PATTERN.test(input.timeOfDay)) {
     throw new Error(`非法的 timeOfDay: ${String(input.timeOfDay)}`)
+  }
+  if (input.activeWindowStart !== undefined && input.activeWindowStart !== null && !TIME_OF_DAY_PATTERN.test(input.activeWindowStart)) {
+    throw new Error(`非法的 activeWindowStart: ${String(input.activeWindowStart)}`)
+  }
+  if (input.activeWindowEnd !== undefined && input.activeWindowEnd !== null && !TIME_OF_DAY_PATTERN.test(input.activeWindowEnd)) {
+    throw new Error(`非法的 activeWindowEnd: ${String(input.activeWindowEnd)}`)
+  }
+  if (input.activeWeekdays !== undefined && input.activeWeekdays !== null && (!Array.isArray(input.activeWeekdays) || input.activeWeekdays.some((day) => !isFiniteInt(day) || day < 0 || day > 6))) {
+    throw new Error(`非法的 activeWeekdays: ${String(input.activeWeekdays)}`)
   }
   if (input.dayOfWeek !== undefined && (!isFiniteInt(input.dayOfWeek) || input.dayOfWeek < 0 || input.dayOfWeek > 6)) {
     throw new Error(`非法的 dayOfWeek: ${String(input.dayOfWeek)}`)
@@ -338,6 +350,9 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
           Type.Literal('once'),
         ], { description: '调度类型' }),
         intervalMinutes: Type.Optional(Type.Number({ description: '固定间隔分钟数；scheduleType=interval 时必填' })),
+        activeWindowStart: Type.Optional(Type.String({ description: 'interval 的每日有效开始时刻，HH:MM；需与 activeWindowEnd 同时设置' })),
+        activeWindowEnd: Type.Optional(Type.String({ description: 'interval 的每日有效结束时刻（不包含），HH:MM；需与 activeWindowStart 同时设置' })),
+        activeWeekdays: Type.Optional(Type.Array(Type.Number({ description: '运行日：0=周日，1=周一 … 6=周六；空数组表示每天' }), { description: 'interval 的周内运行日集合，例如工作日传 [1,2,3,4,5]' })),
         timeOfDay: Type.Optional(Type.String({ description: '每天/每周/每月触发时间，24 小时制 HH:MM' })),
         dayOfWeek: Type.Optional(Type.Number({ description: '每周触发日，0=周日，...，6=周六' })),
         dayOfMonth: Type.Optional(Type.Number({ description: '每月触发日，1-31' })),
@@ -356,6 +371,9 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
           prompt: assertNonBlank(args.prompt as string, 'prompt'),
           scheduleType: args.scheduleType as AutomationScheduleType,
           intervalMinutes: (args.intervalMinutes as number) ?? 10,
+          activeWindowStart: args.activeWindowStart as string | undefined,
+          activeWindowEnd: args.activeWindowEnd as string | undefined,
+          activeWeekdays: args.activeWeekdays as number[] | undefined,
           timeOfDay: args.timeOfDay as string | undefined,
           dayOfWeek: args.dayOfWeek as number | undefined,
           dayOfMonth: args.dayOfMonth as number | undefined,
@@ -371,6 +389,14 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
         validateScheduleFields(input)
         if (input.scheduleType === 'interval' && args.intervalMinutes === undefined) {
           throw new Error('scheduleType=interval 时 intervalMinutes 必填')
+        }
+        if ((input.activeWindowStart === undefined) !== (input.activeWindowEnd === undefined)) {
+          throw new Error('activeWindowStart 与 activeWindowEnd 必须同时设置')
+        }
+        if (input.activeWindowStart && input.activeWindowEnd) {
+          if (input.scheduleType !== 'interval' || input.activeWindowStart >= input.activeWindowEnd) {
+            throw new Error('每日执行窗口仅支持 interval，且开始时间必须早于结束时间')
+          }
         }
         if ((input.scheduleType === 'daily' || input.scheduleType === 'weekly' || input.scheduleType === 'monthly') && !input.timeOfDay) {
           throw new Error('scheduleType=daily/weekly/monthly 时 timeOfDay 必填')
@@ -405,6 +431,9 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
           Type.Literal('once'),
         ])),
         intervalMinutes: Type.Optional(Type.Number({ description: '新的固定间隔分钟数' })),
+        activeWindowStart: Type.Optional(Type.Union([Type.String({ description: '新的每日有效开始时刻 HH:MM' }), Type.Null({ description: '清除每日执行窗口' })])),
+        activeWindowEnd: Type.Optional(Type.Union([Type.String({ description: '新的每日有效结束时刻 HH:MM' }), Type.Null({ description: '清除每日执行窗口' })])),
+        activeWeekdays: Type.Optional(Type.Union([Type.Array(Type.Number({ description: '运行日：0=周日，1=周一 … 6=周六' })), Type.Null({ description: '清除周内运行日限制' })])),
         timeOfDay: Type.Optional(Type.String({ description: '新的每天/每周/每月触发时间' })),
         dayOfWeek: Type.Optional(Type.Number({ description: '新的每周触发日' })),
         dayOfMonth: Type.Optional(Type.Number({ description: '新的每月触发日' })),
@@ -423,6 +452,9 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
           prompt: (args.prompt as string)?.trim(),
           scheduleType: args.scheduleType as AutomationScheduleType | undefined,
           intervalMinutes: args.intervalMinutes as number | undefined,
+          activeWindowStart: args.activeWindowStart as string | null | undefined,
+          activeWindowEnd: args.activeWindowEnd as string | null | undefined,
+          activeWeekdays: args.activeWeekdays as number[] | null | undefined,
           timeOfDay: args.timeOfDay as string | undefined,
           dayOfWeek: args.dayOfWeek as number | undefined,
           dayOfMonth: args.dayOfMonth as number | undefined,
@@ -434,11 +466,24 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
         if (input.name !== undefined) assertNonBlank(input.name, 'name')
         if (input.prompt !== undefined) assertNonBlank(input.prompt, 'prompt')
         validateScheduleFields(input)
+        const existing = getAutomation(id)
         if (input.scheduleType === 'once' && input.scheduledAt === undefined) {
-          const existing = getAutomation(id)
           if (!existing?.scheduledAt) {
             throw new Error('scheduleType 改为 once 时必须提供 scheduledAt')
           }
+        }
+        const activeWindowStart = input.activeWindowStart !== undefined
+          ? input.activeWindowStart ?? undefined
+          : existing?.activeWindowStart
+        const activeWindowEnd = input.activeWindowEnd !== undefined
+          ? input.activeWindowEnd ?? undefined
+          : existing?.activeWindowEnd
+        const effectiveScheduleType = input.scheduleType ?? existing?.scheduleType
+        if ((activeWindowStart === undefined) !== (activeWindowEnd === undefined)) {
+          throw new Error('activeWindowStart 与 activeWindowEnd 必须同时设置或同时清除')
+        }
+        if (activeWindowStart && activeWindowEnd && (effectiveScheduleType !== 'interval' || activeWindowStart >= activeWindowEnd)) {
+          throw new Error('每日执行窗口仅支持 interval，且开始时间必须早于结束时间')
         }
         const automation = updateAutomation(input)
         if (!automation) throw new Error(`定时任务不存在: ${id}`)

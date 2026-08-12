@@ -4,7 +4,7 @@
  * 调度器（apps/electron/src/main/lib/automation-manager.ts）只持久化 nextRunAt 一个锚点；
  * 日历月/周视图需要看到可见范围内的全部未来触发时间，这里按调度规则展开。
  * 展开规则与主进程 computeNextRunAt 保持一致：
- * - interval 从 nextRunAt 等距累加（锚点语义）
+ * - interval 从 nextRunAt 等距累加（锚点语义）；如配置每日窗口，则跳过窗口外时段并于下一窗口开始重置
  * - daily / weekly / monthly 用本地日历推进，保留 timeOfDay 的 hh:mm（DST 安全）
  * - monthly 短月钳制（先回 1 号再进月，setDate(min(dayOfMonth, 当月天数))）
  */
@@ -14,7 +14,7 @@ import type { Automation } from '../types/automation'
 /** 展开所需的调度字段（Automation 子集，方便单测与复用） */
 export type AutomationScheduleFields = Pick<Automation, 'scheduleType' | 'nextRunAt'> &
   Partial<
-    Pick<Automation, 'intervalMinutes' | 'timeOfDay' | 'dayOfWeek' | 'dayOfMonth' | 'scheduledAt' | 'maxRuns' | 'runCount'>
+    Pick<Automation, 'intervalMinutes' | 'activeWindowStart' | 'activeWindowEnd' | 'activeWeekdays' | 'timeOfDay' | 'dayOfWeek' | 'dayOfMonth' | 'scheduledAt' | 'maxRuns' | 'runCount'>
   >
 
 /** 一天内的触发分布 */
@@ -74,18 +74,58 @@ function* iterateOccurrences(
     const minutes = Number(automation.intervalMinutes)
     if (!Number.isFinite(minutes) || minutes < 1) return
     const step = minutes * 60_000
+    const parseTime = (value: string | undefined): number | undefined => {
+      if (!value || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) return undefined
+      const [hours, minutes] = value.split(':').map(Number)
+      return hours! * 60 + minutes!
+    }
+    const windowStartMinutes = parseTime(automation.activeWindowStart)
+    const windowEndMinutes = parseTime(automation.activeWindowEnd)
+    const hasWindow = windowStartMinutes !== undefined && windowEndMinutes !== undefined && windowStartMinutes < windowEndMinutes
+    const weekdays = [...new Set((automation.activeWeekdays ?? []).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))]
+    const isAllowedDay = (date: Date): boolean => weekdays.length === 0 || weekdays.includes(date.getDay())
+    const nextAllowedDay = (date: Date): Date => {
+      const next = new Date(date)
+      for (let i = 0; i < 7; i++) {
+        if (i > 0) next.setDate(next.getDate() + 1)
+        if (isAllowedDay(next)) return next
+      }
+      return next
+    }
     let ts = nextRunAt
-    if (ts < rangeStart) {
+    if (!hasWindow && ts < rangeStart) {
       const skip = Math.floor((rangeStart - ts) / step)
       ts += skip * step
     }
     while (ts <= rangeEnd && produced < remaining && iterations < MAX_ITERATIONS) {
       iterations++
-      if (ts >= rangeStart) {
-        produced++
-        yield ts
+      const date = new Date(ts)
+      const minuteOfDay = date.getHours() * 60 + date.getMinutes()
+      if (!isAllowedDay(date)) {
+        const next = nextAllowedDay(date)
+        if (hasWindow) {
+          next.setHours(Math.floor(windowStartMinutes! / 60), windowStartMinutes! % 60, 0, 0)
+        }
+        ts = next.getTime()
+      } else if (!hasWindow || (minuteOfDay >= windowStartMinutes! && minuteOfDay < windowEndMinutes!)) {
+        if (ts >= rangeStart) {
+          produced++
+          yield ts
+        }
+        if (hasWindow) {
+          const windowStart = new Date(ts)
+          windowStart.setHours(Math.floor(windowStartMinutes! / 60), windowStartMinutes! % 60, 0, 0)
+          const elapsed = ts - windowStart.getTime()
+          ts = windowStart.getTime() + (Math.floor(elapsed / step) + 1) * step
+        } else {
+          ts += step
+        }
+      } else {
+        const nextStart = new Date(ts)
+        nextStart.setHours(Math.floor(windowStartMinutes! / 60), windowStartMinutes! % 60, 0, 0)
+        if (minuteOfDay >= windowEndMinutes!) nextStart.setDate(nextStart.getDate() + 1)
+        ts = nextStart.getTime()
       }
-      ts += step
     }
     return
   }

@@ -5178,6 +5178,15 @@ export function registerIpcHandlers(): void {
     if (i.timeOfDay !== undefined && !validTimeOfDay(i.timeOfDay)) {
       throw new Error(`非法的 timeOfDay: ${String(i.timeOfDay)}`)
     }
+    if (i.activeWindowStart !== undefined && i.activeWindowStart !== null && !validTimeOfDay(i.activeWindowStart)) {
+      throw new Error(`非法的 activeWindowStart: ${String(i.activeWindowStart)}`)
+    }
+    if (i.activeWindowEnd !== undefined && i.activeWindowEnd !== null && !validTimeOfDay(i.activeWindowEnd)) {
+      throw new Error(`非法的 activeWindowEnd: ${String(i.activeWindowEnd)}`)
+    }
+    if (i.activeWeekdays !== undefined && i.activeWeekdays !== null && (!Array.isArray(i.activeWeekdays) || i.activeWeekdays.some((day) => !isFiniteInt(day) || day < 0 || day > 6))) {
+      throw new Error(`非法的 activeWeekdays: ${String(i.activeWeekdays)}`)
+    }
     if (i.dayOfWeek !== undefined && (!isFiniteInt(i.dayOfWeek) || i.dayOfWeek < 0 || i.dayOfWeek > 6)) {
       throw new Error(`非法的 dayOfWeek: ${String(i.dayOfWeek)}`)
     }
@@ -5209,6 +5218,29 @@ export function registerIpcHandlers(): void {
     if (scheduleType === 'interval') {
       const intervalMinutes = input.intervalMinutes ?? existing?.intervalMinutes
       if (!isFiniteInt(intervalMinutes) || intervalMinutes < 1) throw new Error('scheduleType=interval 时 intervalMinutes 必填')
+    }
+    const activeWindowStart = input.activeWindowStart !== undefined
+      ? input.activeWindowStart ?? undefined
+      : existing?.activeWindowStart
+    const activeWindowEnd = input.activeWindowEnd !== undefined
+      ? input.activeWindowEnd ?? undefined
+      : existing?.activeWindowEnd
+    if ((activeWindowStart === undefined) !== (activeWindowEnd === undefined)) {
+      throw new Error('activeWindowStart 与 activeWindowEnd 必须同时设置或同时清除')
+    }
+    const activeWeekdays = input.activeWeekdays !== undefined
+      ? input.activeWeekdays ?? undefined
+      : existing?.activeWeekdays
+    if (activeWeekdays !== undefined && activeWeekdays.length === 0) {
+      // 空数组明确表示每天，不需要额外约束。
+    } else if (activeWeekdays !== undefined && scheduleType !== 'interval') {
+      throw new Error('周内运行日限制仅支持 scheduleType=interval')
+    }
+    if (activeWindowStart !== undefined && activeWindowEnd !== undefined) {
+      if (scheduleType !== 'interval') throw new Error('每日执行窗口仅支持 scheduleType=interval')
+      if (!validTimeOfDay(activeWindowStart) || !validTimeOfDay(activeWindowEnd) || activeWindowStart >= activeWindowEnd) {
+        throw new Error('每日执行窗口必须是同一天内有效的 HH:MM 范围，且开始早于结束')
+      }
     }
     if (scheduleType === 'daily' || scheduleType === 'weekly' || scheduleType === 'monthly') {
       const timeOfDay = input.timeOfDay ?? existing?.timeOfDay
