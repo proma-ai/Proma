@@ -1,6 +1,7 @@
 import * as React from 'react'
+import { useAtomValue, useSetAtom } from 'jotai'
 import type { BrowserViewState } from '@proma/shared'
-import { ArrowLeft, ArrowRight, Globe2, LoaderCircle, Plus, RefreshCw, ShieldAlert, Square, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ExternalLink, Globe2, LoaderCircle, Plus, RefreshCw, ShieldAlert, Square, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -16,7 +17,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { BROWSER_RISK_DISCLAIMER_VERSION } from '@/types/settings'
 import { detectIsWindows, getWindowControlsPaddingClass } from '@/lib/platform'
 import { cn } from '@/lib/utils'
+import { browserPendingNavigationMapAtom } from '@/atoms/browser-atoms'
 import { BrowserSlot } from './BrowserSlot'
+import { shouldReuseInitialBrowserTab } from './agent-browser-link-utils'
 
 interface BrowserPanelProps {
   sessionId: string
@@ -28,6 +31,8 @@ export function BrowserPanel({ sessionId, state, onClose }: BrowserPanelProps): 
   const [url, setUrl] = React.useState(state?.url ?? '')
   const [riskAcknowledged, setRiskAcknowledged] = React.useState<boolean | null>(null)
   const [savingRiskAcknowledgement, setSavingRiskAcknowledgement] = React.useState(false)
+  const pendingNavigationUrl = useAtomValue(browserPendingNavigationMapAtom).get(sessionId)
+  const setPendingNavigationMap = useSetAtom(browserPendingNavigationMapAtom)
 
   React.useEffect(() => setUrl(state?.url ?? ''), [state?.url])
   React.useEffect(() => {
@@ -50,6 +55,11 @@ export function BrowserPanel({ sessionId, state, onClose }: BrowserPanelProps): 
     try { await navigateBrowser({ sessionId, url: value }) } catch (error) { console.error('[受管浏览器] 导航失败:', error) }
   }, [sessionId, url])
 
+  const openInDefaultBrowser = React.useCallback(() => {
+    const value = url.trim()
+    if (value.startsWith('http://') || value.startsWith('https://')) void window.electronAPI.openExternal(value)
+  }, [url])
+
   const close = React.useCallback(async () => {
     const closeBrowser = (window.electronAPI as Partial<typeof window.electronAPI>).closeAgentBrowser
     if (typeof closeBrowser !== 'function') { onClose(); return }
@@ -66,12 +76,31 @@ export function BrowserPanel({ sessionId, state, onClose }: BrowserPanelProps): 
     try {
       await window.electronAPI.updateSettings({ browserRiskDisclaimerVersion: BROWSER_RISK_DISCLAIMER_VERSION })
       setRiskAcknowledged(true)
+      if (pendingNavigationUrl) {
+        try {
+          const currentState = await window.electronAPI.getAgentBrowserState(sessionId)
+          if (!currentState) throw new Error('受管浏览器会话不存在。')
+          if (shouldReuseInitialBrowserTab(currentState)) {
+            await window.electronAPI.navigateAgentBrowser({ sessionId, url: pendingNavigationUrl })
+          } else {
+            await window.electronAPI.createAgentBrowserTab({ sessionId, url: pendingNavigationUrl })
+          }
+        } catch (error) {
+          console.error('[受管浏览器] 打开待处理链接失败:', error)
+        } finally {
+          setPendingNavigationMap((previous) => {
+            const next = new Map(previous)
+            next.delete(sessionId)
+            return next
+          })
+        }
+      }
     } catch (error) {
       console.error('[受管浏览器] 保存风险告知确认失败:', error)
     } finally {
       setSavingRiskAcknowledgement(false)
     }
-  }, [])
+  }, [pendingNavigationUrl, sessionId, setPendingNavigationMap])
 
   const stopBackgroundRun = React.useCallback(async () => {
     if (state?.executionSource === 'user') return
@@ -124,6 +153,7 @@ export function BrowserPanel({ sessionId, state, onClose }: BrowserPanelProps): 
         <form className="flex-1 min-w-0" onSubmit={(event) => { event.preventDefault(); if (!riskBlocked) void navigate() }}>
           <Input disabled={riskBlocked} value={url} onChange={(event) => setUrl(event.target.value)} placeholder="输入域名或 URL（默认 HTTPS，仅公共网站）" className="h-7 text-xs bg-background/70" aria-label="浏览器地址" />
         </form>
+        <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-7" disabled={!url.startsWith('http://') && !url.startsWith('https://')} onClick={openInDefaultBrowser} aria-label="在系统默认浏览器中打开当前网页"><ExternalLink className="size-3.5" /></Button></TooltipTrigger><TooltipContent>在系统默认浏览器中打开</TooltipContent></Tooltip>
         {state?.loading && <LoaderCircle className="size-3.5 text-muted-foreground animate-spin" />}
         {isBackgroundRun && (
           <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-7 text-amber-600 hover:text-amber-700" onClick={() => void stopBackgroundRun()} aria-label="停止当前后台 Agent"><Square className="size-3.5 fill-current" /></Button></TooltipTrigger><TooltipContent>停止当前{state?.executionSource === 'automation' ? '自动任务' : '委派'}运行</TooltipContent></Tooltip>
@@ -156,11 +186,6 @@ export function BrowserPanel({ sessionId, state, onClose }: BrowserPanelProps): 
           </button>
         ))}
         <Tooltip><TooltipTrigger asChild><Button type="button" variant="ghost" size="icon" className="size-6 shrink-0" disabled={riskBlocked} onClick={() => void createTab()} aria-label="新建浏览器标签"><Plus className="size-3.5" /></Button></TooltipTrigger><TooltipContent>新建标签</TooltipContent></Tooltip>
-      </div>
-      <div className="flex items-center h-7 px-3 gap-2 border-b border-border/25 text-[11px] text-muted-foreground">
-        <span className="truncate">{title}</span>
-        {isBackgroundRun && <span className="shrink-0 text-amber-600">{state?.executionSource === 'automation' ? '自动任务' : '委派'}来源 · 可停止当前运行</span>}
-        <span className="ml-auto shrink-0">Proma 仅本地存储登录状态</span>
       </div>
       {activity && (
         <div className="flex min-h-7 items-center gap-2 border-b border-border/25 bg-primary/[0.04] px-3 py-1 text-[11px]" role="status" aria-live="polite">

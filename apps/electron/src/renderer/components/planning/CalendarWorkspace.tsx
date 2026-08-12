@@ -492,7 +492,13 @@ function formatAutomationSchedule(automation: Automation): string {
   const time = automation.timeOfDay ?? '09:00'
   if (automation.scheduleType === 'interval') {
     const minutes = Math.max(1, automation.intervalMinutes)
-    return minutes % 60 === 0 ? `每 ${minutes / 60} 小时` : `每 ${minutes} 分钟`
+    const label = minutes % 60 === 0 ? `每 ${minutes / 60} 小时` : `每 ${minutes} 分钟`
+    const weekdays = (automation.activeWeekdays ?? []).length === 0
+      ? '每天'
+      : (automation.activeWeekdays ?? []).join(',') === '1,2,3,4,5' ? '工作日' : '指定日期'
+    return automation.activeWindowStart && automation.activeWindowEnd
+      ? `${label}（${weekdays} ${automation.activeWindowStart}–${automation.activeWindowEnd}）`
+      : automation.activeWeekdays && automation.activeWeekdays.length > 0 ? `${label}（${weekdays}）` : label
   }
   if (automation.scheduleType === 'daily') return `每天 ${time}`
   if (automation.scheduleType === 'weekly') {

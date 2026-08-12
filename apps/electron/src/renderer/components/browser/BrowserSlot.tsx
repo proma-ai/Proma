@@ -1,13 +1,8 @@
 import * as React from 'react'
+import { nextBrowserLayoutRevision } from './browser-layout-revision'
 
 // 每次 publish（包括卸载隐藏）分配全局单调 revision。旧 slot 的 IPC 即使晚到，
 // 主进程也不会覆盖随后已挂载 tab 的可见性和边界。
-let nextBrowserLayoutRevision = 0
-
-function nextLayoutRevision(): number {
-  nextBrowserLayoutRevision += 1
-  return nextBrowserLayoutRevision
-}
 
 /**
  * WebContentsView 是原生子视图，天然盖在 renderer DOM 之上；CSS z-index 无法反转。
@@ -67,7 +62,7 @@ export function BrowserSlot({ sessionId, tabId }: { sessionId: string; tabId: st
         void setLayout({
           sessionId,
           tabId,
-          revision: nextLayoutRevision(),
+          revision: nextBrowserLayoutRevision(),
           visible: visible && rect.width > 4 && rect.height > 4,
           bounds: {
             x: Math.round(rect.x), y: Math.round(rect.y),
@@ -96,7 +91,7 @@ export function BrowserSlot({ sessionId, tabId }: { sessionId: string; tabId: st
       overlayObserver.disconnect()
       window.removeEventListener('resize', publishBounded)
       if (frame) cancelAnimationFrame(frame)
-      void setLayout({ sessionId, tabId, revision: nextLayoutRevision(), visible: false, bounds: { x: 0, y: 0, width: 0, height: 0 } })
+      void setLayout({ sessionId, tabId, revision: nextBrowserLayoutRevision(), visible: false, bounds: { x: 0, y: 0, width: 0, height: 0 } })
     }
   }, [sessionId, tabId])
 

@@ -25,6 +25,18 @@ export interface AutomationRun {
 export type AutomationScheduleType = 'interval' | 'daily' | 'weekly' | 'monthly' | 'once'
 
 /**
+ * interval 调度的每日有效执行窗口和周内运行日。
+ * - 开始包含、结束不包含；例如 10:00–22:00 每 20 分钟会在 10:00 至 21:40 触发。
+ * - activeWeekdays 为空或未设置表示每天；非空时 0=周日，1=周一 … 6=周六。
+ * - 窗口与运行日可以单独使用，但实际产品通常组合为“工作日 10:00–22:00 每 20 分钟”。
+ */
+export interface AutomationActiveWindow {
+  activeWindowStart?: string
+  activeWindowEnd?: string
+  activeWeekdays?: number[]
+}
+
+/**
  * 定时任务的权限模式（无人值守运行场景）
  * - bypassPermissions：完全自动，所有工具调用自动允许
  * 不含 plan（计划模式只规划不执行，对定时任务无意义）
@@ -63,7 +75,7 @@ export interface AutomationFeishuNotificationTarget {
 export type AutomationNotificationTarget = AutomationFeishuNotificationTarget
 
 /** 定时任务定义 */
-export interface Automation {
+export interface Automation extends AutomationActiveWindow {
   id: string
   /** 任务名（默认从来源消息生成，可编辑） */
   name: string
@@ -75,6 +87,12 @@ export interface Automation {
   scheduleType: AutomationScheduleType
   /** 运行间隔（分钟），scheduleType==='interval' 时使用 */
   intervalMinutes: number
+  /** interval 的每日有效开始时刻 "HH:MM"；与 activeWindowEnd 同时存在时生效 */
+  activeWindowStart?: string
+  /** interval 的每日有效结束时刻 "HH:MM"（结束不包含） */
+  activeWindowEnd?: string
+  /** interval 的运行日；为空表示每天，0=周日，1=周一 … 6=周六 */
+  activeWeekdays?: number[]
   /** 触发时刻 "HH:MM"，scheduleType==='daily'|'weekly'|'monthly' 时使用 */
   timeOfDay?: string
   /** 星期几（0=周日 … 6=周六），scheduleType==='weekly' 时使用 */
@@ -134,7 +152,7 @@ export const AUTOMATION_MAX_HISTORY = 20
 export const AUTOMATION_MAX_CONSECUTIVE_FAILURES = 5
 
 /** 创建定时任务的输入 */
-export interface CreateAutomationInput {
+export interface CreateAutomationInput extends AutomationActiveWindow {
   name: string
   prompt: string
   scheduleType: AutomationScheduleType
@@ -164,6 +182,12 @@ export interface UpdateAutomationInput {
   prompt?: string
   scheduleType?: AutomationScheduleType
   intervalMinutes?: number
+  /** null 表示清除每日执行窗口的开始时刻 */
+  activeWindowStart?: string | null
+  /** null 表示清除每日执行窗口 */
+  activeWindowEnd?: string | null
+  /** interval 的运行日；传空数组表示每天，null 表示清除限制 */
+  activeWeekdays?: number[] | null
   timeOfDay?: string
   dayOfWeek?: number
   dayOfMonth?: number

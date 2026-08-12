@@ -51,8 +51,20 @@ function formatSchedule(a: Automation): string {
   if (min < 60) label = `每 ${min} 分钟`
   else if (min < 1440) label = `每 ${min / 60} 小时`
   else label = `每 ${min / 1440} 天`
+  const weekdayLabel = a.activeWeekdays && a.activeWeekdays.length > 0 ? ` · ${formatWeekdays(a.activeWeekdays)}` : ''
+  const windowLabel = a.activeWindowStart && a.activeWindowEnd ? ` · ${a.activeWindowStart}–${a.activeWindowEnd}` : ''
+  if (weekdayLabel || windowLabel) label += `${weekdayLabel}${windowLabel}`
   // 叠加了运行次数上限时在末尾标注，让列表能看出"跑 N 次就停"
   return a.maxRuns !== undefined ? `${label}·限 ${a.maxRuns} 次` : label
+}
+
+function formatWeekdays(days?: number[]): string {
+  const normalized = [...new Set(days ?? [])].sort((a, b) => a - b)
+  if (normalized.length === 0) return '每天'
+  if (normalized.join(',') === '1,2,3,4,5') return '工作日'
+  if (normalized.join(',') === '0,6') return '周末'
+  const names = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+  return normalized.map((day) => names[day] ?? '').join('、')
 }
 
 function formatNextRun(a: Automation): string {

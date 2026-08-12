@@ -69,6 +69,39 @@ describe('computeNextRunAt 月度调度', () => {
   })
 })
 
+describe('computeNextRunAt 每日执行窗口', () => {
+  const base = (y: number, m: number, d: number, hh: number, mm: number): number =>
+    new Date(y, m - 1, d, hh, mm, 0, 0).getTime()
+
+  const schedule = { scheduleType: 'interval' as const, intervalMinutes: 20, activeWindowStart: '10:00', activeWindowEnd: '22:00' }
+  const weekdaySchedule = { ...schedule, activeWeekdays: [1, 2, 3, 4, 5] }
+
+  test('Given 当前在窗口开始前 When 计算下次运行 Then 对齐到今日窗口开始', () => {
+    expect(computeNextRunAt(schedule, base(2026, 8, 12, 9, 42))).toBe(base(2026, 8, 12, 10, 0))
+  })
+
+  test('Given 当前在窗口内且下个间隔仍在窗口内 When 计算下次运行 Then 保持间隔', () => {
+    expect(computeNextRunAt(schedule, base(2026, 8, 12, 10, 20))).toBe(base(2026, 8, 12, 10, 40))
+  })
+
+  test('Given 上轮完成时间偏离间隔槽位 When 计算下次运行 Then 仍对齐至窗口锚点的下一槽位', () => {
+    expect(computeNextRunAt(schedule, base(2026, 8, 12, 10, 27))).toBe(base(2026, 8, 12, 10, 40))
+  })
+
+  test('Given 下个间隔会越过窗口结束 When 计算下次运行 Then 跳至明日窗口开始', () => {
+    expect(computeNextRunAt(schedule, base(2026, 8, 12, 21, 50))).toBe(base(2026, 8, 13, 10, 0))
+  })
+
+  test('Given 周五窗口结束后 When 计算下次运行 Then 跳过周末到周一窗口开始', () => {
+    expect(computeNextRunAt(weekdaySchedule, base(2026, 8, 14, 22, 0))).toBe(base(2026, 8, 17, 10, 0))
+  })
+
+  test('Given 周五窗口内的最后一次执行 When 计算下次运行 Then 下次为周一窗口开始', () => {
+    expect(computeNextRunAt(weekdaySchedule, base(2026, 8, 14, 21, 50))).toBe(base(2026, 8, 17, 10, 0))
+  })
+})
+
+
 describe('computeNextRunAt 一次性调度（once）', () => {
   const base = (y: number, m: number, d: number, hh: number, mm: number): number =>
     new Date(y, m - 1, d, hh, mm, 0, 0).getTime()

@@ -38,12 +38,12 @@ function SkillUsageChip({ activation }: { activation: SkillActivation }): React.
     }, { mode: 'split' })
   }, [activation.filePath, activation.workspaceSkillPath, activation.workspaceSlug, openPreview, sessionId])
   const chipClassName = cn(
-    'inline-flex max-w-[240px] items-center gap-1.5 rounded-md px-2.5 py-1',
-    'bg-[hsl(270_60%_60%/0.15)] text-[12px] font-medium text-[hsl(270_60%_50%)]',
+    'inline-flex max-w-[240px] items-center gap-[0.25em] rounded-md px-[0.35em] py-[0.15em] text-[0.875em] font-medium leading-none',
+    'bg-[hsl(270_60%_60%/0.15)] text-[hsl(270_60%_50%)]',
     canPreview && 'cursor-pointer transition-colors hover:bg-[hsl(270_60%_60%/0.24)]',
   )
   const chipContent = <>
-    <Sparkles className="size-3.5 shrink-0" />
+    <Sparkles className="size-3 shrink-0" />
     <span className="truncate">{activation.name}</span>
   </>
 

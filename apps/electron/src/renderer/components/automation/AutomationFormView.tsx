@@ -71,6 +71,21 @@ function datetimeLocalToTs(value: string): number | undefined {
   return Number.isFinite(ts) ? ts : undefined
 }
 
+function getWeekdayPreset(days?: number[]): 'everyday' | 'weekdays' | 'weekends' | 'custom' {
+  const normalized = [...new Set(days ?? [])].sort((a, b) => a - b)
+  if (normalized.length === 0) return 'everyday'
+  if (normalized.join(',') === '1,2,3,4,5') return 'weekdays'
+  if (normalized.join(',') === '0,6') return 'weekends'
+  return 'custom'
+}
+
+function getWeekdaysFromPreset(value: string, current?: number[]): number[] {
+  if (value === 'weekdays') return [1, 2, 3, 4, 5]
+  if (value === 'weekends') return [0, 6]
+  if (value === 'custom') return current && current.length > 0 ? current : [1]
+  return []
+}
+
 function formatRunStatus(status: AutomationRun['status']): string {
   if (status === 'success') return '完成'
   if (status === 'error') return '失败'
@@ -104,6 +119,9 @@ function getDraftSignature(draft: AutomationDraft): string {
     prompt: draft.prompt.trim(),
     scheduleType: draft.scheduleType,
     intervalMinutes: draft.intervalMinutes,
+    activeWindowStart: draft.activeWindowStart ?? '',
+    activeWindowEnd: draft.activeWindowEnd ?? '',
+    activeWeekdays: draft.activeWeekdays ?? [],
     timeOfDay: draft.timeOfDay ?? '',
     dayOfWeek: draft.dayOfWeek ?? '',
     dayOfMonth: draft.dayOfMonth ?? '',
@@ -125,6 +143,9 @@ function draftToCreateInput(draft: AutomationDraft): CreateAutomationInput {
     prompt: draft.prompt.trim(),
     scheduleType: draft.scheduleType,
     intervalMinutes: draft.intervalMinutes,
+    activeWindowStart: draft.activeWindowStart,
+    activeWindowEnd: draft.activeWindowEnd,
+    activeWeekdays: draft.activeWeekdays,
     timeOfDay: draft.timeOfDay,
     dayOfWeek: draft.dayOfWeek,
     dayOfMonth: draft.dayOfMonth,
@@ -148,6 +169,9 @@ function draftToUpdateInput(draft: AutomationDraft): UpdateAutomationInput {
     prompt: draft.prompt.trim(),
     scheduleType: draft.scheduleType,
     intervalMinutes: draft.intervalMinutes,
+    activeWindowStart: draft.activeWindowStart ?? null,
+    activeWindowEnd: draft.activeWindowEnd ?? null,
+    activeWeekdays: draft.activeWeekdays ?? null,
     timeOfDay: draft.timeOfDay,
     dayOfWeek: draft.dayOfWeek,
     dayOfMonth: draft.dayOfMonth,
@@ -273,6 +297,7 @@ export function AutomationFormView({ standalone = false }: { standalone?: boolea
   const openSession = useOpenSession()
 
   const [form, setForm] = React.useState<AutomationDraft | null>(null)
+  const [weekdayPresetOverride, setWeekdayPresetOverride] = React.useState<'custom' | null>(null)
   const [editingName, setEditingName] = React.useState(false)
   const [runningNow, setRunningNow] = React.useState(false)
   const [feishuBindings, setFeishuBindings] = React.useState<FeishuChatBinding[]>([])
@@ -296,6 +321,7 @@ export function AutomationFormView({ standalone = false }: { standalone?: boolea
     if (formState.open && formState.draft) {
       const draft = formState.draft
       setForm(draft)
+      setWeekdayPresetOverride(null)
       lastSavedSignatureRef.current = draft.id && canPersistDraft(draft)
         ? getDraftSignature(draft)
         : ''
@@ -766,6 +792,76 @@ export function AutomationFormView({ standalone = false }: { standalone?: boolea
                 />
                 <span className="text-xs text-muted-foreground shrink-0">分钟一次</span>
               </div>
+              <div className="flex items-center justify-between pt-1">
+                <div>
+                  <Label htmlFor="auto-window-enabled">仅在每日时段内运行</Label>
+                  <p className="mt-0.5 text-xs text-muted-foreground">留空则全天按间隔运行</p>
+                </div>
+                <Switch
+                  id="auto-window-enabled"
+                  checked={!!(form.activeWindowStart && form.activeWindowEnd)}
+                  onCheckedChange={(enabled) => update(enabled
+                    ? { activeWindowStart: form.activeWindowStart ?? '09:00', activeWindowEnd: form.activeWindowEnd ?? '18:00' }
+                    : { activeWindowStart: undefined, activeWindowEnd: undefined })}
+                />
+              </div>
+              {form.activeWindowStart && form.activeWindowEnd && (
+                <div className="flex items-center gap-2 pt-1">
+                  <input
+                    aria-label="每日运行开始时间"
+                    type="time"
+                    value={form.activeWindowStart}
+                    onChange={(e) => update({ activeWindowStart: e.target.value })}
+                    className="flex h-9 min-w-0 flex-1 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  />
+                  <span className="text-xs text-muted-foreground">至</span>
+                  <input
+                    aria-label="每日运行结束时间"
+                    type="time"
+                    value={form.activeWindowEnd}
+                    onChange={(e) => update({ activeWindowEnd: e.target.value })}
+                    className="flex h-9 min-w-0 flex-1 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  />
+                </div>
+              )}
+              <div className="flex items-center justify-between pt-1">
+                <Label>运行日</Label>
+                <Select
+                  value={weekdayPresetOverride ?? getWeekdayPreset(form.activeWeekdays)}
+                  onValueChange={(value) => {
+                    if (value === 'custom') setWeekdayPresetOverride('custom')
+                    else setWeekdayPresetOverride(null)
+                    update({ activeWeekdays: getWeekdaysFromPreset(value, form.activeWeekdays) })
+                  }}
+                >
+                  <SelectTrigger className="h-9 w-[150px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="everyday">每天</SelectItem>
+                    <SelectItem value="weekdays">工作日（周一至周五）</SelectItem>
+                    <SelectItem value="weekends">周末（周六、周日）</SelectItem>
+                    <SelectItem value="custom">自定义</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {(weekdayPresetOverride ?? getWeekdayPreset(form.activeWeekdays)) === 'custom' && (
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {AUTOMATION_WEEKDAY_OPTIONS.map((option) => {
+                    const selected = (form.activeWeekdays ?? []).includes(option.value)
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => update({ activeWeekdays: selected
+                          ? (form.activeWeekdays ?? []).filter((day) => day !== option.value)
+                          : [...(form.activeWeekdays ?? []), option.value].sort((a, b) => a - b) })}
+                        className={cn('rounded-md border px-2.5 py-1 text-xs transition-colors', selected ? 'border-primary bg-primary text-primary-foreground' : 'border-input text-muted-foreground hover:bg-foreground/[0.04]')}
+                      >
+                        {option.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )}
 

@@ -40,6 +40,7 @@ import { CodeBlock, MermaidBlock } from '@proma/ui'
 import { detectLanguage } from '@proma/core'
 import { FilePathChip, isAbsoluteFilePath, isImageFilePath, isRelativeFilePath } from './file-path-chip'
 import { buildAgentHistoryQuoteLabel, parseAgentHistoryQuoteMention } from '@/lib/quoted-selection'
+import { useAgentBrowserLink } from '@/components/browser/AgentBrowserLinkProvider'
 import type { HTMLAttributes, ComponentProps, ReactNode } from 'react'
 import type { FileAttachment } from '@proma/shared'
 import type { QuotedSelection } from '@/atoms/preview-atoms'
@@ -531,6 +532,7 @@ const MarkdownLink = React.memo(function MarkdownLink({
   children: linkChildren,
   ...linkProps
 }: React.AnchorHTMLAttributes<HTMLAnchorElement>): React.ReactElement {
+  const agentBrowserLink = useAgentBrowserLink()
   // mention:// 协议 → 渲染为 MentionChip
   if (href) {
     const mentionMatch = MENTION_URL_RE.exec(href)
@@ -551,7 +553,8 @@ const MarkdownLink = React.memo(function MarkdownLink({
       onClick={(e) => {
         e.preventDefault()
         if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
-          window.electronAPI.openExternal(href)
+          if (agentBrowserLink) agentBrowserLink.openLink(href)
+          else void window.electronAPI.openExternal(href)
         }
       }}
       title={href}

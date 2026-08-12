@@ -30,6 +30,10 @@ export interface AutomationDraft {
   prompt: string
   scheduleType: AutomationScheduleType
   intervalMinutes: number
+  /** interval 的每日有效运行窗口；留空表示全天 */
+  activeWindowStart?: string
+  activeWindowEnd?: string
+  activeWeekdays?: number[]
   timeOfDay?: string
   dayOfWeek?: number
   dayOfMonth?: number
@@ -86,6 +90,9 @@ export function automationToDraft(a: Automation): AutomationDraft {
     prompt: a.prompt,
     scheduleType: a.scheduleType,
     intervalMinutes: a.intervalMinutes,
+    activeWindowStart: a.activeWindowStart,
+    activeWindowEnd: a.activeWindowEnd,
+    activeWeekdays: a.activeWeekdays,
     timeOfDay: a.timeOfDay,
     dayOfWeek: a.dayOfWeek,
     dayOfMonth: a.dayOfMonth,
