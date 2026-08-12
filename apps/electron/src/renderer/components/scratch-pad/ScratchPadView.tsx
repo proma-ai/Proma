@@ -176,6 +176,41 @@ function ScratchPadEditor({ variant }: ScratchPadEditorProps): React.ReactElemen
   // 用 ref 追踪最新内容，避免在 useEffect deps 里包含 content 导致循环
   const contentRef = React.useRef(content)
   contentRef.current = content
+  // TipTap 的 transaction 可以比屏幕刷新更密集；只在下一帧向全局 atom 发布一次
+  // 完整 HTML，避免每键驱动整个 Scratch Pad 容器及持久化监听器更新。
+  const pendingContentRef = React.useRef(content)
+  const pendingContentEditorRef = React.useRef<NonNullable<ReturnType<typeof useEditor>> | null>(null)
+  const contentSyncFrameRef = React.useRef<number | null>(null)
+
+  const flushContentSync = React.useCallback((): void => {
+    if (contentSyncFrameRef.current !== null) {
+      cancelAnimationFrame(contentSyncFrameRef.current)
+      contentSyncFrameRef.current = null
+    }
+    // 连续输入期间不在每个 transaction 中序列化完整文档；离开页面时再强制拿最新值。
+    if (pendingContentEditorRef.current) {
+      pendingContentRef.current = pendingContentEditorRef.current.getHTML()
+    }
+    const nextContent = pendingContentRef.current
+    if (contentRef.current !== nextContent) setContent(nextContent)
+  }, [setContent])
+
+  const scheduleContentSync = React.useCallback((editor: NonNullable<ReturnType<typeof useEditor>>): void => {
+    pendingContentEditorRef.current = editor
+    if (contentSyncFrameRef.current !== null) return
+    contentSyncFrameRef.current = requestAnimationFrame(() => {
+      contentSyncFrameRef.current = null
+      const pendingEditor = pendingContentEditorRef.current
+      if (pendingEditor) pendingContentRef.current = pendingEditor.getHTML()
+      const nextContent = pendingContentRef.current
+      if (contentRef.current !== nextContent) setContent(nextContent)
+    })
+  }, [setContent])
+
+  React.useEffect(() => () => {
+    // 卸载时不能丢弃最后一笔输入（例如快速切出 Scratch Pad）。
+    flushContentSync()
+  }, [flushContentSync])
 
   const persistScrollPosition = React.useCallback((element?: HTMLElement | null): void => {
     const scrollContainer = element ?? scrollContainerRef.current
@@ -292,7 +327,7 @@ function ScratchPadEditor({ variant }: ScratchPadEditorProps): React.ReactElemen
       },
     },
     onUpdate: ({ editor }) => {
-      setContent(editor.getHTML())
+      scheduleContentSync(editor)
     },
     immediatelyRender: false,
   })

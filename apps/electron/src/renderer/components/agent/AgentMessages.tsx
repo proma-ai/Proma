@@ -584,7 +584,7 @@ function AgentRunningIndicator({ startedAt }: { startedAt?: number }): React.Rea
   )
 }
 
-export function AgentMessages({
+export const AgentMessages = React.memo(function AgentMessages({
   sessionId,
   sessionModelId,
   messagesLoaded,
@@ -1000,4 +1000,4 @@ export function AgentMessages({
     </div>
     </BasePathsProvider>
   )
-}
+})

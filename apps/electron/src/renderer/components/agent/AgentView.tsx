@@ -601,6 +601,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     setTodoGroupId('__none__')
     setTodoDialogOpen(true)
   }, [])
+  const handleOpenRestoreProjectRootDialog = React.useCallback(() => {
+    setRestoreProjectRootDialogOpen(true)
+  }, [])
 
   const handleCreateReplyTodo = React.useCallback(async (): Promise<void> => {
     setCreatingTodo(true)
@@ -2956,7 +2959,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           onRetry={handleRetry}
           onRetryInNewSession={handleRetryInNewSession}
           onRelinkProjectRoot={handleRelinkProjectRoot}
-          onRestoreProjectRoot={() => setRestoreProjectRootDialogOpen(true)}
+          onRestoreProjectRoot={handleOpenRestoreProjectRootDialog}
           onFork={isLegacyTranscript ? undefined : handleFork}
           onRewind={isLegacyTranscript ? undefined : handleRewindRequest}
           onCreateTodo={handleOpenReplyTodoDialog}

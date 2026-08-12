@@ -1478,6 +1478,11 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     setCurrentWorkspaceId,
   ])
 
+  const handleConfigureProject = React.useCallback((workspaceId: string): void => {
+    handleSelectProject(workspaceId)
+    handleOpenMcpManagement()
+  }, [handleOpenMcpManagement, handleSelectProject])
+
   /** 展开某个项目时每次额外显示的会话数量 */
   const handleShowMoreSessions = React.useCallback((workspaceId: string): void => {
     setExpandedExtraCountMap((prev) => {
@@ -3190,10 +3195,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                     onDragLeave={handleProjectDragLeave}
                     onDrop={handleProjectDrop}
                     onDragEnd={handleProjectDragEnd}
-                    onConfigureProject={isAuto ? noopVoid : (workspaceId) => {
-                      handleSelectProject(workspaceId)
-                      handleOpenMcpManagement()
-                    }}
+                    onConfigureProject={isAuto ? noopVoid : handleConfigureProject}
                     onRenameWorkspace={isAuto ? noopAsync : handleWorkspaceRename}
                     onRelinkProjectRoot={isAuto ? noopAsync : handleRelinkProjectRoot}
                     onRequestRestoreProjectRoot={isAuto ? noopVoid : setPendingRestoreProjectRootId}
