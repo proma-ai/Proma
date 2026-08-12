@@ -192,8 +192,12 @@ function ScratchPadEditor({ variant }: ScratchPadEditorProps): React.ReactElemen
       pendingContentRef.current = pendingContentEditorRef.current.getHTML()
     }
     const nextContent = pendingContentRef.current
-    if (contentRef.current !== nextContent) setContent(nextContent)
-  }, [setContent])
+    if (contentRef.current !== nextContent) {
+      // beforeunload 的同步落盘紧接着读取 atom；直接写入 Jotai store，避免等待 React state flush。
+      contentRef.current = nextContent
+      store.set(scratchPadContentAtom, nextContent)
+    }
+  }, [store])
 
   const scheduleContentSync = React.useCallback((editor: NonNullable<ReturnType<typeof useEditor>>): void => {
     pendingContentEditorRef.current = editor
@@ -207,9 +211,15 @@ function ScratchPadEditor({ variant }: ScratchPadEditorProps): React.ReactElemen
     })
   }, [setContent])
 
-  React.useEffect(() => () => {
-    // 卸载时不能丢弃最后一笔输入（例如快速切出 Scratch Pad）。
-    flushContentSync()
+  React.useEffect(() => {
+    // Electron 的 beforeunload 会先由全局持久化器同步读取 atom；用 capture 阶段先 flush
+    // 当前 TipTap 文档，避免 rAF 尚未执行就退出时丢最后一笔输入。
+    window.addEventListener('beforeunload', flushContentSync, { capture: true })
+    return () => {
+      window.removeEventListener('beforeunload', flushContentSync, { capture: true })
+      // 卸载时不能丢弃最后一笔输入（例如快速切出 Scratch Pad）。
+      flushContentSync()
+    }
   }, [flushContentSync])
 
   const persistScrollPosition = React.useCallback((element?: HTMLElement | null): void => {
