@@ -6,6 +6,7 @@
  */
 
 import * as React from 'react'
+import QRCode from 'qrcode'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { CheckCircle2, XCircle, Clock, Loader2 } from 'lucide-react'
@@ -33,7 +34,31 @@ export function WechatPayArea({
   onReset,
 }: WechatPayAreaProps): React.ReactElement {
   const [timeLeft, setTimeLeft] = React.useState<number>(0)
+  const [qrCodeData, setQrCodeData] = React.useState<string | null>(null)
+  const [qrCodeError, setQrCodeError] = React.useState(false)
   const pollIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // 在客户端本地生成二维码，避免依赖外部图片服务。
+  React.useEffect(() => {
+    let cancelled = false
+    setQrCodeData(null)
+    setQrCodeError(false)
+
+    void QRCode.toDataURL(codeUrl, {
+      width: 200,
+      margin: 1,
+      errorCorrectionLevel: 'M',
+    })
+      .then((dataUrl: string) => {
+        if (!cancelled) setQrCodeData(dataUrl)
+      })
+      .catch((error: unknown) => {
+        console.error('[微信支付] 本地生成二维码失败:', error)
+        if (!cancelled) setQrCodeError(true)
+      })
+
+    return () => { cancelled = true }
+  }, [codeUrl])
 
   // 倒计时
   React.useEffect(() => {
@@ -117,15 +142,20 @@ export function WechatPayArea({
     <Card>
       <CardContent className="pt-6">
         <div className="flex flex-col items-center">
-          <div className="p-4 bg-white rounded-lg border">
-            {/* 使用 QR 图片 API 渲染微信支付码 */}
-            <img
-              src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(codeUrl)}`}
-              alt="微信支付二维码"
-              width={200}
-              height={200}
-              className="block"
-            />
+          <div className="flex h-[234px] w-[234px] items-center justify-center rounded-lg border bg-white p-4">
+            {qrCodeData ? (
+              <img
+                src={qrCodeData}
+                alt="微信支付二维码"
+                width={200}
+                height={200}
+                className="block"
+              />
+            ) : qrCodeError ? (
+              <p className="text-center text-sm text-destructive">二维码生成失败，请重新发起支付</p>
+            ) : (
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-label="正在生成二维码" />
+            )}
           </div>
           <div className="mt-3 flex items-center gap-2 text-muted-foreground text-xs">
             <Loader2 className="h-3 w-3 animate-spin" />
