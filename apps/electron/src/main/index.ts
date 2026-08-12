@@ -107,6 +107,7 @@ import { feishuBridgeManager } from './lib/feishu-bridge-manager'
 import { getFeishuMultiBotConfig } from './lib/feishu-config'
 import { stopFeishuSyncSleepBlocker, syncFeishuSyncSleepBlocker } from './lib/feishu-sleep-blocker'
 import { stopIdleMode, syncIdleMode } from './lib/idle-mode-electron'
+import { stopTaskSleepGuard, syncTaskSleepGuard } from './lib/task-sleep-guard-electron'
 import { getPersistableMainWindowState, hideMacMainWindowAfterClose } from './lib/main-window-lifecycle'
 import { dingtalkBridgeManager } from './lib/dingtalk-bridge-manager'
 import { getDingTalkMultiBotConfig } from './lib/dingtalk-config'
@@ -706,6 +707,9 @@ async function bootstrap(): Promise<void> {
   // 挂机模式开启时，立即熄灭显示器并阻止系统休眠，保证挂机任务持续运行。
   safeRun('syncIdleMode', () => syncIdleMode(getSettings()))
 
+  // 任务防休眠（默认开启）：任务运行期间阻止系统休眠，锁屏/息屏/合盖不中断任务。
+  safeRun('syncTaskSleepGuard', () => syncTaskSleepGuard(getSettings()))
+
   // 注册全局快捷键
   safeRun('registerGlobalShortcut:quick-task', () =>
     registerGlobalShortcut('quick-task', toggleQuickTaskWindow),
@@ -829,6 +833,8 @@ app.on('before-quit', () => {
   stopFeishuSyncSleepBlocker()
   // 释放挂机模式（息屏 + 防休眠）
   stopIdleMode()
+  // 释放任务防休眠
+  stopTaskSleepGuard()
   // 注销全局快捷键
   unregisterAllGlobalShortcuts()
   // 销毁辅助窗口

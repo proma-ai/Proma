@@ -38,6 +38,7 @@ import { getAgentSessionMeta, updateAgentSessionMeta } from './agent-session-man
 import { setAgentStopper, setHeadlessAgentRunner } from './agent-headless-runner-registry'
 import { getHeadlessAgentRunTarget } from './agent-headless-run-target'
 import { sendAgentStreamComplete } from './agent-completion-payload'
+import { taskSleepGuard } from './task-sleep-guard-electron'
 
 // ===== 实例创建 =====
 
@@ -181,9 +182,13 @@ export async function runAgent(
       }
     } catch { /* 新会话可能尚未写入索引 */ }
   }
+  // 任务防休眠：本次 run 的 token，onRunStarted 开始防休眠，onComplete/onError/异常时释放。
+  // 声明在函数级作用域，确保 catch 分支可访问。
+  const sleepGuardToken = {}
   try {
     await orchestrator.sendMessage(input, {
       onError: (error) => {
+        taskSleepGuard.end(sleepGuardToken)
         if (!webContents.isDestroyed()) {
           webContents.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
             sessionId: input.sessionId,
@@ -192,6 +197,7 @@ export async function runAgent(
         }
       },
       onComplete: (messages, opts) => {
+        taskSleepGuard.end(sleepGuardToken)
         publishRunStopped(input.sessionId, opts?.stoppedByUser, opts?.startedAt)
         if (!webContents.isDestroyed()) {
           sendAgentStreamComplete(webContents, input, {
@@ -207,6 +213,7 @@ export async function runAgent(
         }
       },
       onRunStarted: ({ startedAt }) => {
+        taskSleepGuard.begin(sleepGuardToken)
         eventBus.emit(input.sessionId, {
           kind: 'proma_event',
           event: { type: 'run_started', startedAt },
@@ -228,6 +235,7 @@ export async function runAgent(
   } catch (err) {
     console.error('[Agent 服务] runAgent 未处理异常:', err)
     const errorMessage = err instanceof Error ? err.message : '未知错误'
+    taskSleepGuard.end(sleepGuardToken)
     if (!webContents.isDestroyed()) {
       webContents.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
         sessionId: input.sessionId,
@@ -276,9 +284,13 @@ export async function runAgentHeadless(
     registerWebContents(runInput.sessionId, wc)
   }
 
+  // 任务防休眠：本次 run 的 token，onRunStarted 开始防休眠，onComplete/onError/异常时释放。
+  // 声明在函数级作用域，确保 catch 分支可访问。
+  const sleepGuardToken = {}
   try {
     await orchestrator.sendMessage(runInput, {
       onError: (error) => {
+        taskSleepGuard.end(sleepGuardToken)
         callbacks.onError(error)
         // 同步到渲染进程
         if (wc && !wc.isDestroyed()) {
@@ -289,6 +301,7 @@ export async function runAgentHeadless(
         }
       },
       onComplete: (messages, opts) => {
+        taskSleepGuard.end(sleepGuardToken)
         callbacks.onComplete(messages)
         publishRunStopped(runInput.sessionId, opts?.stoppedByUser, opts?.startedAt)
         // 同步到渲染进程
@@ -320,6 +333,7 @@ export async function runAgentHeadless(
         }
       },
       onRunStarted: ({ startedAt: persistedStartedAt }) => {
+        taskSleepGuard.begin(sleepGuardToken)
         const session = getAgentSessionMeta(runInput.sessionId)
         eventBus.emit(runInput.sessionId, {
           kind: 'proma_event',
@@ -339,6 +353,7 @@ export async function runAgentHeadless(
   } catch (err) {
     console.error('[Agent 服务] runAgentHeadless 未处理异常:', err)
     const errorMessage = err instanceof Error ? err.message : '未知错误'
+    taskSleepGuard.end(sleepGuardToken)
     callbacks.onError(errorMessage)
     callbacks.onComplete()
     if (wc && !wc.isDestroyed()) {

@@ -81,6 +81,9 @@ export function GeneralSettings(): React.ReactElement {
   const [idleModeEnabled, setIdleModeEnabled] = React.useState(false)
   /** 挂机模式开关请求在途标记：防止快速连点导致 IPC 乱序、物理熄屏状态与 UI 相反 */
   const [idleModePending, setIdleModePending] = React.useState(false)
+  /** 任务防休眠：默认开启 */
+  const [taskSleepGuardEnabled, setTaskSleepGuardEnabled] = React.useState(true)
+  const [taskSleepGuardPending, setTaskSleepGuardPending] = React.useState(false)
   const isMac = React.useMemo(() => detectIsMac(), [])
   const fileInputRef = React.useRef<HTMLInputElement>(null)
 
@@ -91,6 +94,7 @@ export function GeneralSettings(): React.ReactElement {
       setGitAttributionEnabled(settings.gitAttributionEnabled ?? true)
       setAgentIslandEnabled(settings.agentIsland?.enabled ?? true)
       setIdleModeEnabled(settings.idleMode?.enabled ?? false)
+      setTaskSleepGuardEnabled(settings.taskSleepGuard?.enabled ?? true)
     }).catch(console.error)
   }, [])
 
@@ -128,6 +132,21 @@ export function GeneralSettings(): React.ReactElement {
       setIdleModeEnabled(!checked)
     } finally {
       setIdleModePending(false)
+    }
+  }
+
+  /** 更新任务防休眠开关（默认开启，任务运行期间阻止系统休眠） */
+  const handleTaskSleepGuardChange = async (checked: boolean): Promise<void> => {
+    if (taskSleepGuardPending) return
+    setTaskSleepGuardPending(true)
+    setTaskSleepGuardEnabled(checked)
+    try {
+      await window.electronAPI.updateSettings({ taskSleepGuard: { enabled: checked } })
+    } catch (error) {
+      console.error('[通用设置] 更新任务防休眠失败:', error)
+      setTaskSleepGuardEnabled(!checked)
+    } finally {
+      setTaskSleepGuardPending(false)
     }
   }
 
@@ -430,6 +449,15 @@ export function GeneralSettings(): React.ReactElement {
             disabled={idleModePending}
             onCheckedChange={(checked) => {
               void handleIdleModeChange(checked)
+            }}
+          />
+          <SettingsToggle
+            label="任务防休眠"
+            description="默认开启：只要 Proma 有任务在跑，锁屏、息屏甚至合上笔记本盖都不会中断任务；任务全部结束后自动恢复正常"
+            checked={taskSleepGuardEnabled}
+            disabled={taskSleepGuardPending}
+            onCheckedChange={(checked) => {
+              void handleTaskSleepGuardChange(checked)
             }}
           />
           <SettingsToggle

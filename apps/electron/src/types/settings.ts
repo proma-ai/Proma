@@ -266,6 +266,12 @@ export interface IdleModeSettings {
   enabled?: boolean
 }
 
+/** 任务防休眠设置：任务运行期间阻止系统休眠，锁屏/息屏/合盖都不中断任务。 */
+export interface TaskSleepGuardSettings {
+  /** 是否启用，默认 true（任务在跑就防休眠）。 */
+  enabled?: boolean
+}
+
 /**
  * 给无视觉输入能力的 Agent 使用的独立视觉模型路由。
  * 仅保存用户已有渠道和模型的 ID，凭据继续由渠道加密存储管理。
@@ -351,6 +357,8 @@ export interface AppSettings {
   feishuSessionMirror?: FeishuSessionMirrorSettings
   /** 挂机模式：立即熄灭显示器并阻止系统休眠，保证挂机任务持续运行 */
   idleMode?: IdleModeSettings
+  /** 任务防休眠：任务运行期间阻止系统休眠，锁屏/息屏/合盖都不中断任务（默认开启） */
+  taskSleepGuard?: TaskSleepGuardSettings
   /** 无视觉输入能力 Agent 的视觉助手路由 */
   visionRelay?: VisionRelaySettings
   /** 已确认的受管浏览器风险告知版本；低于当前版本时首次使用会再次要求确认。 */
