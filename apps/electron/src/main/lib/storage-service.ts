@@ -1,7 +1,8 @@
 /**
  * 存储管理服务
  *
- * 提供磁盘用量统计、孤儿数据检测和清理功能。
+ * 提供磁盘用量统计和临时文件清理功能。
+ * 孤儿数据清理因可能误伤用户工作资料而默认关闭。
  * 由设置面板"磁盘管理"Tab 和启动时自动清理逻辑调用。
  */
 
@@ -81,6 +82,9 @@ const SKIP_DIRS = new Set([
 // 单次扫描最大文件数上限，防止超大工作区导致无限递归
 const MAX_FILE_SCAN = 100_000
 const MAX_ORPHAN_ITEM_PREVIEW = 80
+
+// 孤儿目录无法可靠区分用户仍需保留的会话工作资料，默认不展示也不允许删除。
+const ORPHAN_DATA_CLEANUP_ENABLED = false
 
 const WORKSPACE_METADATA_DIRS = new Set([
   'workspace-files',
@@ -235,7 +239,7 @@ async function calcAgentSessionsCategory(): Promise<StorageCategory> {
           const id = basename(file, '.jsonl')
           bytes += stat.size
           count++
-          if (!activeIds.has(id)) {
+          if (ORPHAN_DATA_CLEANUP_ENABLED && !activeIds.has(id)) {
             orphanBytes += stat.size
             orphanCount++
             orphanItemsTruncated = addOrphanItem(orphanItems, {
@@ -337,7 +341,7 @@ async function calcWorkspacesCategory(): Promise<StorageCategory> {
               bytes += sub.bytes
               count += sub.count
               // session 目录的 ID 不在活跃列表中 → 孤儿
-              if (!activeIds.has(entry) && !activeSlugs.has(entry)) {
+              if (ORPHAN_DATA_CLEANUP_ENABLED && !activeIds.has(entry) && !activeSlugs.has(entry)) {
                 const cleanable = await getDirSize(entryPath, { skipTopLevelDirs: PRESERVED_ORPHAN_SESSION_ENTRIES })
                 if (cleanable.count > 0) {
                   orphanBytes += cleanable.bytes
@@ -548,6 +552,14 @@ function cleanupArchivedSessions(beforeDays: number): CleanupResult {
 }
 
 export async function cleanupStorage(options: CleanupOptions): Promise<CleanupResult> {
+  if (options.orphansOnly && !ORPHAN_DATA_CLEANUP_ENABLED) {
+    return {
+      freedBytes: 0,
+      deletedCount: 0,
+      errors: ['孤儿数据清理功能已默认关闭，未删除任何数据'],
+    }
+  }
+
   let totalFreed = 0, totalDeleted = 0
   const allErrors: string[] = []
 
