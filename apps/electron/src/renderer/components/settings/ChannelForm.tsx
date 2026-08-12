@@ -25,7 +25,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useSetAtom } from 'jotai'
-import { channelFormDirtyAtom } from '@/atoms/settings-tab'
+import { channelFormDirtyAtom, settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -54,6 +54,7 @@ import {
   resolveOpenAIResponsesUrl,
 } from '@proma/core'
 import { getProviderLogo } from '@/lib/model-logo'
+import { OFFICIAL_MODEL_CHANNELS } from '@/lib/official-channels'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   AlertDialog,
@@ -196,8 +197,57 @@ function buildZhipuTeamSecret(secret: ZhipuTeamSecretForm): string {
   return Object.keys(payload).length > 0 ? JSON.stringify(payload) : ''
 }
 
-/** auto-save 防抖延迟 */
 const AUTO_SAVE_DELAY = 600
+
+function OfficialCloudChannelNotice(): React.ReactElement {
+  const setSettingsOpen = useSetAtom(settingsOpenAtom)
+  const setSettingsTab = useSetAtom(settingsTabAtom)
+
+  const openPromaBilling = (): void => {
+    setSettingsTab('billing')
+    setSettingsOpen(true)
+  }
+
+  return (
+    <SettingsSection
+      title="没有可用渠道？"
+      description="当前为 Proma 开源版，下载并于 Proma 商业版登录即可使用以下官方内置模型渠道，也保留第三方渠道配置。"
+    >
+      <div className="relative mt-5 border-2 border-foreground bg-card px-5 pb-5 pt-8 shadow-xl sm:px-6 sm:pb-6">
+        <div className="absolute -left-0.5 -top-3 bg-foreground px-3 py-1 text-[11px] font-semibold tracking-[0.16em] text-background">
+          Proma 商业版
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-foreground">当前 Proma 官方 Agent 渠道</p>
+          <ul className="mt-5 grid grid-cols-1 gap-x-10 gap-y-4 text-sm text-muted-foreground sm:grid-cols-2 xl:grid-cols-3">
+            {OFFICIAL_MODEL_CHANNELS.map(({ provider, model, logo }) => (
+              <li key={provider} className="flex min-w-0 items-center gap-2.5">
+                <img src={logo} alt="" aria-hidden="true" className="h-5 w-5 shrink-0 rounded-md" />
+                <span className="whitespace-nowrap">{provider} · {model}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="mt-7 border-t border-foreground/20 pt-5">
+          <p className="text-sm leading-6 text-muted-foreground">
+            官方托管链路提供 Agent 协议兼容与模型健康监控；精选模型享受 Proma Cloud 优惠，并包含 WebSearch、GPT Image 2 等内嵌能力。
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            className="mt-4 gap-1.5 border-foreground bg-foreground text-background hover:bg-foreground/90 hover:text-background"
+            onClick={openPromaBilling}
+          >
+            <span>购买 Proma 商业版额度</span>
+          </Button>
+        </div>
+        <p className="mt-5 border-t border-foreground/20 pt-3 text-xs text-muted-foreground">
+          可用模型、价格和权益会随时间调整，以商业版应用内当期展示为准。
+        </p>
+      </div>
+    </SettingsSection>
+  )
+}
 
 export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): React.ReactElement {
   const isEdit = channel !== null
@@ -892,6 +942,9 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
 
   return (
     <div className="space-y-6">
+      {/* 新建模型配置时展示 Proma 官方渠道推荐。 */}
+      {!isEdit && <OfficialCloudChannelNotice />}
+
       {/* 标题栏 */}
       <div className="flex items-center gap-3">
         <Button
@@ -899,13 +952,14 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
           size="icon"
           className="h-8 w-8"
           onClick={handleBack}
+          title="返回模型配置列表"
+          aria-label="返回模型配置列表"
         >
           <ArrowLeft size={18} />
         </Button>
-        <h3 className="text-lg font-medium text-foreground flex-1">
+        <h3 className="flex-1 text-lg font-medium text-foreground">
           {isEdit ? '编辑模型配置' : '添加模型配置'}
         </h3>
-        {/* 新建模式：创建按钮 */}
         {!isEdit && (
           <Button
             size="sm"

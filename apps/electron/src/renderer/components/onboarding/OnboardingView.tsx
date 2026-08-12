@@ -17,7 +17,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { ChevronRight, ChevronLeft, ChevronsRight, Check } from 'lucide-react'
+import { ChevronRight, ChevronLeft, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { CURRENT_ONBOARDING_VERSION } from '../../../types'
 import hopperSeasideWhiteHouse from '@/assets/onboarding/hopper-seaside-white-house.png'
@@ -39,8 +39,13 @@ import { cloudAuthLoadingAtom, cloudAuthViewAtom, cloudUserAtom } from '@/atoms/
 
 type OnboardingStep = 'welcome' | 'guide' | 'files' | 'project' | 'automation' | 'memory' | 'sideanswer' | 'subagent' | 'faq' | 'account'
 
+interface OnboardingCompletionOptions {
+  openTutorial?: boolean
+  openBilling?: boolean
+}
+
 interface OnboardingViewProps {
-  onComplete: (openTutorial?: boolean) => void
+  onComplete: (options?: OnboardingCompletionOptions) => Promise<void>
   /** 从设置重放时可跳过欢迎页。 */
   initialStep?: OnboardingStep
 }
@@ -381,7 +386,7 @@ function GuideFeatureStep({ anchor, title, highlight, paragraphs, nextLabel, onN
 
 type GuideExamplesIntroProps = Omit<GuideFeatureStepProps, 'nextLabel' | 'onNext' | 'onBack' | 'showNavigation' | 'onScrollHint'>
 
-function GuideExamplesPage({ intro, nextLabel, onNext, onBack, children, showScrollHint = false }: {
+function GuideExamplesPage({ intro, nextLabel, onNext, onBack, children, showScrollHint = false, showSkipAdvanced = false, onSkipAdvanced }: {
   intro: GuideExamplesIntroProps
   nextLabel: string
   onNext: () => void
@@ -389,10 +394,21 @@ function GuideExamplesPage({ intro, nextLabel, onNext, onBack, children, showScr
   children: React.ReactNode
   /** 首个讲解页在正文下方提示继续向下滚动，避免底部进度地图被误解为横向翻页。 */
   showScrollHint?: boolean
+  /** 进阶篇首屏显示的固定跳过按钮，滚动到本页末尾后隐藏。 */
+  showSkipAdvanced?: boolean
+  onSkipAdvanced?: () => void
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [showSkipButton, setShowSkipButton] = useState(showSkipAdvanced)
 
-  /** 点击提示推进约一屏，避免与首屏高度、示例区负 margin 耦合。 */
+  /** 让跳过按钮覆盖整个子会话章节，滚到本章末尾才隐藏。 */
+  const handleScroll = () => {
+    const container = scrollRef.current
+    if (!container || !showSkipAdvanced) return
+    const reachedEnd = container.scrollTop + container.clientHeight >= container.scrollHeight - 16
+    setShowSkipButton(!reachedEnd)
+  }
+
   const handleScrollHint = () => {
     const container = scrollRef.current
     if (!container) return
@@ -401,7 +417,7 @@ function GuideExamplesPage({ intro, nextLabel, onNext, onBack, children, showScr
 
   return (
     <div className="relative h-full w-full">
-      <div ref={scrollRef} className="h-full w-full overflow-y-auto">
+      <div ref={scrollRef} onScroll={handleScroll} className="h-full w-full overflow-y-auto">
         <div className="h-[1100px] lg:h-[calc(100vh-4rem)] lg:min-h-[660px]">
           <GuideFeatureStep
             {...intro}
@@ -418,6 +434,15 @@ function GuideExamplesPage({ intro, nextLabel, onNext, onBack, children, showScr
           <GuideNavigation nextLabel={nextLabel} onNext={onNext} onBack={onBack} />
         </div>
       </div>
+      {showSkipButton && onSkipAdvanced && (
+        <button
+          type="button"
+          onClick={onSkipAdvanced}
+          className="absolute bottom-20 right-[62px] z-30 flex h-14 items-center justify-center rounded-md bg-[#1b3f2d] px-9 text-base font-medium text-white shadow-[0_8px_18px_rgba(27,63,45,0.14)] transition-all hover:bg-[#27513a] active:translate-y-0.5 active:shadow-none md:bottom-24"
+        >
+          跳过进阶篇
+        </button>
+      )}
     </div>
   )
 }
@@ -597,7 +622,6 @@ const STEP_LABELS: Array<{ step: Exclude<OnboardingStep, 'welcome'>; label: stri
   { step: 'memory', label: '记忆' },
   { step: 'sideanswer', label: '侧边回答' },
   { step: 'faq', label: 'FAQ' },
-  { step: 'account', label: '创建账号' },
 ]
 
 const BEGINNER_STEP_LABELS = STEP_LABELS.slice(0, 3)
@@ -724,14 +748,25 @@ export function OnboardingView({ onComplete, initialStep = 'welcome' }: Onboardi
   const [step, setStep] = useState<OnboardingStep>(initialStep)
   const [flash, setFlash] = useState(false)
   const [fading, setFading] = useState(false)
-  const [faqBackStep, setFaqBackStep] = useState<'subagent' | 'sideanswer'>('sideanswer')
+  const [completionError, setCompletionError] = useState<string | null>(null)
+  const [completing, setCompleting] = useState(false)
+  const completedRef = useRef(false)
   const setAuthView = useSetAtom(cloudAuthViewAtom)
-  const handleFinish = async (openTutorial?: boolean) => {
-    await window.electronAPI.updateSettings({
-      onboardingCompleted: true,
-      onboardingVersion: CURRENT_ONBOARDING_VERSION,
-    })
-    onComplete(openTutorial)
+
+  const handleFinish = async (options?: OnboardingCompletionOptions): Promise<void> => {
+    if (completing || completedRef.current) return
+    setCompleting(true)
+    setCompletionError(null)
+    try {
+      await onComplete(options)
+      completedRef.current = true
+    } catch (error) {
+      console.error('[Onboarding] 完成引导失败:', error)
+      setCompletionError('引导完成失败，请重试。')
+      throw error
+    } finally {
+      setCompleting(false)
+    }
   }
 
   /**
@@ -759,17 +794,15 @@ export function OnboardingView({ onComplete, initialStep = 'welcome' }: Onboardi
   const handleNextFromAutomation = () => transitionTo('memory')
   const handleNextFromMemory = () => transitionTo('sideanswer')
   const handleNextFromSideAnswer = () => {
-    setFaqBackStep('sideanswer')
     transitionTo('faq')
   }
   const handleNextFromSubagent = () => transitionTo('automation')
-  const handleJumpToFaq = () => {
-    setFaqBackStep('subagent')
-    transitionTo('faq')
-  }
   const handleEnterAccount = () => {
     setAuthView('register')
     transitionTo('account')
+  }
+  const handleSkipAdvanced = () => {
+    void handleFinish({ openBilling: true }).catch(() => undefined)
   }
   const handleNextFromFaq = () => handleEnterAccount()
 
@@ -945,6 +978,8 @@ export function OnboardingView({ onComplete, initialStep = 'welcome' }: Onboardi
             nextLabel="下一个"
             onNext={handleNextFromSubagent}
             onBack={() => transitionTo('files')}
+            showSkipAdvanced
+            onSkipAdvanced={completing ? undefined : handleSkipAdvanced}
           >
             <SubagentGuideExamples />
           </GuideExamplesPage>
@@ -1028,7 +1063,7 @@ export function OnboardingView({ onComplete, initialStep = 'welcome' }: Onboardi
             highlight="进阶指南 · 第 5 步"
             nextLabel="开始使用"
             onNext={handleNextFromFaq}
-            onBack={() => transitionTo(faqBackStep)}
+            onBack={() => transitionTo('sideanswer')}
           />
         )}
 
@@ -1038,19 +1073,16 @@ export function OnboardingView({ onComplete, initialStep = 'welcome' }: Onboardi
 
       </div>
 
-      {step !== 'welcome' && <ProgressMap current={step} />}
+      {step !== 'welcome' && step !== 'account' && <ProgressMap current={step} />}
 
-      {step === 'subagent' && (
-        <button
-          onClick={handleJumpToFaq}
-          className="absolute bottom-5 right-[30px] z-30 flex h-8 items-center gap-1 px-2 text-sm text-neutral-500 transition-colors hover:text-[#1b3f2d]"
-        >
-          跳到 FAQ
-          <ChevronsRight className="h-4 w-4" />
-        </button>
+      {completionError && (
+        <div className="absolute bottom-5 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-md bg-destructive px-4 py-2 text-sm text-destructive-foreground shadow-lg">
+          <span>{completionError}</span>
+          <button type="button" className="font-medium underline" onClick={() => { void handleFinish({ openBilling: true }).catch(() => undefined) }}>
+            重试
+          </button>
+        </div>
       )}
-
-      {/* ===== 白色闪屏遮罩 ===== */}
       <div
         className={`pointer-events-none absolute inset-0 z-50 bg-white transition-opacity duration-300 ${
           flash ? 'opacity-100' : 'opacity-0'

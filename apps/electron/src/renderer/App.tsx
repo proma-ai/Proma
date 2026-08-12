@@ -7,6 +7,7 @@ import { EnvironmentCheckDialog } from './components/environment/EnvironmentChec
 import { TooltipProvider } from './components/ui/tooltip'
 import { CloudAuthGate } from './components/cloud-auth'
 import { QuotaExceededDialog } from './components/billing/QuotaExceededDialog'
+import { OnboardingBillingPromptDialog } from './components/billing/OnboardingBillingPromptDialog'
 import { agentChannelIdAtom, agentModelIdAtom, agentSessionsAtom, currentAgentSessionIdAtom, currentAgentWorkspaceIdAtom } from './atoms/agent-atoms'
 import { appModeAtom } from './atoms/app-mode'
 import { PROMA_OFFICIAL_CHANNEL_ID, PROMA_OFFICIAL_DEFAULT_AGENT_MODEL } from '@proma/shared'
@@ -20,7 +21,7 @@ import { environmentCheckDialogOpenAtom } from './atoms/environment'
 import { onboardingReplayRequestedAtom } from './atoms/onboarding'
 import { settingsOpenAtom, settingsTabAtom } from './atoms/settings-tab'
 import { tabsAtom, activeTabIdAtom, openTab, TUTORIAL_TAB_ID } from './atoms/tab-atoms'
-import { hasCompletedCurrentOnboarding } from '../types'
+import { CURRENT_ONBOARDING_VERSION, hasCompletedCurrentOnboarding } from '../types'
 import hopperSeasideWhiteHouse from './assets/onboarding/hopper-seaside-white-house.png'
 import promaMarkWhite from './assets/onboarding/proma-mark-white.svg'
 import type { AppShellContextType } from './contexts/AppShellContext'
@@ -36,6 +37,7 @@ export default function App(): React.ReactElement {
   const setCurrentAgentSessionId = useSetAtom(currentAgentSessionIdAtom)
   const [isLoading, setIsLoading] = React.useState(true)
   const [showOnboarding, setShowOnboarding] = React.useState(false)
+  const [onboardingBillingPromptOpen, setOnboardingBillingPromptOpen] = React.useState(false)
   const [onboardingReplayRequested, setOnboardingReplayRequested] = useAtom(onboardingReplayRequestedAtom)
   const [isReplayingOnboarding, setIsReplayingOnboarding] = React.useState(false)
   const isWindows = React.useMemo(() => detectIsWindows(), [])
@@ -69,57 +71,73 @@ export default function App(): React.ReactElement {
     setOnboardingReplayRequested(false)
   }, [isLoading, onboardingReplayRequested, setOnboardingReplayRequested])
 
-  // 完成 onboarding 回调：创建引用模式的 Agent 欢迎会话，可选打开教程 Tab
-  const handleOnboardingComplete = async (openTutorial?: boolean) => {
+  // 完成 onboarding 回调：创建引用模式的 Agent 欢迎会话，可选打开教程或购买额度设置。
+  const handleOnboardingComplete = async (options?: { openTutorial?: boolean; openBilling?: boolean }): Promise<void> => {
     const replayingOnboarding = isReplayingOnboarding
-    setShowOnboarding(false)
-    setIsReplayingOnboarding(false)
-
-    if (replayingOnboarding) {
-      store.set(settingsTabAtom, 'onboarding')
-      store.set(settingsOpenAtom, true)
-      return
-    }
-
-    if (openTutorial) {
-      const tabs = store.get(tabsAtom)
-      const result = openTab(tabs, { type: 'tutorial', sessionId: TUTORIAL_TAB_ID, title: 'Proma 使用教程' })
-      store.set(tabsAtom, result.tabs)
-      store.set(activeTabIdAtom, result.activeTabId)
-      return
-    }
+    let onboardingMarkedComplete = false
 
     try {
-      const meta = await window.electronAPI.createAgentSession(
-        '开始使用 Proma',
-        agentChannelId ?? PROMA_OFFICIAL_CHANNEL_ID,
-        currentWorkspaceId || undefined,
-        agentModelId ?? PROMA_OFFICIAL_DEFAULT_AGENT_MODEL,
-      )
-      const sessions = store.get(agentSessionsAtom)
-      store.set(agentSessionsAtom, [meta, ...sessions])
-      setAppMode('agent')
-      setCurrentAgentSessionId(meta.id)
-
-      const tabs = store.get(tabsAtom)
-      const result = openTab(tabs, {
-        type: 'agent',
-        sessionId: meta.id,
-        title: meta.title,
+      await window.electronAPI.updateSettings({
+        onboardingCompleted: true,
+        onboardingVersion: CURRENT_ONBOARDING_VERSION,
       })
-      store.set(tabsAtom, result.tabs)
-      store.set(activeTabIdAtom, result.activeTabId)
+      onboardingMarkedComplete = true
 
-      // 首次会话以一条真实用户消息启动，让 Agent 基于当前工作区主动完成引导。
-      await window.electronAPI.sendAgentMessage({
-        sessionId: meta.id,
-        channelId: meta.channelId ?? agentChannelId ?? PROMA_OFFICIAL_CHANNEL_ID,
-        modelId: meta.modelId ?? agentModelId ?? PROMA_OFFICIAL_DEFAULT_AGENT_MODEL,
-        workspaceId: meta.workspaceId ?? currentWorkspaceId ?? undefined,
-        userMessage: '你好，我刚完成 Proma 的首次设置。请作为我的上手引导助手：先用简洁友好的方式欢迎我，说明你可以如何协助我完成真实工作；然后只问我一个最关键的问题，帮助你了解我现在想完成的第一件事。请不要一次性罗列大量功能，也不要执行任何工具或修改文件，等我回复后再继续。',
-      })
+      if (replayingOnboarding) {
+        store.set(settingsTabAtom, 'onboarding')
+        store.set(settingsOpenAtom, true)
+      } else if (options?.openTutorial) {
+        const tabs = store.get(tabsAtom)
+        const result = openTab(tabs, { type: 'tutorial', sessionId: TUTORIAL_TAB_ID, title: 'Proma 使用教程' })
+        store.set(tabsAtom, result.tabs)
+        store.set(activeTabIdAtom, result.activeTabId)
+      } else {
+        const meta = await window.electronAPI.createAgentSession(
+          '开始使用 Proma',
+          agentChannelId ?? PROMA_OFFICIAL_CHANNEL_ID,
+          currentWorkspaceId || undefined,
+          agentModelId ?? PROMA_OFFICIAL_DEFAULT_AGENT_MODEL,
+        )
+        const sessions = store.get(agentSessionsAtom)
+        store.set(agentSessionsAtom, [meta, ...sessions])
+        setAppMode('agent')
+        setCurrentAgentSessionId(meta.id)
+
+        const tabs = store.get(tabsAtom)
+        const result = openTab(tabs, {
+          type: 'agent',
+          sessionId: meta.id,
+          title: meta.title,
+        })
+        store.set(tabsAtom, result.tabs)
+        store.set(activeTabIdAtom, result.activeTabId)
+
+        // 欢迎消息失败不应回滚已创建的会话，否则重试会产生重复会话。
+        void window.electronAPI.sendAgentMessage({
+          sessionId: meta.id,
+          channelId: meta.channelId ?? agentChannelId ?? PROMA_OFFICIAL_CHANNEL_ID,
+          modelId: meta.modelId ?? agentModelId ?? PROMA_OFFICIAL_DEFAULT_AGENT_MODEL,
+          workspaceId: meta.workspaceId ?? currentWorkspaceId ?? undefined,
+          userMessage: '你好，我刚完成 Proma 的首次设置。请作为我的上手引导助手：先用简洁友好的方式欢迎我，说明你可以如何协助我完成真实工作；然后只问我一个最关键的问题，帮助你了解我现在想完成的第一件事。请不要一次性罗列大量功能，也不要执行任何工具或修改文件，等我回复后再继续。',
+        }).catch((error: unknown) => console.error('[App] 发送欢迎消息失败:', error))
+      }
+
+      if (options?.openBilling && !replayingOnboarding) {
+        setOnboardingBillingPromptOpen(true)
+      }
+      setShowOnboarding(false)
+      setIsReplayingOnboarding(false)
     } catch (error) {
-      console.error('[App] 创建欢迎对话失败:', error)
+      if (onboardingMarkedComplete) {
+        try {
+          await window.electronAPI.updateSettings({ onboardingCompleted: false })
+        } catch (rollbackError) {
+          console.error('[App] 回滚 onboarding 状态失败:', rollbackError)
+        }
+      }
+      console.error('[App] 完成 onboarding 失败:', error)
+      setOnboardingBillingPromptOpen(false)
+      throw error
     }
   }
 
@@ -161,6 +179,10 @@ export default function App(): React.ReactElement {
         <AppShell contextValue={contextValue} />
         <PlanningReminderRail />
         <QuotaExceededDialog />
+        <OnboardingBillingPromptDialog
+          open={onboardingBillingPromptOpen}
+          onOpenChange={setOnboardingBillingPromptOpen}
+        />
       </CloudAuthGate>
       <ShortcutGuideDialog />
       <FaqDialog />

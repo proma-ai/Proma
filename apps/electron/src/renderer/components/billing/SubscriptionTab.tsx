@@ -20,10 +20,15 @@ import type { WechatPayStatus } from './WechatPayArea'
 // 开发者信封弹窗暂时停用；购买按钮直接发起微信支付。
 import { TeamPromoBanner } from './TeamPromoBanner'
 import { subscriptionTiersAtom, subscriptionStatusAtom } from '@/atoms/cloud-billing'
+import { OFFICIAL_COMPARISON, BILLING_NOTES } from '@/lib/official-channels'
 import type { SubscriptionTier } from '@proma/shared'
 
 interface SubscriptionTabProps {
   onSubscriptionComplete: () => Promise<void>
+  /** onboarding 弹窗模式：隐藏底部「为什么选择 Proma 官方的 AI 渠道？」区块（由弹窗顶部统一展示） */
+  hideWhyProma?: boolean
+  /** onboarding 弹窗模式：隐藏「购买 Proma 商业版额度」标题块（弹窗标题已展示） */
+  hideHeading?: boolean
 }
 
 interface WechatPayState {
@@ -135,39 +140,6 @@ const TIER_DESC: Record<string, string> = {
 
 const RECOMMENDED_TIER = 'standard'
 
-const OFFICIAL_COMPARISON = [
-  {
-    label: '透明计费',
-    official: '按模型、Agent 与工具展示用量和扣费明细',
-    alternative: '价格、扣费规则或明细难以核验',
-    alternativePositive: false,
-  },
-  {
-    label: '模型质量',
-    official: '精选官方模型并持续验证实际模型能力与协议兼容性',
-    alternative: '可能存在模型掺水或实际能力与宣传不符的问题',
-    alternativePositive: false,
-  },
-  {
-    label: '数据安全',
-    official: '官方托管链路提供统一安全保障，减少第三方中转的不确定性',
-    alternative: '数据流向与留存规则不透明，难以排除二次使用或倒卖风险',
-    alternativePositive: false,
-  },
-  {
-    label: '高峰稳定性',
-    official: '持续监控模型健康状态并维护故障恢复能力',
-    alternative: '高峰期可能降速，稳定性与故障恢复能力难以保障',
-    alternativePositive: false,
-  },
-  {
-    label: '价格优势',
-    official: '以官方参考价为基础计算折扣，精选模型提供专属优惠',
-    alternative: '可能具备更低价格，但价格来源和优惠依据不够透明',
-    alternativePositive: true,
-  },
-] as const
-
 function formatDate(dateStr: string): string {
   const d = new Date(dateStr)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -180,7 +152,7 @@ function formatCurrency(value: number | string | null | undefined): string {
   return `${num.toFixed(2)} 积分`
 }
 
-export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps): React.ReactElement {
+export function SubscriptionTab({ onSubscriptionComplete, hideWhyProma = false, hideHeading = false }: SubscriptionTabProps): React.ReactElement {
   const tiers = useAtomValue(subscriptionTiersAtom)
   const [subStatus, setSubStatus] = useAtom(subscriptionStatusAtom)
 
@@ -351,14 +323,16 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
 
       {/* 订阅计划卡片 */}
       <div className="space-y-4">
-        <div className="space-y-1">
-          <h3 className="text-base font-semibold">购买 Proma 商业版额度</h3>
-          <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
-            一次性购买，不自动续费或自动扣款；建议按需少量多次叠加。
-          </p>
-        </div>
+        {!hideHeading && (
+          <div className="space-y-1">
+            <h3 className="text-base font-semibold">购买 Proma 商业版额度</h3>
+            <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
+              一次性购买，不自动续费或自动扣款；建议按需少量多次叠加。
+            </p>
+          </div>
+        )}
 
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {tiers.map((tier: SubscriptionTier) => {
             const isSelected = selectedTier === tier.id
             const isRecommended = tier.id === RECOMMENDED_TIER
@@ -456,10 +430,11 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
         <TeamPromoBanner />
       </div>
 
-      {/* 为什么选择 Proma 官方 */}
-      <section className="overflow-hidden rounded-2xl border border-stone-200/60 bg-stone-50/80 backdrop-blur-sm dark:border-stone-700/40 dark:bg-stone-900/40">
+      {/* 为什么选择 Proma 官方的 AI 渠道（onboarding 弹窗顶部统一展示时隐藏） */}
+      {!hideWhyProma && (
+        <section className="overflow-hidden rounded-2xl border border-stone-200/60 bg-stone-50/80 backdrop-blur-sm dark:border-stone-700/40 dark:bg-stone-900/40">
         <div className="px-5 pb-3 pt-4">
-          <h3 className="text-balance text-sm font-semibold text-foreground">为什么选择 Proma 官方？</h3>
+          <h3 className="text-balance text-sm font-semibold text-foreground">为什么选择 Proma 官方的 AI 渠道？</h3>
           <p className="mt-1 text-pretty text-xs leading-relaxed text-muted-foreground">
             Proma Cloud 以可核验的计费明细、官方托管的安全链路和具有竞争力的模型折扣，让商业版额度的使用更清楚、更安心。
           </p>
@@ -503,13 +478,13 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
         <div className="border-t border-stone-200/60 px-5 py-4 dark:border-stone-700/40">
           <h4 className="text-xs font-semibold text-foreground">计费说明</h4>
           <ul className="mt-2 space-y-1 text-xs leading-relaxed text-muted-foreground">
-            <li>所有模型均按照官方价格的基础进行折扣计算；Proma Cloud 额度会按所选模型、输入输出长度及任务规模消耗。</li>
-            <li>各额度包按所选档位独立计时，到期后未使用额度清零（团队采用单独计费层）。</li>
-            <li>每次购买均为一次性支付，不会自动续费或自动扣款；赠送额度随对应额度包同时到期。</li>
-            <li>支持少量多次购买叠加，各额度包独立计时，优先消耗先购买的额度（FIFO）。</li>
+            {BILLING_NOTES.map((note) => (
+              <li key={note}>{note}</li>
+            ))}
           </ul>
         </div>
       </section>
+      )}
 
     </div>
   )
