@@ -32,7 +32,7 @@ import { automationFormAtom } from '@/atoms/automation-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
 import { interfaceVariantAtom } from '@/atoms/theme'
 import { cn } from '@/lib/utils'
-import { browserPanelOpenMapAtom, browserStateMapAtom } from '@/atoms/browser-atoms'
+import { browserPanelOpenMapAtom, browserPendingNavigationMapAtom, browserStateMapAtom } from '@/atoms/browser-atoms'
 import { BrowserPanel } from '@/components/browser/BrowserPanel'
 
 export function MainArea(): React.ReactElement {
@@ -57,6 +57,7 @@ export function MainArea(): React.ReactElement {
   const previewOpenMap = useAtomValue(previewPanelOpenMapAtom)
   const [browserOpenMap, setBrowserOpenMap] = useAtom(browserPanelOpenMapAtom)
   const [browserStateMap, setBrowserStateMap] = useAtom(browserStateMapAtom)
+  const setPendingNavigationMap = useSetAtom(browserPendingNavigationMapAtom)
   const [splitRatio, setSplitRatio] = useAtom(previewSplitRatioAtom)
   const [rightWorkspaceRatio, setRightWorkspaceRatio] = useAtom(rightWorkspaceSplitRatioAtom)
   const previewDragging = React.useRef(false)
@@ -307,6 +308,7 @@ export function MainArea(): React.ReactElement {
                       onClose={() => {
                         setBrowserOpenMap((previous) => { const next = new Map(previous); next.set(browserSessionId, false); return next })
                         setBrowserStateMap((previous) => { const next = new Map(previous); next.delete(browserSessionId); return next })
+                        setPendingNavigationMap((previous) => { const next = new Map(previous); next.delete(browserSessionId); return next })
                       }}
                     />
                   </div>
