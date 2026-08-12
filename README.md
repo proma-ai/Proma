@@ -17,13 +17,14 @@ Proma 是一个本地优先的 AI 桌面应用，把多模型 Chat、通用 Agen
 ## 现在能做什么
 
 - **Chat 模式**：多模型对话、附件解析、图片输入、Markdown / Mermaid / KaTeX / 代码高亮、并排对话、系统提示词、上下文管理。
-- **Agent 模式**：统一使用 Pi Agent Runtime；支持工作区隔离、权限模式、文件操作、长任务流式输出、计划确认和用户追问。
+- **Agent 模式**：Agent 内核已全面迁移至 Proma 内置 Pi Agent Runtime，不再依赖第三方 Agent 运行时；支持工作区隔离、权限模式、文件操作、长任务流式输出、计划确认和用户追问。
+- **内嵌浏览器自动化**：Agent 可以直接操作内置受管浏览器——打开网页、观察页面结构、点击 / 填写控件、切换标签页，并支持打开 `localhost` 本地开发服务；站内搜索、登录后页面、动态内容和本地 HTML 预览都能交给 Agent 完成，无需手动复制粘贴。
 - **协作与任务**：复杂任务可拆分为可追踪的协作子 Agent / Task，并在消息流中展示调用过程和结果。
-- **Skills、MCP 与项目根目录**：每个 Proma 项目独立配置 Skills 与 MCP Server。项目文件可使用用户选择的本地项目根目录，也可使用 Proma 托管的空白项目目录；本地项目配置不会被自动导入。
+- **Skills、MCP 与项目指令**：每个 Proma 项目独立配置 Skills 与 MCP Server；项目可通过 `AGENTS.md` 声明受信项目指令，旧 `CLAUDE.md` 配置自动迁移。项目文件可使用用户选择的本地项目根目录，也可使用 Proma 托管的空白项目目录。
 - **远程机器人**：支持飞书 / Lark 机器人桥接，并已提供钉钉、微信桥接入口，用手机或群聊触发本机 Agent 工作流。
-- **记忆与工具**：Chat 和 Agent 可共享记忆能力，并支持联网搜索、内置 Chat 工具、Agent 推荐等辅助能力。
+- **记忆与工具**：Chat 和 Agent 可共享工作区记忆，记忆变更自动追踪并在界面提示刷新；支持联网搜索、内置 Chat 工具、Agent 推荐等辅助能力。
 - **本地优先**：会话、工作区、附件、配置、Skills 等默认存储在 `~/.proma/`，使用 JSON / JSONL 文件组织，不依赖本地数据库。
-- **桌面体验**：自动更新、代理设置、文件预览、全局快捷键、快速任务窗口、语音输入、亮色 / 暗色 / 跟随系统主题。
+- **桌面体验**：自动更新、代理设置、文件预览、全局快捷键、快速任务窗口、Agent 灵动岛运行状态、语音输入、亮色 / 暗色 / 跟随系统主题。
 
 ## 快速开始
 
@@ -114,7 +115,7 @@ Proma 支持豆包的流式语音输入功能，并且支持在 Proma 内使用�
 
 ## Agent 运行时与模型渠道
 
-Proma 的 Agent 模式统一使用 **Pi Agent Runtime**，由 `@earendil-works/pi-coding-agent`、`pi-agent-core` 和 `pi-ai` 驱动。已启用的 Proma 渠道会动态注册为 Pi provider，支持 OpenAI Chat Completions / Responses、Google Generative AI、Anthropic Messages 及其兼容端点。历史 Claude transcript 会保留为只读记录，可查看但不能继续、分叉或回退。
+Proma 的 Agent 模式由 **Pi Agent Runtime** 单一驱动，内核来自 `@earendil-works/pi-coding-agent`、`pi-agent-core` 和 `pi-ai`，不再依赖任何第三方 Agent 运行时。已启用的 Proma 渠道会动态注册为 Pi provider，支持 OpenAI Chat Completions / Responses、Google Generative AI、Anthropic Messages 及其兼容端点。早期基于 Claude runtime 的历史会话保留为只读记录，可查看但不能继续、分叉或回退。
 
 | 渠道类型 | Chat | Pi Agent |
 | --- | --- | --- |
@@ -158,6 +159,8 @@ shared 类型和 IPC 常量
 - `adapters/pi-agent-adapter.ts`：Pi 运行时适配与会话管理。
 - `agent-session-manager.ts`：Agent 会话索引和 JSONL 消息持久化。
 - `agent-workspace-manager.ts`：Proma 工作区、项目根目录、MCP 与 Skills 管理。
+- `browser-controller.ts`：内置受管浏览器控制、跨会话视图隔离与本地预览。
+- `agent-memory-refresh-service.ts`：工作区记忆变更追踪与刷新。
 - `chat-service.ts`：Chat 流式调用、Provider Adapter、工具活动。
 - `conversation-manager.ts`：Chat 会话索引和消息存储。
 - `channel-manager.ts`：渠道 CRUD、API Key 加密、连接测试、模型获取。
