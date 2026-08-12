@@ -297,6 +297,7 @@ export function AutomationFormView({ standalone = false }: { standalone?: boolea
   const openSession = useOpenSession()
 
   const [form, setForm] = React.useState<AutomationDraft | null>(null)
+  const [weekdayPresetOverride, setWeekdayPresetOverride] = React.useState<'custom' | null>(null)
   const [editingName, setEditingName] = React.useState(false)
   const [runningNow, setRunningNow] = React.useState(false)
   const [feishuBindings, setFeishuBindings] = React.useState<FeishuChatBinding[]>([])
@@ -320,6 +321,7 @@ export function AutomationFormView({ standalone = false }: { standalone?: boolea
     if (formState.open && formState.draft) {
       const draft = formState.draft
       setForm(draft)
+      setWeekdayPresetOverride(null)
       lastSavedSignatureRef.current = draft.id && canPersistDraft(draft)
         ? getDraftSignature(draft)
         : ''
@@ -825,8 +827,12 @@ export function AutomationFormView({ standalone = false }: { standalone?: boolea
               <div className="flex items-center justify-between pt-1">
                 <Label>运行日</Label>
                 <Select
-                  value={getWeekdayPreset(form.activeWeekdays)}
-                  onValueChange={(value) => update({ activeWeekdays: getWeekdaysFromPreset(value, form.activeWeekdays) })}
+                  value={weekdayPresetOverride ?? getWeekdayPreset(form.activeWeekdays)}
+                  onValueChange={(value) => {
+                    if (value === 'custom') setWeekdayPresetOverride('custom')
+                    else setWeekdayPresetOverride(null)
+                    update({ activeWeekdays: getWeekdaysFromPreset(value, form.activeWeekdays) })
+                  }}
                 >
                   <SelectTrigger className="h-9 w-[150px]"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -837,7 +843,7 @@ export function AutomationFormView({ standalone = false }: { standalone?: boolea
                   </SelectContent>
                 </Select>
               </div>
-              {getWeekdayPreset(form.activeWeekdays) === 'custom' && (
+              {(weekdayPresetOverride ?? getWeekdayPreset(form.activeWeekdays)) === 'custom' && (
                 <div className="flex flex-wrap gap-1.5 pt-1">
                   {AUTOMATION_WEEKDAY_OPTIONS.map((option) => {
                     const selected = (form.activeWeekdays ?? []).includes(option.value)

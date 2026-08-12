@@ -92,6 +92,15 @@ function* iterateOccurrences(
       }
       return next
     }
+    const advanceInterval = (current: number): number => {
+      const candidate = current + step
+      const candidateDate = new Date(candidate)
+      if (isAllowedDay(candidateDate)) return candidate
+      const currentDate = new Date(current)
+      const next = nextAllowedDay(candidateDate)
+      next.setHours(currentDate.getHours(), currentDate.getMinutes(), currentDate.getSeconds(), currentDate.getMilliseconds())
+      return next.getTime()
+    }
     let ts = nextRunAt
     if (ts < rangeStart) {
       if (hasWindow) {
@@ -102,12 +111,21 @@ function* iterateOccurrences(
         candidate.setHours(Math.floor(windowStartMinutes! / 60), windowStartMinutes! % 60, 0, 0)
         ts = candidate.getTime()
       } else if (weekdays.length > 0) {
-        // 保留 interval 锚点的时分秒，避免把周末跳过后错误地从可视范围 00:00 开始展开。
-        const anchor = new Date(nextRunAt)
-        const first = new Date(rangeStart)
-        first.setHours(anchor.getHours(), anchor.getMinutes(), anchor.getSeconds(), anchor.getMilliseconds())
-        const candidate = first.getTime() < rangeStart ? nextAllowedDay(new Date(first.getTime() + 86400000)) : first
-        ts = isAllowedDay(candidate) ? candidate.getTime() : nextAllowedDay(candidate).getTime()
+        // 跳过历史时仍按真正的 interval 推进；仅在落到非运行日后才跳到下一个运行日。
+        // 不能只复制旧锚点的钟点，否则周五跨周末会与调度器的 nextRunAt 不一致。
+        const maxFastForwardSteps = 10_000
+        let fastForwardSteps = 0
+        while (ts < rangeStart && fastForwardSteps++ < maxFastForwardSteps) {
+          const date = new Date(ts)
+          if (isAllowedDay(date)) {
+            const nextDay = new Date(date)
+            nextDay.setHours(24, 0, 0, 0)
+            const lastBeforeDayEnd = ts + Math.floor((nextDay.getTime() - ts - 1) / step) * step
+            ts = advanceInterval(lastBeforeDayEnd)
+          } else {
+            ts = nextAllowedDay(date).getTime()
+          }
+        }
       } else {
         const skip = Math.floor((rangeStart - ts) / step)
         ts += skip * step
@@ -134,7 +152,7 @@ function* iterateOccurrences(
           const elapsed = ts - windowStart.getTime()
           ts = windowStart.getTime() + (Math.floor(elapsed / step) + 1) * step
         } else {
-          ts += step
+          ts = advanceInterval(ts)
         }
       } else {
         const nextStart = new Date(ts)
