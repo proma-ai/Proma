@@ -72,6 +72,16 @@ type BrowserSessionConfiguration = {
   executionSource: BrowserExecutionSource
 }
 
+/**
+ * 主窗口只有一个原生浏览器展示槽。布局 revision 由 renderer 全局递增，
+ * 因此可跨 Agent session 拒绝晚到的 show IPC。
+ */
+type BrowserPresentation = {
+  sessionId: string
+  tabId: string
+  revision: number
+}
+
 export interface ConfigureBrowserSessionInput {
   profileKey: string
   allowedRoots?: string[]
@@ -160,6 +170,10 @@ export class BrowserController {
   private readonly guardedSessions = new WeakSet<Session>()
   /** 自定义 partition 不继承 default session 的协议处理器，必须单独注册本地预览协议。 */
   private readonly previewProtocolSessions = new WeakSet<Session>()
+  /** 跨 Session 的唯一原生 WebContentsView 前台所有权。 */
+  private presentation: BrowserPresentation | null = null
+  /** 即使当前没有 Slot，也保留最新 show 代际以拒绝晚到的旧 show IPC。 */
+  private latestPresentationRevision = 0
 
   configureSession(sessionId: string, input: ConfigureBrowserSessionInput): void {
     const previous = this.configurations.get(sessionId)
@@ -572,18 +586,59 @@ export class BrowserController {
     return structuredClone(this.buildState(browserSession))
   }
 
+  /**
+   * 所有受管标签都挂在同一个 BrowserWindow.contentView，必须在 controller
+   * 层保证跨 Session 只有一个原生 View 可见，不能依赖 renderer 卸载顺序。
+   */
+  private hideAllViewsExcept(targetSessionId: string, targetTabId: string): Set<BrowserSessionRecord> {
+    const changedSessions = new Set<BrowserSessionRecord>()
+    for (const browserSession of this.sessions.values()) {
+      for (const tab of browserSession.tabs.values()) {
+        if (browserSession.sessionId === targetSessionId && tab.tabId === targetTabId) continue
+        tab.view.setVisible(false)
+        if (tab.state.visible) {
+          tab.state.visible = false
+          changedSessions.add(browserSession)
+        }
+      }
+    }
+    return changedSessions
+  }
+
+  private emitChangedSessions(changedSessions: Set<BrowserSessionRecord>): void {
+    for (const browserSession of changedSessions) this.emit(browserSession)
+  }
+
   setLayout(layout: BrowserViewLayout): void {
     const browserSession = this.sessions.get(layout.sessionId)
     if (!browserSession) return
-    // React effect cleanup 和新 slot 的 IPC 可以交错到达。只采纳最新一代布局，
-    // 避免已卸载 tab 的晚到 visible=false/true 覆盖当前 tab。
+    // React effect cleanup 和新 slot 的 IPC 可以交错到达。只采纳当前 Session 的最新布局。
     if (!Number.isSafeInteger(layout.revision) || layout.revision <= browserSession.lastLayoutRevision) return
     browserSession.lastLayoutRevision = layout.revision
     const tab = browserSession.tabs.get(layout.tabId ?? browserSession.activeTabId)
     // BrowserSlot 卸载与 tab 关闭可交错，晚到布局不应让 renderer 报错。
     if (!tab) return
+
     const bounds = layout.bounds
     const visible = layout.visible && bounds.width > 4 && bounds.height > 4 && !!this.owner && !this.owner.isDestroyed() && this.owner.isVisible()
+    if (!visible) {
+      tab.view.setVisible(false)
+      const changedSessions = new Set<BrowserSessionRecord>()
+      if (tab.state.visible) {
+        tab.state.visible = false
+        changedSessions.add(browserSession)
+      }
+      if (this.presentation?.sessionId === browserSession.sessionId && this.presentation.tabId === tab.tabId) {
+        this.presentation = null
+      }
+      this.emitChangedSessions(changedSessions)
+      return
+    }
+
+    // revision 在 renderer 全局单调递增。A 的旧 show 即使在 B 已显示后晚到，
+    // 也不能重新把 A 的原生 view 放到前台。
+    if (layout.revision <= this.latestPresentationRevision) return
+
     const zoomFactor = this.owner?.webContents.getZoomFactor() ?? 1
     const adjustedBounds = {
       x: Math.round(bounds.x * zoomFactor),
@@ -591,33 +646,47 @@ export class BrowserController {
       width: Math.round(bounds.width * zoomFactor),
       height: Math.round(bounds.height * zoomFactor),
     }
-    for (const other of browserSession.tabs.values()) {
-      if (other.tabId !== tab.tabId) other.view.setVisible(false)
-    }
-    if (visible && (!tab.lastBounds || Object.entries(adjustedBounds).some(([key, value]) => tab.lastBounds?.[key as keyof typeof adjustedBounds] !== value))) {
+    const changedSessions = this.hideAllViewsExcept(browserSession.sessionId, tab.tabId)
+    if (!tab.lastBounds || Object.entries(adjustedBounds).some(([key, value]) => tab.lastBounds?.[key as keyof typeof adjustedBounds] !== value)) {
       tab.view.setBounds(adjustedBounds)
       tab.lastBounds = { ...adjustedBounds }
     }
-    tab.view.setVisible(visible)
-    if (tab.state.visible !== visible) { tab.state.visible = visible; this.emit(browserSession) }
+    tab.view.setVisible(true)
+    if (!tab.state.visible) {
+      tab.state.visible = true
+      changedSessions.add(browserSession)
+    }
+    this.presentation = { sessionId: browserSession.sessionId, tabId: tab.tabId, revision: layout.revision }
+    this.latestPresentationRevision = layout.revision
+    this.emitChangedSessions(changedSessions)
   }
 
-  /** 将指定标签置于前台；复用当前显示区域，避免等待 renderer layout 往返时仍显示旧页面。 */
+  /**
+   * 会话内切 tab 可立即复用展示区域；后台 Session 只更新自身状态，绝不抢占
+   * 当前浏览器展示槽，等待其 BrowserSlot 成为前台后再由 setLayout 显示。
+   */
   private activateDisplayTab(browserSession: BrowserSessionRecord, tab: BrowserTabRecord): void {
     const previous = browserSession.tabs.get(browserSession.activeTabId)
     tab.lastActivityAt = Date.now()
     browserSession.activeTabId = tab.tabId
-    for (const other of browserSession.tabs.values()) {
-      if (other.tabId !== tab.tabId) other.view.setVisible(false)
+    if (this.presentation?.sessionId !== browserSession.sessionId) {
+      this.emit(browserSession)
+      return
     }
+
     if (!tab.lastBounds && previous?.lastBounds) {
       tab.view.setBounds(previous.lastBounds)
       tab.lastBounds = { ...previous.lastBounds }
     }
+    const changedSessions = this.hideAllViewsExcept(browserSession.sessionId, tab.tabId)
     const visible = !!tab.lastBounds && !!this.owner && !this.owner.isDestroyed() && this.owner.isVisible()
     tab.view.setVisible(visible)
-    if (tab.state.visible !== visible) tab.state.visible = visible
-    this.emit(browserSession)
+    if (tab.state.visible !== visible) {
+      tab.state.visible = visible
+      changedSessions.add(browserSession)
+    }
+    this.presentation = { ...this.presentation, tabId: tab.tabId }
+    this.emitChangedSessions(changedSessions)
   }
 
   private disposeTab(browserSession: BrowserSessionRecord, tab: BrowserTabRecord): void {
