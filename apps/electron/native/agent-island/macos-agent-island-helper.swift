@@ -534,6 +534,20 @@ struct ExpandedIslandView: View {
                 .font(.system(size: 15.5, weight: .bold)).foregroundStyle(.white.opacity(0.98))
             }
             Spacer()
+            // 显式的收起按钮：顶部空白手势太隐蔽，用户会以为展开态无法关闭。
+            Button(action: { action("set-expanded", ["expanded": false]) }) {
+              Image(systemName: "chevron.up")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.6))
+                .frame(width: 26, height: 26)
+            }.buttonStyle(IslandButtonStyle())
+            // 完全关闭（dismiss）：岛整体隐藏，直到出现新的 Agent 状态 / 计划提醒。
+            Button(action: { action("dismiss", [:]) }) {
+              Image(systemName: "xmark")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.6))
+                .frame(width: 26, height: 26)
+            }.buttonStyle(IslandButtonStyle())
             Button(action: { action("open-main", [:]) }) {
               HStack(spacing: 5) {
                 Text("打开 Proma")
@@ -550,8 +564,29 @@ struct ExpandedIslandView: View {
       } else {
         // The compact notch is a real physical exclusion zone. Keep planning
         // content below it and use that otherwise-empty band for Plan usage.
-        PlanQuotaCarousel(quotas: snapshot.planQuotas)
-          .frame(height: snapshot.planQuotas.isEmpty ? 56 : 108)
+        ZStack(alignment: .topTrailing) {
+          PlanQuotaCarousel(quotas: snapshot.planQuotas)
+            .frame(height: snapshot.planQuotas.isEmpty ? 56 : 108)
+          // 无 Agent 会话时（查余额 / 纯提醒），此前没有任何收起入口：
+          // 展开后无法关闭，一直占据视野。这里提供收起（折叠为 pill）
+          // 与关闭（dismiss，完全隐藏直到有新状态）两个按钮。
+          HStack(spacing: 6) {
+            Button(action: { action("set-expanded", ["expanded": false]) }) {
+              Image(systemName: "chevron.up")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.6))
+                .frame(width: 24, height: 24)
+            }.buttonStyle(IslandButtonStyle())
+            Button(action: { action("dismiss", [:]) }) {
+              Image(systemName: "xmark")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.6))
+                .frame(width: 24, height: 24)
+            }.buttonStyle(IslandButtonStyle())
+          }
+          .padding(.trailing, 10)
+          .padding(.top, 10)
+        }
       }
 
       if !displayedSessions.isEmpty {
