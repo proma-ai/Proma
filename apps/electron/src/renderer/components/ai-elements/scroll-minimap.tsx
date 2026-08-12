@@ -19,6 +19,7 @@ import { getModelLogo, resolveModelProvider } from '@/lib/model-logo'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import { useShortcut } from '@/hooks/useShortcut'
 import { cn } from '@/lib/utils'
+import { measurePerformance } from '@/lib/performance-monitor'
 
 export interface MinimapItem {
   id: string
@@ -108,38 +109,49 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
     const el = scrollRef.current
     if (!el) return
 
+    let frame: number | null = null
     const update = (): void => {
-      const { scrollTop, scrollHeight, clientHeight } = el
-      setCanScroll(scrollHeight > clientHeight + 10)
-      setScrollMetrics({ scrollTop, scrollHeight, clientHeight })
-      if (scrollHeight <= 0) return
+      measurePerformance('history.minimap-scan', () => {
+        const { scrollTop, scrollHeight, clientHeight } = el
+        setCanScroll(scrollHeight > clientHeight + 10)
+        setScrollMetrics({ scrollTop, scrollHeight, clientHeight })
+        if (scrollHeight <= 0) return
 
-      const viewportCenter = scrollTop + clientHeight / 2
-      const nodes = el.querySelectorAll<HTMLElement>('[data-message-id]')
-      const ids = new Set<string>()
-      let centerId: string | undefined
-      for (const node of nodes) {
-        const top = getOffsetTopRelativeTo(node, el)
-        const bottom = top + node.offsetHeight
-        if (bottom > scrollTop && top < scrollTop + clientHeight) {
-          const id = node.getAttribute('data-message-id')
-          if (id) ids.add(id)
+        const viewportCenter = scrollTop + clientHeight / 2
+        const nodes = el.querySelectorAll<HTMLElement>('[data-message-id]')
+        const ids = new Set<string>()
+        let centerId: string | undefined
+        for (const node of nodes) {
+          const top = getOffsetTopRelativeTo(node, el)
+          const bottom = top + node.offsetHeight
+          if (bottom > scrollTop && top < scrollTop + clientHeight) {
+            const id = node.getAttribute('data-message-id')
+            if (id) ids.add(id)
+          }
+          if (centerId === undefined && top <= viewportCenter && bottom > viewportCenter) {
+            centerId = node.getAttribute('data-message-id') ?? undefined
+          }
         }
-        if (centerId === undefined && top <= viewportCenter && bottom > viewportCenter) {
-          centerId = node.getAttribute('data-message-id') ?? undefined
-        }
-      }
-      setVisibleIds(ids)
-      setCenterVisibleId(centerId)
+        setVisibleIds(ids)
+        setCenterVisibleId(centerId)
+      })
+    }
+    const scheduleUpdate = (): void => {
+      if (frame !== null) return
+      frame = requestAnimationFrame(() => {
+        frame = null
+        update()
+      })
     }
 
     update()
-    el.addEventListener('scroll', update, { passive: true })
-    const observer = new ResizeObserver(update)
+    el.addEventListener('scroll', scheduleUpdate, { passive: true })
+    const observer = new ResizeObserver(scheduleUpdate)
     observer.observe(el)
 
     return () => {
-      el.removeEventListener('scroll', update)
+      if (frame !== null) cancelAnimationFrame(frame)
+      el.removeEventListener('scroll', scheduleUpdate)
       observer.disconnect()
     }
   }, [scrollRef])

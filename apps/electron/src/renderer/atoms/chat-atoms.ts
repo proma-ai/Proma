@@ -63,15 +63,29 @@ export const streamingStatesAtom = atom<Map<string, ConversationStreamState>>(ne
 
 /**
  * 当前正在流式输出的对话 ID 集合（派生只读原子）
- * 用于侧边栏绿色呼吸点指示器
+ * 用于侧边栏绿色呼吸点指示器。
+ *
+ * 流式文本 chunk 会频繁替换 streamingStatesAtom，但通常不会改变正在运行的
+ * conversation ID。复用相同 Set 引用可避免订阅该 atom 的侧边栏按 token 重渲染。
  */
+let previousStreamingConversationIds = new Set<string>()
+let previousStreamingConversationIdsSignature = ''
+
 export const streamingConversationIdsAtom = atom<Set<string>>((get) => {
   const states = get(streamingStatesAtom)
-  const ids = new Set<string>()
+  const ids: string[] = []
   for (const [id, state] of states) {
-    if (state.streaming) ids.add(id)
+    if (state.streaming) ids.push(id)
   }
-  return ids
+  ids.sort()
+  const signature = ids.join('\u0000')
+  if (signature === previousStreamingConversationIdsSignature) {
+    return previousStreamingConversationIds
+  }
+
+  previousStreamingConversationIdsSignature = signature
+  previousStreamingConversationIds = new Set(ids)
+  return previousStreamingConversationIds
 })
 
 /**

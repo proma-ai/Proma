@@ -6,6 +6,10 @@ export const WINDOW_CONTROLS_WIDTH_PX = 126
 export const WINDOW_CONTROLS_INSET_RIGHT = 'right-[126px]'
 export const WINDOW_CONTROLS_PADDING_RIGHT = 'pr-[126px]'
 
+export function getWindowControlsPaddingClass(isWindows: boolean): string {
+  return isWindows ? WINDOW_CONTROLS_PADDING_RIGHT : ''
+}
+
 export function detectIsWindows(): boolean {
   const platform =
     typeof navigator !== 'undefined' &&

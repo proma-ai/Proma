@@ -17,6 +17,7 @@ import type { AgentToolResult } from '@earendil-works/pi-agent-core'
 import type { TextContent, ImageContent } from '@earendil-works/pi-ai'
 import type { TSchema } from 'typebox'
 import { Type } from 'typebox'
+import { sanitizeToolResultImageContent } from '../image-content-validation'
 
 const DEFAULT_MCP_REQUEST_TIMEOUT_MS = 60_000
 const DEFAULT_MCP_STARTUP_TIMEOUT_MS = 30_000
@@ -215,7 +216,7 @@ function convertMcpResult(result: McpCallToolResult): AgentToolResult<unknown> {
   }
 
   return {
-    content,
+    content: sanitizeToolResultImageContent(content),
     details: result,
   } as AgentToolResult<unknown>
 }

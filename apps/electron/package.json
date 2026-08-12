@@ -1,6 +1,6 @@
 {
   "name": "@proma/electron",
-  "version": "0.17.15",
+  "version": "0.17.16",
   "description": "Proma next gen ai software with general agents - Electron App",
   "main": "dist/main.cjs",
   "author": {
@@ -88,6 +88,7 @@
     "@radix-ui/react-tooltip": "^1.2.8",
     "@react-symbols/icons": "^1.3.1",
     "@tailwindcss/typography": "^0.5.19",
+    "@tanstack/react-virtual": "^3.14.9",
     "@tiptap/core": "^3.19.0",
     "@tiptap/extension-code-block-lowlight": "^3.19.0",
     "@tiptap/extension-link": "^3.19.0",

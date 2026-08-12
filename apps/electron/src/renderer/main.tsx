@@ -89,6 +89,7 @@ import { userProfileAtom } from './atoms/user-profile'
 import { billingInfoAtom, billingLoadingAtom, quotaExceededDialogAtom, initializeBilling } from './atoms/cloud-billing'
 import { isCloudMode } from './lib/mode'
 import { initShortcutRegistry, updateShortcutOverrides } from './lib/shortcut-registry'
+import { initializePerformanceMonitor } from './lib/performance-monitor'
 import './styles/globals.css'
 import 'katex/dist/katex.min.css'
 
@@ -99,6 +100,8 @@ const isDetachedPreviewWindow = new URLSearchParams(window.location.search).get(
 const isPlanningWindow = new URLSearchParams(window.location.search).get('window') === 'planning'
 const isWorkspaceMemoryWindow = new URLSearchParams(window.location.search).get('window') === 'workspace-memory'
 const isMainWindow = !isQuickTaskWindow && !isVoiceDictationIndicatorWindow && !isDetachedPreviewWindow && !isPlanningWindow && !isWorkspaceMemoryWindow
+
+initializePerformanceMonitor()
 
 // 主窗口和独立规划窗口均由内部面板管理滚动，避免页面本身出现第二层滚动。
 if (isMainWindow || isPlanningWindow || isWorkspaceMemoryWindow) {

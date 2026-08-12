@@ -33,6 +33,7 @@ import { getAgentIslandTodoAttentionKeys, selectAgentIslandTodos } from './agent
 import { selectAgentIslandCompactPlanQuota } from './agent-island-plan-quota'
 import { getAgentIslandPhasePriority } from './agent-island-priority'
 import { buildVisibilityKey } from './agent-island-visibility'
+import { shouldRetainAgentIslandSession } from './agent-island-session-visibility'
 import { listCalendarEvents, listTodos } from './planning-manager'
 import { onPlanningChanged } from './planning-events'
 import { getChannelPlanQuota, listChannels } from './channel-manager'
@@ -431,13 +432,9 @@ function isIslandSession(session: InternalSessionSnapshot, now: number): boolean
   // 委派子会话只在需要用户交互时露出；执行和结束均由父会话收敛。
   if (isDelegatedChildSession(session.sessionId)) return session.phase === 'needs-interaction'
   // Running is deliberately visible: the island is also a live execution pulse,
-  // not only a handoff/error inbox. Terminal sessions retain their existing
-  // unread window to avoid becoming permanent history.
-  if (session.phase === 'running' || session.phase === 'needs-interaction' || session.phase === 'error') return true
-  return session.phase === 'completed'
-    && session.unread
-    && session.terminalAt !== undefined
-    && now - session.terminalAt < UNREAD_RETAIN_MS
+  // not only a handoff/error inbox. Viewed errors leave the Island immediately,
+  // while completed sessions retain their unread window to avoid permanent history.
+  return shouldRetainAgentIslandSession(session, now, UNREAD_RETAIN_MS)
 }
 
 function attentionScore(session: InternalSessionSnapshot): number {
@@ -820,12 +817,14 @@ export function initAgentIslandService(deps: AgentIslandServiceDeps): void {
 }
 
 /**
- * 完成态的未读由主进程管理；主应用确认用户已经看过结果后，在此统一清除。
- * 错误和需要交互的会话必须保留 attention，不能被普通查看动作吞掉。
+ * 完成和异常态的未读由主进程管理；主应用确认用户已经看过后，在此统一清除。
+ * 待接手会话仍保持 attention，直到用户实际完成权限确认、回答或计划审批。
  */
 function markAgentIslandSessionViewed(sessionId: string): void {
   const session = sessions.get(sessionId)
-  if (session?.phase !== 'completed' || !session.unread) return
+  if (!session || (session.phase !== 'completed' && session.phase !== 'error')) return
+  if (session.phase === 'completed' && !session.unread) return
+  if (!session.attention && !session.unread) return
   session.unread = false
   session.attention = false
   schedulePush()

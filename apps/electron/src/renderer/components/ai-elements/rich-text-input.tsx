@@ -49,6 +49,7 @@ import {
   createSkillMentionSuggestion,
 } from '@/components/agent/mention-suggestions'
 import { shouldConvertClipboardTextToAttachment } from '@/lib/clipboard-text-attachment'
+import { measurePerformance } from '@/lib/performance-monitor'
 import {
   VOICE_DICTATION_CLEAR_PREVIEW_EVENT,
   VOICE_DICTATION_INSERT_EVENT,
@@ -125,8 +126,8 @@ interface RichTextInputProps {
   value: string
   /** 值变更回调 */
   onChange: (markdown: string) => void
-  /** 提交回调（Enter 键） */
-  onSubmit: () => void
+  /** 提交回调（Enter 键）；传入值可避免草稿同步尚未提交时发送旧内容。 */
+  onSubmit: (content?: string, fromEditor?: boolean) => void
   /** 粘贴文件回调（拦截粘贴的文件） */
   onPasteFiles?: (files: File[]) => void
   /** 粘贴超长文本回调（由调用方决定是否转换为附件） */
@@ -222,6 +223,8 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
   const isExpandedRef = useRef(false)
   // 行数检查的 rAF 调度句柄（用 rAF 节流，一帧最多检查一次）
   const lineCheckHandleRef = useRef<number | null>(null)
+  // 草稿序列化与上层状态同步同样合并到每帧一次；TipTap 自己仍在输入事件内即时更新 DOM。
+  const draftSyncHandleRef = useRef<number | null>(null)
   // 跟踪编辑器自己设置的值，用于区分外部设置和内部更新
   const lastEditorValueRef = useRef<string>('')
   // 记录尚未由 props 确认的本地草稿。长文本连续编辑时，React 可能先提交较旧的
@@ -356,6 +359,63 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
     () => createSessionMentionSuggestion(currentSessionIdRef, mentionActiveRef, mentionItemCountRef),
     [],
   )
+  const syncEditorDraft = useCallback((ed: NonNullable<ReturnType<typeof useEditor>>): string => {
+    const html = ed.getHTML()
+    if (html === '<p></p>') {
+      lastEditorValueRef.current = ''
+      pendingLocalDraftEchoesRef.current = recordLocalDraftEcho(pendingLocalDraftEchoesRef.current, '')
+      onChange('')
+      onHtmlChangeRef.current?.('')
+      if (isExpandedRef.current) {
+        isExpandedRef.current = false
+        setIsExpanded(false)
+      }
+      setIsManuallyCollapsed(false)
+      return ''
+    }
+
+    // DOM → Markdown 遍历对长草稿较重；将多次连续输入收敛到一帧一次。
+    const markdown = measurePerformance('input.html-to-markdown', () => (
+      htmlToMarkdown(html, { skipMarkdownEscape: !richTextEnabled })
+    ))
+    lastEditorValueRef.current = markdown
+    pendingLocalDraftEchoesRef.current = recordLocalDraftEcho(pendingLocalDraftEchoesRef.current, markdown)
+    onChange(markdown)
+    onHtmlChangeRef.current?.(html)
+
+    if (lineCheckHandleRef.current !== null) {
+      cancelAnimationFrame(lineCheckHandleRef.current)
+    }
+    lineCheckHandleRef.current = requestAnimationFrame(() => {
+      lineCheckHandleRef.current = null
+      const nextExpanded = countEditorLines(ed) > 5
+      if (nextExpanded !== isExpandedRef.current) {
+        isExpandedRef.current = nextExpanded
+        setIsExpanded(nextExpanded)
+      }
+    })
+    return markdown
+  }, [onChange, richTextEnabled])
+
+  const syncEditorDraftRef = useRef(syncEditorDraft)
+  syncEditorDraftRef.current = syncEditorDraft
+
+  const flushPendingDraftSync = useCallback((ed: NonNullable<ReturnType<typeof useEditor>>): string => {
+    if (draftSyncHandleRef.current !== null) {
+      cancelAnimationFrame(draftSyncHandleRef.current)
+      draftSyncHandleRef.current = null
+    }
+    return syncEditorDraftRef.current(ed)
+  }, [])
+
+  const scheduleDraftSync = useCallback((ed: NonNullable<ReturnType<typeof useEditor>>): void => {
+    if (draftSyncHandleRef.current !== null) return
+    draftSyncHandleRef.current = requestAnimationFrame(() => {
+      draftSyncHandleRef.current = null
+      syncEditorDraftRef.current(ed)
+    })
+  }, [])
+
   const planningMentionSuggestions = useMemo(
     () => [
       createPlanningMentionSuggestion('~', currentSessionIdRef, mentionActiveRef, mentionItemCountRef),
@@ -696,7 +756,9 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
 
           if (isSend) {
             event.preventDefault()
-            onSubmitRef.current()
+            // Enter 可能紧跟最后一次输入；先同步当前编辑器，再把最新 Markdown
+            // 直接交给发送方，避免 rAF 批处理导致发送旧草稿。
+            onSubmitRef.current(editor ? flushPendingDraftSync(editor) : undefined, true)
             return true
           }
 
@@ -756,40 +818,7 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
       },
     },
     onUpdate: ({ editor: ed }) => {
-      const html = ed.getHTML()
-      if (html === '<p></p>') {
-        lastEditorValueRef.current = ''
-        pendingLocalDraftEchoesRef.current = recordLocalDraftEcho(pendingLocalDraftEchoesRef.current, '')
-        onChange('')
-        onHtmlChangeRef.current?.('')
-        if (isExpandedRef.current) {
-          isExpandedRef.current = false
-          setIsExpanded(false)
-        }
-        setIsManuallyCollapsed(false)
-      } else {
-        // 纯文本模式下跳过 markdown 特殊字符转义，保持用户所见即所得
-        // 纯文本模式下跳过 markdown 特殊字符转义，保持用户所见即所得
-        const markdown = htmlToMarkdown(html, { skipMarkdownEscape: !richTextEnabled })
-        lastEditorValueRef.current = markdown
-        pendingLocalDraftEchoesRef.current = recordLocalDraftEcho(pendingLocalDraftEchoesRef.current, markdown)
-        onChange(markdown)
-        onHtmlChangeRef.current?.(html)
-
-        // 行数检查用 rAF 节流：每键 doc.descendants 全文遍历 + setState 重渲染会让
-        // 输入热路径变重；延后到下一帧合并连续按键，对 UX 无影响。
-        if (lineCheckHandleRef.current !== null) {
-          cancelAnimationFrame(lineCheckHandleRef.current)
-        }
-        lineCheckHandleRef.current = requestAnimationFrame(() => {
-          lineCheckHandleRef.current = null
-          const nextExpanded = countEditorLines(ed) > 5
-          if (nextExpanded !== isExpandedRef.current) {
-            isExpandedRef.current = nextExpanded
-            setIsExpanded(nextExpanded)
-          }
-        })
-      }
+      scheduleDraftSync(ed)
     },
   }, [richTextEnabled])
 
@@ -799,6 +828,10 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
       if (lineCheckHandleRef.current !== null) {
         cancelAnimationFrame(lineCheckHandleRef.current)
         lineCheckHandleRef.current = null
+      }
+      if (draftSyncHandleRef.current !== null) {
+        cancelAnimationFrame(draftSyncHandleRef.current)
+        draftSyncHandleRef.current = null
       }
     }
   }, [])
