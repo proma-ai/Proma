@@ -11,6 +11,7 @@ import type { AssistantMessage, ToolResultMessage, UserMessage } from '@earendil
 import type { SDKAssistantMessage, SDKMessage } from '@proma/shared'
 import type { RuntimeGuardResultOverride } from '../agent-runtime-guards'
 import { isMalformedResponseError, isTransientNetworkError } from '../error-patterns'
+import { sanitizeToolResultImageContent } from '../image-content-validation'
 
 function getPiEditItems(input: Record<string, unknown>): Array<Record<string, unknown>> {
   return Array.isArray(input.edits)
@@ -127,7 +128,7 @@ export function restorePiInput(
 
 function normalizeToolResultContent(content: unknown): unknown {
   if (!Array.isArray(content)) return content
-  return content.map((item) => {
+  const normalized = content.map((item) => {
     if (!item || typeof item !== 'object') return item
     const record = item as Record<string, unknown>
     if (record.type === 'text' && typeof record.text === 'string') {
@@ -138,6 +139,7 @@ function normalizeToolResultContent(content: unknown): unknown {
     }
     return record
   })
+  return sanitizeToolResultImageContent(normalized as Parameters<typeof sanitizeToolResultImageContent>[0])
 }
 
 function contentToText(content: unknown): string {

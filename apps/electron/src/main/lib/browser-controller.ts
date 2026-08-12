@@ -12,6 +12,7 @@ import { hasAcknowledgedBrowserRiskDisclaimer } from './browser-risk-disclaimer'
 import { buildPromaBrowserUserAgent } from './browser-identity'
 import { assertBrowserScript, buildBrowserDomActionExpression, type BrowserDomActionInput } from './browser-script-policy'
 import { getSettings } from './settings-service'
+import { isValidImageBytes } from './image-content-validation'
 
 const MAX_TRACE_ITEMS = 30
 /** 总数超限时只回收 Agent 创建且未在使用的标签，绝不自动关闭用户标签。 */
@@ -1094,7 +1095,20 @@ export class BrowserController {
       throwIfBrowserOperationAborted(operationSignal)
       const image = await withBrowserCdpTimeout(() => tab.view.webContents.capturePage(), 'Page.captureScreenshot', BROWSER_OBSERVE_TIMEOUT_MS + 3_000, operationSignal)
       throwIfBrowserOperationAborted(operationSignal)
+      if (image.isEmpty()) {
+        this.trace(browserSession, tab, 'screenshot', '截图为空，已拒绝返回无效图片', 'failed')
+        throw new Error('截图为空：浏览器页面尚未完成可捕获布局，请稍后重试或改用 BrowserObserve。')
+      }
+      const { width, height } = image.getSize()
+      if (width <= 0 || height <= 0) {
+        this.trace(browserSession, tab, 'screenshot', '截图尺寸无效，已拒绝返回无效图片', 'failed')
+        throw new Error('截图尺寸无效：浏览器页面尚未完成可捕获布局，请稍后重试或改用 BrowserObserve。')
+      }
       const buffer = image.toPNG()
+      if (!isValidImageBytes('image/png', buffer)) {
+        this.trace(browserSession, tab, 'screenshot', '截图 PNG 数据无效，已拒绝返回无效图片', 'failed')
+        throw new Error('截图 PNG 数据无效，请稍后重试或改用 BrowserObserve。')
+      }
       if (buffer.byteLength > MAX_SCREENSHOT_BYTES) throw new Error('截图过大，请缩小页面或改用 browser_observe。')
       this.trace(browserSession, tab, 'screenshot', '截取当前页面', 'verified')
       return { tabId: tab.tabId, url: tab.state.url, mimeType: 'image/png', base64: buffer.toString('base64') }
