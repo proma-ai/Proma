@@ -845,8 +845,8 @@ function buildBrowserTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefiniti
     sdk.defineTool({
       name: 'BrowserNavigate',
       label: '在受管浏览器中打开网页',
-      description: 'Navigate the Agent working in-app browser tab to a public HTTP/HTTPS URL. Localhost, private network addresses, downloads, popups, and browser permissions are blocked.',
-      parameters: Type.Object({ url: Type.String({ description: 'A complete public HTTP/HTTPS URL.' }), tabId: Type.Optional(Type.String({ description: 'Optional tab id. Defaults to the Agent working tab, independent of the tab visible to the user.' })) }),
+      description: 'Navigate the Agent working in-app browser tab to an HTTP/HTTPS URL. Localhost loopback addresses are allowed for local development; other private-network addresses, downloads, popups, and browser permissions are blocked.',
+      parameters: Type.Object({ url: Type.String({ description: 'A complete HTTP/HTTPS URL. Localhost loopback addresses are supported for local development.' }), tabId: Type.Optional(Type.String({ description: 'Optional tab id. Defaults to the Agent working tab, independent of the tab visible to the user.' })) }),
       async execute(_id, params, signal?: AbortSignal) {
         const args = params as Record<string, unknown>
         return jsonToolResult(await browserController.navigate(ctx.sessionId, typeof args.url === 'string' ? args.url : '', typeof args.tabId === 'string' ? args.tabId : undefined, signal))
@@ -985,8 +985,8 @@ function buildBrowserTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefiniti
     sdk.defineTool({
       name: 'BrowserNewTab',
       label: '新建浏览器标签',
-      description: 'Create a new Agent working tab and activate it in the visible in-app browser. Optionally navigate it to a public HTTP/HTTPS URL.',
-      parameters: Type.Object({ url: Type.Optional(Type.String({ description: 'Optional public HTTP/HTTPS URL.' })) }),
+      description: 'Create a new Agent working tab and activate it in the visible in-app browser. Optionally navigate it to an HTTP/HTTPS URL, including localhost loopback for local development.',
+      parameters: Type.Object({ url: Type.Optional(Type.String({ description: 'Optional HTTP/HTTPS URL; localhost loopback is supported for local development.' })) }),
       async execute(_id, params) {
         const url = typeof (params as Record<string, unknown>).url === 'string' ? (params as Record<string, string>).url : undefined
         return jsonToolResult(await browserController.createNewTab(ctx.sessionId, url))
