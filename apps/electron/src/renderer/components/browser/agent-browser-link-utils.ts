@@ -1,8 +1,11 @@
 import type { BrowserViewState } from '@proma/shared'
 
-/** 新会话仅有空白初始标签时，复用它而非额外创建无用标签。 */
+/** 仅复用用户的空白初始标签，绝不导航 Agent 的工作标签。 */
 export function shouldReuseInitialBrowserTab(state: BrowserViewState): boolean {
+  const activeTab = state.tabs[0]
   return state.tabs.length === 1
-    && state.activeTabId === state.tabs[0]?.tabId
+    && state.activeTabId === activeTab?.tabId
+    && state.agentTabId !== activeTab?.tabId
+    && !activeTab?.openedByAgent
     && (state.url === '' || state.url === 'about:blank')
 }

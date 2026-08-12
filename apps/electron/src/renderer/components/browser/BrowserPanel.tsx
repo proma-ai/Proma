@@ -19,6 +19,7 @@ import { detectIsWindows, getWindowControlsPaddingClass } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import { browserPendingNavigationMapAtom } from '@/atoms/browser-atoms'
 import { BrowserSlot } from './BrowserSlot'
+import { shouldReuseInitialBrowserTab } from './agent-browser-link-utils'
 
 interface BrowserPanelProps {
   sessionId: string
@@ -77,7 +78,13 @@ export function BrowserPanel({ sessionId, state, onClose }: BrowserPanelProps): 
       setRiskAcknowledged(true)
       if (pendingNavigationUrl) {
         try {
-          await window.electronAPI.navigateAgentBrowser({ sessionId, url: pendingNavigationUrl })
+          const currentState = await window.electronAPI.getAgentBrowserState(sessionId)
+          if (!currentState) throw new Error('受管浏览器会话不存在。')
+          if (shouldReuseInitialBrowserTab(currentState)) {
+            await window.electronAPI.navigateAgentBrowser({ sessionId, url: pendingNavigationUrl })
+          } else {
+            await window.electronAPI.createAgentBrowserTab({ sessionId, url: pendingNavigationUrl })
+          }
         } catch (error) {
           console.error('[受管浏览器] 打开待处理链接失败:', error)
         } finally {
