@@ -269,17 +269,21 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
   }, [setPendingAttachments])
 
   /** 发送消息 */
-  const handleSend = React.useCallback((): void => {
-    if (!canSend) return
+  const handleSend = React.useCallback((contentOverride?: string): void => {
+    const contentToSend = contentOverride ?? content
+    const canSendCurrentContent = (contentToSend.trim().length > 0 || pendingAttachments.length > 0)
+      && selectedModel !== null
+      && !streaming
+    if (!canSendCurrentContent) return
     // 发送前检查网络状态：离线时立即反馈，避免消息发出后静默失败
     if (!navigator.onLine) {
       toast.error('当前无网络连接，请检查网络后重试')
       return
     }
-    onSend(content.trim())
+    onSend(contentToSend.trim())
     setContent('')
     // 附件清理由 ChatView 的 handleSend 负责
-  }, [canSend, content, onSend])
+  }, [content, onSend, pendingAttachments.length, selectedModel, streaming])
 
   /** 粘贴文件回调 */
   const handlePasteFiles = React.useCallback((files: File[]): void => {
@@ -408,7 +412,7 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
       className={cn(
         canSend ? inputToolbarSendButtonClass : inputToolbarDisabledButtonClass
       )}
-      onClick={handleSend}
+      onClick={() => handleSend()}
       disabled={!canSend}
     >
       <CornerDownLeft className="size-[22px]" />

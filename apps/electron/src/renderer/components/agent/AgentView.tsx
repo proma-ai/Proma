@@ -2035,7 +2035,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const externalSelectedModel = computedSelectedModel ?? stableSelectedModelRef.current
 
   /** 发送消息 */
-  const handleSend = React.useCallback(async (overrideText?: string): Promise<void> => {
+  const handleSend = React.useCallback(async (overrideText?: string, fromEditor = false): Promise<void> => {
     const text = (overrideText ?? inputContent).trim()
     // 如果输入为空但有建议，使用建议内容
     const effectiveText = text || suggestion || ''
@@ -2081,7 +2081,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         id: 'agent-view-queued-message-hint',
         description: '如需立即处理，点击队列消息右侧的「立即发送」可打断当前执行（会终止正在运行的命令）。',
       })
-      if (overrideText === undefined) {
+      if (overrideText === undefined || fromEditor) {
         setInputContent('')
         setInputHtmlContent('')
       }
@@ -2110,7 +2110,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
             additionalDirectories: attachmentContext.additionalDirectories,
           }
         : undefined)
-      if (overrideText === undefined) {
+      if (overrideText === undefined || fromEditor) {
         setInputContent('')
         setInputHtmlContent('')
       }
@@ -2245,10 +2245,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       ...(mentions.mentionedCalendarEventIds.length > 0 && { mentionedCalendarEventIds: mentions.mentionedCalendarEventIds }),
     }
 
-    // 清空输入框（仅当发送的是用户自己输入的内容，而非推荐建议时）
-    // 用 === undefined 与上方 `overrideText ?? inputContent` 的取值语义保持一致，
-    // 避免未来出现 handleSend('') 时两条路径行为割裂
-    if (overrideText === undefined) {
+    // 清空输入框（仅当发送的是用户自己输入的内容，而非推荐建议时）。
+    // Enter 路径会显式传入已刷新的编辑器内容，因此也应清空。
+    if (overrideText === undefined || fromEditor) {
       setInputContent('')
       setInputHtmlContent('')
     }

@@ -89,6 +89,7 @@ import { useOpenSession } from '@/hooks/useOpenSession'
 import { useSyncActiveTabSideEffects } from '@/hooks/useSyncActiveTabSideEffects'
 import { sessionHoverPreviewEnabledAtom } from '@/atoms/ui-preferences'
 import { CollapsedWorkspacePopover } from '@/components/agent/CollapsedWorkspacePopover'
+import { VirtualSidebarList, type VirtualSidebarRow } from '@/components/ui/virtual-sidebar-list'
 import { LocalProjectBadge } from '@/components/agent/LocalProjectBadge'
 import { MoveSessionDialog } from '@/components/agent/MoveSessionDialog'
 import {
@@ -801,6 +802,9 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   const store = useStore()
   const sidebarRootRef = React.useRef<HTMLDivElement>(null)
   const quickSwitchTargetsRef = React.useRef<QuickSwitchTarget[]>([])
+  // 快捷切换只会标注前 9 行；保留它们避免滚动时全量清理/重写所有列表行。
+  const quickSwitchHintRowsRef = React.useRef<HTMLElement[]>([])
+  const quickSwitchRefreshFrameRef = React.useRef<number | null>(null)
   const quickSwitchHintTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const processedQuickSwitchEventsRef = React.useRef<WeakSet<KeyboardEvent>>(new WeakSet())
   const [quickSwitchHintsVisible, setQuickSwitchHintsVisible] = React.useState(false)
@@ -825,14 +829,15 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     return () => window.clearInterval(id)
   }, [])
 
-  // 当 activeTabId 变化时，自动滚动侧边栏使选中项可见
+  // Chat 列表改由 virtualizer 按 index 定位；普通 Agent 项目列表当前仍是树状 DOM，
+  // 保留既有的原生定位行为，避免打开后台 Agent 会话后选中项不可见。
   React.useEffect(() => {
-    if (!activeTabId) return
+    if (!activeTabId || mode !== 'agent' || viewMode !== 'active') return
     requestAnimationFrame(() => {
-      const el = document.querySelector('.agent-session-item-active, .session-item-selected')
+      const el = document.querySelector('.agent-session-item-active')
       el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
     })
-  }, [activeTabId])
+  }, [activeTabId, mode, viewMode])
 
   // per-conversation/session Map atoms（删除时清理）
   const setConvModels = useSetAtom(conversationModelsAtom)
@@ -1702,23 +1707,29 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     })
   }, [openSession, setActiveView, setUnviewedCompleted])
 
-  const refreshQuickSwitchTargets = React.useCallback((): QuickSwitchTarget[] => {
-    const root = sidebarRootRef.current
-    if (!root) {
-      quickSwitchTargetsRef.current = []
-      return []
-    }
-
-    const rows = Array.from(root.querySelectorAll<HTMLElement>('.session-quick-switch-row'))
-    for (const row of rows) {
+  const clearQuickSwitchHints = React.useCallback((): void => {
+    for (const row of quickSwitchHintRowsRef.current) {
       delete row.dataset.quickSwitchLabel
       delete row.dataset.quickSwitchIndex
       row.querySelector<HTMLElement>('.session-quick-switch-modifier')?.replaceChildren()
       row.querySelector<HTMLElement>('.session-quick-switch-number')?.replaceChildren()
     }
+    quickSwitchHintRowsRef.current = []
+    quickSwitchTargetsRef.current = []
+  }, [])
 
+  const refreshQuickSwitchTargets = React.useCallback((): QuickSwitchTarget[] => {
+    const root = sidebarRootRef.current
+    if (!root) {
+      clearQuickSwitchHints()
+      return []
+    }
+
+    // 先完成所有布局读取，再只写入上次/本次涉及的最多 9 行，避免 write→read
+    // 交错造成的 forced reflow。
+    const rows = Array.from(root.querySelectorAll<HTMLElement>('.session-quick-switch-row'))
+    const selectedRows: HTMLElement[] = []
     const targets: QuickSwitchTarget[] = []
-    const modifierLabel = getPrimaryModifierLabel(isMac)
     for (const row of rows) {
       if (targets.length >= SESSION_QUICK_SWITCH_LIMIT) break
       if (!isQuickSwitchRowVisible(row, root)) continue
@@ -1728,56 +1739,71 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
         !sessionSwitchId
         || !sessionSwitchTitle
         || (sessionSwitchType !== 'chat' && sessionSwitchType !== 'agent')
-      ) {
-        continue
-      }
+      ) continue
 
-      const index = targets.length + 1
-      row.dataset.quickSwitchIndex = String(index)
-      row.dataset.quickSwitchLabel = `${modifierLabel}${index}`
+      selectedRows.push(row)
+      targets.push({ id: sessionSwitchId, title: sessionSwitchTitle, type: sessionSwitchType })
+    }
+
+    const modifierLabel = getPrimaryModifierLabel(isMac)
+    const nextRows = new Set(selectedRows)
+    for (const row of quickSwitchHintRowsRef.current) {
+      if (nextRows.has(row)) continue
+      delete row.dataset.quickSwitchLabel
+      delete row.dataset.quickSwitchIndex
+      row.querySelector<HTMLElement>('.session-quick-switch-modifier')?.replaceChildren()
+      row.querySelector<HTMLElement>('.session-quick-switch-number')?.replaceChildren()
+    }
+    selectedRows.forEach((row, index) => {
+      const position = String(index + 1)
+      if (row.dataset.quickSwitchIndex === position) return
+      row.dataset.quickSwitchIndex = position
+      row.dataset.quickSwitchLabel = `${modifierLabel}${position}`
       const modifier = row.querySelector<HTMLElement>('.session-quick-switch-modifier')
       const number = row.querySelector<HTMLElement>('.session-quick-switch-number')
       if (modifier) modifier.textContent = modifierLabel
-      if (number) number.textContent = String(index)
-      targets.push({
-        id: sessionSwitchId,
-        title: sessionSwitchTitle,
-        type: sessionSwitchType,
-      })
-    }
+      if (number) number.textContent = position
+    })
 
+    quickSwitchHintRowsRef.current = selectedRows
     quickSwitchTargetsRef.current = targets
     return targets
-  }, [isMac])
+  }, [clearQuickSwitchHints, isMac])
 
   React.useEffect(() => {
     const root = sidebarRootRef.current
     if (!root) return
 
     if (!quickSwitchHintsVisible) {
-      const rows = Array.from(root.querySelectorAll<HTMLElement>('.session-quick-switch-row'))
-      for (const row of rows) {
-        delete row.dataset.quickSwitchLabel
-        delete row.dataset.quickSwitchIndex
-        row.querySelector<HTMLElement>('.session-quick-switch-modifier')?.replaceChildren()
-        row.querySelector<HTMLElement>('.session-quick-switch-number')?.replaceChildren()
+      if (quickSwitchRefreshFrameRef.current !== null) {
+        cancelAnimationFrame(quickSwitchRefreshFrameRef.current)
+        quickSwitchRefreshFrameRef.current = null
       }
-      quickSwitchTargetsRef.current = []
+      clearQuickSwitchHints()
       return
     }
 
     const refresh = (): void => {
-      refreshQuickSwitchTargets()
+      if (quickSwitchRefreshFrameRef.current !== null) return
+      quickSwitchRefreshFrameRef.current = requestAnimationFrame(() => {
+        quickSwitchRefreshFrameRef.current = null
+        refreshQuickSwitchTargets()
+      })
     }
     refresh()
     root.addEventListener('scroll', refresh, true)
     window.addEventListener('resize', refresh)
     return () => {
+      if (quickSwitchRefreshFrameRef.current !== null) {
+        cancelAnimationFrame(quickSwitchRefreshFrameRef.current)
+        quickSwitchRefreshFrameRef.current = null
+      }
       root.removeEventListener('scroll', refresh, true)
       window.removeEventListener('resize', refresh)
     }
   }, [
     quickSwitchHintsVisible,
+    clearQuickSwitchHints,
     refreshQuickSwitchTargets,
     sidebarCollapsed,
     mode,
@@ -2448,6 +2474,212 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     />
   )
 
+  // Chat 历史展平为固定行：日期标题、置顶标题和每个会话各占一行，供虚拟列表
+  // 按需挂载。不要把整个日期组作为一行，否则大量会话仍会同时留在 DOM。
+  const chatActiveVirtualRows = React.useMemo<VirtualSidebarRow[]>(() => {
+    const rows: VirtualSidebarRow[] = []
+    if (pinnedConversations.length > 0) {
+      rows.push({
+        id: 'chat-pinned-heading',
+        estimateSize: 30,
+        content: <div className="pl-[18px] pr-3.5 pt-2 pb-1 text-[13px] font-medium leading-[18px] text-foreground/40 select-none">置顶</div>,
+      })
+      for (const conv of pinnedConversations) {
+        rows.push({
+          id: `chat-pinned-${conv.id}`,
+          estimateSize: 34,
+          content: (
+            <div className="px-2">
+              <div className="ml-4">
+                <ConversationItem
+                  conversation={conv}
+                  active={conv.id === activeSessionId}
+                  streaming={streamingIds.has(conv.id)}
+                  showPinIcon={false}
+                  relativeTimeNow={relativeTimeNow}
+                  onSelect={handleSelectConversation}
+                  onRequestDelete={handleRequestDelete}
+                  onRename={handleRename}
+                  onTogglePin={handleTogglePin}
+                  onToggleArchive={handleToggleArchive}
+                />
+              </div>
+            </div>
+          ),
+        })
+      }
+    }
+
+    rows.push({
+      id: 'chat-history-heading',
+      estimateSize: 34,
+      content: (
+        <div className="group/chat-section relative flex items-center px-2 pt-2 pb-1">
+          <span className="ml-[4px] px-1.5 text-[13px] font-medium leading-[18px] text-foreground/40 select-none">对话</span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label="新建对话"
+                onClick={() => { void createChat() }}
+                className="absolute right-2 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-foreground/30 transition-colors hover:bg-foreground/[0.055] hover:text-foreground/65 titlebar-no-drag"
+              >
+                <Plus size={13} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {`新建对话${newChatShortcutLabel ? ` (${newChatShortcutLabel})` : ''}`}
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      ),
+    })
+
+    for (const group of conversationGroups) {
+      rows.push({
+        id: `chat-date-${group.label}`,
+        estimateSize: 30,
+        content: <div className="ml-[4px] px-3.5 pt-2 pb-1 text-[13px] font-medium leading-[18px] text-foreground/40 select-none">{group.label}</div>,
+      })
+      for (const conv of group.items) {
+        rows.push({
+          id: `chat-${conv.id}`,
+          estimateSize: 34,
+          content: (
+            <div className="px-2">
+              <ConversationItem
+                conversation={conv}
+                active={conv.id === activeSessionId}
+                streaming={streamingIds.has(conv.id)}
+                showPinIcon={!!conv.pinned}
+                relativeTimeNow={relativeTimeNow}
+                onSelect={handleSelectConversation}
+                onRequestDelete={handleRequestDelete}
+                onRename={handleRename}
+                onTogglePin={handleTogglePin}
+                onToggleArchive={handleToggleArchive}
+              />
+            </div>
+          ),
+        })
+      }
+    }
+    return rows
+  }, [activeSessionId, conversationGroups, createChat, handleRename, handleRequestDelete, handleSelectConversation, handleToggleArchive, handleTogglePin, newChatShortcutLabel, pinnedConversations, relativeTimeNow, streamingIds])
+
+  const chatArchivedVirtualRows = React.useMemo<VirtualSidebarRow[]>(() => {
+    const rows: VirtualSidebarRow[] = []
+    for (const group of conversationGroups) {
+      rows.push({
+        id: `chat-archived-date-${group.label}`,
+        estimateSize: 30,
+        content: <div className="px-3 pt-2 pb-1 text-[13px] font-medium leading-[18px] text-foreground/40 select-none">{group.label}</div>,
+      })
+      for (const conv of group.items) {
+        rows.push({
+          id: `chat-archived-${conv.id}`,
+          estimateSize: 34,
+          content: (
+            <div className="px-3">
+              <ConversationItem
+                conversation={conv}
+                active={conv.id === activeSessionId}
+                streaming={streamingIds.has(conv.id)}
+                showPinIcon={!!conv.pinned}
+                relativeTimeNow={relativeTimeNow}
+                onSelect={handleSelectConversation}
+                onRequestDelete={handleRequestDelete}
+                onRename={handleRename}
+                onTogglePin={handleTogglePin}
+                onToggleArchive={handleToggleArchive}
+              />
+            </div>
+          ),
+        })
+      }
+    }
+    return rows
+  }, [activeSessionId, conversationGroups, handleRename, handleRequestDelete, handleSelectConversation, handleToggleArchive, handleTogglePin, relativeTimeNow, streamingIds])
+
+  const agentArchivedVirtualRows = React.useMemo<VirtualSidebarRow[]>(() => {
+    const rows: VirtualSidebarRow[] = []
+    for (const group of archivedAgentSessionTrees) {
+      rows.push({
+        id: `agent-archived-date-${group.label}`,
+        estimateSize: 30,
+        content: <div className="px-3 pt-2 pb-1 text-[13px] font-medium leading-[18px] text-foreground/40 select-none">{group.label}</div>,
+      })
+      for (const item of group.items) {
+        const childCount = item.childSessions.length
+        const rowStatus = getSessionTreeStatus(item, agentIndicatorMap)
+        const treeActive = treeContainsSessionId(item, activeSessionId)
+        const activeChildVisible = item.childSessions.some((child) => child.id === activeSessionId)
+        const expandedChildren = expandedDelegationParentIds.has(item.session.id)
+          || (activeChildVisible && !collapsedDelegationParentIds.has(item.session.id))
+        rows.push({
+          id: `agent-archived-${item.session.id}`,
+          estimateSize: 34,
+          content: (
+            <div className="px-3">
+              <AgentSessionItem
+                session={item.session}
+                active={treeActive}
+                indicatorStatus={rowStatus}
+                showPinIcon={!!item.session.pinned}
+                disableMiniMap={!sessionHoverPreviewEnabled}
+                delegationSummary={childCount > 0
+                  ? {
+                    total: childCount,
+                    completed: countCompletedDelegatedChildren(item.childSessions),
+                    expanded: expandedChildren,
+                    onToggle: () => handleToggleDelegationParent(item.session.id, expandedChildren),
+                  }
+                  : undefined}
+                leftAccent={getSessionLeftAccent(rowStatus)}
+                workspaceName={item.session.workspaceId ? workspaceNameMap.get(item.session.workspaceId) : undefined}
+                relativeTimeNow={relativeTimeNow}
+                onSelect={handleSelectAgentSession}
+                onRequestDelete={handleRequestDelete}
+                onRequestMove={handleRequestMove}
+                onRename={handleAgentRename}
+                onTogglePin={handleTogglePinAgent}
+                onToggleStar={handleToggleStarAgent}
+                onToggleArchive={handleToggleArchiveAgent}
+              />
+            </div>
+          ),
+        })
+        if (expandedChildren) {
+          for (const childSession of item.childSessions) {
+            rows.push({
+              id: `agent-archived-child-${childSession.id}`,
+              estimateSize: 34,
+              content: (
+                <div className="ml-6 border-l border-foreground/10 pl-2 pr-3">
+                  <DelegatedChildSessionItem
+                    session={childSession}
+                    activeSessionId={activeSessionId}
+                    agentIndicatorMap={agentIndicatorMap}
+                    relativeTimeNow={relativeTimeNow}
+                    workspaceName={childSession.workspaceId ? workspaceNameMap.get(childSession.workspaceId) : undefined}
+                    onSelect={handleSelectAgentSession}
+                    onRequestDelete={handleRequestDelete}
+                    onRequestMove={handleRequestMove}
+                    onRename={handleAgentRename}
+                    onTogglePin={handleTogglePinAgent}
+                    onToggleStar={handleToggleStarAgent}
+                    onToggleArchive={handleToggleArchiveAgent}
+                  />
+                </div>
+              ),
+            })
+          }
+        }
+      }
+    }
+    return rows
+  }, [activeSessionId, agentIndicatorMap, archivedAgentSessionTrees, collapsedDelegationParentIds, expandedDelegationParentIds, handleAgentRename, handleRequestDelete, handleRequestMove, handleSelectAgentSession, handleToggleArchiveAgent, handleToggleDelegationParent, handleTogglePinAgent, handleToggleStarAgent, relativeTimeNow, sessionHoverPreviewEnabled, workspaceNameMap])
+
   // ===== 折叠状态：精简图标视图 =====
   if (sidebarCollapsed) {
     return (
@@ -2793,82 +3025,12 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
 
       {/* Chat 模式 active 视图：置顶 + 对话历史，结构与 Agent active 视图保持一致 */}
       {mode === 'chat' && viewMode === 'active' ? (
-        <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin titlebar-no-drag">
-          {pinnedConversations.length > 0 && (
-            <div className="pt-2 pb-1 flex-shrink-0 titlebar-no-drag">
-              <div className="pl-[18px] pr-3.5 pb-1 text-[13px] font-medium leading-[18px] text-foreground/40 select-none">
-                置顶
-              </div>
-              <div>
-                <div className="px-2">
-                  <div className="ml-4 flex flex-col gap-0.5">
-                    {pinnedConversations.map((conv) => (
-                      <ConversationItem
-                        key={`pinned-${conv.id}`}
-                        conversation={conv}
-                        active={conv.id === activeSessionId}
-                        streaming={streamingIds.has(conv.id)}
-                        showPinIcon={false}
-                        relativeTimeNow={relativeTimeNow}
-                        onSelect={handleSelectConversation}
-                        onRequestDelete={handleRequestDelete}
-                        onRename={handleRename}
-                        onTogglePin={handleTogglePin}
-                        onToggleArchive={handleToggleArchive}
-                      />
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="group/chat-section relative flex items-center px-2 pt-2 pb-1 flex-shrink-0">
-            <span className="ml-[4px] px-1.5 text-[13px] font-medium leading-[18px] text-foreground/40 select-none">对话</span>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  aria-label="新建对话"
-                  onClick={() => { void createChat() }}
-                  className="absolute right-2 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-foreground/30 transition-colors hover:bg-foreground/[0.055] hover:text-foreground/65 titlebar-no-drag"
-                >
-                  <Plus size={13} />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                {`新建对话${newChatShortcutLabel ? ` (${newChatShortcutLabel})` : ''}`}
-              </TooltipContent>
-            </Tooltip>
-          </div>
-
-          <div className="px-2 pb-3">
-            {conversationGroups.map((group) => (
-              <div key={group.label} className="mb-1">
-                <div className="ml-[4px] px-1.5 pt-2 pb-1 text-[13px] font-medium leading-[18px] text-foreground/40 select-none">
-                  {group.label}
-                </div>
-                <div className="flex flex-col gap-0.5">
-                  {group.items.map((conv) => (
-                    <ConversationItem
-                      key={conv.id}
-                      conversation={conv}
-                      active={conv.id === activeSessionId}
-                      streaming={streamingIds.has(conv.id)}
-                      showPinIcon={!!conv.pinned}
-                      relativeTimeNow={relativeTimeNow}
-                      onSelect={handleSelectConversation}
-                      onRequestDelete={handleRequestDelete}
-                      onRename={handleRename}
-                      onTogglePin={handleTogglePin}
-                      onToggleArchive={handleToggleArchive}
-                    />
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+        <VirtualSidebarList
+          key="chat-active-list"
+          className="flex-1"
+          rows={chatActiveVirtualRows}
+          activeRowId={activeSessionId ? `chat-${activeSessionId}` : null}
+        />
       ) : mode === 'agent' && viewMode === 'active' ? (
         <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin titlebar-no-drag">
           {pinnedAgentSessions.length > 0 && (
@@ -3063,106 +3225,21 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
           )}
 
           {/* 归档视图：单列表布局 */}
-          <div className="flex-1 overflow-y-auto px-3 pt-2 pb-3 scrollbar-thin titlebar-no-drag">
-            {mode === 'chat' ? (
-              /* Chat 归档：对话按日期分组 */
-              conversationGroups.map((group) => (
-                <div key={group.label} className="mb-1">
-                  <div className="px-3 pt-2 pb-1 text-[13px] font-medium leading-[18px] text-foreground/40 select-none">
-                    {group.label}
-                  </div>
-                  <div className="flex flex-col gap-0.5">
-                    {group.items.map((conv) => (
-                      <ConversationItem
-                        key={conv.id}
-                        conversation={conv}
-                        active={conv.id === activeSessionId}
-                        streaming={streamingIds.has(conv.id)}
-                        showPinIcon={!!conv.pinned}
-                        relativeTimeNow={relativeTimeNow}
-                        onSelect={handleSelectConversation}
-                        onRequestDelete={handleRequestDelete}
-                        onRename={handleRename}
-                        onTogglePin={handleTogglePin}
-                        onToggleArchive={handleToggleArchive}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ))
-            ) : (
-              /* Agent 模式归档：Agent 会话按日期分组，含委派树 */
-              archivedAgentSessionTrees.map((group) => (
-                <div key={group.label} className="mb-1">
-                  <div className="px-3 pt-2 pb-1 text-[13px] font-medium leading-[18px] text-foreground/40 select-none">
-                    {group.label}
-                  </div>
-                  <div className="flex flex-col gap-0.5">
-                    {group.items.map((item) => {
-                      const childCount = item.childSessions.length
-                      const rowStatus = getSessionTreeStatus(item, agentIndicatorMap)
-                      const treeActive = treeContainsSessionId(item, activeSessionId)
-                      const activeChildVisible = item.childSessions.some((child) => child.id === activeSessionId)
-                      const expandedChildren = expandedDelegationParentIds.has(item.session.id)
-                        || (activeChildVisible && !collapsedDelegationParentIds.has(item.session.id))
-
-                      return (
-                        <div key={item.session.id} className="flex flex-col gap-0.5">
-                          <AgentSessionItem
-                            session={item.session}
-                            active={treeActive}
-                            indicatorStatus={rowStatus}
-                            showPinIcon={!!item.session.pinned}
-                            disableMiniMap={!sessionHoverPreviewEnabled}
-                            delegationSummary={childCount > 0
-                              ? {
-                                total: childCount,
-                                completed: countCompletedDelegatedChildren(item.childSessions),
-                                expanded: expandedChildren,
-                                onToggle: () => handleToggleDelegationParent(item.session.id, expandedChildren),
-                              }
-                              : undefined}
-                            leftAccent={getSessionLeftAccent(rowStatus)}
-                            workspaceName={item.session.workspaceId ? workspaceNameMap.get(item.session.workspaceId) : undefined}
-                            relativeTimeNow={relativeTimeNow}
-                            onSelect={handleSelectAgentSession}
-                            onRequestDelete={handleRequestDelete}
-                            onRequestMove={handleRequestMove}
-                            onRename={handleAgentRename}
-                            onTogglePin={handleTogglePinAgent}
-                            onToggleStar={handleToggleStarAgent}
-                            onToggleArchive={handleToggleArchiveAgent}
-                          />
-
-                          {childCount > 0 && expandedChildren && (
-                            <div className="ml-3 border-l border-foreground/10 pl-2 flex flex-col gap-0.5">
-                              {item.childSessions.map((childSession) => (
-                                <DelegatedChildSessionItem
-                                  key={childSession.id}
-                                  session={childSession}
-                                  activeSessionId={activeSessionId}
-                                  agentIndicatorMap={agentIndicatorMap}
-                                  relativeTimeNow={relativeTimeNow}
-                                  workspaceName={childSession.workspaceId ? workspaceNameMap.get(childSession.workspaceId) : undefined}
-                                  onSelect={handleSelectAgentSession}
-                                  onRequestDelete={handleRequestDelete}
-                                  onRequestMove={handleRequestMove}
-                                  onRename={handleAgentRename}
-                                  onTogglePin={handleTogglePinAgent}
-                                  onToggleStar={handleToggleStarAgent}
-                                  onToggleArchive={handleToggleArchiveAgent}
-                                />
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+          {mode === 'chat' ? (
+            <VirtualSidebarList
+              key="chat-archived-list"
+              className="flex-1 px-3 pt-2 pb-3"
+              rows={chatArchivedVirtualRows}
+              activeRowId={activeSessionId ? `chat-archived-${activeSessionId}` : null}
+            />
+          ) : (
+            <VirtualSidebarList
+              key="agent-archived-list"
+              className="flex-1 px-3 pt-2 pb-3"
+              rows={agentArchivedVirtualRows}
+              activeRowId={activeSessionId ? `agent-archived-${activeSessionId}` : null}
+            />
+          )}
         </>
       )}
 
