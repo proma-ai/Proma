@@ -79,9 +79,10 @@ function getWeekdayPreset(days?: number[]): 'everyday' | 'weekdays' | 'weekends'
   return 'custom'
 }
 
-function getWeekdaysFromPreset(value: string): number[] {
+function getWeekdaysFromPreset(value: string, current?: number[]): number[] {
   if (value === 'weekdays') return [1, 2, 3, 4, 5]
   if (value === 'weekends') return [0, 6]
+  if (value === 'custom') return current && current.length > 0 ? current : [1]
   return []
 }
 
@@ -825,7 +826,7 @@ export function AutomationFormView({ standalone = false }: { standalone?: boolea
                 <Label>运行日</Label>
                 <Select
                   value={getWeekdayPreset(form.activeWeekdays)}
-                  onValueChange={(value) => update({ activeWeekdays: getWeekdaysFromPreset(value) })}
+                  onValueChange={(value) => update({ activeWeekdays: getWeekdaysFromPreset(value, form.activeWeekdays) })}
                 >
                   <SelectTrigger className="h-9 w-[150px]"><SelectValue /></SelectTrigger>
                   <SelectContent>

@@ -51,7 +51,9 @@ function formatSchedule(a: Automation): string {
   if (min < 60) label = `每 ${min} 分钟`
   else if (min < 1440) label = `每 ${min / 60} 小时`
   else label = `每 ${min / 1440} 天`
-  if (a.activeWindowStart && a.activeWindowEnd) label += ` · ${formatWeekdays(a.activeWeekdays)} ${a.activeWindowStart}–${a.activeWindowEnd}`
+  const weekdayLabel = a.activeWeekdays && a.activeWeekdays.length > 0 ? ` · ${formatWeekdays(a.activeWeekdays)}` : ''
+  const windowLabel = a.activeWindowStart && a.activeWindowEnd ? ` · ${a.activeWindowStart}–${a.activeWindowEnd}` : ''
+  if (weekdayLabel || windowLabel) label += `${weekdayLabel}${windowLabel}`
   // 叠加了运行次数上限时在末尾标注，让列表能看出"跑 N 次就停"
   return a.maxRuns !== undefined ? `${label}·限 ${a.maxRuns} 次` : label
 }

@@ -93,9 +93,25 @@ function* iterateOccurrences(
       return next
     }
     let ts = nextRunAt
-    if (!hasWindow && ts < rangeStart) {
-      const skip = Math.floor((rangeStart - ts) / step)
-      ts += skip * step
+    if (ts < rangeStart) {
+      if (hasWindow) {
+        // 每日窗口的锚点与历史 nextRunAt 无关；从可视范围当天的第一个可能窗口开始，避免逐分钟追赶历史。
+        const first = new Date(rangeStart)
+        first.setHours(windowStartMinutes! / 60, windowStartMinutes! % 60, 0, 0)
+        const candidate = isAllowedDay(first) ? first : nextAllowedDay(first)
+        candidate.setHours(windowStartMinutes! / 60, windowStartMinutes! % 60, 0, 0)
+        ts = candidate.getTime()
+      } else if (weekdays.length > 0) {
+        // 保留 interval 锚点的时分秒，避免把周末跳过后错误地从可视范围 00:00 开始展开。
+        const anchor = new Date(nextRunAt)
+        const first = new Date(rangeStart)
+        first.setHours(anchor.getHours(), anchor.getMinutes(), anchor.getSeconds(), anchor.getMilliseconds())
+        const candidate = first.getTime() < rangeStart ? nextAllowedDay(new Date(first.getTime() + 86400000)) : first
+        ts = isAllowedDay(candidate) ? candidate.getTime() : nextAllowedDay(candidate).getTime()
+      } else {
+        const skip = Math.floor((rangeStart - ts) / step)
+        ts += skip * step
+      }
     }
     while (ts <= rangeEnd && produced < remaining && iterations < MAX_ITERATIONS) {
       iterations++

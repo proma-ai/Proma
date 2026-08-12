@@ -393,6 +393,9 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
         if ((input.activeWindowStart === undefined) !== (input.activeWindowEnd === undefined)) {
           throw new Error('activeWindowStart 与 activeWindowEnd 必须同时设置')
         }
+        if (input.activeWeekdays && input.activeWeekdays.length > 0 && input.scheduleType !== 'interval') {
+          throw new Error('周内运行日限制仅支持 interval')
+        }
         if (input.activeWindowStart && input.activeWindowEnd) {
           if (input.scheduleType !== 'interval' || input.activeWindowStart >= input.activeWindowEnd) {
             throw new Error('每日执行窗口仅支持 interval，且开始时间必须早于结束时间')
@@ -481,6 +484,12 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
         const effectiveScheduleType = input.scheduleType ?? existing?.scheduleType
         if ((activeWindowStart === undefined) !== (activeWindowEnd === undefined)) {
           throw new Error('activeWindowStart 与 activeWindowEnd 必须同时设置或同时清除')
+        }
+        const effectiveWeekdays = input.activeWeekdays !== undefined
+          ? input.activeWeekdays ?? undefined
+          : existing?.activeWeekdays
+        if (effectiveWeekdays && effectiveWeekdays.length > 0 && effectiveScheduleType !== 'interval') {
+          throw new Error('周内运行日限制仅支持 interval')
         }
         if (activeWindowStart && activeWindowEnd && (effectiveScheduleType !== 'interval' || activeWindowStart >= activeWindowEnd)) {
           throw new Error('每日执行窗口仅支持 interval，且开始时间必须早于结束时间')
