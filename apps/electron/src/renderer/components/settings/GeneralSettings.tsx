@@ -78,6 +78,9 @@ export function GeneralSettings(): React.ReactElement {
   /** Git/PR 推广标识：默认开启 */
   const [gitAttributionEnabled, setGitAttributionEnabled] = React.useState(true)
   const [agentIslandEnabled, setAgentIslandEnabled] = React.useState(true)
+  const [idleModeEnabled, setIdleModeEnabled] = React.useState(false)
+  /** 挂机模式开关请求在途标记：防止快速连点导致 IPC 乱序、物理熄屏状态与 UI 相反 */
+  const [idleModePending, setIdleModePending] = React.useState(false)
   const isMac = React.useMemo(() => detectIsMac(), [])
   const fileInputRef = React.useRef<HTMLInputElement>(null)
 
@@ -87,6 +90,7 @@ export function GeneralSettings(): React.ReactElement {
       setArchiveAfterDays(settings.archiveAfterDays ?? 7)
       setGitAttributionEnabled(settings.gitAttributionEnabled ?? true)
       setAgentIslandEnabled(settings.agentIsland?.enabled ?? true)
+      setIdleModeEnabled(settings.idleMode?.enabled ?? false)
     }).catch(console.error)
   }, [])
 
@@ -109,6 +113,21 @@ export function GeneralSettings(): React.ReactElement {
     } catch (error) {
       console.error('[通用设置] 更新 Agent 灵动岛失败:', error)
       setAgentIslandEnabled(!checked)
+    }
+  }
+
+  /** 更新挂机模式开关（立即息屏 + 防休眠），串行化防连点乱序 */
+  const handleIdleModeChange = async (checked: boolean): Promise<void> => {
+    if (idleModePending) return
+    setIdleModePending(true)
+    setIdleModeEnabled(checked)
+    try {
+      await window.electronAPI.updateSettings({ idleMode: { enabled: checked } })
+    } catch (error) {
+      console.error('[通用设置] 更新挂机模式失败:', error)
+      setIdleModeEnabled(!checked)
+    } finally {
+      setIdleModePending(false)
     }
   }
 
@@ -404,6 +423,15 @@ export function GeneralSettings(): React.ReactElement {
               }}
             />
           )}
+          <SettingsToggle
+            label="挂机模式（息屏 + 防休眠）"
+            description="开启后立即熄灭显示器并阻止系统休眠，适合挂机跑任务；移动鼠标或按任意键可唤醒屏幕，关闭开关或退出应用后自动恢复"
+            checked={idleModeEnabled}
+            disabled={idleModePending}
+            onCheckedChange={(checked) => {
+              void handleIdleModeChange(checked)
+            }}
+          />
           <SettingsToggle
             label="Git/PR 标识"
             description="Agent 代你提交 commit 或创建 PR 时，附加 Made-with: Proma 与官网链接，便于推广；可随时关闭"

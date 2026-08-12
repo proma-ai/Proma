@@ -376,6 +376,7 @@ import {
 } from './lib/feishu-config'
 import { feishuBridgeManager } from './lib/feishu-bridge-manager'
 import { syncFeishuSyncSleepBlocker } from './lib/feishu-sleep-blocker'
+import { syncIdleMode } from './lib/idle-mode-electron'
 import { presenceService } from './lib/feishu-presence'
 import { getDingTalkConfig, saveDingTalkConfig, getDecryptedClientSecret, getDingTalkMultiBotConfig, saveDingTalkBotConfig, removeDingTalkBot, getDecryptedBotClientSecret } from './lib/dingtalk-config'
 import { listShallowDirectory } from './lib/directory-listing'
@@ -1758,6 +1759,9 @@ export function registerIpcHandlers(): void {
       if (updates.feishuSessionMirror !== undefined) {
         syncFeishuSyncSleepBlocker(result)
       }
+      if (updates.idleMode !== undefined) {
+        syncIdleMode(result)
+      }
       if (updates.agentIsland !== undefined) {
         refreshAgentIslandConfiguration()
       }
@@ -1789,6 +1793,9 @@ export function registerIpcHandlers(): void {
         const result = updateSettings(updates)
         if (updates.feishuSessionMirror !== undefined) {
           syncFeishuSyncSleepBlocker(result)
+        }
+        if (updates.idleMode !== undefined) {
+          syncIdleMode(result)
         }
         if (updates.agentIsland !== undefined) {
           refreshAgentIslandConfiguration()

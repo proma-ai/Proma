@@ -8,9 +8,15 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { getSettingsPath } from './config-paths'
 import { DEFAULT_INTERFACE_VARIANT, DEFAULT_THEME_MODE } from '../../types'
-import type { AgentIslandSettings, AppSettings } from '../../types'
+import type { AgentIslandSettings, AppSettings, IdleModeSettings } from '../../types'
 
 function sanitizeAgentIslandSettings(input: unknown): AgentIslandSettings | undefined {
+  if (!input || typeof input !== 'object') return undefined
+  const raw = input as { enabled?: unknown }
+  return typeof raw.enabled === 'boolean' ? { enabled: raw.enabled } : undefined
+}
+
+function sanitizeIdleModeSettings(input: unknown): IdleModeSettings | undefined {
   if (!input || typeof input !== 'object') return undefined
   const raw = input as { enabled?: unknown }
   return typeof raw.enabled === 'boolean' ? { enabled: raw.enabled } : undefined
@@ -34,6 +40,7 @@ export function getSettings(): AppSettings {
       longTextPasteAsAttachmentEnabled: false,
       richTextRenderingEnabled: false,
       feishuSessionMirror: { mode: 'off' },
+      idleMode: { enabled: false },
       visionRelay: { enabled: false },
       builtinMcpDisabledIds: [],
       windowsShellPreference: 'auto',
@@ -66,6 +73,7 @@ export function getSettings(): AppSettings {
       longTextPasteAsAttachmentEnabled: data.longTextPasteAsAttachmentEnabled ?? false,
       richTextRenderingEnabled: data.richTextRenderingEnabled ?? false,
       feishuSessionMirror: data.feishuSessionMirror ?? { mode: 'off' },
+      idleMode: sanitizeIdleModeSettings(data.idleMode) ?? { enabled: false },
       visionRelay: data.visionRelay ?? { enabled: false },
       builtinMcpDisabledIds: settings.builtinMcpDisabledIds ?? [],
       windowsShellPreference: settings.windowsShellPreference ?? 'auto',
@@ -86,6 +94,7 @@ export function getSettings(): AppSettings {
       longTextPasteAsAttachmentEnabled: false,
       richTextRenderingEnabled: false,
       feishuSessionMirror: { mode: 'off' },
+      idleMode: { enabled: false },
       visionRelay: { enabled: false },
       builtinMcpDisabledIds: [],
       windowsShellPreference: 'auto',

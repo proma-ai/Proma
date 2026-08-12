@@ -260,6 +260,12 @@ export interface AgentIslandSettings {
   enabled?: boolean
 }
 
+/** 挂机模式（息屏 + 防休眠）设置。 */
+export interface IdleModeSettings {
+  /** 是否启用：立即熄灭显示器并阻止系统休眠，适合挂机跑任务。默认 false。 */
+  enabled?: boolean
+}
+
 /**
  * 给无视觉输入能力的 Agent 使用的独立视觉模型路由。
  * 仅保存用户已有渠道和模型的 ID，凭据继续由渠道加密存储管理。
@@ -343,6 +349,8 @@ export interface AppSettings {
   voiceDictation?: VoiceDictationPersistedSettings
   /** 飞书 Session 镜像设置：每个 Proma Session 可创建一个仅包含用户与指定 Bot 的飞书群 */
   feishuSessionMirror?: FeishuSessionMirrorSettings
+  /** 挂机模式：立即熄灭显示器并阻止系统休眠，保证挂机任务持续运行 */
+  idleMode?: IdleModeSettings
   /** 无视觉输入能力 Agent 的视觉助手路由 */
   visionRelay?: VisionRelaySettings
   /** 已确认的受管浏览器风险告知版本；低于当前版本时首次使用会再次要求确认。 */
