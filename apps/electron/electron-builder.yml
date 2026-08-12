@@ -153,5 +153,5 @@ nsis:
 # ============================================
 publish:
   provider: github
-  owner: ErlichLiu
+  owner: proma-ai
   repo: Proma

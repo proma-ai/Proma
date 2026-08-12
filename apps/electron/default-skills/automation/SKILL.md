@@ -128,8 +128,8 @@ Proma 已提供内置 `automation` MCP 工具。你必须通过这些工具操�
 
 一个 monthly 月度报告任务的 prompt 范本（创建任务时按这个结构写，跨运行记忆段落直接照搬）：
 
-    目标：汇总本月 ErlichLiu/Proma 仓库合入的 PR，按类别归类并标注影响。
-    范围：读取 ErlichLiu/Proma 的 closed PR 列表，筛选本月合入的。
+    目标：汇总本月 proma-ai/Proma 仓库合入的 PR，按类别归类并标注影响。
+    范围：读取 proma-ai/Proma 的 closed PR 列表，筛选本月合入的。
     判断标准：每个 PR 是否引入破坏性变更、是否影响用户配置、是否需要更新文档。
     输出格式：Markdown 报告，分「重大变更」「新功能」「修复」「文档」四组。
 

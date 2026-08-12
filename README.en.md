@@ -6,7 +6,7 @@ It is not just another chat box. Proma is meant to become a long-lived Agent wor
 
 ![Proma Poster](https://img.erlich.fun/personal-blog/uPic/pb.png)
 
-[中文 README](./README.md) | [Beginner Tutorial](./tutorial/tutorial.md) | [Open-Source Release](https://github.com/ErlichLiu/Proma/releases) | [Commercial Version](https://proma.cool/download)
+[中文 README](./README.md) | [Beginner Tutorial](./tutorial/tutorial.md) | [Open-Source Release](https://github.com/proma-ai/Proma/releases) | [Commercial Version](https://proma.cool/download)
 
 ## What Proma Can Do
 
@@ -24,7 +24,7 @@ It is not just another chat box. Proma is meant to become a long-lived Agent wor
 
 ### Download
 
-Download the open-source version from [GitHub Releases](https://github.com/ErlichLiu/Proma/releases), with builds for macOS Apple Silicon, macOS Intel, and Windows.
+Download the open-source version from [GitHub Releases](https://github.com/proma-ai/Proma/releases), with builds for macOS Apple Silicon, macOS Intel, and Windows.
 
 The open-source version can be used independently with self-configured AI provider channels. If you prefer Proma-provided built-in model channels and subscription options, you can optionally explore the [Proma commercial version](https://proma.cool/download). The two versions support different preferences, and you are free to choose the one that best fits your workflow.
 

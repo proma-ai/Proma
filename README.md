@@ -10,7 +10,7 @@ Proma 是一个本地优先的 AI 桌面应用，把多模型 Chat、通用 Agen
   <source src="https://img.erlich.fun/personal-blog/uPic/%E7%AE%80%E5%8D%95%E4%BB%8B%E7%BB%8D%20Proma.mp4" type="video/mp4">
 </video>
 
-[English README](./README.en.md) | [新手教程](./tutorial/tutorial.md) | [下载开源版](https://github.com/ErlichLiu/Proma/releases) | [下载商业版](https://proma.cool/download)
+[English README](./README.en.md) | [新手教程](./tutorial/tutorial.md) | [下载开源版](https://github.com/proma-ai/Proma/releases) | [下载商业版](https://proma.cool/download)
 
 > **最新思考 ｜ 2026 Q2–Q3**：[勇敢地解决真实的问题 — Proactive · 个人注意力 · 团队协作](./proma-thinking/proma-2026-q2-q3-thinking.md) ｜ 往期思考：[2026 Q1](./proma-thinking/proma-2026-q1-thinking.md)
 
@@ -30,7 +30,7 @@ Proma 是一个本地优先的 AI 桌面应用，把多模型 Chat、通用 Agen
 
 ### 下载安装
 
-从 [GitHub Releases](https://github.com/ErlichLiu/Proma/releases) 下载开源版本，提供 macOS Apple Silicon、macOS Intel 和 Windows 安装包。
+从 [GitHub Releases](https://github.com/proma-ai/Proma/releases) 下载开源版本，提供 macOS Apple Silicon、macOS Intel 和 Windows 安装包。
 
 开源版可独立使用，并支持自行配置 AI 供应商渠道。如果你更希望使用 Proma 提供的内置模型渠道和订阅方案，也可以按需了解 [Proma 商业版](https://proma.cool/download)。两个版本面向不同的使用偏好，你可以自由选择适合自己的版本。
 
