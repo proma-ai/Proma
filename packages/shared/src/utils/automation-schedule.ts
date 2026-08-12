@@ -97,9 +97,9 @@ function* iterateOccurrences(
       if (hasWindow) {
         // 每日窗口的锚点与历史 nextRunAt 无关；从可视范围当天的第一个可能窗口开始，避免逐分钟追赶历史。
         const first = new Date(rangeStart)
-        first.setHours(windowStartMinutes! / 60, windowStartMinutes! % 60, 0, 0)
+        first.setHours(Math.floor(windowStartMinutes! / 60), windowStartMinutes! % 60, 0, 0)
         const candidate = isAllowedDay(first) ? first : nextAllowedDay(first)
-        candidate.setHours(windowStartMinutes! / 60, windowStartMinutes! % 60, 0, 0)
+        candidate.setHours(Math.floor(windowStartMinutes! / 60), windowStartMinutes! % 60, 0, 0)
         ts = candidate.getTime()
       } else if (weekdays.length > 0) {
         // 保留 interval 锚点的时分秒，避免把周末跳过后错误地从可视范围 00:00 开始展开。
