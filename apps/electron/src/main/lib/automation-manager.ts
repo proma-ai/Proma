@@ -351,6 +351,14 @@ function shouldAutoComplete(a: Pick<Automation, 'scheduleType' | 'maxRuns' | 'ru
  * 按调度模式清理不适用字段。
  * 更新接口只需声明目标 scheduleType，避免调用方必须手动清空旧模式字段。
  */
+type AutomationScheduleFields = Omit<
+  Pick<
+    Automation,
+    'scheduleType' | 'intervalMinutes' | 'activeWindowStart' | 'activeWindowEnd' | 'activeWeekdays' | 'timeOfDay' | 'dayOfWeek' | 'dayOfMonth' | 'scheduledAt'
+  >,
+  'intervalMinutes'
+> & { intervalMinutes?: number }
+
 export function normalizeAutomationScheduleFields(
   target: Pick<Automation, 'scheduleType' | 'activeWindowStart' | 'activeWindowEnd' | 'activeWeekdays' | 'timeOfDay' | 'dayOfWeek' | 'dayOfMonth' | 'scheduledAt'>,
 ): void {
@@ -365,6 +373,33 @@ export function normalizeAutomationScheduleFields(
   if (target.scheduleType !== 'weekly') target.dayOfWeek = undefined
   if (target.scheduleType !== 'monthly') target.dayOfMonth = undefined
   if (target.scheduleType !== 'once') target.scheduledAt = undefined
+}
+
+/**
+ * 合并更新输入与已有任务，并按目标 scheduleType 清理旧模式字段后供边界层校验。
+ * 切换模式时，旧模式的字段不能参与新模式的完整性校验；否则归一化尚未执行就会被拒绝。
+ */
+export function getEffectiveAutomationScheduleFields(
+  input: Partial<CreateAutomationInput | UpdateAutomationInput>,
+  existing?: Automation,
+): AutomationScheduleFields {
+  const scheduleType = input.scheduleType ?? existing?.scheduleType ?? 'interval'
+  const useExisting = <K extends keyof AutomationScheduleFields>(field: K): AutomationScheduleFields[K] | undefined =>
+    input[field] !== undefined ? input[field] as AutomationScheduleFields[K] : existing?.[field]
+
+  const effective: AutomationScheduleFields = {
+    scheduleType,
+    intervalMinutes: useExisting('intervalMinutes'),
+    activeWindowStart: useExisting('activeWindowStart') ?? undefined,
+    activeWindowEnd: useExisting('activeWindowEnd') ?? undefined,
+    activeWeekdays: useExisting('activeWeekdays') ?? undefined,
+    timeOfDay: useExisting('timeOfDay') ?? undefined,
+    dayOfWeek: useExisting('dayOfWeek'),
+    dayOfMonth: useExisting('dayOfMonth'),
+    scheduledAt: useExisting('scheduledAt'),
+  }
+  normalizeAutomationScheduleFields(effective)
+  return effective
 }
 
 export function createAutomation(input: CreateAutomationInput): Automation {

@@ -224,6 +224,7 @@ import {
   listAutomations,
   getAutomation,
   createAutomation,
+  getEffectiveAutomationScheduleFields,
   updateAutomation,
   deleteAutomation,
 } from './lib/automation-manager'
@@ -5215,51 +5216,33 @@ export function registerIpcHandlers(): void {
     input: Partial<CreateAutomationInput | UpdateAutomationInput>,
     existing?: Automation,
   ): void => {
-    const scheduleType = input.scheduleType ?? existing?.scheduleType
-    if (scheduleType === 'interval') {
-      const intervalMinutes = input.intervalMinutes ?? existing?.intervalMinutes
-      if (!isFiniteInt(intervalMinutes) || intervalMinutes < 1) throw new Error('scheduleType=interval 时 intervalMinutes 必填')
+    const effective = getEffectiveAutomationScheduleFields(input, existing)
+    if (effective.scheduleType === 'interval') {
+      if (!isFiniteInt(effective.intervalMinutes) || effective.intervalMinutes < 1) throw new Error('scheduleType=interval 时 intervalMinutes 必填')
     }
-    const activeWindowStart = input.activeWindowStart !== undefined
-      ? input.activeWindowStart ?? undefined
-      : existing?.activeWindowStart
-    const activeWindowEnd = input.activeWindowEnd !== undefined
-      ? input.activeWindowEnd ?? undefined
-      : existing?.activeWindowEnd
-    if ((activeWindowStart === undefined) !== (activeWindowEnd === undefined)) {
+    if ((effective.activeWindowStart === undefined) !== (effective.activeWindowEnd === undefined)) {
       throw new Error('activeWindowStart 与 activeWindowEnd 必须同时设置或同时清除')
     }
-    const activeWeekdays = input.activeWeekdays !== undefined
-      ? input.activeWeekdays ?? undefined
-      : existing?.activeWeekdays
-    if (activeWeekdays !== undefined && activeWeekdays.length === 0) {
-      // 空数组明确表示每天，不需要额外约束。
-    } else if (activeWeekdays !== undefined && scheduleType !== 'interval') {
+    if (effective.activeWeekdays !== undefined && effective.activeWeekdays.length > 0 && effective.scheduleType !== 'interval') {
       throw new Error('周内运行日限制仅支持 scheduleType=interval')
     }
-    if (activeWindowStart !== undefined && activeWindowEnd !== undefined) {
-      if (scheduleType !== 'interval') throw new Error('每日执行窗口仅支持 scheduleType=interval')
-      if (!validTimeOfDay(activeWindowStart) || !validTimeOfDay(activeWindowEnd) || activeWindowStart >= activeWindowEnd) {
+    if (effective.activeWindowStart !== undefined && effective.activeWindowEnd !== undefined) {
+      if (effective.scheduleType !== 'interval') throw new Error('每日执行窗口仅支持 scheduleType=interval')
+      if (!validTimeOfDay(effective.activeWindowStart) || !validTimeOfDay(effective.activeWindowEnd) || effective.activeWindowStart >= effective.activeWindowEnd) {
         throw new Error('每日执行窗口必须是同一天内有效的 HH:MM 范围，且开始早于结束')
       }
     }
-    if (scheduleType === 'daily' || scheduleType === 'weekly' || scheduleType === 'monthly') {
-      const timeOfDay = input.timeOfDay ?? existing?.timeOfDay
-      if (!validTimeOfDay(timeOfDay)) throw new Error('scheduleType=daily/weekly/monthly 时 timeOfDay 必填')
+    if (effective.scheduleType === 'daily' || effective.scheduleType === 'weekly' || effective.scheduleType === 'monthly') {
+      if (!validTimeOfDay(effective.timeOfDay)) throw new Error('scheduleType=daily/weekly/monthly 时 timeOfDay 必填')
     }
-    if (scheduleType === 'weekly') {
-      const dayOfWeek = input.dayOfWeek ?? existing?.dayOfWeek
-      if (!isFiniteInt(dayOfWeek)) throw new Error('scheduleType=weekly 时 dayOfWeek 必填')
+    if (effective.scheduleType === 'weekly' && !isFiniteInt(effective.dayOfWeek)) {
+      throw new Error('scheduleType=weekly 时 dayOfWeek 必填')
     }
-    if (scheduleType === 'monthly') {
-      const dayOfMonth = input.dayOfMonth ?? existing?.dayOfMonth
-      if (!isFiniteInt(dayOfMonth)) throw new Error('scheduleType=monthly 时 dayOfMonth 必填')
+    if (effective.scheduleType === 'monthly' && !isFiniteInt(effective.dayOfMonth)) {
+      throw new Error('scheduleType=monthly 时 dayOfMonth 必填')
     }
-    if (scheduleType === 'once') {
-      const scheduledAt = input.scheduledAt ?? existing?.scheduledAt
-      if (typeof scheduledAt !== 'number' || !Number.isFinite(scheduledAt) || scheduledAt <= 0) {
-        throw new Error('scheduleType=once 时 scheduledAt 必填')
-      }
+    if (effective.scheduleType === 'once' && (typeof effective.scheduledAt !== 'number' || !Number.isFinite(effective.scheduledAt) || effective.scheduledAt <= 0)) {
+      throw new Error('scheduleType=once 时 scheduledAt 必填')
     }
   }
 

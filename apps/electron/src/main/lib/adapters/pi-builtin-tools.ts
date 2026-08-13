@@ -19,6 +19,7 @@ import {
   createAutomation,
   deleteAutomation,
   getAutomation,
+  getEffectiveAutomationScheduleFields,
   listAutomations,
   updateAutomation,
 } from '../automation-manager'
@@ -476,29 +477,31 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
         if (input.prompt !== undefined) assertNonBlank(input.prompt, 'prompt')
         validateScheduleFields(input)
         const existing = getAutomation(id)
-        if (input.scheduleType === 'once' && input.scheduledAt === undefined) {
-          if (!existing?.scheduledAt) {
-            throw new Error('scheduleType 改为 once 时必须提供 scheduledAt')
-          }
+        if (!existing) throw new Error(`定时任务不存在: ${id}`)
+        const effective = getEffectiveAutomationScheduleFields(input, existing)
+        if (effective.scheduleType === 'interval' && (!isFiniteInt(effective.intervalMinutes) || effective.intervalMinutes < 1)) {
+          throw new Error('scheduleType=interval 时 intervalMinutes 必填')
         }
-        const activeWindowStart = input.activeWindowStart !== undefined
-          ? input.activeWindowStart ?? undefined
-          : existing?.activeWindowStart
-        const activeWindowEnd = input.activeWindowEnd !== undefined
-          ? input.activeWindowEnd ?? undefined
-          : existing?.activeWindowEnd
-        const effectiveScheduleType = input.scheduleType ?? existing?.scheduleType
-        if ((activeWindowStart === undefined) !== (activeWindowEnd === undefined)) {
+        if ((effective.activeWindowStart === undefined) !== (effective.activeWindowEnd === undefined)) {
           throw new Error('activeWindowStart 与 activeWindowEnd 必须同时设置或同时清除')
         }
-        const effectiveWeekdays = input.activeWeekdays !== undefined
-          ? input.activeWeekdays ?? undefined
-          : existing?.activeWeekdays
-        if (effectiveWeekdays && effectiveWeekdays.length > 0 && effectiveScheduleType !== 'interval') {
+        if (effective.activeWeekdays && effective.activeWeekdays.length > 0 && effective.scheduleType !== 'interval') {
           throw new Error('周内运行日限制仅支持 interval')
         }
-        if (activeWindowStart && activeWindowEnd && (effectiveScheduleType !== 'interval' || activeWindowStart >= activeWindowEnd)) {
+        if (effective.activeWindowStart && effective.activeWindowEnd && (effective.scheduleType !== 'interval' || effective.activeWindowStart >= effective.activeWindowEnd)) {
           throw new Error('每日执行窗口仅支持 interval，且开始时间必须早于结束时间')
+        }
+        if ((effective.scheduleType === 'daily' || effective.scheduleType === 'weekly' || effective.scheduleType === 'monthly') && !effective.timeOfDay) {
+          throw new Error('scheduleType=daily/weekly/monthly 时 timeOfDay 必填')
+        }
+        if (effective.scheduleType === 'weekly' && effective.dayOfWeek === undefined) {
+          throw new Error('scheduleType=weekly 时 dayOfWeek 必填')
+        }
+        if (effective.scheduleType === 'monthly' && effective.dayOfMonth === undefined) {
+          throw new Error('scheduleType=monthly 时 dayOfMonth 必填')
+        }
+        if (effective.scheduleType === 'once' && effective.scheduledAt === undefined) {
+          throw new Error('scheduleType 改为 once 时必须提供 scheduledAt')
         }
         const automation = updateAutomation(input)
         if (!automation) throw new Error(`定时任务不存在: ${id}`)

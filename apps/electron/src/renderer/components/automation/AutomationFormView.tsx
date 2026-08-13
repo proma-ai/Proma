@@ -758,8 +758,14 @@ export function AutomationFormView({ standalone = false }: { standalone?: boolea
               value={form.scheduleType}
               onValueChange={(v) => {
                 const next = v as AutomationDraft['scheduleType']
-                // 切到 once 且尚无触发时间时，默认填入 1 小时后，避免空值导致自动保存失败
-                if (next === 'once' && !form.scheduledAt) {
+                // 默认值必须写入 draft：展示层 fallback 不会进入自动保存请求。
+                if (next === 'daily') {
+                  update({ scheduleType: next, timeOfDay: form.timeOfDay ?? '09:00' })
+                } else if (next === 'weekly') {
+                  update({ scheduleType: next, timeOfDay: form.timeOfDay ?? '09:00', dayOfWeek: form.dayOfWeek ?? 1 })
+                } else if (next === 'monthly') {
+                  update({ scheduleType: next, timeOfDay: form.timeOfDay ?? '09:00', dayOfMonth: form.dayOfMonth ?? 1 })
+                } else if (next === 'once' && !form.scheduledAt) {
                   update({ scheduleType: next, scheduledAt: Date.now() + 60 * 60 * 1000 })
                 } else {
                   update({ scheduleType: next })
