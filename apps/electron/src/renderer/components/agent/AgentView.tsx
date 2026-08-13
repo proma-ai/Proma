@@ -136,6 +136,8 @@ import type { AgentQueuedAttachment, AgentQueuedMessage, QueueDropPlacement } fr
 
 /** 稳定的空 SDKMessage 数组引用，避免 ?? [] 每次创建新引用 */
 const EMPTY_SDK_MESSAGES: SDKMessage[] = []
+/** 稳定的空 string 数组引用，避免无附件会话的 memo 链每次渲染失效。 */
+const EMPTY_STRING_ARRAY: string[] = []
 const LONG_TEXT_ATTACHMENT_THRESHOLD = 2000
 
 function endOfToday(): number {
@@ -514,15 +516,19 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const openSession = useOpenSession()
   const setAttachedDirsMap = useSetAtom(agentAttachedDirectoriesMapAtom)
   const attachedDirsMap = useAtomValue(agentAttachedDirectoriesMapAtom)
-  const attachedDirs = attachedDirsMap.get(sessionId) ?? []
+  const attachedDirs = attachedDirsMap.get(sessionId) ?? EMPTY_STRING_ARRAY
   const setAttachedFilesMap = useSetAtom(agentAttachedFilesMapAtom)
   const attachedFilesMap = useAtomValue(agentAttachedFilesMapAtom)
-  const attachedFiles = attachedFilesMap.get(sessionId) ?? []
+  const attachedFiles = attachedFilesMap.get(sessionId) ?? EMPTY_STRING_ARRAY
   const wsAttachedDirsMap = useAtomValue(workspaceAttachedDirectoriesMapAtom)
-  const wsAttachedDirs = currentWorkspaceId ? (wsAttachedDirsMap.get(currentWorkspaceId) ?? []) : []
+  const wsAttachedDirs = currentWorkspaceId
+    ? (wsAttachedDirsMap.get(currentWorkspaceId) ?? EMPTY_STRING_ARRAY)
+    : EMPTY_STRING_ARRAY
   const setWsAttachedFilesMap = useSetAtom(workspaceAttachedFilesMapAtom)
   const wsAttachedFilesMap = useAtomValue(workspaceAttachedFilesMapAtom)
-  const wsAttachedFiles = currentWorkspaceId ? (wsAttachedFilesMap.get(currentWorkspaceId) ?? []) : []
+  const wsAttachedFiles = currentWorkspaceId
+    ? (wsAttachedFilesMap.get(currentWorkspaceId) ?? EMPTY_STRING_ARRAY)
+    : EMPTY_STRING_ARRAY
 
   // 按 sessionId 切片订阅 drafts/draftHtml：仅本 session 草稿变化才让 AgentView 重渲染。
   // 输入框每次按键都会写整 Map atom，若直接订阅整 Map，AgentView 跟着每键重渲染。
@@ -2754,7 +2760,15 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     return registerShortcut('toggle-preview-panel', togglePreviewPanel)
   }, [togglePreviewPanel])
 
-  const hasTextInput = inputContent.trim().length > 0
+  const [inputHasContent, setInputHasContent] = React.useState(false)
+  const inputHasContentRef = React.useRef(inputHasContent)
+  inputHasContentRef.current = inputHasContent
+  const handleInputActivity = React.useCallback((hasContent: boolean): void => {
+    if (inputHasContentRef.current === hasContent) return
+    inputHasContentRef.current = hasContent
+    setInputHasContent(hasContent)
+  }, [])
+  const hasTextInput = inputHasContent
   const canSend = !isStopping && messagesLoaded && (streaming || !messagesRefreshing) && (hasTextInput || pendingFiles.length > 0 || !!suggestion) && agentChannelId !== null && hasAvailableModel && (!streaming || hasTextInput)
 
   const inputToolbarItems = React.useMemo<ToolbarItem[]>(() => [
@@ -2895,7 +2909,10 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       className={cn(
         canSend ? inputToolbarSendButtonClass : inputToolbarDisabledButtonClass
       )}
-      onClick={() => handleSend()}
+      onClick={() => {
+        const latestContent = richTextInputRef.current?.getMarkdown()
+        void handleSend(latestContent, true)
+      }}
       disabled={!canSend}
     >
       <CornerDownLeft className="size-[22px]" />
@@ -3084,6 +3101,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               ref={richTextInputRef}
               value={inputContent}
               onChange={setInputContentFromEditor}
+              onInputActivity={handleInputActivity}
+              draftSyncDelayMs={120}
               onSubmit={handleSend}
               onPasteFiles={handlePasteFiles}
               onPasteLongText={handlePasteLongText}
