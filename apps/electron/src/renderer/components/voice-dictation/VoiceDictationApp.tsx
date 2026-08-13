@@ -11,6 +11,7 @@ import { CHUNK_BYTES, concatAudioBuffers, floatTo16BitPcm, splitChunk } from './
 import { mergeVoiceDictationTranscript } from './voice-transcript-merge'
 import type { VoiceDictationTranscriptMergeState } from './voice-transcript-merge'
 import { useVoiceWindowLayout } from './use-voice-window-layout'
+import { resumeAudioContextForCapture } from './audio-context'
 import {
   VOICE_DICTATION_STATUS_EVENT,
   resolveVoiceDictationSessionInputIds,
@@ -416,16 +417,7 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
 
     source.connect(processor)
     processor.connect(audioContext.destination)
-    if (audioContext.state !== 'running') {
-      try {
-        await audioContext.resume()
-      } catch {
-        throw new Error('音频处理启动失败，请重新触发语音输入或检查系统音频权限')
-      }
-    }
-    if (audioContext.state !== 'running') {
-      throw new Error('音频处理未进入运行状态，请重新触发语音输入或检查系统音频权限')
-    }
+    await resumeAudioContextForCapture(audioContext)
     if (!stream.getAudioTracks().some((track) => track.readyState === 'live' && track.enabled)) {
       throw new Error('麦克风未就绪，请检查系统麦克风权限与设备连接')
     }
@@ -567,6 +559,7 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
         const textMessage = getMicrophoneErrorMessage(error)
         setStatus('error')
         setMessage(textMessage)
+        toast.error(textMessage)
         cleanupAudio()
       })
     })
