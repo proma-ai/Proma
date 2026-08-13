@@ -455,6 +455,30 @@ export interface ChannelPlanQuotaResult {
 }
 
 /**
+ * 商业版启动时清理第三方中转站渠道后的一次性通知条目。
+ *
+ * 只保留展示所需的最小信息（名称 + 供应商类型），不携带被删除渠道的
+ * baseUrl / apiKey 等敏感字段。
+ */
+export interface ChannelRemovalNoticeEntry {
+  name: string
+  provider: ProviderType
+}
+
+/**
+ * 「第三方中转站已被移除」的一次性通知。
+ *
+ * 由主进程在检测到本地存有不被商业版允许的渠道时生成，持久化到
+ * ~/.proma/channel-removal-notice.json；Renderer 启动后读取一次即清空，
+ * 用于提醒用户具体是哪些渠道被移除，并引导迁移到官方渠道或开源版本。
+ */
+export interface ChannelRemovalNotice {
+  channels: ChannelRemovalNoticeEntry[]
+  /** 触发清理的时间戳（毫秒） */
+  removedAt: number
+}
+
+/**
  * 渠道相关 IPC 通道常量
  */
 export const CHANNEL_IPC_CHANNELS = {
@@ -488,6 +512,8 @@ export const CHANNEL_IPC_CHANNELS = {
   XAI_OAUTH_CANCEL: 'channel:xai-oauth-cancel',
   /** xAI device-code 已就绪（主进程推送给发起登录的渲染窗口） */
   XAI_OAUTH_DEVICE_CODE: 'channel:xai-oauth-device-code',
+  /** 读取并清空「第三方中转站已被移除」的一次性通知 */
+  CONSUME_REMOVAL_NOTICE: 'channel:consume-removal-notice',
 } as const
 
 /**

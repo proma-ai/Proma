@@ -268,6 +268,101 @@ describe('商业版渠道准入与中转站清理', () => {
   })
 })
 
+describe('渠道移除通知', () => {
+  test('Given 启动时清理了第三方中转站 When 消费通知 Then 返回被移除渠道且读取即清除', () => {
+    writeChannels([
+      {
+        id: 'relay-channel',
+        name: '第三方中转',
+        provider: 'custom',
+        baseUrl: 'https://relay.example.com/v1/chat/completions',
+        apiKey: 'relay-key',
+        models: [],
+        enabled: true,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ])
+
+    // 触发一次 readConfig 完成清理，并记录移除通知。
+    channelManager.listChannels()
+
+    const notice = channelManager.consumeChannelRemovalNotice()
+    expect(notice?.channels).toEqual([{ name: '第三方中转', provider: 'custom' }])
+
+    // 读取即清除：再消费一次应该返回 null。
+    expect(channelManager.consumeChannelRemovalNotice()).toBeNull()
+  })
+
+  test('Given 没有任何渠道被移除 When 消费通知 Then 返回 null', () => {
+    writeChannels([
+      {
+        id: 'deepseek-official',
+        name: 'DeepSeek',
+        provider: 'deepseek',
+        baseUrl: 'https://api.deepseek.com/anthropic',
+        apiKey: 'official-key',
+        models: [],
+        enabled: true,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ])
+
+    channelManager.listChannels()
+    expect(channelManager.consumeChannelRemovalNotice()).toBeNull()
+  })
+
+  test('Given 连续两次启动均清理到第三方渠道且均未消费 When 消费通知 Then 按 provider+name 去重合并', () => {
+    writeChannels([
+      {
+        id: 'relay-a',
+        name: '第三方中转 A',
+        provider: 'custom',
+        baseUrl: 'https://relay-a.example.com/v1/chat/completions',
+        apiKey: 'relay-key',
+        models: [],
+        enabled: true,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ])
+    channelManager.listChannels()
+
+    writeChannels([
+      {
+        id: 'relay-a',
+        name: '第三方中转 A',
+        provider: 'custom',
+        baseUrl: 'https://relay-a.example.com/v1/chat/completions',
+        apiKey: 'relay-key',
+        models: [],
+        enabled: true,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'relay-b',
+        name: '第三方中转 B',
+        provider: 'anthropic-compatible',
+        baseUrl: 'https://relay-b.example.com/v1/messages',
+        apiKey: 'relay-key',
+        models: [],
+        enabled: true,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ])
+    channelManager.listChannels()
+
+    const notice = channelManager.consumeChannelRemovalNotice()
+    expect(notice?.channels).toEqual([
+      { name: '第三方中转 A', provider: 'custom' },
+      { name: '第三方中转 B', provider: 'anthropic-compatible' },
+    ])
+  })
+})
+
 describe('渠道运行时认证解析', () => {
   test('Given ChatGPT OAuth 渠道 When 解析运行时 key Then 返回 access token 而不是凭据 JSON', async () => {
     writeChannels([

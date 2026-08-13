@@ -4,6 +4,7 @@ import { AppShell } from './components/app-shell/AppShell'
 import { OnboardingView } from './components/onboarding/OnboardingView'
 import { TutorialBanner } from './components/tutorial/TutorialBanner'
 import { EnvironmentCheckDialog } from './components/environment/EnvironmentCheckDialog'
+import { ThirdPartyChannelRemovedDialog } from './components/channels/ThirdPartyChannelRemovedDialog'
 import { TooltipProvider } from './components/ui/tooltip'
 import { CloudAuthGate } from './components/cloud-auth'
 import { QuotaExceededDialog } from './components/billing/QuotaExceededDialog'
@@ -166,6 +167,7 @@ export default function App(): React.ReactElement {
       <FaqDialog />
       <TutorialBanner />
       <GlobalEnvironmentCheckDialog />
+      <GlobalThirdPartyChannelRemovedDialog />
     </TooltipProvider>
   )
 }
@@ -221,4 +223,41 @@ function StartupLoadingScreen(): React.ReactElement {
 function GlobalEnvironmentCheckDialog(): React.ReactElement {
   const [open, setOpen] = useAtom(environmentCheckDialogOpenAtom)
   return <EnvironmentCheckDialog open={open} onOpenChange={setOpen} />
+}
+
+/**
+ * 全局「第三方中转站已被移除」通知 Dialog。
+ *
+ * 应用启动后调用一次 `consumeChannelRemovalNotice`（主进程读取即清除）：
+ * 没有待展示内容时不渲染任何内容，避免第一次启动就打一次徒劳的 IPC。
+ */
+function GlobalThirdPartyChannelRemovedDialog(): React.ReactElement | null {
+  const [notice, setNotice] = React.useState<import('@proma/shared').ChannelRemovalNotice | null>(null)
+  const [open, setOpen] = React.useState(false)
+  // `consumeChannelRemovalNotice` 是读取即清除的操作。开发态 React Strict Mode 会
+  // 模拟一次 effect 的卸载/重挂，因此必须复用同一个 Promise，避免第二次 effect
+  // 把第一次尚未展示的通知读成空。
+  const noticeRequestRef = React.useRef<Promise<import('@proma/shared').ChannelRemovalNotice | null> | null>(null)
+
+  React.useEffect(() => {
+    let active = true
+    noticeRequestRef.current ??= window.electronAPI.consumeChannelRemovalNotice()
+
+    noticeRequestRef.current
+      .then((result) => {
+        if (!active || !result || result.channels.length === 0) return
+        setNotice(result)
+        setOpen(true)
+      })
+      .catch((error) => {
+        if (active) console.error('[App] 读取渠道移除通知失败:', error)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [])
+
+  if (!notice) return null
+  return <ThirdPartyChannelRemovedDialog open={open} onOpenChange={setOpen} channels={notice.channels} />
 }

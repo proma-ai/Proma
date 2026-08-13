@@ -324,6 +324,9 @@ export interface ElectronAPI {
   /** 查询渠道订阅 Plan 额度 */
   getChannelPlanQuota: (channelId: string) => Promise<ChannelPlanQuotaResult>
 
+  /** 读取并清空「第三方中转站已被移除」的一次性通知（应用启动后调用一次） */
+  consumeChannelRemovalNotice: () => Promise<import('@proma/shared').ChannelRemovalNotice | null>
+
   /** 发起 ChatGPT (Codex) OAuth 登录，返回序列化凭据（作为 apiKey 存储） */
   codexOAuthLogin: (method?: import('@proma/shared').CodexOAuthLoginMethod) => Promise<CodexOAuthLoginResult>
 
@@ -1570,6 +1573,10 @@ const electronAPI: ElectronAPI = {
 
   getChannelPlanQuota: (channelId: string) => {
     return ipcRenderer.invoke(CHANNEL_IPC_CHANNELS.GET_PLAN_QUOTA, channelId)
+  },
+
+  consumeChannelRemovalNotice: () => {
+    return ipcRenderer.invoke(CHANNEL_IPC_CHANNELS.CONSUME_REMOVAL_NOTICE)
   },
 
   codexOAuthLogin: (method?: import('@proma/shared').CodexOAuthLoginMethod) => {
