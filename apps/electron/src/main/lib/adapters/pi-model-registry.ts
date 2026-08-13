@@ -24,6 +24,7 @@ import {
   getPromaUserAgent,
   normalizeAnthropicBaseUrlForSdk,
   normalizeOpenAIBaseUrlForSdk,
+  normalizeVersionedAnthropicBaseUrl,
   resolveAnthropicMessagesUrl,
 } from '@proma/core'
 import type { Api, KnownProvider, Model } from '@earendil-works/pi-ai/compat'
@@ -333,6 +334,8 @@ function candidatePiProviders(provider: ProviderType): KnownProvider[] {
       return ['moonshotai-cn', 'moonshotai']
     case 'kimi-coding':
       return ['kimi-coding', 'moonshotai-cn', 'moonshotai']
+    case 'opencode-go-openai':
+      return ['opencode-go']
     case 'zhipu':
       return ['zai']
     case 'zhipu-coding':
@@ -350,8 +353,9 @@ function candidatePiProviders(provider: ProviderType): KnownProvider[] {
 
 function findCatalogModelById(models: readonly PiCatalogModel[], modelId: string): PiCatalogModel | undefined {
   const normalized = modelId.toLowerCase()
-  return models.find((model) =>
-    model.id.toLowerCase() === normalized || model.name.toLowerCase() === normalized)
+  // ID 是渠道实际发送到上游的稳定标识；同名展示名称只能在没有 ID 命中时兜底。
+  return models.find((model) => model.id.toLowerCase() === normalized)
+    ?? models.find((model) => model.name.toLowerCase() === normalized)
 }
 
 /**
@@ -446,6 +450,52 @@ export async function resolvePiImageInputCapability(
   const catalogModel = await findPiCatalogModel(provider, resolvedModelId)
   if (!catalogModel) return 'unknown'
   return catalogModel.input.includes('image') ? 'supported' : 'unsupported'
+}
+
+/**
+ * Vision Relay 的实际请求路由。
+ *
+ * OpenCode Go 的同一渠道同时提供 OpenAI 和 Anthropic Messages 模型；因此必须以
+ * Pi catalog 中该模型声明的 API 与 Base URL 为准，不能只按渠道类型固定走 OpenAI。
+ */
+export interface PiVisionRelayRoute {
+  adapterProvider: ProviderType
+  baseUrl?: string
+}
+
+export async function resolvePiVisionRelayRoute(
+  provider: ProviderType,
+  modelId: string | undefined,
+): Promise<PiVisionRelayRoute | undefined> {
+  const resolvedModelId = stripLegacyAgentSdkContextSuffix(modelId)
+  if (!resolvedModelId) return undefined
+  const catalogModel = await findPiCatalogModel(provider, resolvedModelId)
+  if (!catalogModel?.input.includes('image')) return undefined
+
+  if (provider !== 'opencode-go-openai') {
+    return { adapterProvider: provider }
+  }
+
+  switch (catalogModel.api) {
+    case 'anthropic-messages':
+      return {
+        // Anthropic-compatible adapter 接收完整 messages 端点，避免误套 OpenAI 协议。
+        adapterProvider: 'anthropic-compatible',
+        baseUrl: `${normalizeVersionedAnthropicBaseUrl(catalogModel.baseUrl)}/messages`,
+      }
+    case 'openai-completions':
+      return {
+        adapterProvider: 'opencode-go-openai',
+        baseUrl: catalogModel.baseUrl,
+      }
+    case 'openai-responses':
+      return {
+        adapterProvider: 'openai-responses',
+        baseUrl: catalogModel.baseUrl,
+      }
+    default:
+      return undefined
+  }
 }
 
 /**
