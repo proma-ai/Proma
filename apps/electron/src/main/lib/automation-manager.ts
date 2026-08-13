@@ -388,7 +388,7 @@ export function validateExplicitAutomationScheduleFields(
   const hasValue = (value: unknown): boolean => value !== undefined && value !== null
 
   if (scheduleType !== 'interval') {
-    if (input.activeWeekdays !== undefined && input.activeWeekdays !== null && input.activeWeekdays.length > 0) {
+    if (input.activeWeekdays !== undefined && input.activeWeekdays !== null) {
       throw new Error('周内运行日限制仅支持 scheduleType=interval')
     }
     if (hasValue(input.activeWindowStart) || hasValue(input.activeWindowEnd)) {
