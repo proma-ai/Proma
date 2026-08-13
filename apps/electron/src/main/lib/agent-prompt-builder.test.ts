@@ -100,6 +100,16 @@ test('Given Proma 工作区 When 构建提示词 Then 指向受管 AGENTS.md 而
   expect(prompt).not.toContain('Proma 工作区 CLAUDE.md')
 })
 
+test('Given 商业版 Agent When 构建提示词 Then 明确要求为视觉增益任务主动使用 GPT Image 2', () => {
+  const prompt = buildPrompt('/tmp/sample-project')
+
+  expect(prompt).toContain('## 商业版视觉表达')
+  expect(prompt).toContain('GPT Image 2 是 Proma 商业版的默认视觉能力')
+  expect(prompt).toContain('设计、品牌、产品、空间、服装、营销、提案、课程、故事、内容策划或概念解释')
+  expect(prompt).toContain('无需先抽象地询问“是否需要配图”')
+  expect(prompt).toContain('精确数据图表和需要可编辑节点的流程图、架构图、关系图使用图表、Mermaid 或画板')
+})
+
 test('Given 新会话 workbench root 布局 When 构建提示词 Then 不再使用 legacy .context 路径', () => {
   const prompt = buildSystemPrompt({
     workspaceName: '示例项目',
