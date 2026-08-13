@@ -387,6 +387,8 @@ export function validateExplicitAutomationScheduleFields(
 ): void {
   const hasValue = (value: unknown): boolean => value !== undefined && value !== null
 
+  // intervalMinutes 是所有 Automation 持久化记录及 CreateAutomationInput 的必填兼容字段；
+  // 非 interval 模式会保留它作为闲置值，不能在此按模式拒绝。
   if (scheduleType !== 'interval') {
     if (input.activeWeekdays !== undefined && input.activeWeekdays !== null) {
       throw new Error('周内运行日限制仅支持 scheduleType=interval')

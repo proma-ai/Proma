@@ -768,6 +768,7 @@ export function AutomationFormView({ standalone = false }: { standalone?: boolea
                 if (next === 'interval') {
                   update({
                     scheduleType: next,
+                    intervalMinutes: form.intervalMinutes ?? 10,
                     timeOfDay: undefined,
                     dayOfWeek: undefined,
                     dayOfMonth: undefined,
