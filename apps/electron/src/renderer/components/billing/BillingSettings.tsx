@@ -10,6 +10,7 @@ import { useSetAtom, useAtomValue } from 'jotai'
 import { Loader2 } from 'lucide-react'
 import { BalanceCard } from './BalanceCard'
 import { SubscriptionTab } from './SubscriptionTab'
+import { WhyPromaOfficial, BillingNotes } from './WhyPromaOfficial'
 import {
   billingInfoAtom,
   billingLoadingAtom,
@@ -17,7 +18,12 @@ import {
   subscriptionStatusAtom,
 } from '@/atoms/cloud-billing'
 
-export function BillingSettings(): React.ReactElement {
+interface BillingSettingsProps {
+  /** onboarding 弹窗模式：隐藏余额卡片，「为什么选择 Proma 官方的 AI 渠道？」由弹窗顶部统一展示 */
+  onboarding?: boolean
+}
+
+export function BillingSettings({ onboarding = false }: BillingSettingsProps): React.ReactElement {
   const billingLoading = useAtomValue(billingLoadingAtom)
   const billingInfo = useAtomValue(billingInfoAtom)
   const setBillingInfo = useSetAtom(billingInfoAtom)
@@ -66,11 +72,21 @@ export function BillingSettings(): React.ReactElement {
 
   return (
     <div className="space-y-6">
-      {/* 余额卡片 */}
-      <BalanceCard />
+      {/* 余额卡片（onboarding 弹窗面向新用户，隐藏账户余额） */}
+      {!onboarding && <BalanceCard />}
 
-      {/* 订阅计划 */}
-      <SubscriptionTab onSubscriptionComplete={refreshAll} />
+      {/* 为什么选择 Proma 官方的 AI 渠道：设置页置顶展示；onboarding 弹窗由外层统一展示 */}
+      {!onboarding && <WhyPromaOfficial />}
+
+      {/* 订阅计划（底部 WhyProma 已上移，两种模式统一隐藏避免重复） */}
+      <SubscriptionTab
+        onSubscriptionComplete={refreshAll}
+        hideWhyProma
+        hideHeading={onboarding}
+      />
+
+      {/* 计费说明固定在最底部 */}
+      <BillingNotes />
     </div>
   )
 }
