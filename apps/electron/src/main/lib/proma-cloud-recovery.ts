@@ -15,7 +15,7 @@ export function getPromaCloudRecoveryAction(
   provider: string | undefined,
   errorCode: ErrorCode,
 ): RecoveryAction | undefined {
-  if (provider === 'proma' || !ELIGIBLE_ERROR_CODES.has(errorCode)) return undefined
+  if (!provider || provider === 'proma' || !ELIGIBLE_ERROR_CODES.has(errorCode)) return undefined
 
   return {
     key: 'p',

@@ -673,6 +673,7 @@ export class AgentOrchestrator {
     const streamStartedAt = input.startedAt ?? Date.now()
     let userMessagePersisted = false
     let initialUserMessageUuid: string | undefined
+    let activeChannelProvider: string | undefined
     let sessionMeta = getAgentSessionMeta(sessionId)
 
     const persistInitialUserMessage = (): void => {
@@ -716,7 +717,13 @@ export class AgentOrchestrator {
         _errorTitle: typedError.title,
         _errorDetails: typedError.details,
         _errorCanRetry: typedError.canRetry,
-        _errorActions: typedError.actions,
+        _errorActions: [
+          ...typedError.actions,
+          ...(() => {
+            const recovery = getPromaCloudRecoveryAction(activeChannelProvider, typedError.code)
+            return recovery ? [recovery] : []
+          })(),
+        ],
       } as unknown as SDKMessage
       try { appendSDKMessages(sessionId, [errorSDKMsg]) } catch (e) {
         console.error('[Agent 编排] 持久化 preflight error 失败:', e)
@@ -786,6 +793,7 @@ export class AgentOrchestrator {
       })
       return
     }
+    activeChannelProvider = channel.provider
 
     let apiKey: string
     let codexOAuthCredentials: CodexOAuthCredentials | undefined
