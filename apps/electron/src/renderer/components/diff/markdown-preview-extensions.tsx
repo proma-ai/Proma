@@ -703,7 +703,7 @@ function createMathView(initialNode: ProseMirrorNode, displayMode: boolean) {
   })
 }
 
-function createShikiCodeBlockView(initialNode: ProseMirrorNode, view: EditorView) {
+function createShikiCodeBlockView(initialNode: ProseMirrorNode) {
   const dom = document.createElement('div')
   setClass(dom, 'not-prose my-3 overflow-hidden rounded-md border border-border/40 bg-muted/30')
   dom.dataset.promaCodeBlock = 'true'
@@ -771,7 +771,7 @@ function createShikiCodeBlockView(initialNode: ProseMirrorNode, view: EditorView
     currentCode = node.textContent
     label.textContent = language === 'text' ? 'Code' : getDisplayName(language)
     const className = language === 'text' ? undefined : `language-${language}`
-    const shouldRenderMermaid = !view.editable && shouldRenderMermaidCodeBlock(className, currentCode)
+    const shouldRenderMermaid = shouldRenderMermaidCodeBlock(className, currentCode)
     dom.classList.toggle('proma-code-block--mermaid', shouldRenderMermaid)
     scheduleMermaidRender(shouldRenderMermaid ? currentCode : null)
   }
@@ -1146,7 +1146,7 @@ export function createShikiCodeBlock(themeRef: ThemeRef): Node {
     },
 
     addNodeView() {
-      return ({ node, view }) => createShikiCodeBlockView(node, view)
+      return ({ node }) => createShikiCodeBlockView(node)
     },
 
     addProseMirrorPlugins() {

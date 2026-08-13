@@ -47,8 +47,9 @@ export function SpeechButton({
 }: SpeechButtonProps): React.ReactElement {
   const [voiceStatus, setVoiceStatus] = useState<InlineVoiceStatus>(IDLE_VOICE_STATUS)
   const isRecording = voiceStatus.status === 'recording'
-  const isStopping = voiceStatus.status === 'connecting' || voiceStatus.status === 'stopping'
-  const isActive = isRecording || isStopping
+  const isPreparing = voiceStatus.status === 'connecting'
+  const isStopping = voiceStatus.status === 'stopping'
+  const isActive = isPreparing || isRecording || isStopping
 
   useEffect(() => {
     const handleStatus = (event: Event): void => {
@@ -106,7 +107,7 @@ export function SpeechButton({
             disabled={disabled}
             aria-label={isActive ? '停止语音输入' : '开始语音输入'}
           >
-            {isStopping ? (
+            {isPreparing || isStopping ? (
               <Loader2 className="size-4 animate-spin" />
             ) : isRecording ? (
               <span className="flex h-4 items-center gap-[2px]" aria-hidden="true">
@@ -124,7 +125,7 @@ export function SpeechButton({
           </Button>
           {isActive && (
             <span className="max-w-20 truncate text-xs text-primary" role="status">
-              {isStopping ? '收尾中' : '正在听写'}
+              {isPreparing ? '准备麦克风' : isStopping ? '收尾中' : '正在听写'}
             </span>
           )}
         </span>

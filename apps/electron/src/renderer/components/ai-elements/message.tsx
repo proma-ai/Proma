@@ -26,6 +26,7 @@ import { CalendarDays, ChevronDown, ChevronUp, Paperclip, FileText, ListTodo, Sp
 import { cn } from '@/lib/utils'
 import { shouldInspectMermaidCodeBlock, shouldRenderMermaidCodeBlock } from '@/lib/mermaid-detection'
 import { normalizeLatexDelimiters } from '@/lib/normalize-latex'
+import { normalizeMalformedStrongDelimiters } from '@/lib/markdown-emphasis'
 import { copyTextToClipboard } from '@/lib/clipboard'
 import { Button } from '@/components/ui/button'
 import { ImageLightbox, type LightboxImage } from '@/components/ui/image-lightbox'
@@ -721,7 +722,7 @@ export const MessageResponse = React.memo(
           urlTransform={mentionUrlTransform}
           components={components}
         >
-          {normalizeLatexDelimiters(renderedMarkdown)}
+          {normalizeLatexDelimiters(normalizeMalformedStrongDelimiters(renderedMarkdown))}
         </Markdown>
       </div>
     )

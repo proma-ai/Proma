@@ -43,7 +43,7 @@ export const TIPS: Tip[] = [
   { id: 'win-shortcut-search', text: '按 Ctrl+Shift+F 搜索历史对话', platform: 'windows' },
   { id: 'win-shortcut-file-find', text: '按 Ctrl+F 可在对话中搜索消息，预览面板中则查找文件内容', platform: 'windows' },
   { id: 'win-shortcut-settings', text: '按 Ctrl+, 打开设置', platform: 'windows' },
-  { id: 'win-shortcut-sidebar', text: '按 Ctrl+B 切换侧边栏显示', platform: 'windows' },
+  { id: 'win-shortcut-sidebar', text: '按 Ctrl+Shift+E 切换侧边栏显示', platform: 'windows' },
   { id: 'win-shortcut-mode', text: '按 Ctrl+Shift+M 快速切换 Chat / Agent 模式', platform: 'windows' },
   { id: 'win-shortcut-focus', text: '按 Ctrl+L 快速跳转到输入框', platform: 'windows' },
   { id: 'win-shortcut-clear', text: '按 Ctrl+K 清除当前对话上下文', platform: 'windows' },

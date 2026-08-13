@@ -51,6 +51,7 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
   const previewTextRef = React.useRef('')
   const dictationIdRef = React.useRef<string | null>(null)
   const recordingAttemptRef = React.useRef(0)
+  const audioCaptureReadyRef = React.useRef(false)
   const lastReportedVolumeAtRef = React.useRef(0)
   /** 本次听写会话归属的输入框 ID，仅用于同步内嵌按钮状态。 */
   const dictationSourceRef = React.useRef<string | null>(null)
@@ -131,6 +132,7 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
       pendingAudioRef.current = []
       queuedAudioRef.current = []
       asrReadyRef.current = false
+      audioCaptureReadyRef.current = false
     }
     setVolume(0)
   }, [])
@@ -378,6 +380,11 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
 
     processor.onaudioprocess = (event) => {
       if (!sessionIdRef.current || stoppingRef.current) return
+      if (!audioCaptureReadyRef.current) {
+        audioCaptureReadyRef.current = true
+        setStatus('recording')
+        setMessage('正在听写')
+      }
       const input = event.inputBuffer.getChannelData(0)
       let peak = 0
       for (let i = 0; i < input.length; i += 1) {
@@ -438,6 +445,7 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
       commitTimerRef.current = null
     }
     asrReadyRef.current = false
+    audioCaptureReadyRef.current = false
     lastReportedVolumeAtRef.current = 0
     queuedAudioRef.current = []
     pendingAudioRef.current = []
@@ -450,8 +458,8 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
       currentSessionId: '',
     }
     setCommitResult(null)
-    setStatus('recording')
-    setMessage('请开始说话')
+    setStatus('connecting')
+    setMessage('准备麦克风...')
     const recordingAttempt = ++recordingAttemptRef.current
 
     const isCurrentAttempt = (): boolean => recordingAttempt === recordingAttemptRef.current
@@ -516,8 +524,6 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
           scheduleCommit(STOP_COMMIT_TIMEOUT_MS)
           return
         }
-        setStatus('recording')
-        setMessage('正在听写')
       })
       .catch((error) => {
         if (!isCurrentAttempt() || sessionIdRef.current !== nextSessionId || stoppingRef.current) return
@@ -583,8 +589,11 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
     const cleanupState = window.electronAPI.onVoiceDictationState((event: VoiceDictationStateEvent) => {
       if (event.sessionId && event.sessionId !== sessionIdRef.current) return
       if (stoppingRef.current && event.status === 'error') return
-      if (event.status === 'connecting') {
-        setStatus('recording')
+      if (event.status === 'connecting' || event.status === 'recording') {
+        if (!audioCaptureReadyRef.current) {
+          setStatus('connecting')
+          setMessage('准备麦克风...')
+        }
         return
       }
       if (event.status === 'idle' && event.message === 'asr_session_ended') {
@@ -737,7 +746,11 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
               <div className="whitespace-pre-wrap break-words overflow-hidden">
                 {transcript || (
                   <span className="text-muted-foreground/60">
-                    {status === 'idle' ? '等待 Ctrl+～ 唤起' : '请开始说话'}
+                    {status === 'idle'
+                      ? '等待 Ctrl+～ 唤起'
+                      : status === 'connecting'
+                        ? '准备麦克风...'
+                        : '请开始说话'}
                   </span>
                 )}
               </div>

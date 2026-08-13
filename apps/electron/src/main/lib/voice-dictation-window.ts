@@ -23,7 +23,7 @@ const INDICATOR_BOTTOM_MARGIN = 28
 
 let voiceDictationActive = false
 let usesExternalIndicator = false
-let indicatorState: 'recording' | 'stopping' = 'recording'
+let indicatorState: 'preparing' | 'recording' | 'stopping' = 'preparing'
 let indicatorVolume = 0
 let indicatorTranscript = ''
 let activeOutputContextId: string | null = null
@@ -68,7 +68,7 @@ export function toggleVoiceDictationWindow(options: VoiceDictationToggleOptions 
   activeOutputContextId = outputContextId
   voiceDictationActive = true
   usesExternalIndicator = !targetIsProma
-  indicatorState = 'recording'
+  indicatorState = 'preparing'
   indicatorVolume = 0
   indicatorTranscript = ''
   if (usesExternalIndicator) showVoiceIndicator()
@@ -111,7 +111,8 @@ export function destroyVoiceDictationWindow(): void {
 
 /** 仅接收主窗口的采集结果，转发给外部应用的无焦点状态条。 */
 export function updateVoiceDictationIndicatorVolume(volume: number): void {
-  if (!usesExternalIndicator || indicatorState !== 'recording') return
+  if (!usesExternalIndicator || indicatorState === 'stopping') return
+  indicatorState = 'recording'
   indicatorVolume = Math.max(0, Math.min(1, Number.isFinite(volume) ? volume : 0))
   sendIndicatorState()
 }

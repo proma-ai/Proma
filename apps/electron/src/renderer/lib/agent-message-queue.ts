@@ -24,6 +24,28 @@ export interface AgentQueuedMessage {
   additionalDirectories?: string[]
 }
 
+/**
+ * 队列的自动消费必须由常驻调度器执行，不能依赖某个 AgentView 是否仍挂载。
+ * 保留停止、后台等待和交互阻塞状态，避免在不安全的时机意外开启新一轮 run。
+ */
+export function shouldAutoDispatchQueuedMessage(options: {
+  queueLength: number
+  running: boolean
+  backgroundWaiting: boolean
+  stoppedByUser: boolean
+  hasBlockingRequests: boolean
+  hasChannel: boolean
+  hasAvailableModel: boolean
+}): boolean {
+  return options.queueLength > 0 &&
+    !options.running &&
+    !options.backgroundWaiting &&
+    !options.stoppedByUser &&
+    !options.hasBlockingRequests &&
+    options.hasChannel &&
+    options.hasAvailableModel
+}
+
 export function createAgentQueuedMessage(
   text: string,
   id: string,

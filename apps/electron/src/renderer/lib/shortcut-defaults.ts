@@ -73,7 +73,7 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     name: '切换侧边栏',
     description: '显示或隐藏左侧边栏',
     defaultMac: 'Cmd+B',
-    defaultWin: 'Ctrl+B',
+    defaultWin: 'Ctrl+Shift+E',
     category: 'app',
   },
   // 由 Electron 原生菜单角色处理，展示但不允许在应用内修改。
@@ -147,13 +147,13 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     category: 'navigation',
   },
 
-  // 编辑级（输入框格式化，仅 macOS — Cmd+B/S 被全局快捷键占用）
+  // 编辑级（输入框格式化 — macOS 上 Cmd+B 被切换侧边栏占用，改用 Ctrl+B；Windows 上 Ctrl+B 直接加粗）
   {
     id: 'editor-bold',
     name: '加粗 / 取消加粗',
-    description: '输入框中切换文字加粗（因 Cmd+B 已用于切换侧边栏）',
+    description: '输入框中切换文字加粗',
     defaultMac: 'Ctrl+B',
-    defaultWin: '',
+    defaultWin: 'Ctrl+B',
     category: 'edit',
     readonly: true,
   },

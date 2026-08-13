@@ -17,6 +17,7 @@ import {
 } from './config-paths'
 import { deleteConversationAttachments, deleteAttachment } from './attachment-service'
 import type { ConversationMeta, ChatMessage, RecentMessagesResult, MessageSearchResult } from '@proma/shared'
+import { findBestSearchMatch, insertTopSearchResult } from '@proma/shared'
 
 /**
  * 对话索引文件格式
@@ -30,6 +31,8 @@ interface ConversationsIndex {
 
 /** 当前索引版本 */
 const INDEX_VERSION = 1
+const MAX_SEARCH_SESSIONS = 100
+const MAX_SEARCH_HITS_PER_SESSION = 2
 
 /**
  * 读取对话索引文件
@@ -396,30 +399,28 @@ export function autoArchiveConversations(daysThreshold: number): number {
 }
 
 /**
- * 搜索对话消息内容
- *
- * 按行流式读取每个对话的 JSONL 文件，命中即早退，避免一次性加载大文件到内存。
- * 每个对话最多返回 1 条匹配，总计达到 maxResults 即停止扫描后续会话。
- *
- * @param query 搜索关键词
- * @returns 匹配结果列表
+ * 搜索对话消息内容。
+ * 每个会话最多返回 2 个用户/助手正文命中，最多返回 100 个命中会话。
  */
 export async function searchConversationMessages(query: string): Promise<MessageSearchResult[]> {
   if (!query || query.length < 2) return []
 
   const index = readIndex()
   const results: MessageSearchResult[] = []
-  const queryLower = query.toLowerCase()
-  const maxResults = 30
+  let matchedSessionCount = 0
 
-  for (const conv of index.conversations) {
-    if (results.length >= maxResults) break
+  const sortedConversations = [...index.conversations].sort((a, b) => b.updatedAt - a.updatedAt)
+  for (const conv of sortedConversations) {
+    if (matchedSessionCount >= MAX_SEARCH_SESSIONS) break
 
     const filePath = getConversationMessagesPath(conv.id)
     if (!existsSync(filePath)) continue
 
-    const hit = await findFirstMatchInJsonl(filePath, queryLower, query.length)
-    if (hit) {
+    const hits = await findMatchesInJsonl(filePath, query)
+    if (hits.length === 0) continue
+    matchedSessionCount++
+
+    for (const hit of hits.slice(0, MAX_SEARCH_HITS_PER_SESSION)) {
       results.push({
         conversationId: conv.id,
         conversationTitle: conv.title,
@@ -427,7 +428,7 @@ export async function searchConversationMessages(query: string): Promise<Message
         role: hit.role,
         snippet: hit.snippet,
         matchStart: hit.matchStart,
-        matchLength: query.length,
+        matchLength: hit.matchLength,
         archived: conv.archived,
       })
     }
@@ -436,19 +437,26 @@ export async function searchConversationMessages(query: string): Promise<Message
   return results
 }
 
+interface ConversationSearchHit {
+  messageId: string
+  role: Extract<ChatMessage['role'], 'user' | 'assistant'>
+  snippet: string
+  matchStart: number
+  matchLength: number
+  score: number
+}
+
 /**
- * 在单个 ChatMessage JSONL 文件中按行流式查找第一条匹配。
- *
- * 为什么独立成函数：保持 readline 资源的早退与清理逻辑集中，避免重复。
- * 命中后立即 close stream，未匹配的大文件也按行读取，单行 GC 友好。
+ * 在单个 Chat JSONL 中收集用户/助手正文命中。
+ * 工具活动、工具参数和工具结果不属于 ChatMessage.content，不参与搜索。
  */
-async function findFirstMatchInJsonl(
+async function findMatchesInJsonl(
   filePath: string,
-  queryLower: string,
-  queryLength: number
-): Promise<{ messageId: string; role: ChatMessage['role']; snippet: string; matchStart: number } | null> {
+  query: string,
+): Promise<ConversationSearchHit[]> {
   const stream = createReadStream(filePath, { encoding: 'utf-8' })
   const rl = createInterface({ input: stream, crlfDelay: Infinity })
+  const hits: ConversationSearchHit[] = []
 
   try {
     for await (const line of rl) {
@@ -459,24 +467,31 @@ async function findFirstMatchInJsonl(
       } catch {
         continue
       }
-      if (!msg.content) continue
+      if ((msg.role !== 'user' && msg.role !== 'assistant') || !msg.content) continue
 
-      const contentLower = msg.content.toLowerCase()
-      const matchIndex = contentLower.indexOf(queryLower)
-      if (matchIndex === -1) continue
+      const match = findBestSearchMatch(msg.content, query)
+      if (!match) continue
 
-      const snippetStart = Math.max(0, matchIndex - 40)
-      const snippetEnd = Math.min(msg.content.length, matchIndex + queryLength + 40)
+      const snippetStart = Math.max(0, match.matchStart - 40)
+      const snippetEnd = Math.min(msg.content.length, match.matchStart + match.matchLength + 40)
       const snippet = (snippetStart > 0 ? '...' : '') +
         msg.content.slice(snippetStart, snippetEnd) +
         (snippetEnd < msg.content.length ? '...' : '')
-      const matchStart = matchIndex - snippetStart + (snippetStart > 0 ? 3 : 0)
+      const matchStart = match.matchStart - snippetStart + (snippetStart > 0 ? 3 : 0)
 
-      return { messageId: msg.id, role: msg.role, snippet, matchStart }
+      insertTopSearchResult(hits, {
+        messageId: msg.id,
+        role: msg.role,
+        snippet,
+        matchStart,
+        matchLength: match.matchLength,
+        score: match.score,
+      }, MAX_SEARCH_HITS_PER_SESSION)
     }
-    return null
   } finally {
     rl.close()
     stream.destroy()
   }
+
+  return hits
 }

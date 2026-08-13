@@ -1815,6 +1815,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
                   onChange={updateMarkdownDraft}
                   onSave={() => void saveMarkdownEdit()}
                   onCancel={exitMarkdownEdit}
+                  renderMermaidInEditor
                   disabled={markdownSaving || Boolean(readOnly)}
                   fileAccess={markdownFileAccess}
                   shikiTheme={theme === 'dark' ? 'github-dark' : 'github-light'}

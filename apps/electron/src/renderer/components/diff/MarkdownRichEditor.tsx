@@ -32,6 +32,8 @@ interface MarkdownRichEditorProps {
   onSave: () => void
   onCancel: () => void
   onRequestEdit?: () => void
+  /** 由外层源码编辑器接管 Mermaid 源码编辑时，富文本态持续显示图表预览。 */
+  renderMermaidInEditor?: boolean
   disabled?: boolean
   fileAccess?: FileAccessOptions
   shikiTheme?: string
@@ -48,6 +50,7 @@ export function MarkdownRichEditor({
   onSave,
   onCancel,
   onRequestEdit,
+  renderMermaidInEditor = false,
   disabled,
   fileAccess,
   shikiTheme = 'github-dark',
@@ -57,6 +60,7 @@ export function MarkdownRichEditor({
   onSelectionChange,
 }: MarkdownRichEditorProps): React.ReactElement {
   const isEditable = editing && !disabled
+  const showMermaidPreview = !isEditable || renderMermaidInEditor
   const markdownRendererVersion = MARKDOWN_RENDERER_VERSION
   const onChangeRef = React.useRef(onChange)
   const onSaveRef = React.useRef(onSave)
@@ -334,9 +338,8 @@ export function MarkdownRichEditor({
         }}
         className={cn(
           editing ? 'min-h-0 flex-1 overflow-auto scrollbar-thin' : 'h-full min-h-full flex-1',
-          isEditable
-            ? '[&_.proma-mermaid-preview]:hidden [&_.proma-code-source-body]:block'
-            : [
+          showMermaidPreview
+            ? [
                 '[&_.proma-code-block--mermaid]:overflow-visible',
                 '[&_.proma-code-block--mermaid]:rounded-none',
                 '[&_.proma-code-block--mermaid]:border-0',
@@ -344,7 +347,8 @@ export function MarkdownRichEditor({
                 '[&_.proma-code-block--mermaid_.proma-code-header]:hidden',
                 '[&_.proma-code-block--mermaid_.proma-mermaid-preview]:block',
                 '[&_.proma-code-block--mermaid_.proma-code-source-body]:hidden',
-              ],
+              ]
+            : '[&_.proma-mermaid-preview]:hidden [&_.proma-code-source-body]:block',
         )}
       />
       {editing && editor && <TableBubbleMenu editor={editor} />}

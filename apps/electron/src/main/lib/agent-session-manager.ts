@@ -44,7 +44,7 @@ import type {
   AgentActiveWorktree,
   SessionWorkbenchLayout,
 } from '@proma/shared'
-import { migratePermissionMode, mergeSkillActivations } from '@proma/shared'
+import { migratePermissionMode, mergeSkillActivations, findBestSearchMatch, insertTopSearchResult } from '@proma/shared'
 import { getConversationMessages } from './conversation-manager'
 // 旧格式 → SDKMessage 的转换逻辑下沉到 @proma/session-core 作为唯一真源，避免主进程与渲染层各存一份。
 import { convertLegacyMessage } from '@proma/session-core'
@@ -74,6 +74,10 @@ const INDEX_VERSION = 2
  * 同时避免极端会话数量下向渲染进程传输过大列表。
  */
 const MAX_SESSION_REFERENCE_LIMIT = 200
+
+/** 全局 Agent 会话正文搜索的结果预算。 */
+const MAX_SEARCH_SESSIONS = 100
+const MAX_SEARCH_HITS_PER_SESSION = 2
 
 /**
  * 会话引用的正文搜索是输入框补全路径，必须有独立 I/O 预算。
@@ -1227,29 +1231,28 @@ export function cleanupStaleAttachedPaths(): number {
 }
 
 /**
- *
- * 按行流式读取每个会话的 JSONL 文件，命中即早退。兼容旧 AgentMessage 和新 SDKMessage 格式。
- * 每个会话最多返回 1 条匹配，总计达到 maxResults 即停止扫描后续会话。
- *
- * @param query 搜索关键词
- * @returns 匹配结果列表
+ * 搜索 Agent 会话正文。
+ * 每个会话最多返回 2 个用户/助手正文命中，最多返回 100 个命中会话。
  */
 export async function searchAgentSessionMessages(query: string): Promise<AgentMessageSearchResult[]> {
   if (!query || query.length < 2) return []
 
   const index = readIndex()
   const results: AgentMessageSearchResult[] = []
-  const queryLower = query.toLowerCase()
-  const maxResults = 30
+  let matchedSessionCount = 0
 
-  for (const session of index.sessions) {
-    if (results.length >= maxResults) break
+  const sortedSessions = [...index.sessions].sort((a, b) => b.updatedAt - a.updatedAt)
+  for (const session of sortedSessions) {
+    if (matchedSessionCount >= MAX_SEARCH_SESSIONS) break
 
     const filePath = getAgentSessionMessagesPath(session.id)
     if (!existsSync(filePath)) continue
 
-    const hit = await findFirstMatchInAgentJsonl(filePath, queryLower, query.length)
-    if (hit) {
+    const hits = await findMatchesInAgentJsonl(filePath, query)
+    if (hits.length === 0) continue
+    matchedSessionCount++
+
+    for (const hit of hits.slice(0, MAX_SEARCH_HITS_PER_SESSION)) {
       results.push({
         sessionId: session.id,
         sessionTitle: session.title,
@@ -1257,13 +1260,111 @@ export async function searchAgentSessionMessages(query: string): Promise<AgentMe
         role: hit.role,
         snippet: hit.snippet,
         matchStart: hit.matchStart,
-        matchLength: query.length,
+        matchLength: hit.matchLength,
         archived: session.archived,
       })
     }
   }
 
   return results
+}
+
+interface AgentSearchHit {
+  messageId: string
+  role: Extract<AgentMessageSearchResult['role'], 'user' | 'assistant'>
+  snippet: string
+  matchStart: number
+  matchLength: number
+  score: number
+}
+
+/** 在单个 Agent JSONL 中收集用户文本和助手 text block 的命中。 */
+async function findMatchesInAgentJsonl(
+  filePath: string,
+  query: string,
+): Promise<AgentSearchHit[]> {
+  const stream = createReadStream(filePath, { encoding: 'utf-8' })
+  const rl = createInterface({ input: stream, crlfDelay: Infinity })
+  const hitsByMessageId = new Map<string, AgentSearchHit>()
+  const anonymousHits: AgentSearchHit[] = []
+
+  try {
+    for await (const line of rl) {
+      if (!line.trim()) continue
+      let parsed: {
+        role?: string
+        id?: string
+        uuid?: string
+        content?: unknown
+        type?: string
+        message?: {
+          role?: string
+          id?: string
+          content?: Array<{ type: string; text?: string }>
+        }
+      }
+      try {
+        parsed = JSON.parse(line)
+      } catch {
+        continue
+      }
+
+      let role: AgentSearchHit['role'] | null = null
+      let messageId = parsed.id ?? parsed.uuid ?? parsed.message?.id ?? ''
+      let textContent = ''
+
+      // 兼容旧 AgentMessage：只接受 user/assistant 的顶层 content。
+      if (!parsed.type && typeof parsed.content === 'string') {
+        if (parsed.role !== 'user' && parsed.role !== 'assistant') continue
+        role = parsed.role
+        textContent = parsed.content
+      } else if (parsed.type === 'user' || parsed.type === 'assistant') {
+        role = parsed.type
+        if (Array.isArray(parsed.message?.content)) {
+          textContent = parsed.message.content
+            .filter((block) => block.type === 'text' && typeof block.text === 'string')
+            .map((block) => block.text!)
+            .join('\n')
+        }
+      }
+
+      if (!role || !textContent) continue
+      const match = findBestSearchMatch(textContent, query)
+      if (!match) continue
+
+      const snippetStart = Math.max(0, match.matchStart - 40)
+      const snippetEnd = Math.min(textContent.length, match.matchStart + match.matchLength + 40)
+      const snippet = (snippetStart > 0 ? '...' : '') +
+        textContent.slice(snippetStart, snippetEnd) +
+        (snippetEnd < textContent.length ? '...' : '')
+      const matchStart = match.matchStart - snippetStart + (snippetStart > 0 ? 3 : 0)
+      const hit = { messageId, role, snippet, matchStart, matchLength: match.matchLength, score: match.score }
+      if (messageId) {
+        const existingHit = hitsByMessageId.get(messageId)
+        if (!existingHit) {
+          hitsByMessageId.set(messageId, hit)
+        } else {
+          const bestHit = [existingHit]
+          insertTopSearchResult(bestHit, hit, 1)
+          hitsByMessageId.set(messageId, bestHit[0]!)
+        }
+      } else {
+        insertTopSearchResult(anonymousHits, hit, MAX_SEARCH_HITS_PER_SESSION)
+      }
+    }
+  } finally {
+    rl.close()
+    stream.destroy()
+  }
+
+  const hits: AgentSearchHit[] = []
+  for (const hit of hitsByMessageId.values()) {
+    insertTopSearchResult(hits, hit, MAX_SEARCH_HITS_PER_SESSION)
+  }
+  for (const hit of anonymousHits) {
+    insertTopSearchResult(hits, hit, MAX_SEARCH_HITS_PER_SESSION)
+  }
+  return hits
 }
 
 /**

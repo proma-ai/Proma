@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { buildQueuedMessageSendPayload, getQueuedMessageDisplayParts, parseQueuedMessageMentions } from './agent-message-queue'
+import {
+  buildQueuedMessageSendPayload,
+  getQueuedMessageDisplayParts,
+  parseQueuedMessageMentions,
+} from './agent-message-queue'
 
 describe('queued message @file mention path decoding (Agent 侧真实路径)', () => {
   test('decodes percent-encoded @file path back to the real path with spaces', () => {

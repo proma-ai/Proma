@@ -4,7 +4,7 @@ import * as React from 'react'
 import { Loader2, Mic } from 'lucide-react'
 
 export function VoiceDictationIndicatorApp(): React.ReactElement {
-  const [state, setState] = React.useState<'recording' | 'stopping'>('recording')
+  const [state, setState] = React.useState<'preparing' | 'recording' | 'stopping'>('preparing')
   const [volume, setVolume] = React.useState(0)
   const [transcript, setTranscript] = React.useState('')
   const [typedTranscript, setTypedTranscript] = React.useState('')
@@ -31,6 +31,7 @@ export function VoiceDictationIndicatorApp(): React.ReactElement {
     return () => window.clearTimeout(timer)
   }, [transcript, typedTranscript])
 
+  const preparing = state === 'preparing'
   const stopping = state === 'stopping'
   const lines = getRecentTranscriptLines(typedTranscript)
 
@@ -38,7 +39,7 @@ export function VoiceDictationIndicatorApp(): React.ReactElement {
     <div className="flex h-screen w-screen flex-col overflow-hidden rounded-lg border border-border/70 bg-background/95 px-4 py-2.5 text-foreground shadow-lg backdrop-blur">
       <div className="flex shrink-0 items-center justify-center gap-2 text-xs font-medium">
         <span className="flex size-5 items-center justify-center text-primary" aria-hidden="true">
-          {stopping ? (
+          {preparing || stopping ? (
             <Loader2 className="size-4 animate-spin" />
           ) : (
             <span className="flex h-4 items-center gap-[2px]">
@@ -55,7 +56,7 @@ export function VoiceDictationIndicatorApp(): React.ReactElement {
             </span>
           )}
         </span>
-        <span>{stopping ? '正在整理语音' : '正在听写'}</span>
+        <span>{preparing ? '准备麦克风' : stopping ? '正在整理语音' : '正在听写'}</span>
         <Mic className="size-3.5 text-muted-foreground" aria-hidden="true" />
       </div>
 
@@ -73,7 +74,7 @@ export function VoiceDictationIndicatorApp(): React.ReactElement {
             ))}
           </div>
         ) : (
-          <p className="text-muted-foreground/60">请开始说话</p>
+          <p className="text-muted-foreground/60">{preparing ? '准备麦克风...' : '请开始说话'}</p>
         )}
       </div>
     </div>

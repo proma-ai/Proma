@@ -119,7 +119,7 @@ export interface VoiceDictationShownEvent {
 
 /** 外部应用听写状态条的实时显示数据。 */
 export interface VoiceDictationIndicatorEvent {
-  state: 'recording' | 'stopping'
+  state: 'preparing' | 'recording' | 'stopping'
   /** 已归一化、平滑处理后的麦克风音量（0~1）。 */
   volume: number
   /** 尚未提交给第三方应用的实时转写文本。 */

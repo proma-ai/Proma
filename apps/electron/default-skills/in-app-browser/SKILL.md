@@ -45,6 +45,12 @@ Proma 的 `Browser*` 工具控制当前会话关联的受管浏览器。网页�
 - `BrowserNewTab`：创建新的 **Agent 工作 tab**，并将其激活到用户可见的浏览器面板；`BrowserSelectTab` 也会同步激活所选工作 tab。`BrowserListTabs` 可确认 tabId；每个 Observe ref 只能在其来源 tab 使用。`BrowserCloseTab` 关闭指定 tab。
 - `BrowserPreviewOpen`：在受管浏览器中预览当前项目、会话工作台或已授权附加目录中的 HTML / `index.html`，并自动激活该预览标签。
 
+## 滚动页面
+
+- 导航键 `PageDown` / `End` / `ArrowDown` 只触发**窗口/body 滚动**；SPA 信息流（小红书、X/Twitter、LinkedIn 等）常在**内部滚动容器**里滚动，导航键不会滚动内部容器。
+- 需要滚动时先判断滚动容器：用 `BrowserExecuteJavaScript` 读 `window.scrollY` 与候选容器的 `scrollTop` / `scrollHeight`；对内部容器执行 `scrollBy(0, innerHeight)` 或设置 `scrollTop`。
+- 滚动后**验证**读回 `scrollY` / `scrollTop` 确认确实移动，不要假定按键已生效。
+
 ## 登录与敏感网页流程
 
 当用户目标需要登录、验证、支付或填写敏感字段时，可以使用 `BrowserFill`、`BrowserClick`、`BrowserPress` 或必要时的 `BrowserDomAction` 完成当前网页流程；不要因为字段类型而自动拒绝。`BrowserExecuteJavaScript` 只能用于当前用户目标的最小页面操作，不主动枚举、导出或读取浏览器 Cookie、local storage、profile、密码管理器或其他会话存储。

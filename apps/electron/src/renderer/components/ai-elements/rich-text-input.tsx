@@ -126,6 +126,10 @@ interface RichTextInputProps {
   value: string
   /** 值变更回调 */
   onChange: (markdown: string) => void
+  /** 轻量通知，用于立即更新依赖输入内容的本地控件状态，不序列化整篇文档。 */
+  onInputActivity?: (hasContent: boolean) => void
+  /** 草稿同步的停顿时间；省略时保留按帧同步的既有交互语义。 */
+  draftSyncDelayMs?: number
   /** 提交回调（Enter 键）；传入值可避免草稿同步尚未提交时发送旧内容。 */
   onSubmit: (content?: string, fromEditor?: boolean) => void
   /** 粘贴文件回调（拦截粘贴的文件） */
@@ -175,6 +179,8 @@ interface RichTextInputProps {
 
 /** RichTextInput 对外暴露的命令接口 */
 export interface RichTextInputHandle {
+  /** 返回最新 Markdown 草稿，并同步尚未提交的编辑。 */
+  getMarkdown: () => string
   /** 在光标处插入文件引用（右侧文件面板拖入时调用） */
   insertFileMentions: (items: FilePanelDragItem[]) => void
   /** 在光标处插入可定位的 Agent 历史引用 chip。 */
@@ -190,6 +196,8 @@ export interface RichTextInputHandle {
 export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>(function RichTextInput({
   value,
   onChange,
+  onInputActivity,
+  draftSyncDelayMs = 0,
   onSubmit,
   onPasteFiles,
   onPasteLongText,
@@ -221,10 +229,15 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
   const [isManuallyCollapsed, setIsManuallyCollapsed] = useState(false)
   // 跟踪 isExpanded 最新值（对比后再 setState，避免每键无谓 setState 触发重渲染）
   const isExpandedRef = useRef(false)
-  // 行数检查会遍历整篇 ProseMirror 文档；在输入停顿后再计算，避免长草稿每帧重复扫描。
+  // 行数检查会遍历整篇 ProseMirror 文档；在输入停顿后再计算，避免长草稿重复扫描。
   const lineCheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // 草稿序列化与上层状态同步同样合并到每帧一次；TipTap 自己仍在输入事件内即时更新 DOM。
-  const draftSyncHandleRef = useRef<number | null>(null)
+  // Agent 输入可以在停顿后同步草稿；其他调用方保持既有的按帧同步。
+  const draftSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const draftSyncFrameRef = useRef<number | null>(null)
+  const pendingDraftEditorRef = useRef<NonNullable<ReturnType<typeof useEditor>> | null>(null)
+  const pendingDraftScopeKeyRef = useRef<string | null | undefined>(undefined)
+  const draftScopeKeyRef = useRef(draftScopeKey)
+  draftScopeKeyRef.current = draftScopeKey
   // 跟踪编辑器自己设置的值，用于区分外部设置和内部更新
   const lastEditorValueRef = useRef<string>('')
   // 记录尚未由 props 确认的本地草稿。长文本连续编辑时，React 可能先提交较旧的
@@ -232,6 +245,9 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
   const pendingLocalDraftEchoesRef = useRef<string[]>([])
   // 跟踪 IME 输入状态（中文输入法等）
   const isComposingRef = useRef(false)
+  // 保持轻量输入状态回调引用最新，避免每次按键重建 TipTap 编辑器。
+  const onInputActivityRef = useRef(onInputActivity)
+  onInputActivityRef.current = onInputActivity
   // 保持 onSubmit 引用最新
   const onSubmitRef = useRef(onSubmit)
   onSubmitRef.current = onSubmit
@@ -374,7 +390,7 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
       return ''
     }
 
-    // DOM → Markdown 遍历对长草稿较重；将多次连续输入收敛到一帧一次。
+    // DOM → Markdown 遍历对长草稿较重；在连续输入停顿后再同步。
     const markdown = measurePerformance('input.html-to-markdown', () => (
       htmlToMarkdown(html, { skipMarkdownEscape: !richTextEnabled })
     ))
@@ -400,21 +416,52 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
   const syncEditorDraftRef = useRef(syncEditorDraft)
   syncEditorDraftRef.current = syncEditorDraft
 
-  const flushPendingDraftSync = useCallback((ed: NonNullable<ReturnType<typeof useEditor>>): string => {
-    if (draftSyncHandleRef.current !== null) {
-      cancelAnimationFrame(draftSyncHandleRef.current)
-      draftSyncHandleRef.current = null
+  const flushPendingDraftSync = useCallback((ed?: NonNullable<ReturnType<typeof useEditor>>): string => {
+    if (draftSyncTimerRef.current !== null) {
+      clearTimeout(draftSyncTimerRef.current)
+      draftSyncTimerRef.current = null
     }
-    return syncEditorDraftRef.current(ed)
+    if (draftSyncFrameRef.current !== null) {
+      cancelAnimationFrame(draftSyncFrameRef.current)
+      draftSyncFrameRef.current = null
+    }
+    const pendingEditor = ed ?? pendingDraftEditorRef.current
+    const pendingScopeKey = ed ? draftScopeKeyRef.current : pendingDraftScopeKeyRef.current
+    pendingDraftEditorRef.current = null
+    pendingDraftScopeKeyRef.current = undefined
+    if (!pendingEditor || pendingScopeKey !== draftScopeKeyRef.current) return lastEditorValueRef.current
+    return syncEditorDraftRef.current(pendingEditor)
   }, [])
 
   const scheduleDraftSync = useCallback((ed: NonNullable<ReturnType<typeof useEditor>>): void => {
-    if (draftSyncHandleRef.current !== null) return
-    draftSyncHandleRef.current = requestAnimationFrame(() => {
-      draftSyncHandleRef.current = null
-      syncEditorDraftRef.current(ed)
+    const scopeKey = draftScopeKeyRef.current
+    pendingDraftEditorRef.current = ed
+    pendingDraftScopeKeyRef.current = scopeKey
+    const flushScheduledDraft = (): void => {
+      const pendingEditor = pendingDraftEditorRef.current
+      const pendingScopeKey = pendingDraftScopeKeyRef.current
+      pendingDraftEditorRef.current = null
+      pendingDraftScopeKeyRef.current = undefined
+      // 同一编辑器在切换会话时可能还没卸载；旧 scope 的延迟同步绝不能写进新会话草稿。
+      if (pendingScopeKey !== draftScopeKeyRef.current || !pendingEditor) return
+      syncEditorDraftRef.current(pendingEditor)
+    }
+
+    if (draftSyncDelayMs > 0) {
+      if (draftSyncTimerRef.current !== null) clearTimeout(draftSyncTimerRef.current)
+      draftSyncTimerRef.current = setTimeout(() => {
+        draftSyncTimerRef.current = null
+        flushScheduledDraft()
+      }, draftSyncDelayMs)
+      return
+    }
+
+    if (draftSyncFrameRef.current !== null) return
+    draftSyncFrameRef.current = requestAnimationFrame(() => {
+      draftSyncFrameRef.current = null
+      flushScheduledDraft()
     })
-  }, [])
+  }, [draftSyncDelayMs])
 
   const planningMentionSuggestions = useMemo(
     () => [
@@ -647,6 +694,12 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
           event.clipboardData.setData('text/html', '')
           return true
         },
+        blur: () => {
+          // 点击发送、切换会话或打开工具栏前会失焦；不要捕获初始化时的 editor，
+          // 直接从待同步引用取得当前实例，保证最后一笔编辑会立即提交。
+          flushPendingDraftSync()
+          return false
+        },
       },
       handlePaste: (view, event) => {
         // 拦截粘贴的文件（图片等）
@@ -818,20 +871,32 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
       },
     },
     onUpdate: ({ editor: ed }) => {
+      onInputActivityRef.current?.(!ed.isEmpty)
       scheduleDraftSync(ed)
     },
   }, [richTextEnabled])
 
-  // 卸载时取消未触发的 rAF 行数检查，避免泄漏 / 在卸载组件上 setState
+  // 卸载时取消未触发的行数检查和草稿同步；同步最后一笔输入，避免快速切换会话丢草稿。
   useEffect(() => {
     return () => {
       if (lineCheckTimerRef.current !== null) {
         clearTimeout(lineCheckTimerRef.current)
         lineCheckTimerRef.current = null
       }
-      if (draftSyncHandleRef.current !== null) {
-        cancelAnimationFrame(draftSyncHandleRef.current)
-        draftSyncHandleRef.current = null
+      if (draftSyncTimerRef.current !== null) {
+        clearTimeout(draftSyncTimerRef.current)
+        draftSyncTimerRef.current = null
+      }
+      if (draftSyncFrameRef.current !== null) {
+        cancelAnimationFrame(draftSyncFrameRef.current)
+        draftSyncFrameRef.current = null
+      }
+      const pendingEditor = pendingDraftEditorRef.current
+      const pendingScopeKey = pendingDraftScopeKeyRef.current
+      pendingDraftEditorRef.current = null
+      pendingDraftScopeKeyRef.current = undefined
+      if (pendingEditor && pendingScopeKey === draftScopeKeyRef.current) {
+        syncEditorDraftRef.current(pendingEditor)
       }
     }
   }, [])
@@ -876,6 +941,7 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
     // 草稿范围切换、发送清空、队列回填等真正外部更新取代了当前本地编辑，
     // 旧 echo 已不再有意义，避免日后误匹配。
     pendingLocalDraftEchoesRef.current = []
+    onInputActivityRef.current?.(controllerValue.trim().length > 0)
 
     if (controllerValue === '') {
       editor.commands.clearContent(false)
@@ -940,6 +1006,9 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
   // mention 节点沿用 TipTap Mention 扩展的 attrs（id=路径，label=文件名），
   // 发送时由 htmlToMarkdown 序列化为 @file:{path}，与键盘 @ 引用行为完全一致。
   useImperativeHandle(ref, () => ({
+    getMarkdown(): string {
+      return flushPendingDraftSync(editor ?? undefined)
+    },
     insertFileMentions(items: FilePanelDragItem[]): void {
       if (!editor || items.length === 0) return
       let chain = editor.chain().focus()
@@ -980,7 +1049,7 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
         .run()
       return true
     },
-  }), [editor])
+  }), [editor, flushPendingDraftSync])
 
   // 将预览范围映射到每次用户编辑后的文档位置，避免流式更新覆盖邻近输入。
   useEffect(() => {
