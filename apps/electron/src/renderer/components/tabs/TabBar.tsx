@@ -44,7 +44,6 @@ import { shortcutGuideOpenAtom } from '@/atoms/shortcut-guide'
 import { faqDialogOpenAtom } from '@/atoms/faq-dialog'
 import { browserFilePanelManualRestoreSessionIdsAtom, browserPanelOpenMapAtom, browserStateMapAtom } from '@/atoms/browser-atoms'
 // 浏览器入口对所有 Agent 会话开放；来源限制由主进程浏览器策略处理。
-import { toast } from 'sonner'
 
 export function TabBar(): React.ReactElement {
   const tabs = useAtomValue(tabsAtom)
@@ -288,9 +287,6 @@ function TabBarInner({
 
     if (!shouldAutoCollapse) return
     setSidePanelOpen(false)
-    toast.message('已收起右侧文件面板，便于浏览网页', {
-      description: '按 ⌘⇧B（Windows / Linux：Ctrl+Shift+B）可重新打开；手动打开后，本会话不再自动收起。',
-    })
   }, [activeAgentSession?.id, activeBrowserIsOpen, browserFilePanelManualRestoreSessionIds, isPanelOpen, setSidePanelOpen])
 
   const openShortcutGuide = React.useCallback(() => {

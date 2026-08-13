@@ -366,8 +366,6 @@ export function buildTaskProgressDataForTurn(turn: AssistantTurn): { taskActivit
 }
 
 
-// ===== AssistantTurnRenderer — 渲染一个完整的 assistant turn =====
-
 export interface AssistantTurnRendererProps {
   turn: AssistantTurn
   /** 所有消息（全局，供工具结果查找跨 turn 的结果） */
@@ -533,10 +531,13 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
     return renderTopLevelBlock(block, i)
   }
 
+  const turnChannelId = (turn.assistantMessages[0] as unknown as Record<string, unknown> | undefined)?._channelId
+  const resolvedTurnChannelId = typeof turnChannelId === 'string' ? turnChannelId : undefined
+
   return (
     <Message from="assistant">
       <MessageHeader
-        model={turn.model ? resolveModelDisplayName(turn.model, channels) : undefined}
+        model={turn.model ? resolveModelDisplayName(turn.model, channels, resolvedTurnChannelId, 'agent') : undefined}
         time={turn.createdAt ? formatMessageTime(turn.createdAt) : undefined}
         logo={<AssistantLogo model={turn.model} />}
       />
@@ -678,6 +679,8 @@ export function SDKMessageRenderer({
     }
 
     const model = aMsg._channelModelId || aMsg.message?.model || sessionModelId
+    const messageChannelId = (aMsg as unknown as Record<string, unknown>)._channelId
+    const resolvedMessageChannelId = typeof messageChannelId === 'string' ? messageChannelId : undefined
     const meta = extractMeta(message)
 
     // 检测是否有主要内容（text 块）
@@ -689,7 +692,7 @@ export function SDKMessageRenderer({
       <Message from="assistant">
         {showHeader && (
           <MessageHeader
-            model={model ? resolveModelDisplayName(model, channels) : undefined}
+            model={model ? resolveModelDisplayName(model, channels, resolvedMessageChannelId, 'agent') : undefined}
             time={meta.createdAt ? formatMessageTime(meta.createdAt) : undefined}
             logo={<AssistantLogo model={model} />}
           />
@@ -1144,6 +1147,7 @@ export function AssistantErrorTail({
   const errorTitle = typeof msgAny._errorTitle === 'string' ? msgAny._errorTitle : undefined
   const errorCode = typeof msgAny._errorCode === 'string' ? msgAny._errorCode : undefined
   const isBillingError = errorCode === 'billing_error'
+  const isPromaBillingError = isBillingError && msgAny._channelProvider === 'proma'
   const errorDetails = Array.isArray(msgAny._errorDetails)
     ? (msgAny._errorDetails as string[])
     : undefined
@@ -1244,7 +1248,7 @@ export function AssistantErrorTail({
     onRetry ||
     onRetryInNewSession ||
     (isPromptTooLong && onCompact) ||
-    (isBillingError && onSwitchToPromaCloud)
+    (isPromaBillingError && onSwitchToPromaCloud)
   )
   const hasProjectRootActions = isLocalProjectRootUnavailable && !!(
     onRelinkProjectRoot || (canRestoreProjectRoot && onRestoreProjectRoot)
@@ -1293,7 +1297,7 @@ export function AssistantErrorTail({
           )}
         </div>
       )}
-      {isBillingError && (
+      {isPromaBillingError && (
         <div className="mt-3 flex items-center flex-wrap gap-2">
           <Button size="sm" onClick={() => {
             setSettingsTab('billing')
@@ -1309,7 +1313,7 @@ export function AssistantErrorTail({
           )}
         </div>
       )}
-      {hasActions && !isBillingError && (
+      {hasActions && !isPromaBillingError && (
         <div className="flex items-center flex-wrap gap-2 mt-3">
           {hasProjectRootActions && (
             <>
@@ -1419,6 +1423,8 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact, onSwit
 export interface MessageGroupRendererProps {
   group: MessageGroup
   allMessages: SDKMessage[]
+  /** 仅跨 turn 工具元数据变化时更新历史 assistant；普通 live 数组新引用不触发重渲染。 */
+  externalMetadataSignature?: string
   basePath?: string
   onFork?: (upToMessageUuid: string) => void
   onRewind?: (assistantMessageUuid: string) => void
@@ -1436,6 +1442,8 @@ export interface MessageGroupRendererProps {
   onSwitchToPromaCloud?: () => void
   onRelinkProjectRoot?: () => void
   onRestoreProjectRoot?: () => void
+  /** 当前历史轮次；直接写入消息 DOM，避免划选时回扫整段历史。 */
+  historyTurn?: number
   /** 是否正在流式输出中（隐藏操作栏） */
   isStreaming?: boolean
   /** 是否被用户中断 */
@@ -1490,12 +1498,12 @@ export function getGroupId(group: MessageGroup): string {
 
 // getGroupPreview 已迁移至 @proma/session-core（本文件从该包 import 并 re-export）
 
-export function MessageGroupRenderer({ group, allMessages, basePath, onFork, onRewind, onAgentHistoryQuoteClick, onCreateTodo, onRetry, onRetryInNewSession, onCompact, onSwitchToPromaCloud, onRelinkProjectRoot, onRestoreProjectRoot, isStreaming, stoppedByUser, sessionModelId }: MessageGroupRendererProps): React.ReactElement | null {
+export const MessageGroupRenderer = React.memo(function MessageGroupRenderer({ group, allMessages, basePath, onFork, onRewind, onAgentHistoryQuoteClick, onCreateTodo, onRetry, onRetryInNewSession, onCompact, onSwitchToPromaCloud, onRelinkProjectRoot, onRestoreProjectRoot, historyTurn, isStreaming, stoppedByUser, sessionModelId }: MessageGroupRendererProps): React.ReactElement | null {
   const groupId = getGroupId(group)
 
   if (group.type === 'user') {
     return (
-      <div data-message-id={groupId} data-message-role="user">
+      <div data-message-id={groupId} data-message-role="user" data-message-turn={historyTurn}>
         <UserInputMessage message={group.message} onAgentHistoryQuoteClick={onAgentHistoryQuoteClick} />
       </div>
     )
@@ -1503,14 +1511,25 @@ export function MessageGroupRenderer({ group, allMessages, basePath, onFork, onR
 
   if (group.type === 'system') {
     const subtype = group.message.subtype
-    if (getSDKCompactStatus(group.message)) return <div data-message-id={groupId}><CompactStatusNotice message={group.message} /></div>
-    if (subtype === 'permission_denied') return <div data-message-id={groupId}><PermissionDeniedNotice message={group.message} /></div>
+    // system 消息同样需要稳定 DOM 锚点，保留既有历史引用与精确回跳能力。
+    const historySelectionAttributes = {
+      'data-message-id': groupId,
+      'data-message-role': 'system',
+      'data-message-turn': historyTurn,
+    }
+    if (getSDKCompactStatus(group.message)) return <div {...historySelectionAttributes}><CompactStatusNotice message={group.message} /></div>
+    if (subtype === 'permission_denied') return <div {...historySelectionAttributes}><PermissionDeniedNotice message={group.message} /></div>
     return null
   }
 
   // assistant-turn
   return (
-    <div data-message-id={groupId} data-message-role="assistant">
+    <div
+      data-message-id={groupId}
+      data-message-role="assistant"
+      data-message-turn={historyTurn}
+      data-agent-live={isStreaming ? 'true' : undefined}
+    >
       <AssistantTurnRenderer
         turn={group}
         allMessages={allMessages}
@@ -1530,4 +1549,22 @@ export function MessageGroupRenderer({ group, allMessages, basePath, onFork, onR
       />
     </div>
   )
-}
+}, (previous, next) => (
+  previous.group === next.group
+  && previous.basePath === next.basePath
+  && previous.onFork === next.onFork
+  && previous.onRewind === next.onRewind
+  && previous.onAgentHistoryQuoteClick === next.onAgentHistoryQuoteClick
+  && previous.onCreateTodo === next.onCreateTodo
+  && previous.onRetry === next.onRetry
+  && previous.onRetryInNewSession === next.onRetryInNewSession
+  && previous.onCompact === next.onCompact
+  && previous.onSwitchToPromaCloud === next.onSwitchToPromaCloud
+  && previous.onRelinkProjectRoot === next.onRelinkProjectRoot
+  && previous.onRestoreProjectRoot === next.onRestoreProjectRoot
+  && previous.historyTurn === next.historyTurn
+  && previous.isStreaming === next.isStreaming
+  && previous.stoppedByUser === next.stoppedByUser
+  && previous.sessionModelId === next.sessionModelId
+  && previous.externalMetadataSignature === next.externalMetadataSignature
+))

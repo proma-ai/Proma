@@ -18,7 +18,7 @@ export interface BrowserViewLayout {
 
 export type BrowserExecutionSource = 'user' | 'automation' | 'delegation'
 
-export type BrowserTraceAction = 'navigate' | 'observe' | 'wait' | 'click' | 'fill' | 'press' | 'dom' | 'script' | 'screenshot' | 'tab'
+export type BrowserTraceAction = 'navigate' | 'observe' | 'wait' | 'click' | 'fill' | 'press' | 'dom' | 'script' | 'screenshot' | 'tab' | 'download' | 'popup'
 export type BrowserOperationStatus = 'dispatched' | 'verified' | 'failed' | 'unknown'
 
 /** 脱敏的浏览器操作账本项；绝不含输入正文、Cookie、截图或脚本全文。 */
@@ -53,6 +53,8 @@ export interface BrowserTabSummary {
   loading: boolean
   /** 此标签由 Agent 创建（与当前默认工作标签无关）。 */
   openedByAgent: boolean
+  /** 此标签由页面 window.open / target=_blank 创建。 */
+  openedByPopup: boolean
 }
 
 export interface BrowserViewState {

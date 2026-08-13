@@ -20,7 +20,6 @@ import { stickyUserMessageEnabledAtom } from '@/atoms/ui-preferences'
 import { MessageResponse, remarkMentions } from './message'
 import type { RemarkPluginFn } from './message'
 import { cn } from '@/lib/utils'
-import { measurePerformance } from '@/lib/performance-monitor'
 
 /** 悬浮条专用 remark 插件（仅 mention，不保留换行） */
 const STICKY_REMARK_PLUGINS: RemarkPluginFn[] = [remarkMentions]
@@ -45,6 +44,11 @@ interface StickyUserMessageProps {
   userMessages: UserMessageData[]
 }
 
+interface UserMessagePosition {
+  id: string
+  bottom: number
+}
+
 export function StickyUserMessage({ userMessages }: StickyUserMessageProps): React.ReactElement {
   const { scrollRef, stopScroll, state: stickyState } = useStickToBottomContext()
   const userProfile = useAtomValue(userProfileAtom)
@@ -52,74 +56,111 @@ export function StickyUserMessage({ userMessages }: StickyUserMessageProps): Rea
 
   // 当前悬浮展示的消息
   const [stickyMessage, setStickyMessage] = React.useState<UserMessageData | null>(null)
+  const positionsRef = React.useRef<UserMessagePosition[]>([])
 
-  // 构建 id → data 查找表
+  const userMessageSignature = React.useMemo(
+    () => userMessages.map((message) => message.id ?? '').join('\u0000'),
+    [userMessages],
+  )
+
+  // 构建 id → data 查找表；流式 assistant 更新会重建上游数组，但用户消息未变时
+  // 保持 map 引用稳定，避免重新绑定观察器和测量全部历史消息。
   const messageMap = React.useMemo(() => {
     const map = new Map<string, UserMessageData>()
     for (const msg of userMessages) {
       if (msg.id) map.set(msg.id, msg)
     }
     return map
-  }, [userMessages])
+  }, [userMessageSignature])
 
   React.useEffect(() => {
     const el = scrollRef.current
     if (!el || userMessages.length === 0 || !stickyEnabled) {
+      positionsRef.current = []
       setStickyMessage(null)
       return
     }
 
-    let frame: number | null = null
-    const check = () => {
-      measurePerformance('history.sticky-user-scan', () => {
-        const containerRect = el.getBoundingClientRect()
-        const nodes = el.querySelectorAll<HTMLElement>('[data-message-role="user"]')
+    let scrollFrame: number | null = null
+    let measureFrame: number | null = null
+    let containerWidth = el.clientWidth
 
-        // 从后往前找第一个完全在视口上方的用户消息节点
-        let found: UserMessageData | null = null
-        for (let i = nodes.length - 1; i >= 0; i--) {
-          const node = nodes[i]!
-          const nodeRect = node.getBoundingClientRect()
-          if (nodeRect.bottom < containerRect.top) {
-            // 找到了视口上方最近的用户消息
-            const msgId = node.getAttribute('data-message-id')
-            if (msgId) found = messageMap.get(msgId) ?? null
-            break
-          }
+    const updateStickyMessage = (): void => {
+      const scrollTop = el.scrollTop
+      const positions = positionsRef.current
+      let low = 0
+      let high = positions.length - 1
+      let match: UserMessagePosition | undefined
+      while (low <= high) {
+        const middle = Math.floor((low + high) / 2)
+        const candidate = positions[middle]!
+        if (candidate.bottom < scrollTop) {
+          match = candidate
+          low = middle + 1
+        } else {
+          high = middle - 1
         }
-        setStickyMessage((previous) => previous?.id === found?.id ? previous : found)
+      }
+      const found = match ? messageMap.get(match.id) ?? null : null
+      setStickyMessage((previous) => previous?.id === found?.id ? previous : found)
+    }
+
+    const measurePositions = (): void => {
+      const containerRect = el.getBoundingClientRect()
+      const positions: UserMessagePosition[] = []
+      for (const node of el.querySelectorAll<HTMLElement>('[data-message-role="user"]')) {
+        const id = node.getAttribute('data-message-id')
+        if (!id) continue
+        const rect = node.getBoundingClientRect()
+        positions.push({ id, bottom: rect.bottom - containerRect.top + el.scrollTop })
+      }
+      positionsRef.current = positions
+      updateStickyMessage()
+    }
+
+    const scheduleMeasure = (): void => {
+      if (measureFrame !== null) return
+      measureFrame = requestAnimationFrame(() => {
+        measureFrame = null
+        measurePositions()
       })
     }
-    const scheduleCheck = (): void => {
-      if (frame !== null) return
-      frame = requestAnimationFrame(() => {
-        frame = null
-        check()
+    const scheduleScrollUpdate = (): void => {
+      if (scrollFrame !== null) return
+      scrollFrame = requestAnimationFrame(() => {
+        scrollFrame = null
+        updateStickyMessage()
       })
     }
 
-    el.addEventListener('scroll', scheduleCheck, { passive: true })
-
-    // 监听容器尺寸变化
-    const resizeObserver = new ResizeObserver(scheduleCheck)
-    resizeObserver.observe(el)
-
-    // 监听内容区域 DOM 变化（流式输出、消息加载后及时检测）
-    const contentEl = el.firstElementChild as HTMLElement | null
-    if (contentEl) {
-      resizeObserver.observe(contentEl)
+    el.addEventListener('scroll', scheduleScrollUpdate, { passive: true })
+    const resizeObserver = new ResizeObserver((entries) => {
+      const containerEntry = entries.find((entry) => entry.target === el)
+      if (containerEntry && Math.abs(containerEntry.contentRect.width - containerWidth) >= 1) {
+        containerWidth = containerEntry.contentRect.width
+        scheduleMeasure()
+        return
+      }
+      if (entries.some((entry) => entry.target !== el)) scheduleMeasure()
+    })
+    // 只有最后一条用户消息及其之前的内容会改变用户消息的绝对位置。
+    // 当前流式 assistant 位于它之后，不纳入观察，避免每个流式高度更新重测整段历史。
+    const messageElements = Array.from(el.querySelectorAll<HTMLElement>('[data-message-id]'))
+    const lastUserMessageIndex = messageElements.findLastIndex(
+      (message) => message.dataset.messageRole === 'user',
+    )
+    for (const message of messageElements.slice(0, lastUserMessageIndex + 1)) {
+      resizeObserver.observe(message)
     }
-
-    // 延迟一帧执行初始检查，确保 DOM 已完成渲染
-    const rafId = requestAnimationFrame(check)
+    scheduleMeasure()
 
     return () => {
-      if (frame !== null) cancelAnimationFrame(frame)
-      el.removeEventListener('scroll', scheduleCheck)
+      if (scrollFrame !== null) cancelAnimationFrame(scrollFrame)
+      if (measureFrame !== null) cancelAnimationFrame(measureFrame)
+      el.removeEventListener('scroll', scheduleScrollUpdate)
       resizeObserver.disconnect()
-      cancelAnimationFrame(rafId)
     }
-  }, [scrollRef, userMessages, messageMap, stickyEnabled])
+  }, [scrollRef, userMessageSignature, messageMap, stickyEnabled])
 
   // 点击回滚到原始消息
   const scrollToOriginal = React.useCallback(() => {

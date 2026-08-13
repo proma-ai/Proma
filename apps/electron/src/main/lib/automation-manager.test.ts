@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { applyMaxRunsUpdate, computeNextRunAt } from './automation-manager'
+import { applyMaxRunsUpdate, computeNextRunAt, getEffectiveAutomationScheduleFields, normalizeAutomationScheduleFields, validateExplicitAutomationScheduleFields } from './automation-manager'
 
 describe('computeNextRunAt 月度调度', () => {
   // 用固定 from 时间戳避免测试与当前时间耦合；2026-03-31 09:30 UTC+8
@@ -155,5 +155,31 @@ describe('updateAutomation maxRuns 配额重置', () => {
     expect(automation.maxRuns).toBe(3)
     expect(automation.runCount).toBe(2)
     expect(automation.completedAt).toBe(completedAt)
+  })
+})
+
+
+describe('automation schedule mode transitions', () => {
+  test('interval → monthly clears interval-only fields while preserving monthly fields', () => {
+    const effective = getEffectiveAutomationScheduleFields({ scheduleType: 'monthly', timeOfDay: '09:00', dayOfMonth: 20 }, {
+      scheduleType: 'interval', intervalMinutes: 30, activeWindowStart: '09:00', activeWindowEnd: '18:00', activeWeekdays: [1, 2, 3],
+    } as never)
+    expect(effective.activeWindowStart).toBeUndefined()
+    expect(effective.activeWindowEnd).toBeUndefined()
+    expect(effective.activeWeekdays).toBeUndefined()
+    expect(effective.timeOfDay).toBe('09:00')
+    expect(effective.dayOfMonth).toBe(20)
+  })
+
+  test('monthly → interval clears calendar-only fields', () => {
+    const target = { scheduleType: 'interval' as const, intervalMinutes: 30, timeOfDay: '09:00', dayOfMonth: 20 }
+    normalizeAutomationScheduleFields(target)
+    expect(target.timeOfDay).toBeUndefined()
+    expect(target.dayOfMonth).toBeUndefined()
+  })
+
+  test('explicit incompatible fields are rejected instead of silently ignored', () => {
+    expect(() => validateExplicitAutomationScheduleFields({ scheduleType: 'monthly', activeWindowStart: '09:00' }, 'monthly')).toThrow()
+    expect(() => validateExplicitAutomationScheduleFields({ scheduleType: 'interval', dayOfMonth: 20 }, 'interval')).toThrow()
   })
 })

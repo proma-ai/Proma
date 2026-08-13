@@ -44,6 +44,7 @@ import { extractHttpStatusFromErrorText, friendlyErrorMessage, isPromptTooLongEr
 import { getActiveRunRejectionMessage, shouldPersistInitialUserMessage } from './agent-send-message-policy'
 import { isSessionNotFoundError } from './error-patterns'
 import { isPromaBillingErrorText } from './proma-billing-error'
+import { getPromaCloudRecoveryAction } from './proma-cloud-recovery'
 import { AgentEventBus } from './agent-event-bus'
 import { decryptApiKey, getChannelById, listChannels, persistCodexOAuthCredentials, persistXaiOAuthCredentials, resolveChannelRuntimeApiKey, resolveCodexOAuthCredentials, resolveXaiOAuthCredentials } from './channel-manager'
 import { getAdapter, fetchTitle } from '@proma/core'
@@ -1822,7 +1823,13 @@ export class AgentOrchestrator {
                   _errorTitle: typedError.title,
                   _errorDetails: typedError.details,
                   _errorCanRetry: typedError.canRetry,
-                  _errorActions: typedError.actions,
+                  _errorActions: [
+                    ...typedError.actions,
+                    ...(() => {
+                      const recovery = getPromaCloudRecoveryAction(channel.provider, typedError.code)
+                      return recovery ? [recovery] : []
+                    })(),
+                  ],
                 } as unknown as SDKMessage
                 appendSDKMessages(sessionId, [errorSDKMsg])
                 console.log(`[Agent 编排] 已保存 TypedError 消息: ${typedError.code} - ${typedError.title}`)

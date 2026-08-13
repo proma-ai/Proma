@@ -49,7 +49,27 @@ function migrateLegacyFields(data: AutomationsIndex): boolean {
       a.permissionMode = AUTOMATION_DEFAULT_PERMISSION_MODE
       changed = true
     }
-    // 移除已退役 runtime 字段。此前的 Claude/缺失 runtime 不可复用其会话，
+    const beforeScheduleFields = JSON.stringify({
+      scheduleType: a.scheduleType,
+      activeWindowStart: a.activeWindowStart,
+      activeWindowEnd: a.activeWindowEnd,
+      activeWeekdays: a.activeWeekdays,
+      timeOfDay: a.timeOfDay,
+      dayOfWeek: a.dayOfWeek,
+      dayOfMonth: a.dayOfMonth,
+      scheduledAt: a.scheduledAt,
+    })
+    normalizeAutomationScheduleFields(a)
+    if (beforeScheduleFields !== JSON.stringify({
+      scheduleType: a.scheduleType,
+      activeWindowStart: a.activeWindowStart,
+      activeWindowEnd: a.activeWindowEnd,
+      activeWeekdays: a.activeWeekdays,
+      timeOfDay: a.timeOfDay,
+      dayOfWeek: a.dayOfWeek,
+      dayOfMonth: a.dayOfMonth,
+      scheduledAt: a.scheduledAt,
+    })) changed = true
     // 因此清空 lastSessionId，下一次运行必定创建新的 Pi 会话。
     const raw = a as Automation & { agentRuntime?: unknown }
     const wasLegacyRuntime = raw.agentRuntime !== 'pi'
@@ -293,8 +313,8 @@ function isAutomationRunnable(a: Pick<Automation, 'channelId' | 'workspaceId'>):
  * 规范化 maxRuns：只接受 ≥1 的有限整数，其余（0、负数、非法值、undefined）一律按「不限次」处理返回 undefined。
  * 让 0/负数等价于"取消上限"，避免出现"上限为 0 永远跑不了"的死配置。
  */
-function normalizeMaxRuns(v: number | undefined): number | undefined {
-  if (v === undefined) return undefined
+function normalizeMaxRuns(v: number | null | undefined): number | undefined {
+  if (v === null || v === undefined) return undefined
   if (!Number.isFinite(v) || !Number.isInteger(v) || v < 1) return undefined
   return v
 }
@@ -304,7 +324,7 @@ function normalizeMaxRuns(v: number | undefined): number | undefined {
  */
 export function applyMaxRunsUpdate(
   target: Pick<Automation, 'maxRuns' | 'runCount' | 'completedAt'>,
-  nextMaxRuns: number | undefined,
+  nextMaxRuns: number | null | undefined,
 ): void {
   const normalizedMaxRuns = normalizeMaxRuns(nextMaxRuns)
   if (normalizedMaxRuns !== target.maxRuns) {
@@ -327,7 +347,97 @@ function shouldAutoComplete(a: Pick<Automation, 'scheduleType' | 'maxRuns' | 'ru
   return max !== undefined && count >= max
 }
 
-/** 创建定时任务 */
+/**
+ * 按调度模式清理不适用字段。
+ * 更新接口只需声明目标 scheduleType，避免调用方必须手动清空旧模式字段。
+ */
+type AutomationScheduleFields = Omit<
+  Pick<
+    Automation,
+    'scheduleType' | 'intervalMinutes' | 'activeWindowStart' | 'activeWindowEnd' | 'activeWeekdays' | 'timeOfDay' | 'dayOfWeek' | 'dayOfMonth' | 'scheduledAt'
+  >,
+  'intervalMinutes'
+> & { intervalMinutes?: number }
+
+export function normalizeAutomationScheduleFields(
+  target: Pick<Automation, 'scheduleType' | 'activeWindowStart' | 'activeWindowEnd' | 'activeWeekdays' | 'timeOfDay' | 'dayOfWeek' | 'dayOfMonth' | 'scheduledAt'>,
+): void {
+  if (target.scheduleType !== 'interval') {
+    target.activeWindowStart = undefined
+    target.activeWindowEnd = undefined
+    target.activeWeekdays = undefined
+  }
+  if (target.scheduleType !== 'daily' && target.scheduleType !== 'weekly' && target.scheduleType !== 'monthly') {
+    target.timeOfDay = undefined
+  }
+  if (target.scheduleType !== 'weekly') target.dayOfWeek = undefined
+  if (target.scheduleType !== 'monthly') target.dayOfMonth = undefined
+  if (target.scheduleType !== 'once') target.scheduledAt = undefined
+}
+
+/**
+ * 拒绝调用方显式提交的、与目标 scheduleType 不兼容的字段。
+ *
+ * 此检查必须发生在 getEffectiveAutomationScheduleFields() 归一化之前：后者只用于
+ * 忽略已有任务继承的旧模式字段，不能将本次请求明确提供的非法字段静默丢弃。
+ */
+export function validateExplicitAutomationScheduleFields(
+  input: Partial<CreateAutomationInput | UpdateAutomationInput>,
+  scheduleType: Automation['scheduleType'],
+): void {
+  const hasValue = (value: unknown): boolean => value !== undefined && value !== null
+
+  // intervalMinutes 是所有 Automation 持久化记录及 CreateAutomationInput 的必填兼容字段；
+  // 非 interval 模式会保留它作为闲置值，不能在此按模式拒绝。
+  if (scheduleType !== 'interval') {
+    if (input.activeWeekdays !== undefined && input.activeWeekdays !== null) {
+      throw new Error('周内运行日限制仅支持 scheduleType=interval')
+    }
+    if (hasValue(input.activeWindowStart) || hasValue(input.activeWindowEnd)) {
+      throw new Error('每日执行窗口仅支持 scheduleType=interval')
+    }
+  }
+  if (scheduleType !== 'daily' && scheduleType !== 'weekly' && scheduleType !== 'monthly' && input.timeOfDay !== undefined) {
+    throw new Error('timeOfDay 仅支持 scheduleType=daily/weekly/monthly')
+  }
+  if (scheduleType !== 'weekly' && input.dayOfWeek !== undefined) {
+    throw new Error('dayOfWeek 仅支持 scheduleType=weekly')
+  }
+  if (scheduleType !== 'monthly' && input.dayOfMonth !== undefined) {
+    throw new Error('dayOfMonth 仅支持 scheduleType=monthly')
+  }
+  if (scheduleType !== 'once' && input.scheduledAt !== undefined) {
+    throw new Error('scheduledAt 仅支持 scheduleType=once')
+  }
+}
+
+/**
+ * 合并更新输入与已有任务，并按目标 scheduleType 清理旧模式字段后供边界层校验。
+ * 切换模式时，旧模式的字段不能参与新模式的完整性校验；否则归一化尚未执行就会被拒绝。
+ */
+export function getEffectiveAutomationScheduleFields(
+  input: Partial<CreateAutomationInput | UpdateAutomationInput>,
+  existing?: Automation,
+): AutomationScheduleFields {
+  const scheduleType = input.scheduleType ?? existing?.scheduleType ?? 'interval'
+  const useExisting = <K extends keyof AutomationScheduleFields>(field: K): AutomationScheduleFields[K] | undefined =>
+    input[field] !== undefined ? input[field] as AutomationScheduleFields[K] : existing?.[field]
+
+  const effective: AutomationScheduleFields = {
+    scheduleType,
+    intervalMinutes: useExisting('intervalMinutes'),
+    activeWindowStart: useExisting('activeWindowStart') ?? undefined,
+    activeWindowEnd: useExisting('activeWindowEnd') ?? undefined,
+    activeWeekdays: useExisting('activeWeekdays') ?? undefined,
+    timeOfDay: useExisting('timeOfDay') ?? undefined,
+    dayOfWeek: useExisting('dayOfWeek'),
+    dayOfMonth: useExisting('dayOfMonth'),
+    scheduledAt: useExisting('scheduledAt'),
+  }
+  normalizeAutomationScheduleFields(effective)
+  return effective
+}
+
 export function createAutomation(input: CreateAutomationInput): Automation {
   const index = readIndex()
   const now = Date.now()
@@ -363,6 +473,7 @@ export function createAutomation(input: CreateAutomationInput): Automation {
     runCount: 0,
     runHistory: [],
   }
+  normalizeAutomationScheduleFields(automation)
 
   index.automations.push(automation)
   writeIndex(index)
@@ -388,7 +499,8 @@ export function updateAutomation(input: UpdateAutomationInput): Automation | und
   if (input.permissionMode !== undefined) target.permissionMode = input.permissionMode
   if (input.sessionMode !== undefined) target.sessionMode = input.sessionMode
   if (input.notificationTargets !== undefined) target.notificationTargets = input.notificationTargets
-  if (input.maxRuns !== undefined) applyMaxRunsUpdate(target, input.maxRuns)
+  const nextMaxRuns = input.maxRuns !== undefined ? input.maxRuns : target.maxRuns
+  if (input.maxRuns !== undefined) applyMaxRunsUpdate(target, nextMaxRuns)
 
   // 调度参数变化：重算下次运行时间（从现在起算，避免旧时间戳立即触发）
   const scheduleChanged =
@@ -410,6 +522,7 @@ export function updateAutomation(input: UpdateAutomationInput): Automation | und
   if (input.dayOfWeek !== undefined) target.dayOfWeek = input.dayOfWeek
   if (input.dayOfMonth !== undefined) target.dayOfMonth = input.dayOfMonth
   if (input.scheduledAt !== undefined) target.scheduledAt = input.scheduledAt
+  normalizeAutomationScheduleFields(target)
   if (scheduleChanged) {
     target.nextRunAt = computeNextRunAt(target, now)
   }

@@ -8,6 +8,7 @@
 
 import { atom } from 'jotai'
 import type { NotificationSoundId, NotificationSoundType, NotificationSoundSettings } from '@/types/settings'
+import { detectIsWindows } from '@/lib/platform'
 
 // ===== 音频资源导入 =====
 import soundDing from '@/assets/sound/ding.mp3'
@@ -316,6 +317,9 @@ export function sendDesktopNotification(
 
     if (!enabled) return
     if (!options?.force && document.hasFocus()) return
+
+    // Windows 上系统通知由主进程统一发送，渲染进程跳过 Web Notification
+    if (detectIsWindows()) return
 
     const notification = new Notification(title, { body, silent: true })
     notification.onclick = () => {

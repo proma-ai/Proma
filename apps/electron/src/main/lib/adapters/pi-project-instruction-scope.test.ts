@@ -56,7 +56,7 @@ describe('Pi 项目指令动态 scope', () => {
 
     expect(controller.beforeToolCall({ toolName: 'read', input: { path: 'apps/main.ts' } })?.block).toBe(true)
     const prompt = controller.appendPendingInstructions('base')
-    expect(prompt).toContain('Legacy CLAUDE.md 迁移要求')
+    expect(prompt).toContain('Legacy 项目指令迁移任务')
     expect(prompt).toContain('apps/CLAUDE.md')
 
     expect(controller.beforeToolCall({ toolName: 'write', input: { path: 'apps/main.ts' } })).toEqual({

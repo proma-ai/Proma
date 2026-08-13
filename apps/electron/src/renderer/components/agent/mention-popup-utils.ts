@@ -85,7 +85,14 @@ export function shouldClearEscSuppressionOnExit(
  * TipTap 会并发等待每次 items() 的异步结果。请求编号在发起时递增，因此旧请求即使
  * 最后返回，也无法覆盖当前触发符或当前 query 的弹窗。
  */
-export function createLatestSuggestionRequestGuard<T>() {
+export interface LatestSuggestionRequestGuard<T> {
+  startRequest: () => number
+  attachResult: (requestId: number, items: T[]) => T[]
+  isLatest: (items: T[]) => boolean
+  isStale: (items: T[]) => boolean
+}
+
+export function createLatestSuggestionRequestGuard<T>(): LatestSuggestionRequestGuard<T> {
   let latestRequestId = 0
   const requestIds = new WeakMap<T[], number>()
 
@@ -106,6 +113,50 @@ export function createLatestSuggestionRequestGuard<T>() {
       return requestId !== undefined && requestId !== latestRequestId
     },
   }
+}
+
+/**
+ * 合并连续 mention 查询。被新查询替代的 Promise 会立即以“已过期空结果”完成，
+ * 既不悬挂 TipTap 生命周期，也不会让旧空列表覆盖最新弹窗。
+ */
+export function createDebouncedSuggestionLoader<T>(
+  requestGuard: LatestSuggestionRequestGuard<T>,
+  delayMs = 80,
+): { load: (loader: () => Promise<T[]>) => Promise<T[]>; cancel: () => void } {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let pendingRequestId: number | null = null
+  let settlePending: ((items: T[]) => void) | null = null
+
+  const cancel = (): void => {
+    if (timer !== null) clearTimeout(timer)
+    timer = null
+    if (settlePending && pendingRequestId !== null) {
+      settlePending(requestGuard.attachResult(pendingRequestId, []))
+    }
+    pendingRequestId = null
+    settlePending = null
+  }
+
+  const load = (loader: () => Promise<T[]>): Promise<T[]> => {
+    const requestId = requestGuard.startRequest()
+    cancel()
+    return new Promise((resolve) => {
+      pendingRequestId = requestId
+      settlePending = resolve
+      timer = setTimeout(async () => {
+        timer = null
+        pendingRequestId = null
+        settlePending = null
+        try {
+          resolve(requestGuard.attachResult(requestId, await loader()))
+        } catch {
+          resolve(requestGuard.attachResult(requestId, []))
+        }
+      }, delayMs)
+    })
+  }
+
+  return { load, cancel }
 }
 
 /** 创建弹窗容器并挂载到 body */

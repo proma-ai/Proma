@@ -150,7 +150,7 @@ function draftToCreateInput(draft: AutomationDraft): CreateAutomationInput {
     dayOfWeek: draft.dayOfWeek,
     dayOfMonth: draft.dayOfMonth,
     scheduledAt: draft.scheduledAt,
-    maxRuns: draft.maxRuns,
+    maxRuns: draft.maxRuns ?? null,
     channelId: draft.channelId,
     modelId: draft.modelId,
     workspaceId: draft.workspaceId,
@@ -176,7 +176,7 @@ function draftToUpdateInput(draft: AutomationDraft): UpdateAutomationInput {
     dayOfWeek: draft.dayOfWeek,
     dayOfMonth: draft.dayOfMonth,
     scheduledAt: draft.scheduledAt,
-    maxRuns: draft.maxRuns,
+    maxRuns: draft.maxRuns ?? null,
     channelId: draft.channelId,
     modelId: draft.modelId,
     workspaceId: draft.workspaceId ?? '',
@@ -758,11 +758,58 @@ export function AutomationFormView({ standalone = false }: { standalone?: boolea
               value={form.scheduleType}
               onValueChange={(v) => {
                 const next = v as AutomationDraft['scheduleType']
-                // 切到 once 且尚无触发时间时，默认填入 1 小时后，避免空值导致自动保存失败
-                if (next === 'once' && !form.scheduledAt) {
-                  update({ scheduleType: next, scheduledAt: Date.now() + 60 * 60 * 1000 })
+                // 默认值必须写入 draft：展示层 fallback 不会进入自动保存请求。
+                // 同时立即清除不适用字段，避免后端归一化后旧配置仍滞留本地并在切回时复活。
+                const clearIntervalFields = {
+                  activeWindowStart: undefined,
+                  activeWindowEnd: undefined,
+                  activeWeekdays: undefined,
+                }
+                if (next === 'interval') {
+                  update({
+                    scheduleType: next,
+                    intervalMinutes: form.intervalMinutes ?? 10,
+                    timeOfDay: undefined,
+                    dayOfWeek: undefined,
+                    dayOfMonth: undefined,
+                    scheduledAt: undefined,
+                  })
+                } else if (next === 'daily') {
+                  update({
+                    scheduleType: next,
+                    ...clearIntervalFields,
+                    timeOfDay: form.timeOfDay ?? '09:00',
+                    dayOfWeek: undefined,
+                    dayOfMonth: undefined,
+                    scheduledAt: undefined,
+                  })
+                } else if (next === 'weekly') {
+                  update({
+                    scheduleType: next,
+                    ...clearIntervalFields,
+                    timeOfDay: form.timeOfDay ?? '09:00',
+                    dayOfWeek: form.dayOfWeek ?? 1,
+                    dayOfMonth: undefined,
+                    scheduledAt: undefined,
+                  })
+                } else if (next === 'monthly') {
+                  update({
+                    scheduleType: next,
+                    ...clearIntervalFields,
+                    timeOfDay: form.timeOfDay ?? '09:00',
+                    dayOfWeek: undefined,
+                    dayOfMonth: form.dayOfMonth ?? 1,
+                    scheduledAt: undefined,
+                  })
                 } else {
-                  update({ scheduleType: next })
+                  update({
+                    scheduleType: next,
+                    ...clearIntervalFields,
+                    timeOfDay: undefined,
+                    dayOfWeek: undefined,
+                    dayOfMonth: undefined,
+                    scheduledAt: form.scheduledAt ?? Date.now() + 60 * 60 * 1000,
+                  })
                 }
               }}
             >

@@ -39,6 +39,7 @@ import { getChannelById } from './channel-manager'
 import { setAgentStopper, setHeadlessAgentRunner } from './agent-headless-runner-registry'
 import { getHeadlessAgentRunTarget } from './agent-headless-run-target'
 import { sendAgentStreamComplete } from './agent-completion-payload'
+import { AgentStreamForwarder } from './agent-stream-forwarder'
 
 // ===== 实例创建 =====
 
@@ -61,6 +62,9 @@ import('./agent-collaboration-tools').then(({ registerCollaborationEventBus }) =
  * runAgent 开始时注册，结束时清理。
  */
 const sessionWebContents = new Map<string, WebContents>()
+/** 每个 renderer 当前可见的 Agent 会话；仅该会话维持 20fps partial。 */
+const visibleAgentSessionByWebContents = new WeakMap<WebContents, string | null>()
+const streamForwarder = new AgentStreamForwarder()
 
 /**
  * 已挂载 destroyed 回收钩子的 webContents 集合。
@@ -77,16 +81,22 @@ const wcWithCleanupHook = new WeakSet<WebContents>()
  * webContents 提前销毁的场景——destroyed 事件兜底。
  */
 function registerWebContents(sessionId: string, wc: WebContents): void {
-  // 同一 sessionId 切换 webContents 时直接覆盖；旧 wc 的 destroyed 钩子仍由 WeakSet 持有，
-  // 触发时会扫描 sessionWebContents 清理所有指向旧 wc 的条目（见下方实现）。
+  // 同一 sessionId 切换 renderer 时，先丢弃捕获旧 wc.send 的等待 partial，避免投递到旧窗口。
+  const previousWebContents = sessionWebContents.get(sessionId)
+  if (previousWebContents && previousWebContents !== wc) streamForwarder.clear(sessionId)
+  // 旧 wc 的 destroyed 钩子仍由 WeakSet 持有，触发时会扫描 sessionWebContents 清理所有指向它的条目。
   sessionWebContents.set(sessionId, wc)
   if (wcWithCleanupHook.has(wc)) return
   wcWithCleanupHook.add(wc)
   wc.once('destroyed', () => {
     // 单个 wc 可能映射到多个 sessionId（同窗口多 tab），需要清理所有指向它的条目
     for (const [sid, mappedWc] of sessionWebContents) {
-      if (mappedWc === wc) sessionWebContents.delete(sid)
+      if (mappedWc === wc) {
+        sessionWebContents.delete(sid)
+        streamForwarder.clear(sid)
+      }
     }
+    visibleAgentSessionByWebContents.delete(wc)
   })
 }
 
@@ -137,13 +147,28 @@ eventBus.use((sessionId, payload, next) => {
   const wc = sessionWebContents.get(sessionId)
   if (wc && !wc.isDestroyed()) {
     try {
-      wc.send(AGENT_IPC_CHANNELS.STREAM_EVENT, { sessionId, payload } as AgentStreamEvent)
+      streamForwarder.forward(
+        { sessionId, payload } as AgentStreamEvent,
+        (event) => wc.send(AGENT_IPC_CHANNELS.STREAM_EVENT, event),
+        visibleAgentSessionByWebContents.get(wc) === sessionId,
+      )
     } catch (err) {
       console.error(`[EventBus] wc.send 失败: sessionId=${sessionId}, payload.kind=${(payload as Record<string, unknown>)?.kind}`, err)
     }
   }
   next()
 })
+
+/** renderer 切换标签时更新流式优先级；切入会话立即 flush 等待中的后台快照。 */
+export function setVisibleAgentSession(webContents: WebContents, sessionId: string | null): void {
+  const previousSessionId = visibleAgentSessionByWebContents.get(webContents)
+  if (previousSessionId && previousSessionId !== sessionId) {
+    // 切出后将已排队的前台帧按后台频率重排，避免继续以 20fps 发送。
+    streamForwarder.reprioritize(previousSessionId, false)
+  }
+  visibleAgentSessionByWebContents.set(webContents, sessionId)
+  if (sessionId) streamForwarder.promote(sessionId)
+}
 
 // ===== IPC 薄包装函数 =====
 
@@ -252,6 +277,7 @@ export async function runAgent(
     // 避免被拒绝的请求误删仍在运行的会话映射
     if (!orchestrator.isActive(input.sessionId)) {
       sessionWebContents.delete(input.sessionId)
+      streamForwarder.clear(input.sessionId)
     }
   }
 }
@@ -361,6 +387,7 @@ export async function runAgentHeadless(
   } finally {
     if (!orchestrator.isActive(runInput.sessionId)) {
       sessionWebContents.delete(runInput.sessionId)
+      streamForwarder.clear(runInput.sessionId)
     }
   }
 }

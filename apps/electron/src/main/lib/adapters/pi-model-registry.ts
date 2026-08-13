@@ -24,6 +24,7 @@ import {
   getPromaUserAgent,
   normalizeAnthropicBaseUrlForSdk,
   normalizeOpenAIBaseUrlForSdk,
+  normalizeVersionedAnthropicBaseUrl,
   resolveAnthropicMessagesUrl,
 } from '@proma/core'
 import type { Api, KnownProvider, Model } from '@earendil-works/pi-ai/compat'
@@ -361,6 +362,8 @@ function candidatePiProviders(provider: ProviderType): KnownProvider[] {
       return ['moonshotai-cn', 'moonshotai']
     case 'kimi-coding':
       return ['kimi-coding', 'moonshotai-cn', 'moonshotai']
+    case 'opencode-go-openai':
+      return ['opencode-go']
     case 'zhipu':
       return ['zai']
     case 'zhipu-coding':
@@ -378,8 +381,9 @@ function candidatePiProviders(provider: ProviderType): KnownProvider[] {
 
 function findCatalogModelById(models: readonly PiCatalogModel[], modelId: string): PiCatalogModel | undefined {
   const normalized = modelId.toLowerCase()
-  return models.find((model) =>
-    model.id.toLowerCase() === normalized || model.name.toLowerCase() === normalized)
+  // ID is the upstream request identifier; display-name matching is only a fallback.
+  return models.find((model) => model.id.toLowerCase() === normalized)
+    ?? models.find((model) => model.name.toLowerCase() === normalized)
 }
 
 /**
@@ -504,6 +508,50 @@ export async function resolvePiImageInputCapability(
   return resolvePiModelInput(provider, resolvedModelId, catalogModel.input).includes('image')
     ? 'supported'
     : 'unsupported'
+}
+
+export interface PiVisionRelayRoute {
+  adapterProvider: ProviderType
+  baseUrl?: string
+}
+
+export async function resolvePiVisionRelayRoute(
+  provider: ProviderType,
+  modelId: string | undefined,
+): Promise<PiVisionRelayRoute | undefined> {
+  const resolvedModelId = stripLegacyAgentSdkContextSuffix(modelId)
+  if (!resolvedModelId) return undefined
+  // OpenCode Go must never fall back to another provider's catalog: its key and images
+  // may only be sent to the catalog endpoint owned by the configured OpenCode Go channel.
+  const catalogModel = provider === 'opencode-go-openai'
+    ? findCatalogModelById(await getCatalogModels('opencode-go'), resolvedModelId)
+    : await findPiCatalogModel(provider, resolvedModelId)
+  if (!catalogModel || !resolvePiModelInput(provider, resolvedModelId, catalogModel.input).includes('image')) return undefined
+
+  if (provider !== 'opencode-go-openai') {
+    return { adapterProvider: provider }
+  }
+
+  switch (catalogModel.api) {
+    case 'anthropic-messages':
+      return {
+        // Anthropic-compatible adapter 接收完整 messages 端点，避免误套 OpenAI 协议。
+        adapterProvider: 'anthropic-compatible',
+        baseUrl: `${normalizeVersionedAnthropicBaseUrl(catalogModel.baseUrl)}/messages`,
+      }
+    case 'openai-completions':
+      return {
+        adapterProvider: 'opencode-go-openai',
+        baseUrl: catalogModel.baseUrl,
+      }
+    case 'openai-responses':
+      return {
+        adapterProvider: 'openai-responses',
+        baseUrl: catalogModel.baseUrl,
+      }
+    default:
+      return undefined
+  }
 }
 
 /** Resolve Pi session reasoning from a verified profile before catalog fallback. */

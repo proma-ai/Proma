@@ -599,6 +599,7 @@ function ThinkingBlock({ block, dimmed = false }: ThinkingBlockProps): React.Rea
       >
         <div
           ref={contentRef}
+          data-agent-history-selection-excluded={shouldCollapse && !isExpanded ? 'true' : undefined}
           className={cn(
             'prose prose-sm dark:prose-invert max-w-none prose-p:my-1 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 text-[14px] leading-relaxed overflow-hidden transition-[max-height] duration-200',
             dimmed ? 'text-muted-foreground' : 'text-foreground/90',

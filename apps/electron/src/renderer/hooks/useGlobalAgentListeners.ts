@@ -58,9 +58,10 @@ import {
   notificationSoundEnabledAtom,
   notificationSoundsAtom,
   sendDesktopNotification,
+  playNotificationSoundForType,
 } from '@/atoms/notifications'
 import { appModeAtom } from '@/atoms/app-mode'
-import { tabsAtom, activeTabIdAtom, openTab, updateTabTitle } from '@/atoms/tab-atoms'
+import { tabsAtom, activeTabIdAtom, activeSessionIdAtom, openTab, updateTabTitle } from '@/atoms/tab-atoms'
 import type { AgentStreamState } from '@/atoms/agent-atoms'
 import { agentDiffUnseenChangesAtom, agentDiffUnseenFilesAtom } from '@/atoms/agent-atoms'
 import { channelsAtom } from '@/atoms/chat-atoms'
@@ -81,6 +82,7 @@ import { detectIsWindows } from '@/lib/platform'
 import { getSessionFileChangeKind, arePathsEqual, isPathWithinRoot, upsertSessionFileChange } from '@/lib/session-file-changes'
 import { buildQueuedMessageSendPayload, removeQueuedMessage, restoreQueuedMessageToFront, shouldAutoDispatchQueuedMessage } from '@/lib/agent-message-queue'
 import { buildQuotedSelectionBlock } from '@/lib/quoted-selection'
+import { createAgentStreamEventBatcher } from '@/lib/agent-stream-event-batcher'
 
 /** 触发右侧文件浏览器自动定位的写入类工具集合 */
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Update'])
@@ -543,6 +545,7 @@ export function useGlobalAgentListeners(): void {
         message: { content: [{ type: 'text', text: payload.rawText }] },
         parent_tool_use_id: null,
         _createdAt: streamStartedAt,
+        _promaLiveRunStartedAt: streamStartedAt,
       } as unknown as SDKMessage
       store.set(liveMessagesMapAtom, (prev) => {
         const map = new Map(prev)
@@ -978,8 +981,7 @@ export function useGlobalAgentListeners(): void {
     // [FLASH-DEBUG] 事件频率计数器
     let eventCount = 0
     let lastLogTime = Date.now()
-    const cleanupEvent = window.electronAPI.onAgentStreamEvent(
-      (streamEvent: AgentStreamEvent) => {
+    const handleStreamEvent = (streamEvent: AgentStreamEvent): void => {
         // [FLASH-DEBUG] 每 2 秒输出一次事件频率
         eventCount++
         const now = Date.now()
@@ -1029,23 +1031,37 @@ export function useGlobalAgentListeners(): void {
               msgRecord._createdAt = Date.now()
             }
 
-            // 为 assistant 消息注入渠道信息，确保流式期间就绑定正确的渠道+模型与 Agent SDK 窗口
-            // （多渠道同名模型场景下，显示名必须结合 channelId 精确匹配，否则会错配促销文案）
+            // 队列自动派发会在上一轮实时消息尚未落盘刷新时开始下一轮。
+            // 标记每条实时消息所属 run，渲染层即可把上一轮立即视为完成并自动收起过程块。
+            const activeRunStartedAt = store.get(agentStreamingStatesAtom).get(sessionId)?.startedAt
+            if (activeRunStartedAt != null) {
+              msgRecord._promaLiveRunStartedAt = activeRunStartedAt
+            }
+
+            // 为 assistant 消息注入渠道信息，确保流式期间就绑定正确的渠道+模型与 Agent SDK 窗口。
+            // 多渠道同名模型场景必须同时记录 channelId，否则会错配显示和恢复操作。
             if (msgRecord.type === 'assistant') {
+              // Background or external sessions may emit before AgentView initializes its maps.
+              // Use persisted session metadata first, then per-session maps, then global defaults.
+              const session = store.get(agentSessionsAtom).find((item) => item.id === sessionId)
               if (!msgRecord._channelModelId) {
                 const sessionModelMap = store.get(agentSessionModelMapAtom)
                 const defaultModelId = store.get(agentModelIdAtom)
-                msgRecord._channelModelId = sessionModelMap.get(sessionId) ?? defaultModelId ?? undefined
+                msgRecord._channelModelId = session?.modelId ?? sessionModelMap.get(sessionId) ?? defaultModelId ?? undefined
               }
               if (!msgRecord._channelId) {
                 const sessionChannelMap = store.get(agentSessionChannelMapAtom)
-                msgRecord._channelId = sessionChannelMap.get(sessionId) ?? undefined
+                const defaultChannelId = store.get(agentChannelIdAtom)
+                msgRecord._channelId = session?.channelId ?? sessionChannelMap.get(sessionId) ?? defaultChannelId ?? undefined
               }
             }
             if (msgRecord.type === 'assistant' && !msgRecord._channelProvider) {
+              const session = store.get(agentSessionsAtom).find((item) => item.id === sessionId)
               const sessionChannelMap = store.get(agentSessionChannelMapAtom)
               const defaultChannelId = store.get(agentChannelIdAtom)
-              const channelId = sessionChannelMap.get(sessionId) ?? defaultChannelId ?? undefined
+              const channelId = typeof msgRecord._channelId === 'string'
+                ? msgRecord._channelId
+                : (session?.channelId ?? sessionChannelMap.get(sessionId) ?? defaultChannelId ?? undefined)
               const channels = store.get(channelsAtom)
               const provider = channels.find((c) => c.id === channelId)?.provider
               if (provider) {
@@ -1431,12 +1447,18 @@ export function useGlobalAgentListeners(): void {
           }
         }
         }) // unstable_batchedUpdates
-      }
-    )
+    }
+    // partial 仅保留每个会话在一帧内最新的累计全文，非 partial（尤其 final）立即处理。
+    const streamEventBatcher = createAgentStreamEventBatcher({ dispatch: handleStreamEvent })
+    const cleanupEvent = window.electronAPI.onAgentStreamEvent((streamEvent) => {
+      streamEventBatcher.push(streamEvent)
+    })
 
     // ===== 2. 流式完成 =====
     const cleanupComplete = window.electronAPI.onAgentStreamComplete(
       (data: AgentStreamCompletePayload) => {
+        // 无终态 assistant 的异常路径也不能让等待中的 partial 在完成后倒灌。
+        streamEventBatcher.clear(data.sessionId)
         console.log(`[FLASH-DEBUG] STREAM_COMPLETE for session=${data.sessionId.slice(0, 8)}, stoppedByUser=${data.stoppedByUser}, resultSubtype=${data.resultSubtype}`)
         unstable_batchedUpdates(() => {
         // 后台任务等待态：turn 主体结束但仍有后台任务在飞行，UI 进入"空闲可输入"。
@@ -1697,6 +1719,12 @@ export function useGlobalAgentListeners(): void {
         .catch(console.error)
     })
 
+    // ===== 6. Windows Agent Island 提示音委托 =====
+    const cleanupPlaySound = window.electronAPI.onWindowsAgentIslandPlaySound(({ type }) => {
+      const sounds = store.get(notificationSoundsAtom)
+      void playNotificationSoundForType(type, sounds)
+    })
+
     // 定期清理 60s 前的「最近修改」标记，避免 atom 无限增长
     const pruneTimer = setInterval(() => {
       const cutoff = Date.now() - RECENTLY_MODIFIED_TTL_MS
@@ -1785,12 +1813,30 @@ export function useGlobalAgentListeners(): void {
     }
     window.addEventListener('focus', onWindowFocus)
 
+    const syncVisibleAgentStreamSession = (): void => {
+      const sessionId = store.get(activeSessionIdAtom)
+      const activeTab = store.get(tabsAtom).find((tab) => tab.id === store.get(activeTabIdAtom))
+      const visibleAgentSessionId = activeTab?.type === 'agent' || activeTab?.type === 'preview'
+        ? sessionId
+        : null
+      // 开发时 renderer HMR 可能先于 preload/main 重启；缺少新 IPC 不应让整个应用白屏。
+      const setVisibleAgentStreamSession = window.electronAPI.setVisibleAgentStreamSession
+      if (setVisibleAgentStreamSession) {
+        void setVisibleAgentStreamSession(visibleAgentSessionId).catch(console.error)
+      }
+    }
+    syncVisibleAgentStreamSession()
+    const unsubscribeVisibleSession = store.sub(activeSessionIdAtom, syncVisibleAgentStreamSession)
+
     return () => {
       cleanupEvent()
+      streamEventBatcher.dispose()
+      unsubscribeVisibleSession()
       cleanupComplete()
       cleanupError()
       cleanupTodoAgentSessionReady()
       cleanupTitleUpdated()
+      cleanupPlaySound()
       cleanupWatchedFileChanges()
       queuedDispatchUnsubscribers.forEach((unsubscribe) => unsubscribe())
       clearInterval(pruneTimer)

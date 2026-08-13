@@ -1861,6 +1861,8 @@ export const AGENT_IPC_CHANNELS = {
   STREAM_COMPLETE: 'agent:stream:complete',
   /** Agent 流式错误 */
   STREAM_ERROR: 'agent:stream:error',
+  /** renderer 报告当前可见的 Agent 会话，用于流式优先级。 */
+  SET_VISIBLE_STREAM_SESSION: 'agent:set-visible-stream-session',
 
   // 附件
   /** 保存文件到 Agent session 工作目录 */

@@ -471,7 +471,7 @@ function MonthCalendar({ monthStart, today, events, todos, automations, onSelect
     return result
   }, [automations, events, todos, visibleDays])
 
-  return <div className="flex h-full min-h-0 flex-col"><div className="grid shrink-0 grid-cols-7 border-b border-border/60 text-center text-xs text-muted-foreground">{['日', '一', '二', '三', '四', '五', '六'].map((day) => <div key={day} className="py-2.5">{day}</div>)}</div><div className="grid min-h-0 flex-1 grid-cols-7" style={{ gridTemplateRows: `repeat(${weekCount}, minmax(0, 1fr))` }}>{cells.map((day, index) => { const valid = day > 0 && day <= days; const timestamp = valid ? startOfDay(new Date(monthDate.getFullYear(), monthDate.getMonth(), day, 9).getTime()) : undefined; const items = timestamp === undefined ? undefined : itemsByDay.get(timestamp); return <div key={index} className="flex min-h-0 flex-col border-b border-r border-border/50 p-2 last:border-r-0 hover:bg-muted/20 sm:p-2.5"><time className={cn('inline-flex size-6 shrink-0 items-center justify-center rounded-full text-xs tabular-nums', timestamp === today && 'bg-primary text-primary-foreground')}>{valid ? day : ''}</time><div className="mt-1.5 min-h-0 flex-1 space-y-1 overflow-y-auto scrollbar-thin">{items?.events.map((event) => <CalendarEventMarker key={event.id} event={event} onSelect={() => onSelectEvent(event.id)} className="flex w-full min-w-0 items-center gap-1 px-1.5 py-0.5 text-left text-[11px]" />)}{items?.todos.map((todo) => <TodoCalendarMarker key={todo.id} todo={todo} onSelect={() => onSelectTodo(todo.id)} className="bg-amber-500/15 text-amber-800 dark:text-amber-200" />)}{items?.automations.map((entry) => <AutomationCalendarMarker key={entry.automation.id} automation={entry.automation} occurrenceCount={entry.count} className="flex min-w-0 items-center gap-1 bg-violet-500/15 px-1.5 py-0.5 text-[11px] text-violet-700 dark:text-violet-300" />)}</div></div> })}</div></div>
+  return <div className="flex h-full min-h-0 flex-col"><div className="grid shrink-0 grid-cols-7 border-b border-border/60 text-center text-xs text-muted-foreground">{['日', '一', '二', '三', '四', '五', '六'].map((day) => <div key={day} className="py-2.5">{day}</div>)}</div><div className="grid min-h-0 flex-1 grid-cols-7" style={{ gridTemplateRows: `repeat(${weekCount}, minmax(0, 1fr))` }}>{cells.map((day, index) => { const valid = day > 0 && day <= days; const timestamp = valid ? startOfDay(new Date(monthDate.getFullYear(), monthDate.getMonth(), day, 9).getTime()) : undefined; const items = timestamp === undefined ? undefined : itemsByDay.get(timestamp); return <div key={index} className="flex min-h-0 flex-col border-b border-r border-border/50 p-2 last:border-r-0 hover:bg-muted/20 sm:p-2.5"><time className={cn('inline-flex size-6 shrink-0 items-center justify-center rounded-full text-xs tabular-nums', timestamp === today && 'bg-primary text-primary-foreground')}>{valid ? day : ''}</time><div className="mt-1.5 min-h-0 flex-1 space-y-1 overflow-y-auto scrollbar-thin">{items?.events.map((event) => <CalendarEventMarker key={event.id} event={event} onSelect={() => onSelectEvent(event.id)} className="flex w-full min-w-0 items-center gap-1 px-1.5 py-0.5 text-left text-[11px]" />)}{items?.todos.map((todo) => <TodoCalendarMarker key={todo.id} todo={todo} onSelect={() => onSelectTodo(todo.id)} className="bg-amber-500/15 text-amber-800 dark:text-amber-200" />)}{items?.automations.map((entry) => <AutomationCalendarMarker key={entry.automation.id} automation={entry.automation} occurrenceCount={entry.count} showWindow className="flex min-w-0 items-center gap-1 bg-violet-500/15 px-1.5 py-0.5 text-[11px] text-violet-700 dark:text-violet-300" />)}</div></div> })}</div></div>
 }
 
 function TodoCalendarMarker({ todo, onSelect, className }: { todo: Todo; onSelect: () => void; className: string }): React.ReactElement {
@@ -486,6 +486,25 @@ function TodoPreviewContent({ todo }: { todo: Todo }): React.ReactElement {
 function formatAutomationTimestamp(value: number | undefined): string | undefined {
   if (value === undefined || !Number.isFinite(value)) return undefined
   return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(value)
+}
+
+function getAutomationWindow(automation: Automation): { startMinutes: number; endMinutes: number } | undefined {
+  if (automation.scheduleType !== 'interval') return undefined
+  const parseTime = (value: string | undefined): number | undefined => {
+    if (!value || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) return undefined
+    const [hours, minutes] = value.split(':').map(Number)
+    return hours! * 60 + minutes!
+  }
+  const startMinutes = parseTime(automation.activeWindowStart)
+  const endMinutes = parseTime(automation.activeWindowEnd)
+  return startMinutes !== undefined && endMinutes !== undefined && startMinutes < endMinutes
+    ? { startMinutes, endMinutes }
+    : undefined
+}
+
+function formatAutomationWindow(automation: Automation): string | undefined {
+  const window = getAutomationWindow(automation)
+  return window ? `${automation.activeWindowStart}–${automation.activeWindowEnd}` : undefined
 }
 
 function formatAutomationSchedule(automation: Automation): string {
@@ -515,8 +534,9 @@ function AutomationPreviewContent({ automation, occurrenceCount }: { automation:
   return <div className="space-y-2"><div><p className="font-medium text-tooltip-foreground">{automation.name}</p>{automation.prompt && <p className="mt-1 line-clamp-3 leading-relaxed text-tooltip-muted">{automation.prompt}</p>}</div><div className="flex flex-wrap gap-1.5 text-[11px] text-tooltip-muted"><span>{formatAutomationSchedule(automation)}</span>{nextRun && <span>下次 {nextRun}</span>}{occurrenceCount > 1 && <span>当天计划 {occurrenceCount} 次</span>}{runBudget && <span>{runBudget}</span>}</div></div>
 }
 
-function AutomationCalendarMarker({ automation, occurrenceCount = 1, className, iconClassName, style }: { automation: Automation; occurrenceCount?: number; className: string; iconClassName?: string; style?: React.CSSProperties }): React.ReactElement {
-  return <Tooltip delayDuration={250}><TooltipTrigger asChild><div data-calendar-item className={className} style={style}><Repeat2 className={cn('size-3 shrink-0', iconClassName)} /><span className="truncate">{automation.name}</span>{occurrenceCount > 1 && <span className="shrink-0 tabular-nums opacity-70">×{occurrenceCount}</span>}</div></TooltipTrigger><TooltipContent side="right" className="w-72 rounded-none p-3"><AutomationPreviewContent automation={automation} occurrenceCount={occurrenceCount} /></TooltipContent></Tooltip>
+function AutomationCalendarMarker({ automation, occurrenceCount = 1, showWindow = false, className, iconClassName, style }: { automation: Automation; occurrenceCount?: number; showWindow?: boolean; className: string; iconClassName?: string; style?: React.CSSProperties }): React.ReactElement {
+  const window = showWindow ? formatAutomationWindow(automation) : undefined
+  return <Tooltip delayDuration={250}><TooltipTrigger asChild><div data-calendar-item className={className} style={style}><Repeat2 className={cn('size-3 shrink-0', iconClassName)} /><span className="truncate">{window && <span className="mr-1 tabular-nums opacity-80">{window}</span>}{automation.name}</span>{occurrenceCount > 1 && <span className="shrink-0 tabular-nums opacity-70">×{occurrenceCount}</span>}</div></TooltipTrigger><TooltipContent side="right" className="w-72 rounded-none p-3"><AutomationPreviewContent automation={automation} occurrenceCount={occurrenceCount} /></TooltipContent></Tooltip>
 }
 
 
@@ -536,7 +556,7 @@ function CalendarEventPreviewContent({ event }: { event: CalendarEvent }): React
 type TimedItem =
   | { kind: 'event'; id: string; startAt: number; endAt: number; event: CalendarEvent }
   | { kind: 'todo'; id: string; startAt: number; endAt: number; todo: Todo }
-  | { kind: 'automation'; id: string; startAt: number; endAt: number; automation: Automation; count: number }
+  | { kind: 'automation'; id: string; startAt: number; endAt: number; automation: Automation; count: number; isWindow: boolean }
 
 interface TimedSegment {
   item: TimedItem
@@ -653,13 +673,24 @@ function buildWeekView(weekStart: number, events: CalendarEvent[], todos: Todo[]
     for (const occurrence of getAutomationOccurrencesByDay(automation, weekStart, weekRangeEnd)) {
       const item = items.get(occurrence.day)
       if (!item) continue
-      if (occurrence.count <= AUTOMATION_OCCURRENCE_SAMPLES_PER_DAY) {
+      const window = getAutomationWindow(automation)
+      if (window) {
+        item.timedItems.push({
+          id: `${automation.id}@${occurrence.day}`,
+          kind: 'automation',
+          startAt: atLocalMinute(occurrence.day, window.startMinutes),
+          endAt: atLocalMinute(occurrence.day, window.endMinutes),
+          automation,
+          count: occurrence.count,
+          isWindow: true,
+        })
+      } else if (occurrence.count <= AUTOMATION_OCCURRENCE_SAMPLES_PER_DAY) {
         for (const ts of occurrence.times) {
-          item.timedItems.push({ id: `${automation.id}@${ts}`, kind: 'automation', startAt: ts, endAt: ts + 30 * 60 * 1000, automation, count: 1 })
+          item.timedItems.push({ id: `${automation.id}@${ts}`, kind: 'automation', startAt: ts, endAt: ts + 30 * 60 * 1000, automation, count: 1, isWindow: false })
         }
       } else {
         const first = occurrence.times[0]!
-        item.timedItems.push({ id: `${automation.id}@${occurrence.day}`, kind: 'automation', startAt: first, endAt: first + 30 * 60 * 1000, automation, count: occurrence.count })
+        item.timedItems.push({ id: `${automation.id}@${occurrence.day}`, kind: 'automation', startAt: first, endAt: first + 30 * 60 * 1000, automation, count: occurrence.count, isWindow: false })
       }
     }
   }
@@ -720,7 +751,7 @@ function WeekTimePanel({ week, hours, hourHeight, today, currentMinute, dragSele
           return <CalendarEventMarker key={`event-${event.id}`} event={event} onSelect={() => onSelectEvent(event.id)} className="absolute z-10 overflow-hidden border-l-2 border-primary-foreground/50 px-1.5 py-1 text-left text-[11px] shadow-sm" style={style}><span className="block truncate font-medium">{event.title}</span>{height >= 28 && <span className="block truncate text-primary-foreground/75">{formatTime(segment.startAt)}–{formatTime(segment.endAt)}</span>}</CalendarEventMarker>
         }
         if (segment.item.kind === 'todo') return <div key={`todo-${segment.item.id}`} className="absolute z-20" style={style}><TodoCalendarMarker todo={segment.item.todo} onSelect={() => onSelectTodo(segment.item.id)} className="h-full bg-amber-500/20 text-amber-900 dark:text-amber-100" /></div>
-        return <AutomationCalendarMarker key={`automation-${segment.item.id}`} automation={segment.item.automation} occurrenceCount={segment.item.count} iconClassName="mt-0.5" className="absolute z-20 flex items-start gap-1 overflow-hidden bg-violet-500/20 px-1 py-0.5 text-[10px] text-violet-900 shadow-sm dark:text-violet-100" style={style} />
+        return <AutomationCalendarMarker key={`automation-${segment.item.id}`} automation={segment.item.automation} occurrenceCount={segment.item.count} showWindow={segment.item.isWindow} iconClassName="mt-0.5" className={cn('absolute z-20 flex items-start gap-1 overflow-hidden px-1 py-0.5 text-[10px] shadow-sm', segment.item.isWindow ? 'border-l-2 border-violet-500/70 bg-violet-500/10 text-violet-900 dark:text-violet-100' : 'bg-violet-500/20 text-violet-900 dark:text-violet-100')} style={style} />
       })}
       {selection && <div aria-hidden="true" className="pointer-events-none absolute inset-x-1 z-20 overflow-hidden border border-primary/70 border-l-2 bg-primary/15 px-1.5 py-1 text-[11px] text-primary shadow-sm" style={{ top: `${selection.startMinute / 60 * hourHeight}px`, height: `${(selection.endMinute - selection.startMinute) / 60 * hourHeight}px` }}>{selection.endMinute - selection.startMinute >= 30 && <span className="block truncate font-medium">新建日程 · {formatTime(atLocalMinute(day, selection.startMinute))}–{formatTime(atLocalMinute(day, selection.endMinute))}</span>}</div>}
       {includesToday && startOfDay(day) === today && <div className="pointer-events-none absolute inset-x-0 z-30 flex -translate-y-1/2 items-center" style={{ top: `${currentMinute / 60 * hourHeight}px` }}><span className="ml-0.5 size-2 shrink-0 rounded-full bg-primary" /><span className="h-px flex-1 bg-primary" /></div>}

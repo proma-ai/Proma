@@ -40,7 +40,7 @@ export interface AutomationDraft {
   /** 一次性任务的绝对触发时间戳，scheduleType==='once' 时使用 */
   scheduledAt?: number
   /** 最大运行次数上限（实际执行次数）；undefined = 不限次 */
-  maxRuns?: number
+  maxRuns?: number | null
   channelId: string
   modelId?: string
   workspaceId?: string

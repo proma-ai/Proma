@@ -59,6 +59,40 @@ export function assertSafeBrowserUrl(input: string): string {
 }
 
 /**
+ * popup 的首次 URL 由 Chromium 在 window.open() 同步创建时处理。
+ * HTTP(S) 复用普通导航边界；about:blank、blob:、data: 只在首次 popup 创建时允许，
+ * 以支持 OAuth 中转页和页面内生成的预览，而不把它们放开为任意后续导航协议。
+ */
+export function isSupportedBrowserPopupUrl(input: string): boolean {
+  const value = input.trim()
+  if (!value) return false
+  if (value === 'about:blank' || /^(?:blob:|data:)/i.test(value)) return true
+  try {
+    assertSafeBrowserUrl(value)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function isTransientBrowserPopupUrl(input: string): boolean {
+  const value = input.trim()
+  return value === 'about:blank' || /^(?:blob:|data:)/i.test(value)
+}
+
+/**
+ * 判断受管浏览器里触发的下载是否安全，返回可下载的目标 URL。
+ * - blob: / data: 是页面内存资源（前端生成的导出、预览等），不发起新网络请求，无 SSRF 风险，直接放行。
+ * - 其余（http/https 等）复用公网/loopback 边界与 DNS 私网防护。
+ */
+export async function assertSafeBrowserDownloadUrl(input: string): Promise<string> {
+  const value = input.trim()
+  if (!value) throw new Error('下载地址为空。')
+  if (/^(?:blob:|data:)/i.test(value)) return value
+  return assertSafeBrowserDestination(value)
+}
+
+/**
  * 导航/请求开始前再次解析域名，并拒绝落到私网（本机 loopback 除外）的结果。
  * Chromium 仍是最终网络栈；完整 DNS-rebinding 防护需要后续接入受控 egress proxy，
  * 但这个 guard 可以阻断当前解析即指向局域网或其他私网的常见攻击路径。

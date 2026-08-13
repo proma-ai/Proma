@@ -67,7 +67,7 @@ import {
   updateSessionHoverPreviewEnabled,
 } from '@/atoms/ui-preferences'
 import { cn } from '@/lib/utils'
-import { detectIsMac } from '@/lib/platform'
+import { detectIsMac, detectIsWindows } from '@/lib/platform'
 import { Button } from '../ui/button'
 import type { NotificationSoundId, NotificationSoundType, NotificationSoundSettings } from '@/types/settings'
 
@@ -101,6 +101,7 @@ export function GeneralSettings(): React.ReactElement {
   const [gitAttributionEnabled, setGitAttributionEnabled] = React.useState(true)
   const [agentIslandEnabled, setAgentIslandEnabled] = React.useState(true)
   const isMac = React.useMemo(() => detectIsMac(), [])
+  const isWindows = React.useMemo(() => detectIsWindows(), [])
   const fileInputRef = React.useRef<HTMLInputElement>(null)
 
   /** Cloud 模式 + 已登录 */
@@ -471,6 +472,17 @@ export function GeneralSettings(): React.ReactElement {
               setNotificationSounds(newSounds)
             }}
           />
+          {isWindows && (
+            <SettingsToggle
+              label="Agent 状态通知"
+              description="在任务栏托盘显示 Agent 运行状态，悬停查看会话详情"
+              checked={agentIslandEnabled}
+              disabled={!notificationsEnabled}
+              onCheckedChange={(checked) => {
+                void handleAgentIslandChange(checked)
+              }}
+            />
+          )}
           <SettingsRow
             label="自动归档"
             description="超过指定天数未更新的对话将自动归档（置顶对话除外）"

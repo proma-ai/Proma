@@ -162,8 +162,8 @@ export interface CreateAutomationInput extends AutomationActiveWindow {
   dayOfMonth?: number
   /** 一次性任务的绝对触发时间戳，scheduleType==='once' 时必填 */
   scheduledAt?: number
-  /** 最大运行次数上限（实际执行次数），达到后自动停用；不传 = 不限次 */
-  maxRuns?: number
+  /** 最大运行次数上限；null/不传 = 不限次 */
+  maxRuns?: number | null
   channelId: string
   modelId?: string
   workspaceId?: string
@@ -193,8 +193,8 @@ export interface UpdateAutomationInput {
   dayOfMonth?: number
   /** 一次性任务的绝对触发时间戳，scheduleType==='once' 时使用 */
   scheduledAt?: number
-  /** 最大运行次数上限（实际执行次数）；传 0 或负数等价于不限次。改动会重置已执行次数计数 */
-  maxRuns?: number
+  /** 最大运行次数上限；传 null 表示清除上限、不限次 */
+  maxRuns?: number | null
   channelId?: string
   modelId?: string
   /** 工作区（用户可在创建后调整子会话归属的工作区） */

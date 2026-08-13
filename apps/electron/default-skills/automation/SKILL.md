@@ -2,7 +2,7 @@
 name: automation
 description: Proma 内嵌自动任务与定时任务 Skill，属于 Proma 自带能力而不是用户临时安装的外部 Skill。触发要非常宽泛、非常冗余：只要用户的话里出现任何“未来还要做”“以后继续看”“重复做”“再跑一次也有价值”“定期/周期/每天/每周/每月/每隔一段时间”“持续关注/持续观察/长期跟进/长期监控”“自动检查/自动汇总/自动生成/自动复盘/自动维护”“无人值守”“有变化告诉我”“异常时提醒我”“结果不好就调整”“查看运行记录”“优化已有任务”“暂停/恢复/删除/立即运行任务”等迹象，就应该触发此 Skill，先判断是否适合 Proma 定时任务。也要覆盖一次性与有限次的延时执行信号：“X 小时/天后跑一次”“过一会儿/晚点/稍后自动做”“到某个具体时间点执行一次”“跑几次/连续观察 N 次就停”——这类未来无人值守的延时任务现在同样适合 Proma 定时任务（用 once 或 maxRuns），不要再一概当成不支持。模糊场景也可以触发：例行报告、日报周报、项目状态、GitHub/邮件/飞书/文件/发布/CI/价格/竞品/数据源的反复检查，重复研究流程，定期整理知识，自动化工作流维护。高频触发不代表必须创建任务；纯提醒/闹钟/倒计时、需要用户实时参与判断、或结果没有任何留存价值的事，要明确说明不推荐创建 Proma 定时任务，并给出替代做法。
 group: proma
-version: "1.0.12"
+version: "1.0.13"
 ---
 
 # Proma Automation
@@ -216,7 +216,7 @@ Automation 的调度规则由多个独立维度组合而成，不要把每个维
 - `list_automations`：查看已有任务，避免重复创建，也用于了解启用/暂停状态。
 - `get_automation`：查看单个任务详情和运行记录；自动任务执行中可省略 `id` 读取当前任务。
 - `create_automation`：创建新的 Proma 定时任务，只用于确认值得长期反复执行的场景。
-- `update_automation`：修改任意字段——`name`、`prompt`、`scheduleType`/`intervalMinutes`/`activeWindowStart`/`activeWindowEnd`/`activeWeekdays`/`timeOfDay`/`dayOfWeek`/`dayOfMonth`/`scheduledAt`（频率和时间约束）、`maxRuns`（运行次数上限）、`permissionMode`（权限模式）、`sessionMode`（会话模式）、`active`（启用/暂停）。`activeWeekdays` 传空数组或 null 表示取消星期限制；`activeWindowStart` 与 `activeWindowEnd` 必须成对传入，传 null 清除窗口。调度相关字段变化时会自动重算下次运行时间；改 `maxRuns` 会重置已执行次数计数；把 `active` 从 false 改回 true 会重置运行配额（已完成的任务可借此再跑一轮）。**改 `maxRuns` 想让停用/已完成任务继续跑时，必须连带处理启用状态，见下文「调整 maxRuns 时连带判断启用状态」。** 自动任务执行中可省略 `id` 更新当前任务。
+- `update_automation`：修改任意字段——`name`、`prompt`、`scheduleType`/`intervalMinutes`/`activeWindowStart`/`activeWindowEnd`/`activeWeekdays`/`timeOfDay`/`dayOfWeek`/`dayOfMonth`/`scheduledAt`（频率和时间约束）、`maxRuns`（运行次数上限）、`permissionMode`（权限模式）、`sessionMode`（会话模式）、`active`（启用/暂停）。`activeWeekdays` 传空数组或 null 表示取消星期限制；`activeWindowStart` 与 `activeWindowEnd` 必须成对传入，传 null 清除窗口。切换 `scheduleType` 时，只传**目标模式**需要的字段：系统会自动清理旧模式不适用的 `timeOfDay`、`dayOfWeek`、`dayOfMonth`、`scheduledAt` 与 interval 窗口字段，禁止为了通过校验填入无关占位值。`maxRuns: null` 明确表示清除上限、长期运行，绝不能用极大的数字伪装“不限次”。调度相关字段变化时会自动重算下次运行时间；改 `maxRuns` 会重置已执行次数计数；把 `active` 从 false 改回 true 会重置运行配额（已完成的任务可借此再跑一轮）。**改 `maxRuns` 想让停用/已完成任务继续跑时，必须连带处理启用状态，见下文「调整 maxRuns 时连带判断启用状态」。** 自动任务执行中可省略 `id` 更新当前任务。
 - `delete_automation`：删除任务。除非用户明确要求，否则删除前要确认。
 - `run_automation_now`：用户要求立即验证，或你刚修改任务后需要试跑时使用。自动任务执行中不要触发自身重入。
 
