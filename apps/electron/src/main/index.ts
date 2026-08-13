@@ -79,7 +79,7 @@ for (const key of Object.keys(process.env)) {
 
 import { createApplicationMenu } from './menu'
 import { registerIpcHandlers } from './ipc'
-import { createTray, destroyTray, getTray } from './tray'
+import { createTray, destroyTray, getTray, setTrayFlash } from './tray'
 import { initializeRuntime } from './lib/runtime-init'
 import { seedDefaultSkills } from './lib/config-paths'
 import { upgradeDefaultSkillsInWorkspaces } from './lib/agent-workspace-manager'
@@ -112,12 +112,14 @@ import { getDingTalkMultiBotConfig } from './lib/dingtalk-config'
 import { wechatBridge } from './lib/wechat-bridge'
 import { getWeChatConfig } from './lib/wechat-config'
 import { createQuickTaskWindow, toggleQuickTaskWindow, destroyQuickTaskWindow } from './lib/quick-task-window'
+import { getAgentStatusHoverWindow, destroyAgentStatusHoverWindow } from './agent-status-hover-window'
 import { destroyPlanningWindow, showPlanningWindow } from './lib/planning-window'
 import { configurePlanningQuickEntries } from './lib/planning-quick-entry'
 import { hasOpenPlanningArgument } from './lib/planning-quick-entry-model'
 import { handleNativeAgentIslandEvent, initAgentIslandService, disposeAgentIslandService, publishAgentIslandNow } from './lib/agent-island-service'
 import { disposeMacAgentIslandNativeHost, startMacAgentIslandNativeHost, isMacAgentIslandNativeHostReady } from './lib/mac-agent-island-native-host'
-import { isAgentIslandSupported } from './lib/macos-version'
+import { isAgentIslandServiceSupported, isMacAgentIslandSurfaceSupported } from './lib/macos-version'
+import { getWindowsAgentIslandSurface, processNotification, type SurfaceDeps } from './lib/windows-agent-island-surface'
 import {
   createVoiceDictationWindow,
   toggleVoiceDictationWindow,
@@ -126,11 +128,11 @@ import {
 } from './lib/voice-dictation-window'
 import { registerGlobalShortcut, unregisterAllGlobalShortcuts } from './lib/global-shortcut-service'
 import { setPromaVersion } from '@proma/core'
-import { TRAY_IPC_CHANNELS } from '../types'
+import { TRAY_IPC_CHANNELS, WINDOWS_AGENT_ISLAND_IPC_CHANNELS } from '../types'
 
 /** macOS 26+ 使用 Swift/AppKit NSPanel；其他平台不创建 Agent Island surface。 */
 function startAgentIslandSurface(): void {
-  if (!isAgentIslandSupported()) {
+  if (!isMacAgentIslandSurfaceSupported()) {
     console.info('[agent-island] 当前平台或 macOS 版本不支持，已禁用')
     return
   }
@@ -650,6 +652,9 @@ async function bootstrap(): Promise<void> {
   if (hasOpenPlanningArgument(process.argv)) showPlanningWindow()
 
   // Create system tray icon
+  const hoverWin = process.platform === 'win32' ? getAgentStatusHoverWindow() : null
+  if (hoverWin) safeRun('ensureHoverWindow', () => hoverWin.ensureCreated())
+
   createTray({
     showMainWindow: showAndFocusMainWindow,
     showPlanningWindow,
@@ -662,7 +667,29 @@ async function bootstrap(): Promise<void> {
     createAgentSession: () => {
       sendToMainWindow(TRAY_IPC_CHANNELS.CREATE_SESSION, { mode: 'agent' })
     },
+    onTrayMouseEnter: hoverWin ? (bounds) => hoverWin.onTrayMouseEnter(bounds) : undefined,
+    onTrayMouseMove: hoverWin ? (bounds) => hoverWin.onTrayMouseMove(bounds) : undefined,
+    onTrayMouseLeave: hoverWin ? () => hoverWin.onTrayMouseLeave() : undefined,
   })
+
+  // Windows: 将 Agent Island surface 的 pill 状态接入托盘图标 + tooltip + 通知
+  if (process.platform === 'win32') {
+    const surface = getWindowsAgentIslandSurface()
+    surface.onTrayFlash = (flashing) => setTrayFlash(flashing)
+
+    const notificationDeps: SurfaceDeps = {
+      sendPlaySound: (type) => {
+        const win = getMainWindow()
+        if (win) win.webContents.send(WINDOWS_AGENT_ISLAND_IPC_CHANNELS.PLAY_SOUND, { type })
+      },
+      soundEnabled: () => getSettings().notificationSoundEnabled ?? true,
+    }
+    surface.onNotification = (transition) => processNotification(transition, notificationDeps)
+
+    if (hoverWin) {
+      surface.onHoverWindowUpdate = (snapshot) => hoverWin.updateSnapshot(snapshot)
+    }
+  }
 
   // 启动工作区文件监听（Agent MCP/Skills + 文件浏览器自动刷新）
   if (mainWindow) {
@@ -684,8 +711,8 @@ async function bootstrap(): Promise<void> {
     safeRun('createVoiceDictationWindow', createVoiceDictationWindow)
   }
 
-  // Agent Island 仅在 macOS 26+ 原生 surface 上初始化；Windows/Linux 不注册服务、窗口或事件监听。
-  if (isAgentIslandSupported()) {
+  // Agent Island 状态机在 macOS 和 Windows 都初始化；Swift surface 仅 macOS 26+。
+  if (isAgentIslandServiceSupported()) {
     safeRun('initAgentIslandService', () => {
       initAgentIslandService({
         showAndFocusMainWindow,
@@ -693,9 +720,12 @@ async function bootstrap(): Promise<void> {
           sendToMainWindow(TRAY_IPC_CHANNELS.OPEN_AGENT_SESSION, { sessionId, title })
         },
         openPlanning: showPlanningWindow,
-        enabled: () => isMacAgentIslandNativeHostReady() && getSettings().agentIsland?.enabled !== false,
+        enabled: () => getSettings().agentIsland?.enabled !== false,
       })
     })
+  }
+
+  if (isMacAgentIslandSurfaceSupported()) {
     safeRun('startAgentIslandSurface', startAgentIslandSurface)
   }
 
@@ -829,6 +859,7 @@ app.on('before-quit', () => {
   destroyQuickTaskWindow()
   destroyPlanningWindow()
   destroyVoiceDictationWindow()
+  destroyAgentStatusHoverWindow()
   // 销毁原生 macOS 灵动岛服务（其他平台从未创建 surface）
   disposeMacAgentIslandNativeHost()
   disposeAgentIslandService()

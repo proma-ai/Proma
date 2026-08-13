@@ -550,6 +550,20 @@ export const TRAY_IPC_CHANNELS = {
   CREATE_SESSION: 'tray:create-session',
 } as const
 
+/** Windows Agent Island IPC 通道（主进程 ↔ 渲染进程） */
+export const WINDOWS_AGENT_ISLAND_IPC_CHANNELS = {
+  /** 主进程 → 渲染进程：委托播放提示音 */
+  PLAY_SOUND: 'windows-agent-island:play-sound',
+  /** 渲染进程（悬停窗）→ 主进程：点击跳转到会话 */
+  OPEN_SESSION: 'windows-agent-island:open-session',
+  /** 主进程 → 渲染进程（悬停窗）：推送全量 snapshot */
+  PUSH_SNAPSHOT: 'windows-agent-island:push-snapshot',
+  /** 渲染进程（悬停窗）→ 主进程：鼠标进入气泡区域 */
+  MOUSE_ENTER: 'windows-agent-island:mouse-enter',
+  /** 渲染进程（悬停窗）→ 主进程：鼠标离开气泡区域 */
+  MOUSE_LEAVE: 'windows-agent-island:mouse-leave',
+} as const
+
 /** 存储管理 IPC 通道 */
 export const STORAGE_IPC_CHANNELS = {
   /** 计算各目录存储统计 */

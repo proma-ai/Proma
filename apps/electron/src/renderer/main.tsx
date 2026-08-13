@@ -94,7 +94,8 @@ const isVoiceDictationIndicatorWindow = new URLSearchParams(window.location.sear
 const isDetachedPreviewWindow = new URLSearchParams(window.location.search).get('window') === 'detached-preview'
 const isPlanningWindow = new URLSearchParams(window.location.search).get('window') === 'planning'
 const isWorkspaceMemoryWindow = new URLSearchParams(window.location.search).get('window') === 'workspace-memory'
-const isMainWindow = !isQuickTaskWindow && !isVoiceDictationIndicatorWindow && !isDetachedPreviewWindow && !isPlanningWindow && !isWorkspaceMemoryWindow
+const isAgentStatusHoverWindow = new URLSearchParams(window.location.search).get('window') === 'agent-status-hover'
+const isMainWindow = !isQuickTaskWindow && !isVoiceDictationIndicatorWindow && !isDetachedPreviewWindow && !isPlanningWindow && !isWorkspaceMemoryWindow && !isAgentStatusHoverWindow
 
 initializePerformanceMonitor()
 
@@ -1111,6 +1112,15 @@ if (isQuickTaskWindow) {
         <ThemeInitializer />
         <WorkspaceMemoryWindowApp />
         <Toaster position="bottom-right" />
+      </React.StrictMode>
+    )
+  })
+} else if (isAgentStatusHoverWindow) {
+  import('./components/agent-status-hover/HoverPanel').then(({ HoverPanel }) => {
+    ReactDOM.createRoot(document.getElementById('root')!).render(
+      <React.StrictMode>
+        <ThemeInitializer />
+        <HoverPanel />
       </React.StrictMode>
     )
   })

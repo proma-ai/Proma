@@ -34,6 +34,7 @@ import { selectAgentIslandCompactPlanQuota } from './agent-island-plan-quota'
 import { getAgentIslandPhasePriority } from './agent-island-priority'
 import { buildVisibilityKey } from './agent-island-visibility'
 import { shouldRetainAgentIslandSession } from './agent-island-session-visibility'
+import { getWindowsAgentIslandSurface } from './windows-agent-island-surface'
 import { listCalendarEvents, listTodos } from './planning-manager'
 import { onPlanningChanged } from './planning-events'
 import { getChannelPlanQuota, listChannels } from './channel-manager'
@@ -633,9 +634,19 @@ function pushState(): void {
   if (json === lastStateJson) return
   lastStateJson = json
 
-  // macOS 原生 helper 是唯一的 Island surface；helper 不可用时直接停止投影。
-  if (!isMacAgentIslandNativeHostReady()) return
-  publishMacAgentIslandSnapshot(buildNativeSnapshot(state, planning))
+  const snapshot = buildNativeSnapshot(state, planning)
+
+  if (isMacAgentIslandNativeHostReady()) {
+    publishMacAgentIslandSnapshot(snapshot)
+  }
+
+  if (process.platform === 'win32') {
+    publishWindowsAgentIslandSnapshot(snapshot)
+  }
+}
+
+function publishWindowsAgentIslandSnapshot(snapshot: NativeAgentIslandSnapshot): void {
+  getWindowsAgentIslandSurface().onSnapshot(snapshot)
 }
 
 /**
@@ -791,7 +802,6 @@ export function initAgentIslandService(deps: AgentIslandServiceDeps): void {
 
   // 订阅 Agent 事件流
   disposeEventBus = agentEventBus.on((sessionId, payload) => {
-    if (deps.enabled?.() === false) return
     handleAgentEvent(sessionId, payload)
     schedulePush(requiresImmediateAgentIslandPush(payload) ? PUSH_THROTTLE_MS : AGENT_STREAM_PUSH_THROTTLE_MS)
   })
@@ -807,7 +817,7 @@ export function initAgentIslandService(deps: AgentIslandServiceDeps): void {
  * 完成和异常态的未读由主进程管理；主应用确认用户已经看过后，在此统一清除。
  * 待接手会话仍保持 attention，直到用户实际完成权限确认、回答或计划审批。
  */
-function markAgentIslandSessionViewed(sessionId: string): void {
+export function markAgentIslandSessionViewed(sessionId: string): void {
   const session = sessions.get(sessionId)
   if (!session || (session.phase !== 'completed' && session.phase !== 'error')) return
   if (session.phase === 'completed' && !session.unread) return

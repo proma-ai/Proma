@@ -58,6 +58,7 @@ import {
   notificationSoundEnabledAtom,
   notificationSoundsAtom,
   sendDesktopNotification,
+  playNotificationSoundForType,
 } from '@/atoms/notifications'
 import { appModeAtom } from '@/atoms/app-mode'
 import { tabsAtom, activeTabIdAtom, openTab, updateTabTitle } from '@/atoms/tab-atoms'
@@ -1690,6 +1691,12 @@ export function useGlobalAgentListeners(): void {
         .catch(console.error)
     })
 
+    // ===== 6. Windows Agent Island 提示音委托 =====
+    const cleanupPlaySound = window.electronAPI.onWindowsAgentIslandPlaySound(({ type }) => {
+      const sounds = store.get(notificationSoundsAtom)
+      void playNotificationSoundForType(type, sounds)
+    })
+
     // 定期清理 60s 前的「最近修改」标记，避免 atom 无限增长
     const pruneTimer = setInterval(() => {
       const cutoff = Date.now() - RECENTLY_MODIFIED_TTL_MS
@@ -1784,6 +1791,7 @@ export function useGlobalAgentListeners(): void {
       cleanupError()
       cleanupTodoAgentSessionReady()
       cleanupTitleUpdated()
+      cleanupPlaySound()
       cleanupWatchedFileChanges()
       queuedDispatchUnsubscribers.forEach((unsubscribe) => unsubscribe())
       clearInterval(pruneTimer)

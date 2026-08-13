@@ -111,6 +111,7 @@ import type {
   WeChatBridgeState,
   AgentQueueMessageInput,
   PendingRequestsSnapshot,
+  NativeAgentIslandSnapshot,
   Automation,
   CreateAutomationInput,
   UpdateAutomationInput,
@@ -171,8 +172,9 @@ import type {
   MicPermissionResult,
   TrayCreateSessionData,
   TrayOpenAgentSessionData,
+  NotificationSoundType,
 } from '../types'
-import { QUICK_TASK_IPC_CHANNELS, TRAY_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS } from '../types'
+import { QUICK_TASK_IPC_CHANNELS, TRAY_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, WINDOWS_AGENT_ISLAND_IPC_CHANNELS } from '../types'
 
 /**
  * 暴露给渲染进程的 API 接口定义
@@ -1237,6 +1239,18 @@ export interface ElectronAPI {
   agentIsland: {
     markSessionViewed: (sessionId: string) => Promise<void>
   }
+
+  // ===== Windows Agent Island =====
+
+  /** Windows: 主进程委托渲染进程播放提示音 */
+  onWindowsAgentIslandPlaySound: (callback: (data: { type: NotificationSoundType }) => void) => () => void
+  /** Windows: 主进程推送全量 snapshot 到悬停窗（Step 5 接入） */
+  onWindowsAgentIslandPushSnapshot: (callback: (snapshot: NativeAgentIslandSnapshot) => void) => () => void
+  /** Windows: 悬停窗点击跳转到指定会话 */
+  openAgentIslandSession: (sessionId: string, title: string) => Promise<void>
+  /** Windows: 悬停窗鼠标进入/离开通知主进程 */
+  hoverMouseEnter: () => void
+  hoverMouseLeave: () => void
 }
 
 /**
@@ -2797,6 +2811,23 @@ const electronAPI: ElectronAPI = {
     markSessionViewed: (sessionId: string) =>
       ipcRenderer.invoke(AGENT_ISLAND_IPC_CHANNELS.MARK_SESSION_VIEWED, sessionId),
   },
+
+  // ===== Windows Agent Island =====
+  onWindowsAgentIslandPlaySound: (callback: (data: { type: NotificationSoundType }) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, data: { type: NotificationSoundType }): void => callback(data)
+    ipcRenderer.on(WINDOWS_AGENT_ISLAND_IPC_CHANNELS.PLAY_SOUND, listener)
+    return () => { ipcRenderer.removeListener(WINDOWS_AGENT_ISLAND_IPC_CHANNELS.PLAY_SOUND, listener) }
+  },
+  onWindowsAgentIslandPushSnapshot: (callback: (snapshot: NativeAgentIslandSnapshot) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, snapshot: NativeAgentIslandSnapshot): void => callback(snapshot)
+    ipcRenderer.on(WINDOWS_AGENT_ISLAND_IPC_CHANNELS.PUSH_SNAPSHOT, listener)
+    return () => { ipcRenderer.removeListener(WINDOWS_AGENT_ISLAND_IPC_CHANNELS.PUSH_SNAPSHOT, listener) }
+  },
+  openAgentIslandSession: (sessionId: string, title: string) => {
+    return ipcRenderer.invoke(WINDOWS_AGENT_ISLAND_IPC_CHANNELS.OPEN_SESSION, sessionId, title)
+  },
+  hoverMouseEnter: () => { ipcRenderer.send(WINDOWS_AGENT_ISLAND_IPC_CHANNELS.MOUSE_ENTER) },
+  hoverMouseLeave: () => { ipcRenderer.send(WINDOWS_AGENT_ISLAND_IPC_CHANNELS.MOUSE_LEAVE) },
 }
 
 // 将 API 暴露到渲染进程的 window 对象上
