@@ -759,16 +759,56 @@ export function AutomationFormView({ standalone = false }: { standalone?: boolea
               onValueChange={(v) => {
                 const next = v as AutomationDraft['scheduleType']
                 // 默认值必须写入 draft：展示层 fallback 不会进入自动保存请求。
-                if (next === 'daily') {
-                  update({ scheduleType: next, timeOfDay: form.timeOfDay ?? '09:00' })
+                // 同时立即清除不适用字段，避免后端归一化后旧配置仍滞留本地并在切回时复活。
+                const clearIntervalFields = {
+                  activeWindowStart: undefined,
+                  activeWindowEnd: undefined,
+                  activeWeekdays: undefined,
+                }
+                if (next === 'interval') {
+                  update({
+                    scheduleType: next,
+                    timeOfDay: undefined,
+                    dayOfWeek: undefined,
+                    dayOfMonth: undefined,
+                    scheduledAt: undefined,
+                  })
+                } else if (next === 'daily') {
+                  update({
+                    scheduleType: next,
+                    ...clearIntervalFields,
+                    timeOfDay: form.timeOfDay ?? '09:00',
+                    dayOfWeek: undefined,
+                    dayOfMonth: undefined,
+                    scheduledAt: undefined,
+                  })
                 } else if (next === 'weekly') {
-                  update({ scheduleType: next, timeOfDay: form.timeOfDay ?? '09:00', dayOfWeek: form.dayOfWeek ?? 1 })
+                  update({
+                    scheduleType: next,
+                    ...clearIntervalFields,
+                    timeOfDay: form.timeOfDay ?? '09:00',
+                    dayOfWeek: form.dayOfWeek ?? 1,
+                    dayOfMonth: undefined,
+                    scheduledAt: undefined,
+                  })
                 } else if (next === 'monthly') {
-                  update({ scheduleType: next, timeOfDay: form.timeOfDay ?? '09:00', dayOfMonth: form.dayOfMonth ?? 1 })
-                } else if (next === 'once' && !form.scheduledAt) {
-                  update({ scheduleType: next, scheduledAt: Date.now() + 60 * 60 * 1000 })
+                  update({
+                    scheduleType: next,
+                    ...clearIntervalFields,
+                    timeOfDay: form.timeOfDay ?? '09:00',
+                    dayOfWeek: undefined,
+                    dayOfMonth: form.dayOfMonth ?? 1,
+                    scheduledAt: undefined,
+                  })
                 } else {
-                  update({ scheduleType: next })
+                  update({
+                    scheduleType: next,
+                    ...clearIntervalFields,
+                    timeOfDay: undefined,
+                    dayOfWeek: undefined,
+                    dayOfMonth: undefined,
+                    scheduledAt: form.scheduledAt ?? Date.now() + 60 * 60 * 1000,
+                  })
                 }
               }}
             >

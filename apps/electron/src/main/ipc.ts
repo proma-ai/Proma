@@ -225,6 +225,7 @@ import {
   getAutomation,
   createAutomation,
   getEffectiveAutomationScheduleFields,
+  validateExplicitAutomationScheduleFields,
   updateAutomation,
   deleteAutomation,
 } from './lib/automation-manager'
@@ -5216,6 +5217,9 @@ export function registerIpcHandlers(): void {
     input: Partial<CreateAutomationInput | UpdateAutomationInput>,
     existing?: Automation,
   ): void => {
+    const scheduleType = input.scheduleType ?? existing?.scheduleType
+    if (!scheduleType) throw new Error('scheduleType 必填')
+    validateExplicitAutomationScheduleFields(input, scheduleType)
     const effective = getEffectiveAutomationScheduleFields(input, existing)
     if (effective.scheduleType === 'interval') {
       if (!isFiniteInt(effective.intervalMinutes) || effective.intervalMinutes < 1) throw new Error('scheduleType=interval 时 intervalMinutes 必填')

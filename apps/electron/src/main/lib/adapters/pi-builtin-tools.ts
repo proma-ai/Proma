@@ -20,6 +20,7 @@ import {
   deleteAutomation,
   getAutomation,
   getEffectiveAutomationScheduleFields,
+  validateExplicitAutomationScheduleFields,
   listAutomations,
   updateAutomation,
 } from '../automation-manager'
@@ -391,6 +392,7 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
           active: (args.active as boolean) ?? true,
         }
         validateScheduleFields(input)
+        validateExplicitAutomationScheduleFields(input, input.scheduleType)
         if (input.scheduleType === 'interval' && args.intervalMinutes === undefined) {
           throw new Error('scheduleType=interval 时 intervalMinutes 必填')
         }
@@ -478,6 +480,8 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
         validateScheduleFields(input)
         const existing = getAutomation(id)
         if (!existing) throw new Error(`定时任务不存在: ${id}`)
+        const scheduleType = input.scheduleType ?? existing.scheduleType
+        validateExplicitAutomationScheduleFields(input, scheduleType)
         const effective = getEffectiveAutomationScheduleFields(input, existing)
         if (effective.scheduleType === 'interval' && (!isFiniteInt(effective.intervalMinutes) || effective.intervalMinutes < 1)) {
           throw new Error('scheduleType=interval 时 intervalMinutes 必填')

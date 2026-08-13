@@ -376,6 +376,40 @@ export function normalizeAutomationScheduleFields(
 }
 
 /**
+ * 拒绝调用方显式提交的、与目标 scheduleType 不兼容的字段。
+ *
+ * 此检查必须发生在 getEffectiveAutomationScheduleFields() 归一化之前：后者只用于
+ * 忽略已有任务继承的旧模式字段，不能将本次请求明确提供的非法字段静默丢弃。
+ */
+export function validateExplicitAutomationScheduleFields(
+  input: Partial<CreateAutomationInput | UpdateAutomationInput>,
+  scheduleType: Automation['scheduleType'],
+): void {
+  const hasValue = (value: unknown): boolean => value !== undefined && value !== null
+
+  if (scheduleType !== 'interval') {
+    if (input.activeWeekdays !== undefined && input.activeWeekdays !== null && input.activeWeekdays.length > 0) {
+      throw new Error('周内运行日限制仅支持 scheduleType=interval')
+    }
+    if (hasValue(input.activeWindowStart) || hasValue(input.activeWindowEnd)) {
+      throw new Error('每日执行窗口仅支持 scheduleType=interval')
+    }
+  }
+  if (scheduleType !== 'daily' && scheduleType !== 'weekly' && scheduleType !== 'monthly' && input.timeOfDay !== undefined) {
+    throw new Error('timeOfDay 仅支持 scheduleType=daily/weekly/monthly')
+  }
+  if (scheduleType !== 'weekly' && input.dayOfWeek !== undefined) {
+    throw new Error('dayOfWeek 仅支持 scheduleType=weekly')
+  }
+  if (scheduleType !== 'monthly' && input.dayOfMonth !== undefined) {
+    throw new Error('dayOfMonth 仅支持 scheduleType=monthly')
+  }
+  if (scheduleType !== 'once' && input.scheduledAt !== undefined) {
+    throw new Error('scheduledAt 仅支持 scheduleType=once')
+  }
+}
+
+/**
  * 合并更新输入与已有任务，并按目标 scheduleType 清理旧模式字段后供边界层校验。
  * 切换模式时，旧模式的字段不能参与新模式的完整性校验；否则归一化尚未执行就会被拒绝。
  */
