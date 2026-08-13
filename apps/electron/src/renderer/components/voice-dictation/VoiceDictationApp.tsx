@@ -353,6 +353,13 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
     }
   }, [])
 
+  const markAudioCaptureReady = React.useCallback(() => {
+    if (audioCaptureReadyRef.current) return
+    audioCaptureReadyRef.current = true
+    setStatus('recording')
+    setMessage('正在听写')
+  }, [])
+
   const startAudioCapture = React.useCallback(async (attempt: number) => {
     const stream = await requestMicrophoneStream()
     if (attempt !== recordingAttemptRef.current || stoppingRef.current) {
@@ -380,11 +387,6 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
 
     processor.onaudioprocess = (event) => {
       if (!sessionIdRef.current || stoppingRef.current) return
-      if (!audioCaptureReadyRef.current) {
-        audioCaptureReadyRef.current = true
-        setStatus('recording')
-        setMessage('正在听写')
-      }
       const input = event.inputBuffer.getChannelData(0)
       let peak = 0
       for (let i = 0; i < input.length; i += 1) {
@@ -414,14 +416,27 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
 
     source.connect(processor)
     processor.connect(audioContext.destination)
-    if (audioContext.state === 'suspended') {
+    if (audioContext.state !== 'running') {
       try {
         await audioContext.resume()
       } catch {
         throw new Error('音频处理启动失败，请重新触发语音输入或检查系统音频权限')
       }
     }
-  }, [requestMicrophoneStream, sendAudioChunk])
+    if (audioContext.state !== 'running') {
+      throw new Error('音频处理未进入运行状态，请重新触发语音输入或检查系统音频权限')
+    }
+    if (!stream.getAudioTracks().some((track) => track.readyState === 'live' && track.enabled)) {
+      throw new Error('麦克风未就绪，请检查系统麦克风权限与设备连接')
+    }
+
+    // getUserMedia 已授予并启用音轨，且音频图已恢复即可认定采集就绪。
+    // 不再依赖首个 ScriptProcessor 回调：某些系统/设备会延后该回调，导致
+    // 实际已打开的麦克风永久停在“准备麦克风”。
+    if (attempt === recordingAttemptRef.current && !stoppingRef.current) {
+      markAudioCaptureReady()
+    }
+  }, [markAudioCaptureReady, requestMicrophoneStream, sendAudioChunk])
 
   const startRecording = React.useCallback(async () => {
     const refreshSettings = window.electronAPI.getVoiceDictationSettings()
