@@ -19,7 +19,6 @@ import { getModelLogo, resolveModelProvider } from '@/lib/model-logo'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import { useShortcut } from '@/hooks/useShortcut'
 import { cn } from '@/lib/utils'
-import { measurePerformance } from '@/lib/performance-monitor'
 
 export interface MinimapItem {
   id: string
@@ -83,15 +82,23 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
   /** 主区视口几何中心当前对应的消息 id —— 面板打开时作为列表居中锚点 */
   const [centerVisibleId, setCenterVisibleId] = React.useState<string | undefined>(undefined)
   const [canScroll, setCanScroll] = React.useState(false)
+  const [thumbHeightPct, setThumbHeightPct] = React.useState(100)
   const [searchQuery, setSearchQuery] = React.useState('')
   const [isDragging, setIsDragging] = React.useState(false)
-  const [scrollMetrics, setScrollMetrics] = React.useState({ scrollTop: 0, scrollHeight: 1, clientHeight: 1 })
   const closeTimerRef = React.useRef<ReturnType<typeof setTimeout>>()
   const fadeTimerRef = React.useRef<ReturnType<typeof setTimeout>>()
   const openTimerRef = React.useRef<ReturnType<typeof setTimeout>>()
   const searchInputRef = React.useRef<HTMLInputElement>(null)
   const trackRef = React.useRef<HTMLDivElement>(null)
   const listRef = React.useRef<HTMLDivElement>(null)
+  const visibleIdsRef = React.useRef<Set<string>>(new Set())
+  const visibleElementsRef = React.useRef<Map<string, HTMLElement>>(new Map())
+  const hoveredRef = React.useRef(hovered)
+  hoveredRef.current = hovered
+  const updateCenterVisibleRef = React.useRef<(() => void) | null>(null)
+  const canScrollRef = React.useRef(false)
+  const thumbHeightPctRef = React.useRef(100)
+  const thumbRef = React.useRef<HTMLDivElement>(null)
 
   // ── 组件卸载时清理计时器 ──
 
@@ -103,58 +110,123 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
     }
   }, [])
 
-  // ── 可见消息 + 滚动指标追踪 ──
+  // 仅列表结构变化时重新绑定消息。滚动时由 IntersectionObserver 追踪可见项，
+  // 避免每帧查询整个历史 DOM 并读取所有消息的几何信息。
+  const itemIds = React.useMemo(() => items.map((item) => item.id).join('\u0000'), [items])
 
   React.useEffect(() => {
     const el = scrollRef.current
     if (!el) return
 
-    let frame: number | null = null
-    const update = (): void => {
-      measurePerformance('history.minimap-scan', () => {
-        const { scrollTop, scrollHeight, clientHeight } = el
-        setCanScroll(scrollHeight > clientHeight + 10)
-        setScrollMetrics({ scrollTop, scrollHeight, clientHeight })
-        if (scrollHeight <= 0) return
+    const updateVisibleIds = (next: Set<string>): void => {
+      const previous = visibleIdsRef.current
+      if (previous.size === next.size && [...previous].every((id) => next.has(id))) return
+      visibleIdsRef.current = next
+      setVisibleIds(next)
+    }
 
-        const viewportCenter = scrollTop + clientHeight / 2
-        const nodes = el.querySelectorAll<HTMLElement>('[data-message-id]')
-        const ids = new Set<string>()
-        let centerId: string | undefined
-        for (const node of nodes) {
-          const top = getOffsetTopRelativeTo(node, el)
-          const bottom = top + node.offsetHeight
-          if (bottom > scrollTop && top < scrollTop + clientHeight) {
-            const id = node.getAttribute('data-message-id')
-            if (id) ids.add(id)
-          }
-          if (centerId === undefined && top <= viewportCenter && bottom > viewportCenter) {
-            centerId = node.getAttribute('data-message-id') ?? undefined
-          }
+    const updateCenterVisible = (): void => {
+      const viewportCenter = el.getBoundingClientRect().top + el.clientHeight / 2
+      let closestId: string | undefined
+      let closestDistance = Number.POSITIVE_INFINITY
+      for (const [id, element] of visibleElementsRef.current) {
+        const rect = element.getBoundingClientRect()
+        const distance = viewportCenter < rect.top
+          ? rect.top - viewportCenter
+          : viewportCenter > rect.bottom
+            ? viewportCenter - rect.bottom
+            : 0
+        if (distance < closestDistance) {
+          closestDistance = distance
+          closestId = id
         }
-        setVisibleIds(ids)
-        setCenterVisibleId(centerId)
-      })
-    }
-    const scheduleUpdate = (): void => {
-      if (frame !== null) return
-      frame = requestAnimationFrame(() => {
-        frame = null
-        update()
-      })
+      }
+      setCenterVisibleId((previous) => previous === closestId ? previous : closestId)
     }
 
-    update()
-    el.addEventListener('scroll', scheduleUpdate, { passive: true })
-    const observer = new ResizeObserver(scheduleUpdate)
-    observer.observe(el)
+    const updateThumb = (): void => {
+      const { scrollTop, scrollHeight, clientHeight } = el
+      const scrollRange = scrollHeight - clientHeight
+      const nextCanScroll = scrollRange > 10
+      const nextThumbHeightPct = scrollHeight > 0
+        ? Math.max(10, Math.min((clientHeight / scrollHeight) * 100, 100))
+        : 100
+      const thumbTopPct = scrollRange > 0
+        ? (scrollTop / scrollRange) * (100 - nextThumbHeightPct)
+        : 0
+
+      if (nextCanScroll !== canScrollRef.current) {
+        canScrollRef.current = nextCanScroll
+        setCanScroll(nextCanScroll)
+      }
+      if (Math.abs(thumbHeightPctRef.current - nextThumbHeightPct) >= 0.01) {
+        thumbHeightPctRef.current = nextThumbHeightPct
+        setThumbHeightPct(nextThumbHeightPct)
+      }
+      if (thumbRef.current) thumbRef.current.style.top = `${thumbTopPct}%`
+    }
+
+    const visible = new Set<string>()
+    const observer = new IntersectionObserver((entries) => {
+      let changed = false
+      for (const entry of entries) {
+        const id = entry.target.getAttribute('data-message-id')
+        if (!id) continue
+        if (entry.isIntersecting) {
+          visibleElementsRef.current.set(id, entry.target as HTMLElement)
+          if (!visible.has(id)) {
+            visible.add(id)
+            changed = true
+          }
+        } else {
+          visibleElementsRef.current.delete(id)
+          if (visible.delete(id)) changed = true
+        }
+      }
+      if (changed) updateVisibleIds(new Set(visible))
+      if (hoveredRef.current) updateCenterVisible()
+    }, { root: el, threshold: 0 })
+
+    updateCenterVisibleRef.current = updateCenterVisible
+    for (const message of el.querySelectorAll<HTMLElement>('[data-message-id]')) observer.observe(message)
+    updateThumb()
+
+    const onScroll = (): void => {
+      updateThumb()
+      if (hoveredRef.current) updateCenterVisible()
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    const resizeObserver = new ResizeObserver(updateThumb)
+    resizeObserver.observe(el)
+    const content = el.firstElementChild
+    if (content) resizeObserver.observe(content)
 
     return () => {
-      if (frame !== null) cancelAnimationFrame(frame)
-      el.removeEventListener('scroll', scheduleUpdate)
+      el.removeEventListener('scroll', onScroll)
       observer.disconnect()
+      resizeObserver.disconnect()
+      updateCenterVisibleRef.current = null
+      visibleIdsRef.current = new Set()
+      visibleElementsRef.current.clear()
     }
-  }, [scrollRef])
+  }, [itemIds, scrollRef])
+
+  React.useEffect(() => {
+    if (hovered) updateCenterVisibleRef.current?.()
+  }, [hovered])
+
+  // 进度条首次从不可滚动状态挂载时，上一段 effect 中尚无 thumb DOM；
+  // 此处在绘制前补齐当前位置，保证恢复历史滚动位置后滑块也正确定位。
+  React.useLayoutEffect(() => {
+    const el = scrollRef.current
+    const thumb = thumbRef.current
+    if (!el || !thumb || !canScroll) return
+    const scrollRange = el.scrollHeight - el.clientHeight
+    const thumbTopPct = scrollRange > 0
+      ? (el.scrollTop / scrollRange) * (100 - thumbHeightPct)
+      : 0
+    thumb.style.top = `${thumbTopPct}%`
+  }, [canScroll, scrollRef, thumbHeightPct])
 
   // ── 面板打开时自动聚焦搜索框 ──
 
@@ -183,7 +255,7 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
       list.scrollTo({ top: Math.max(0, offset), behavior: 'auto' })
     }, 0)
     return () => clearTimeout(timer)
-  }, [hovered])
+  }, [centerVisibleId, hovered, visibleIds])
 
   // ── 面板关闭时清空搜索 ──
 
@@ -359,14 +431,6 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
 
   const barCount = Math.min(items.length, MAX_BARS)
 
-  // ── 滚动条滑块尺寸计算 ──
-
-  const { scrollTop, scrollHeight, clientHeight } = scrollMetrics
-  const scrollRange = scrollHeight - clientHeight
-  const thumbRatio = scrollHeight > 0 ? Math.min(clientHeight / scrollHeight, 1) : 1
-  const thumbHeightPct = Math.max(10, thumbRatio * 100)
-  const thumbTopPct = scrollRange > 0 ? (scrollTop / scrollRange) * (100 - thumbHeightPct) : 0
-
   return (
     <div className="absolute right-1 top-0 bottom-0 z-30 flex pointer-events-none">
       {/* ── 迷你地图悬停区域（面板 + 横杠） ── */}
@@ -480,6 +544,7 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
           onMouseDown={handleTrackMouseDown}
         >
           <div
+            ref={thumbRef}
             className={cn(
               'absolute left-0 right-0 rounded-full transition-colors duration-100 scroll-progress-thumb',
               isDragging
@@ -488,7 +553,7 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
             )}
             style={{
               height: `${thumbHeightPct}%`,
-              top: `${thumbTopPct}%`,
+              top: '0%',
             }}
             onMouseDown={handleThumbMouseDown}
           />
