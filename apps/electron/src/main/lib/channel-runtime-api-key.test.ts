@@ -1,8 +1,13 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import * as os from 'node:os'
 import { join } from 'node:path'
-import { serializeCodexCredentials } from '@proma/shared'
+import {
+  PROMA_OFFICIAL_CHANNEL_ID,
+  PROVIDER_DEFAULT_URLS,
+  serializeCodexCredentials,
+} from '@proma/shared'
+import type { ProviderType } from '@proma/shared'
 
 type ChannelManagerModule = typeof import('./channel-manager')
 
@@ -68,6 +73,199 @@ afterAll(() => {
     process.env.PROMA_DEV = originalPromaDev
   }
   rmSync(tempHome, { recursive: true, force: true })
+})
+
+describe('商业版渠道准入与中转站清理', () => {
+  test('Given 存量第三方中转站 When 读取渠道 Then 删除并原子回写仅保留官方 API', () => {
+    writeChannels([
+      {
+        id: 'deepseek-official',
+        name: 'DeepSeek',
+        provider: 'deepseek',
+        baseUrl: 'https://api.deepseek.com/anthropic',
+        apiKey: 'official-key',
+        models: [],
+        enabled: true,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'relay-channel',
+        name: '第三方中转',
+        provider: 'custom',
+        baseUrl: 'https://relay.example.com/v1/chat/completions',
+        apiKey: 'relay-key',
+        models: [],
+        enabled: true,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'rewritten-openai',
+        name: '伪装 OpenAI',
+        provider: 'openai',
+        baseUrl: 'https://relay.example.com/v1',
+        apiKey: 'relay-key',
+        models: [],
+        enabled: true,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ])
+
+    expect(channelManager.listChannels().map((channel) => channel.id)).toEqual(['deepseek-official'])
+
+    const persisted = JSON.parse(readFileSync(join(tempHome, '.proma', 'channels.json'), 'utf-8')) as {
+      version: number
+      channels: Array<{ id: string }>
+    }
+    expect(persisted.version).toBe(5)
+    expect(persisted.channels.map((channel) => channel.id)).toEqual(['deepseek-official'])
+  })
+
+  test('Given 第三方中转站输入 When 创建或直连探测 Then 主进程拒绝且不落库', async () => {
+    const input = {
+      name: '第三方中转',
+      provider: 'custom' as const,
+      baseUrl: 'https://relay.example.com/v1/chat/completions',
+      apiKey: 'relay-key',
+      models: [],
+      enabled: true,
+    }
+
+    expect(() => channelManager.createChannel(input)).toThrow('已禁用第三方中转站')
+    await expect(channelManager.testChannelDirect(input)).resolves.toMatchObject({ success: false, message: expect.stringContaining('已禁用第三方中转站') })
+    await expect(channelManager.fetchModels(input)).resolves.toMatchObject({ success: false, models: [], message: expect.stringContaining('已禁用第三方中转站') })
+  })
+
+  test('Given 内置供应商默认地址 When 创建渠道 Then 正常保留，任何地址改写均拒绝', () => {
+    const channel = channelManager.createChannel({
+      name: 'OpenAI',
+      provider: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'official-key',
+      models: [],
+      enabled: true,
+    })
+
+    expect(channel.baseUrl).toBe('https://api.openai.com/v1')
+    expect(channelManager.getChannelById(channel.id)?.provider).toBe('openai')
+    expect(() => channelManager.updateChannel(channel.id, { baseUrl: 'https://api.openai.com/v1/proxy' }))
+      .toThrow('已禁用第三方中转站')
+  })
+
+  test('Given 官方域名但非默认地址的历史渠道 When 读取渠道 Then 仍删除', () => {
+    writeChannels([
+      {
+        id: 'rewritten-path',
+        name: '改写路径的 OpenAI',
+        provider: 'openai',
+        baseUrl: 'https://api.openai.com/v1/proxy',
+        apiKey: 'relay-key',
+        models: [],
+        enabled: true,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ])
+
+    expect(channelManager.listChannels().map((channel) => channel.provider)).toEqual(['deepseek'])
+  })
+
+  test('Given 所有内置渠道默认地址（含尾斜杠） When 读取渠道 Then 全部保留', () => {
+    const providers: ProviderType[] = [
+      'anthropic', 'openai', 'openai-responses', 'deepseek', 'google', 'kimi-api', 'kimi-coding',
+      'opencode-go-openai', 'zhipu', 'zhipu-coding', 'zhipu-coding-team', 'ark-coding-plan',
+      'minimax', 'doubao', 'qwen', 'qwen-anthropic', 'qwen-token-plan', 'xiaomi', 'xiaomi-token-plan',
+      'openai-codex', 'xai',
+    ]
+    writeChannels(providers.map((provider, index) => ({
+      id: `builtin-${provider}`,
+      name: provider,
+      provider,
+      baseUrl: PROVIDER_DEFAULT_URLS[provider] ? `${PROVIDER_DEFAULT_URLS[provider]}/` : '',
+      apiKey: 'official-key',
+      models: [],
+      enabled: true,
+      createdAt: index,
+      updatedAt: index,
+    })))
+
+    const remainingProviderIds = new Set(channelManager.listChannels().map((channel) => channel.id))
+    for (const provider of providers) {
+      expect(remainingProviderIds.has(`builtin-${provider}`)).toBe(true)
+    }
+  })
+
+  test('Given OpenCode Go 的默认地址 When 读取或创建渠道 Then 保留，改写地址仍拒绝', () => {
+    writeChannels([
+      {
+        id: 'opencode-go',
+        name: 'OpenCode Go',
+        provider: 'opencode-go-openai',
+        baseUrl: 'https://opencode.ai/zen/go/v1',
+        apiKey: 'official-key',
+        models: [],
+        enabled: true,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ])
+
+    expect(channelManager.listChannels().some((channel) => channel.id === 'opencode-go')).toBe(true)
+    expect(() => channelManager.createChannel({
+      name: '改写的 OpenCode Go',
+      provider: 'opencode-go-openai',
+      baseUrl: 'https://opencode.ai/zen/go/v1/proxy',
+      apiKey: 'relay-key',
+      models: [],
+      enabled: true,
+    })).toThrow('已禁用第三方中转站')
+  })
+
+  test('Given Proma 官方固定 ID 被伪造 When 读取渠道 Then 删除伪造记录并保留完整官方身份', () => {
+    writeChannels([
+      {
+        id: PROMA_OFFICIAL_CHANNEL_ID,
+        name: '伪装官方',
+        provider: 'openai',
+        baseUrl: PROVIDER_DEFAULT_URLS.openai,
+        apiKey: 'relay-key',
+        models: [],
+        enabled: true,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'real-official',
+        name: 'Proma 官方',
+        provider: 'proma',
+        baseUrl: '',
+        apiKey: '',
+        models: [],
+        enabled: true,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ])
+
+    expect(channelManager.listChannels().some((channel) => channel.id === PROMA_OFFICIAL_CHANNEL_ID)).toBe(false)
+
+    writeChannels([
+      {
+        id: PROMA_OFFICIAL_CHANNEL_ID,
+        name: 'Proma 官方',
+        provider: 'proma',
+        baseUrl: '',
+        apiKey: '',
+        models: [],
+        enabled: true,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ])
+    expect(channelManager.listChannels().some((channel) => channel.id === PROMA_OFFICIAL_CHANNEL_ID)).toBe(true)
+  })
 })
 
 describe('渠道运行时认证解析', () => {

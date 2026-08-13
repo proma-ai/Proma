@@ -150,11 +150,11 @@ export function ChannelSettings(): React.ReactElement {
       {/* 区块一：模型配置 */}
       <SettingsSection
         title="模型配置"
-        description="管理 AI 供应商连接，配置 API Key 和可用模型。"
+        description="商业版仅支持 Proma 官方渠道及各供应商的官方 API。"
         action={
           <Button size="sm" onClick={() => setViewMode('create')}>
             <Plus size={16} />
-            <span>添加配置</span>
+            <span>添加官方供应商</span>
           </Button>
         }
       >
@@ -176,7 +176,7 @@ export function ChannelSettings(): React.ReactElement {
         ) : userChannels.length === 0 && !officialChannel ? (
           <SettingsCard divided={false}>
             <div className="text-sm text-muted-foreground py-12 text-center">
-              还没有配置任何模型，点击上方"添加配置"开始
+              还没有可用模型，请登录 Proma 或添加官方供应商 API
             </div>
           </SettingsCard>
         ) : userChannels.length > 0 ? (

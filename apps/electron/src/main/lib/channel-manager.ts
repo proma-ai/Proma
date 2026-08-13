@@ -6,10 +6,11 @@
  * 数据持久化到 ~/.proma/channels.json。
  */
 
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { safeStorage } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { getChannelsPath } from './config-paths'
+import { writeJsonFileAtomic } from './safe-file'
 import type {
   Channel,
   ChannelCreateInput,
@@ -58,12 +59,51 @@ import { normalizeHttpResponse, normalizeRequestError } from './channel-test-err
 import pkg from '../../../package.json' with { type: 'json' }
 
 /** 当前配置版本 */
-const CONFIG_VERSION = 2
+const CONFIG_VERSION = 5
 /** 连接测试 / 模型拉取的统一超时时间 */
 const CHANNEL_TEST_TIMEOUT_MS = 15_000
 // ChatGPT backend 首次经代理 / Cloudflare 建连可能超过普通模型探测的 15 秒。
 const CODEX_PLAN_QUOTA_TIMEOUT_MS = 30_000
 const ARK_CODING_PLAN_TEST_MODEL = 'doubao-seed-2.0-code'
+
+/**
+ * 商业版仅接受 Proma 官方渠道和各供应商的官方 API。
+ * 通用兼容协议、自定义地址和聚合服务均可能成为第三方中转站，因此一律禁用。
+ */
+const DISALLOWED_RELAY_PROVIDERS = new Set<ProviderType>([
+  'custom',
+  'anthropic-compatible',
+])
+
+const THIRD_PARTY_RELAY_DISABLED_MESSAGE = 'Proma 商业版已禁用第三方中转站，请使用内置供应商的默认 API 地址'
+
+/**
+ * 除订阅登录渠道外，商业版只允许供应商预设的完整默认地址。
+ * 这不只防止切到第三方 hostname，也防止在官方域名上改写路径接入中转服务。
+ */
+function isCommercialChannelAllowed(channel: Pick<Channel, 'id' | 'provider' | 'baseUrl'>): boolean {
+  if (channel.id === PROMA_OFFICIAL_CHANNEL_ID) {
+    return channel.provider === 'proma' && !normalizeBaseUrl(channel.baseUrl)
+  }
+  if (channel.provider === 'proma') return false
+  if (channel.provider === 'openai-codex' || channel.provider === 'xai') return !normalizeBaseUrl(channel.baseUrl)
+  if (DISALLOWED_RELAY_PROVIDERS.has(channel.provider)) return false
+  return normalizeBaseUrl(channel.baseUrl) === normalizeBaseUrl(PROVIDER_DEFAULT_URLS[channel.provider])
+}
+
+function assertCommercialChannelAllowed(channel: Pick<Channel, 'id' | 'provider' | 'baseUrl'>): void {
+  if (!isCommercialChannelAllowed(channel)) throw new Error(THIRD_PARTY_RELAY_DISABLED_MESSAGE)
+}
+
+function isCommercialChannelInputAllowed(input: Pick<ChannelCreateInput, 'provider' | 'baseUrl'>): boolean {
+  // Proma 官方渠道由 Cloud service 以固定 ID 同步，不能由普通 CRUD 创建。
+  if (input.provider === 'proma') return false
+  return isCommercialChannelAllowed({ id: '', ...input })
+}
+
+function assertCommercialChannelInputAllowed(input: Pick<ChannelCreateInput, 'provider' | 'baseUrl'>): void {
+  if (!isCommercialChannelInputAllowed(input)) throw new Error(THIRD_PARTY_RELAY_DISABLED_MESSAGE)
+}
 const DEEPSEEK_PRESET_MODELS: ChannelModel[] = [
   { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', enabled: true },
   { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true },
@@ -185,27 +225,30 @@ function inferProviderFromBaseUrl(provider: ProviderType, baseUrl: string): Prov
  */
 function migrateConfig(config: ChannelsConfig): { config: ChannelsConfig; changed: boolean } {
   const version = config.version ?? 1
-  if (version >= CONFIG_VERSION) {
-    return { config, changed: false }
+  let changed = version < CONFIG_VERSION
+  let channels = config.channels
+
+  // 仅保留旧版本兼容迁移的历史语义；v3 随后会删除这些已禁用的兼容渠道。
+  if (version < 2) {
+    channels = channels.map((channel) => {
+      if (channel.provider !== 'custom' && channel.provider !== 'anthropic-compatible') {
+        return channel
+      }
+      const migratedUrl = migrateCompatibleChannelBaseUrl(channel.baseUrl, channel.provider)
+      if (migratedUrl === channel.baseUrl) return channel
+      changed = true
+      return { ...channel, baseUrl: migratedUrl }
+    })
   }
 
-  let mutated = false
-  const channels = config.channels.map((channel) => {
-    if (channel.provider !== 'custom' && channel.provider !== 'anthropic-compatible') {
-      return channel
-    }
-    const migratedUrl = migrateCompatibleChannelBaseUrl(channel.baseUrl, channel.provider)
-    if (migratedUrl === channel.baseUrl) {
-      return channel
-    }
-    mutated = true
-    console.log(
-      `[渠道管理] v${version}→v${CONFIG_VERSION} 迁移渠道 ${channel.name} (${channel.provider}) Base URL: ${channel.baseUrl} → ${migratedUrl}`,
-    )
-    return { ...channel, baseUrl: migratedUrl }
+  const permittedChannels = channels.filter((channel) => {
+    if (isCommercialChannelAllowed(channel)) return true
+    changed = true
+    console.warn(`[渠道管理] 已删除不受商业版支持的第三方渠道: ${channel.name} (${channel.id}, ${channel.provider})`)
+    return false
   })
 
-  return { config: { version: CONFIG_VERSION, channels }, changed: true }
+  return { config: { version: CONFIG_VERSION, channels: permittedChannels }, changed }
 }
 
 /**
@@ -242,11 +285,19 @@ function writeConfig(config: ChannelsConfig): void {
   const configPath = getChannelsPath()
 
   try {
-    writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
+    writeJsonFileAtomic(configPath, config)
   } catch (error) {
     console.error('[渠道管理] 写入配置文件失败:', error)
     throw new Error('写入渠道配置失败')
   }
+}
+
+/**
+ * 启动时显式清理已存储的第三方中转站。
+ * `readConfig` 本身已幂等执行过滤；导出此函数用于让 bootstrap 明确表达清理时机。
+ */
+export function purgeDisallowedCommercialChannels(): void {
+  readConfig()
 }
 
 /**
@@ -439,6 +490,7 @@ export function getChannelById(id: string): Channel | undefined {
  * @returns 创建后的渠道（apiKey 为加密态）
  */
 export function createChannel(input: ChannelCreateInput): Channel {
+  assertCommercialChannelInputAllowed(input)
   const config = readConfig()
   const now = Date.now()
 
@@ -500,6 +552,7 @@ export function updateChannel(id: string, input: ChannelUpdateInput): Channel {
     updatedAt: Date.now(),
   }
 
+  assertCommercialChannelAllowed(updated)
   config.channels[index] = updated
   writeConfig(config)
 
@@ -1732,6 +1785,9 @@ export async function getChannelPlanQuota(channelId: string): Promise<ChannelPla
  * 适用于创建/编辑渠道时用户在保存前先验证连接。
  */
 export async function testChannelDirect(input: ChannelDirectTestInput): Promise<ChannelTestResult> {
+  if (!isCommercialChannelInputAllowed(input)) {
+    return { success: false, message: THIRD_PARTY_RELAY_DISABLED_MESSAGE }
+  }
   const proxyUrl = await getEffectiveProxyUrl()
   const provider = inferProviderFromBaseUrl(input.provider, input.baseUrl)
 
@@ -1828,6 +1884,9 @@ export async function testChannelDirect(input: ChannelDirectTestInput): Promise<
  * 针对不同供应商使用不同的 API 端点和响应解析。
  */
 export async function fetchModels(input: FetchModelsInput): Promise<FetchModelsResult> {
+  if (!isCommercialChannelInputAllowed(input)) {
+    return { success: false, message: THIRD_PARTY_RELAY_DISABLED_MESSAGE, models: [] }
+  }
   const proxyUrl = await getEffectiveProxyUrl()
   const provider = inferProviderFromBaseUrl(input.provider, input.baseUrl)
 

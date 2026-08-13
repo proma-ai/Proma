@@ -63,6 +63,7 @@ function registerProtocolsAndHandlers(): void {
 
 
 import { getSettings, updateSettings } from './lib/settings-service'
+import { purgeDisallowedCommercialChannels } from './lib/channel-manager'
 import { handlePromaFileRequest } from './lib/local-file-protocol'
 
 // 商业版固定为 Cloud 模式
@@ -669,6 +670,9 @@ async function bootstrap(): Promise<void> {
   // 初始化运行时环境。Node.js 仅由 npx / npm 型 MCP 在实际连接时使用，
   // 或由用户从设置手动检测；启动时不应将其作为 Agent 的前置要求。
   await safeAwait('initializeRuntime', () => initializeRuntime({ skipNodeDetection: true }))
+
+  // 商业版仅允许 Proma 官方及供应商官方 API；启动即不可恢复地清理历史第三方中转站。
+  safeRun('purgeDisallowedCommercialChannels', purgeDisallowedCommercialChannels)
 
   // 同步默认 Skills 模板到 ~/.proma/default-skills/
   safeRun('seedDefaultSkills', seedDefaultSkills)
