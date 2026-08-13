@@ -174,6 +174,7 @@ import {
   fetchModels,
   getChannelById,
   getChannelPlanQuota,
+  consumeChannelRemovalNotice,
 } from './lib/channel-manager'
 import { loginCodexOAuth, cancelCodexOAuthLogin } from './lib/codex-oauth-service'
 import { loginXaiOAuth, cancelXaiOAuthLogin } from './lib/xai-oauth-service'
@@ -1365,6 +1366,14 @@ export function registerIpcHandlers(): void {
     CHANNEL_IPC_CHANNELS.GET_PLAN_QUOTA,
     async (_, channelId: string): Promise<import('@proma/shared').ChannelPlanQuotaResult> => {
       return getChannelPlanQuota(channelId)
+    }
+  )
+
+  // 读取并清空「第三方中转站已被移除」的一次性通知（应用启动后调用一次）
+  ipcMain.handle(
+    CHANNEL_IPC_CHANNELS.CONSUME_REMOVAL_NOTICE,
+    async (): Promise<import('@proma/shared').ChannelRemovalNotice | null> => {
+      return consumeChannelRemovalNotice()
     }
   )
 

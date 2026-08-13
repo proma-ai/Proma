@@ -6,11 +6,11 @@
  * 数据持久化到 ~/.proma/channels.json。
  */
 
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, unlinkSync } from 'node:fs'
 import { safeStorage } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { getChannelsPath } from './config-paths'
-import { writeJsonFileAtomic } from './safe-file'
+import { getChannelsPath, getChannelRemovalNoticePath } from './config-paths'
+import { writeJsonFileAtomic, readJsonFileSafe } from './safe-file'
 import type {
   Channel,
   ChannelCreateInput,
@@ -21,6 +21,8 @@ import type {
   ChannelModel,
   ChannelPlanQuotaResult,
   ChannelPlanQuotaWindow,
+  ChannelRemovalNotice,
+  ChannelRemovalNoticeEntry,
   CodexOAuthCredentials,
   XaiOAuthCredentials,
   FetchModelsInput,
@@ -223,7 +225,7 @@ function inferProviderFromBaseUrl(provider: ProviderType, baseUrl: string): Prov
  *
  * @returns 迁移后的配置；`changed` 标记是否发生实际变更（决定是否需要回写文件）
  */
-function migrateConfig(config: ChannelsConfig): { config: ChannelsConfig; changed: boolean } {
+function migrateConfig(config: ChannelsConfig): { config: ChannelsConfig; changed: boolean; removed: Channel[] } {
   const version = config.version ?? 1
   let changed = version < CONFIG_VERSION
   let channels = config.channels
@@ -241,14 +243,16 @@ function migrateConfig(config: ChannelsConfig): { config: ChannelsConfig; change
     })
   }
 
+  const removed: Channel[] = []
   const permittedChannels = channels.filter((channel) => {
     if (isCommercialChannelAllowed(channel)) return true
     changed = true
+    removed.push(channel)
     console.warn(`[渠道管理] 已删除不受商业版支持的第三方渠道: ${channel.name} (${channel.id}, ${channel.provider})`)
     return false
   })
 
-  return { config: { version: CONFIG_VERSION, channels: permittedChannels }, changed }
+  return { config: { version: CONFIG_VERSION, channels: permittedChannels }, changed, removed }
 }
 
 /**
@@ -266,10 +270,13 @@ function readConfig(): ChannelsConfig {
   try {
     const raw = readFileSync(configPath, 'utf-8')
     const parsed = JSON.parse(raw) as ChannelsConfig
-    const { config, changed } = migrateConfig(parsed)
+    const { config, changed, removed } = migrateConfig(parsed)
     if (changed) {
       writeConfig(config)
       console.log('[渠道管理] 渠道配置已迁移并持久化')
+    }
+    if (removed.length > 0) {
+      recordChannelRemovalNotice(removed)
     }
     return config
   } catch (error) {
@@ -298,6 +305,57 @@ function writeConfig(config: ChannelsConfig): void {
  */
 export function purgeDisallowedCommercialChannels(): void {
   readConfig()
+}
+
+/**
+ * 将本次被移除的渠道记入「第三方中转站已被移除」一次性通知。
+ *
+ * 与尚未被 Renderer 消费的历史通知按 provider+name 去重合并，避免用户
+ * 连续多次启动且均未打开应用时，后一次迁移静默覆盖掉前一次的通知内容。
+ */
+function recordChannelRemovalNotice(removed: Channel[]): void {
+  const noticePath = getChannelRemovalNoticePath()
+  const existing = readJsonFileSafe<ChannelRemovalNotice>(noticePath)
+
+  const merged = new Map<string, ChannelRemovalNoticeEntry>()
+  for (const entry of existing?.channels ?? []) {
+    merged.set(`${entry.provider}:${entry.name}`, entry)
+  }
+  for (const channel of removed) {
+    merged.set(`${channel.provider}:${channel.name}`, { name: channel.name, provider: channel.provider })
+  }
+
+  const notice: ChannelRemovalNotice = {
+    channels: Array.from(merged.values()),
+    removedAt: Date.now(),
+  }
+
+  try {
+    writeJsonFileAtomic(noticePath, notice)
+    console.log(`[渠道管理] 已记录渠道移除通知，待展示 ${notice.channels.length} 个渠道`)
+  } catch (error) {
+    console.warn('[渠道管理] 写入渠道移除通知失败:', error)
+  }
+}
+
+/**
+ * 读取并清空「第三方中转站已被移除」的一次性通知。
+ *
+ * Renderer 在应用启动后调用一次；没有待展示内容时返回 null。
+ * 读取即清除，避免用户每次重启应用都重复看到同一条通知。
+ */
+export function consumeChannelRemovalNotice(): ChannelRemovalNotice | null {
+  const noticePath = getChannelRemovalNoticePath()
+  const notice = readJsonFileSafe<ChannelRemovalNotice>(noticePath)
+  if (!notice || notice.channels.length === 0) return null
+
+  try {
+    unlinkSync(noticePath)
+  } catch (error) {
+    console.warn('[渠道管理] 清除渠道移除通知失败:', error)
+  }
+
+  return notice
 }
 
 /**
