@@ -1398,6 +1398,8 @@ export interface MessageGroupRendererProps {
   onCompact?: () => void
   onRelinkProjectRoot?: () => void
   onRestoreProjectRoot?: () => void
+  /** 当前历史轮次；直接写入消息 DOM，避免划选时回扫整段历史。 */
+  historyTurn?: number
   /** 是否正在流式输出中（隐藏操作栏） */
   isStreaming?: boolean
   /** 是否被用户中断 */
@@ -1452,12 +1454,12 @@ export function getGroupId(group: MessageGroup): string {
 
 // getGroupPreview 已迁移至 @proma/session-core（本文件从该包 import 并 re-export）
 
-export const MessageGroupRenderer = React.memo(function MessageGroupRenderer({ group, allMessages, basePath, onFork, onRewind, onAgentHistoryQuoteClick, onCreateTodo, onRetry, onRetryInNewSession, onCompact, onRelinkProjectRoot, onRestoreProjectRoot, isStreaming, stoppedByUser, sessionModelId }: MessageGroupRendererProps): React.ReactElement | null {
+export const MessageGroupRenderer = React.memo(function MessageGroupRenderer({ group, allMessages, basePath, onFork, onRewind, onAgentHistoryQuoteClick, onCreateTodo, onRetry, onRetryInNewSession, onCompact, onRelinkProjectRoot, onRestoreProjectRoot, historyTurn, isStreaming, stoppedByUser, sessionModelId }: MessageGroupRendererProps): React.ReactElement | null {
   const groupId = getGroupId(group)
 
   if (group.type === 'user') {
     return (
-      <div data-message-id={groupId} data-message-role="user">
+      <div data-message-id={groupId} data-message-role="user" data-message-turn={historyTurn}>
         <UserInputMessage message={group.message} onAgentHistoryQuoteClick={onAgentHistoryQuoteClick} />
       </div>
     )
@@ -1465,8 +1467,14 @@ export const MessageGroupRenderer = React.memo(function MessageGroupRenderer({ g
 
   if (group.type === 'system') {
     const subtype = group.message.subtype
-    if (getSDKCompactStatus(group.message)) return <div data-message-id={groupId}><CompactStatusNotice message={group.message} /></div>
-    if (subtype === 'permission_denied') return <div data-message-id={groupId}><PermissionDeniedNotice message={group.message} /></div>
+    // system 消息同样需要稳定 DOM 锚点，保留既有历史引用与精确回跳能力。
+    const historySelectionAttributes = {
+      'data-message-id': groupId,
+      'data-message-role': 'system',
+      'data-message-turn': historyTurn,
+    }
+    if (getSDKCompactStatus(group.message)) return <div {...historySelectionAttributes}><CompactStatusNotice message={group.message} /></div>
+    if (subtype === 'permission_denied') return <div {...historySelectionAttributes}><PermissionDeniedNotice message={group.message} /></div>
     return null
   }
 
@@ -1475,6 +1483,7 @@ export const MessageGroupRenderer = React.memo(function MessageGroupRenderer({ g
     <div
       data-message-id={groupId}
       data-message-role="assistant"
+      data-message-turn={historyTurn}
       data-agent-live={isStreaming ? 'true' : undefined}
     >
       <AssistantTurnRenderer
@@ -1507,6 +1516,7 @@ export const MessageGroupRenderer = React.memo(function MessageGroupRenderer({ g
   && previous.onCompact === next.onCompact
   && previous.onRelinkProjectRoot === next.onRelinkProjectRoot
   && previous.onRestoreProjectRoot === next.onRestoreProjectRoot
+  && previous.historyTurn === next.historyTurn
   && previous.isStreaming === next.isStreaming
   && previous.stoppedByUser === next.stoppedByUser
   && previous.sessionModelId === next.sessionModelId

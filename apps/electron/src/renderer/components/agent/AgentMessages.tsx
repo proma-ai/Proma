@@ -635,9 +635,13 @@ export const AgentMessages = React.memo(function AgentMessages({
   }, [sessionId])
 
   React.useEffect(() => {
+    const root = historySelectionRootRef.current
+    if (!root) return
     const clearOnPointerDown = (): void => {
+      // 仅清理已存在的高亮；不读取 Selection 或触发历史渲染。
       clearHistoryQuoteHighlight()
     }
+    // 保留根外点击的高亮清理；该监听不参与选区捕获热路径。
     document.addEventListener('pointerdown', clearOnPointerDown, true)
     return () => {
       document.removeEventListener('pointerdown', clearOnPointerDown, true)
@@ -903,6 +907,17 @@ export const AgentMessages = React.memo(function AgentMessages({
     [sessionPath, attachedDirs],
   )
 
+  // turn 在消息渲染时一次性标注到 DOM；历史划选只需读取锚点属性，绝不回扫全部消息。
+  const groupHistoryTurns = React.useMemo(() => {
+    let turn = 0
+    const turns = new Map<MessageGroup, number>()
+    for (const group of visibleGroups) {
+      if (group.type === 'user') turn += 1
+      turns.set(group, Math.max(turn, 1))
+    }
+    return turns
+  }, [visibleGroups])
+
   return (
     <BasePathsProvider basePaths={messageBasePaths}>
       <AgentBrowserLinkProvider sessionId={sessionId}>
@@ -945,6 +960,7 @@ export const AgentMessages = React.memo(function AgentMessages({
                     onRelinkProjectRoot={shouldDisableActions ? undefined : onRelinkProjectRoot}
                     onRestoreProjectRoot={shouldDisableActions ? undefined : onRestoreProjectRoot}
                     onCompact={shouldDisableActions ? undefined : onCompact}
+                    historyTurn={groupHistoryTurns.get(group)}
                     isStreaming={isLive || undefined}
                     stoppedByUser={isLastAssistantTurn || undefined}
                     sessionModelId={sessionModelId}
