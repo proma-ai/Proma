@@ -89,7 +89,7 @@ const PROVIDER_TEST_MODEL_PRESETS: Partial<Record<ProviderType, string[]>> = {
   'opencode-go-openai': ['grok-4.5', 'glm-5.2', 'kimi-k3'],
   xiaomi: ['mimo-v2.5-pro', 'mimo-v2-pro', 'mimo-v2.5', 'mimo-v2-omni', 'mimo-v2-flash'],
   'xiaomi-token-plan': ['mimo-v2.5-pro', 'mimo-v2-pro', 'mimo-v2.5', 'mimo-v2-omni', 'mimo-v2-flash'],
-  'qwen-token-plan': ['qwen3.8-max-preview', 'qwen3.7-max', 'qwen3.6-flash'],
+  'qwen-token-plan': ['qwen3.8-max-preview', 'qwen3.7-max', 'qwen3.7-flash', 'qwen3.6-flash'],
 }
 
 /** 供应商选项（用于 SettingsSelect） */
@@ -468,6 +468,7 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
         setModels([
           { id: 'qwen3.8-max-preview', name: 'Qwen3.8 Max Preview', enabled: true },
           { id: 'qwen3.7-max', name: 'Qwen3.7 Max', enabled: true },
+          { id: 'qwen3.7-flash', name: 'Qwen3.7 Flash', enabled: true },
           { id: 'qwen3.6-flash', name: 'Qwen3.6 Flash', enabled: true },
         ])
       }

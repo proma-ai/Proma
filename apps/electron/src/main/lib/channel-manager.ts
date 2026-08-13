@@ -80,6 +80,7 @@ const XIAOMI_PRESET_MODELS: ChannelModel[] = [
 const QWEN_TOKEN_PLAN_PRESET_MODELS: ChannelModel[] = [
   { id: 'qwen3.8-max-preview', name: 'Qwen3.8 Max Preview', enabled: true },
   { id: 'qwen3.7-max', name: 'Qwen3.7 Max', enabled: true },
+  { id: 'qwen3.7-flash', name: 'Qwen3.7 Flash', enabled: true },
   { id: 'qwen3.6-flash', name: 'Qwen3.6 Flash', enabled: true },
 ]
 const ARK_CODING_PLAN_MODELS: ChannelModel[] = [
