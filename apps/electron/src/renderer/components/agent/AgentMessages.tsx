@@ -829,8 +829,9 @@ export const AgentMessages = React.memo(function AgentMessages({
       allGroups,
       liveMessages,
       streaming,
+      activeRunStartedAt: streamState?.startedAt,
     })
-  }, [allGroups, liveMessages, streaming])
+  }, [allGroups, liveMessages, streaming, streamState?.startedAt])
 
   // 迷你地图数据 — 直接使用统一的 allGroups（无需去重）
   const minimapItems: MinimapItem[] = React.useMemo(
