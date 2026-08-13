@@ -10,7 +10,7 @@
 
 import * as React from 'react'
 import { useAtomValue } from 'jotai'
-import { Check, X } from 'lucide-react'
+import { Check, Info, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import { PROMA_OFFICIAL_CHANNEL_ID } from '@proma/shared'
@@ -19,6 +19,7 @@ import {
   OFFICIAL_MODEL_CHANNELS,
   OFFICIAL_COMPARISON,
   matchOfficialProvider,
+  OFFICIAL_DISCOUNT_NOTE,
   BILLING_NOTES,
 } from '@/lib/official-channels'
 
@@ -59,7 +60,12 @@ export function WhyPromaOfficial(): React.ReactElement {
       {/* 官方 Agent 渠道与模型 */}
       <div className="border-t border-stone-200/60 px-5 py-4 dark:border-stone-700/40">
         <p className="text-xs font-semibold text-foreground">当前 Proma 官方提供的 Agent 渠道</p>
-        <div className="mt-3 grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="mt-3 flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/10 px-3 py-2.5 text-foreground">
+          <Info size={15} strokeWidth={2.5} className="mt-0.5 shrink-0 text-primary" aria-hidden="true" />
+          <span className="shrink-0 text-xs font-semibold leading-5">折扣说明</span>
+          <p className="text-xs font-medium leading-5">{OFFICIAL_DISCOUNT_NOTE}</p>
+        </div>
+        <div className="mt-4 grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">
           {groups.map(({ provider, model, logo, liveNames }) => (
             <div key={provider} className="min-w-0">
               <div className="flex items-center gap-2">

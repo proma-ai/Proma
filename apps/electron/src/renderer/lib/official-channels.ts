@@ -101,9 +101,13 @@ export function matchOfficialProvider(modelId: string): string | null {
   return null
 }
 
+/** 官方模型列表旁统一展示的折扣口径，避免用户将「几折」误解为额度包或订阅折扣。 */
+export const OFFICIAL_DISCOUNT_NOTE = '模型名后的「X 折」= 官方 API 公开价的 X 折；例如「2 折」就是官方价的 20%。'
+
 /** 计费说明（购买页与 onboarding 弹窗共用，固定展示在所有内容最底部） */
 export const BILLING_NOTES: readonly string[] = [
-  '所有模型均按照官方价格的基础进行折扣计算；Proma Cloud 额度会按所选模型、输入输出长度及任务规模消耗。',
+  OFFICIAL_DISCOUNT_NOTE,
+  '未标注「X 折」的模型按商业版页面展示的当期规则计费；Proma Cloud 额度会按所选模型、输入输出长度及任务规模消耗。',
   '各额度包按所选档位独立计时，到期后未使用额度清零（团队采用单独计费层）。',
   '每次购买均为一次性支付，不会自动续费或自动扣款；赠送额度随对应额度包同时到期。',
   '支持少量多次购买叠加，各额度包独立计时，优先消耗先购买的额度（FIFO）。',

@@ -22,6 +22,7 @@ import {
   Zap,
   Download,
   Search,
+  Info,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useSetAtom } from 'jotai'
@@ -54,7 +55,7 @@ import {
   resolveOpenAIResponsesUrl,
 } from '@proma/core'
 import { getProviderLogo } from '@/lib/model-logo'
-import { OFFICIAL_MODEL_CHANNELS } from '@/lib/official-channels'
+import { OFFICIAL_MODEL_CHANNELS, OFFICIAL_DISCOUNT_NOTE } from '@/lib/official-channels'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   AlertDialog,
@@ -219,7 +220,12 @@ function OfficialCloudChannelNotice(): React.ReactElement {
         </div>
         <div>
           <p className="text-sm font-semibold text-foreground">当前 Proma 官方 Agent 渠道</p>
-          <ul className="mt-5 grid grid-cols-1 gap-x-10 gap-y-4 text-sm text-muted-foreground sm:grid-cols-2 xl:grid-cols-3">
+          <div className="mt-3 flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/10 px-3 py-2.5 text-foreground">
+            <Info size={15} strokeWidth={2.5} className="mt-0.5 shrink-0 text-primary" aria-hidden="true" />
+            <span className="shrink-0 text-xs font-semibold leading-5">折扣说明</span>
+            <p className="text-xs font-medium leading-5">{OFFICIAL_DISCOUNT_NOTE}</p>
+          </div>
+          <ul className="mt-4 grid grid-cols-1 gap-x-10 gap-y-4 text-sm text-muted-foreground sm:grid-cols-2 xl:grid-cols-3">
             {OFFICIAL_MODEL_CHANNELS.map(({ provider, model, logo }) => (
               <li key={provider} className="flex min-w-0 items-center gap-2.5">
                 <img src={logo} alt="" aria-hidden="true" className="h-5 w-5 shrink-0 rounded-md" />
