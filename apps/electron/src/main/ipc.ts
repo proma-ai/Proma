@@ -5196,7 +5196,7 @@ export function registerIpcHandlers(): void {
     if (i.scheduledAt !== undefined && (typeof i.scheduledAt !== 'number' || !Number.isFinite(i.scheduledAt) || i.scheduledAt <= 0)) {
       throw new Error(`非法的 scheduledAt: ${String(i.scheduledAt)}`)
     }
-    if (i.maxRuns !== undefined && (!isFiniteInt(i.maxRuns) || i.maxRuns < 1)) {
+    if (i.maxRuns !== undefined && i.maxRuns !== null && (!isFiniteInt(i.maxRuns) || i.maxRuns < 1)) {
       throw new Error(`非法的 maxRuns: ${String(i.maxRuns)}`)
     }
     if (i.permissionMode !== undefined && !validPermissionMode(i.permissionMode)) {

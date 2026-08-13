@@ -293,7 +293,7 @@ function validateScheduleFields(input: Partial<CreateAutomationInput | UpdateAut
   if (input.scheduledAt !== undefined && (typeof input.scheduledAt !== 'number' || !Number.isFinite(input.scheduledAt) || input.scheduledAt <= 0)) {
     throw new Error(`非法的 scheduledAt: ${String(input.scheduledAt)}（应为毫秒时间戳）`)
   }
-  if (input.maxRuns !== undefined && (!isFiniteInt(input.maxRuns) || input.maxRuns < 1)) {
+  if (input.maxRuns !== undefined && input.maxRuns !== null && (!isFiniteInt(input.maxRuns) || input.maxRuns < 1)) {
     throw new Error(`非法的 maxRuns: ${String(input.maxRuns)}（应为 ≥1 的整数）`)
   }
   if (input.sessionMode !== undefined && input.sessionMode !== 'daily' && input.sessionMode !== 'reuse') {
@@ -357,7 +357,10 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
         dayOfWeek: Type.Optional(Type.Number({ description: '每周触发日，0=周日，...，6=周六' })),
         dayOfMonth: Type.Optional(Type.Number({ description: '每月触发日，1-31' })),
         scheduledAt: Type.Optional(Type.Number({ description: '一次性任务的绝对触发时间（毫秒时间戳）；scheduleType=once 时必填' })),
-        maxRuns: Type.Optional(Type.Number({ description: '最大运行次数上限；达到后任务自动停用' })),
+        maxRuns: Type.Optional(Type.Union([
+          Type.Number({ description: '最大运行次数上限；达到后任务自动停用' }),
+          Type.Null({ description: '清除运行次数上限，长期运行' }),
+        ])),
         active: Type.Optional(Type.Boolean({ description: '创建后是否启用，默认 true' })),
         sessionMode: Type.Optional(Type.Union([Type.Literal('daily'), Type.Literal('reuse')], { description: '会话模式' })),
       }),
@@ -378,7 +381,7 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
           dayOfWeek: args.dayOfWeek as number | undefined,
           dayOfMonth: args.dayOfMonth as number | undefined,
           scheduledAt: args.scheduledAt as number | undefined,
-          maxRuns: args.maxRuns as number | undefined,
+          maxRuns: args.maxRuns as number | null | undefined,
           channelId: ctx.channelId,
           modelId: ctx.modelId,
           workspaceId: ctx.workspaceId,
@@ -441,7 +444,10 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
         dayOfWeek: Type.Optional(Type.Number({ description: '新的每周触发日' })),
         dayOfMonth: Type.Optional(Type.Number({ description: '新的每月触发日' })),
         scheduledAt: Type.Optional(Type.Number({ description: '新的一次性触发时间（毫秒时间戳）' })),
-        maxRuns: Type.Optional(Type.Number({ description: '新的最大运行次数上限' })),
+        maxRuns: Type.Optional(Type.Union([
+          Type.Number({ description: '新的最大运行次数上限' }),
+          Type.Null({ description: '清除运行次数上限，改为不限次' }),
+        ])),
         active: Type.Optional(Type.Boolean({ description: '启用或暂停任务' })),
         sessionMode: Type.Optional(Type.Union([Type.Literal('daily'), Type.Literal('reuse')])),
       }),
@@ -462,7 +468,7 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
           dayOfWeek: args.dayOfWeek as number | undefined,
           dayOfMonth: args.dayOfMonth as number | undefined,
           scheduledAt: args.scheduledAt as number | undefined,
-          maxRuns: args.maxRuns as number | undefined,
+          maxRuns: args.maxRuns as number | null | undefined,
           active: args.active as boolean | undefined,
           sessionMode: args.sessionMode as 'daily' | 'reuse' | undefined,
         }
