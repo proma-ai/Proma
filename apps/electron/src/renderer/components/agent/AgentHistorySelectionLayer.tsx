@@ -98,7 +98,7 @@ export function AgentHistorySelectionLayer({
   const openChatPendingRef = React.useRef(false)
 
   const clearSelection = React.useCallback((): void => {
-    setSelection(null)
+    setSelection((current) => current === null ? current : null)
   }, [])
 
   const captureSelection = React.useCallback((): void => {
@@ -123,7 +123,13 @@ export function AgentHistorySelectionLayer({
 
     const startMessageEl = startEl.closest('[data-message-id]')
     const endMessageEl = endEl.closest('[data-message-id]')
-    if (!startMessageEl || !endMessageEl) {
+    if (
+      !startMessageEl
+      || !endMessageEl
+      || startMessageEl.getAttribute('data-agent-live') === 'true'
+      || endMessageEl.getAttribute('data-agent-live') === 'true'
+    ) {
+      // 流式尾部只渲染有界预览，文本偏移与完成后的完整消息不同，不能生成不可恢复引用。
       clearSelection()
       return
     }
@@ -190,6 +196,10 @@ export function AgentHistorySelectionLayer({
   React.useEffect(() => {
     const onSelectionChange = (): void => {
       if (pointerSelectingRef.current) return
+      // contenteditable 的光标移动会在每次输入时触发 selectionchange。
+      // 历史选区已在 pointerdown 时清理，此处不要读取或改写编辑器选区热路径。
+      const activeElement = document.activeElement
+      if (activeElement?.closest?.('.ProseMirror, [data-input-mode]')) return
       const sel = window.getSelection()
       if (!sel || sel.isCollapsed) clearSelection()
     }

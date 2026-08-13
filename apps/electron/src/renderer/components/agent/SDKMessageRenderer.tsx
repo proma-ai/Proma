@@ -366,8 +366,6 @@ export function buildTaskProgressDataForTurn(turn: AssistantTurn): { taskActivit
 }
 
 
-// ===== AssistantTurnRenderer — 渲染一个完整的 assistant turn =====
-
 export interface AssistantTurnRendererProps {
   turn: AssistantTurn
   /** 所有消息（全局，供工具结果查找跨 turn 的结果） */
@@ -1383,6 +1381,8 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact, onReli
 export interface MessageGroupRendererProps {
   group: MessageGroup
   allMessages: SDKMessage[]
+  /** 仅跨 turn 工具元数据变化时更新历史 assistant；普通 live 数组新引用不触发重渲染。 */
+  externalMetadataSignature?: string
   basePath?: string
   onFork?: (upToMessageUuid: string) => void
   onRewind?: (assistantMessageUuid: string) => void
@@ -1452,7 +1452,7 @@ export function getGroupId(group: MessageGroup): string {
 
 // getGroupPreview 已迁移至 @proma/session-core（本文件从该包 import 并 re-export）
 
-export function MessageGroupRenderer({ group, allMessages, basePath, onFork, onRewind, onAgentHistoryQuoteClick, onCreateTodo, onRetry, onRetryInNewSession, onCompact, onRelinkProjectRoot, onRestoreProjectRoot, isStreaming, stoppedByUser, sessionModelId }: MessageGroupRendererProps): React.ReactElement | null {
+export const MessageGroupRenderer = React.memo(function MessageGroupRenderer({ group, allMessages, basePath, onFork, onRewind, onAgentHistoryQuoteClick, onCreateTodo, onRetry, onRetryInNewSession, onCompact, onRelinkProjectRoot, onRestoreProjectRoot, isStreaming, stoppedByUser, sessionModelId }: MessageGroupRendererProps): React.ReactElement | null {
   const groupId = getGroupId(group)
 
   if (group.type === 'user') {
@@ -1472,7 +1472,11 @@ export function MessageGroupRenderer({ group, allMessages, basePath, onFork, onR
 
   // assistant-turn
   return (
-    <div data-message-id={groupId} data-message-role="assistant">
+    <div
+      data-message-id={groupId}
+      data-message-role="assistant"
+      data-agent-live={isStreaming ? 'true' : undefined}
+    >
       <AssistantTurnRenderer
         turn={group}
         allMessages={allMessages}
@@ -1491,4 +1495,20 @@ export function MessageGroupRenderer({ group, allMessages, basePath, onFork, onR
       />
     </div>
   )
-}
+}, (previous, next) => (
+  previous.group === next.group
+  && previous.basePath === next.basePath
+  && previous.onFork === next.onFork
+  && previous.onRewind === next.onRewind
+  && previous.onAgentHistoryQuoteClick === next.onAgentHistoryQuoteClick
+  && previous.onCreateTodo === next.onCreateTodo
+  && previous.onRetry === next.onRetry
+  && previous.onRetryInNewSession === next.onRetryInNewSession
+  && previous.onCompact === next.onCompact
+  && previous.onRelinkProjectRoot === next.onRelinkProjectRoot
+  && previous.onRestoreProjectRoot === next.onRestoreProjectRoot
+  && previous.isStreaming === next.isStreaming
+  && previous.stoppedByUser === next.stoppedByUser
+  && previous.sessionModelId === next.sessionModelId
+  && previous.externalMetadataSignature === next.externalMetadataSignature
+))

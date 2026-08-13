@@ -6,7 +6,7 @@
  */
 
 import { atom } from 'jotai'
-import { atomFamily, atomWithStorage } from 'jotai/utils'
+import { atomFamily, atomWithStorage, selectAtom } from 'jotai/utils'
 import type { AgentSessionMeta, AgentEvent, AgentWorkspace, AgentPendingFile, RetryAttempt, PromaPermissionMode, PermissionRequest, AskUserRequest, ExitPlanModeRequest, ThinkingConfig, AgentEffort, SDKMessage, UnstagedChangesResult } from '@proma/shared'
 import { PROMA_DEFAULT_PERMISSION_MODE } from '@proma/shared'
 import { calculateDockBadgeCount, countPendingRequests } from '@/lib/dock-badge-count'
@@ -300,6 +300,49 @@ export const agentSessionStreamingStateAtomFamily = atomFamily((sessionId: strin
   atom((get) => get(agentStreamingStatesAtom).get(sessionId)),
 )
 
+/** AgentView 输入区/工具栏需要的低频流状态；排除逐 token 变化的 content/toolActivities。 */
+export type AgentViewStreamState = Pick<
+  AgentStreamState,
+  | 'running'
+  | 'backgroundWaiting'
+  | 'inputTokens'
+  | 'outputTokens'
+  | 'cacheReadTokens'
+  | 'cacheCreationTokens'
+  | 'contextWindow'
+  | 'contextUsageIsEstimated'
+  | 'isCompacting'
+>
+
+const EMPTY_AGENT_VIEW_STREAM_STATE: AgentViewStreamState = { running: false }
+
+export function areAgentViewStreamStatesEqual(
+  previous: AgentViewStreamState,
+  next: AgentViewStreamState,
+): boolean {
+  return previous.running === next.running
+    && previous.backgroundWaiting === next.backgroundWaiting
+    && previous.inputTokens === next.inputTokens
+    && previous.outputTokens === next.outputTokens
+    && previous.cacheReadTokens === next.cacheReadTokens
+    && previous.cacheCreationTokens === next.cacheCreationTokens
+    && previous.contextWindow === next.contextWindow
+    && previous.contextUsageIsEstimated === next.contextUsageIsEstimated
+    && previous.isCompacting === next.isCompacting
+}
+
+/**
+ * AgentView 不订阅逐 token content；完整状态只由 AgentMessages 消费。
+ * selectAtom 的 equalityFn 保证纯文本流式更新不会重渲染输入框和工具栏。
+ */
+export const agentSessionViewStreamStateAtomFamily = atomFamily((sessionId: string) =>
+  selectAtom(
+    agentSessionStreamingStateAtomFamily(sessionId),
+    (state): AgentViewStreamState => state ?? EMPTY_AGENT_VIEW_STREAM_STATE,
+    areAgentViewStreamStatesEqual,
+  ),
+)
+
 /**
  * 实时 SDKMessage 累积 Map — Phase 2 新增
  *
@@ -307,6 +350,13 @@ export const agentSessionStreamingStateAtomFamily = atomFamily((sessionId: strin
  * 流式完成后清空（持久化消息从 JSONL 加载）。
  */
 export const liveMessagesMapAtom = atom<Map<string, SDKMessage[]>>(new Map())
+
+const EMPTY_LIVE_SDK_MESSAGES: SDKMessage[] = []
+
+/** 单个 session 的实时消息切片；其他 session 流式更新不唤醒当前历史区。 */
+export const agentLiveMessagesAtomFamily = atomFamily((sessionId: string) =>
+  atom((get) => get(liveMessagesMapAtom).get(sessionId) ?? EMPTY_LIVE_SDK_MESSAGES),
+)
 
 export const agentPendingPromptAtom = atom<AgentPendingPrompt | null>(null)
 

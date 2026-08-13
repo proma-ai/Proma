@@ -3866,6 +3866,20 @@ export function registerIpcHandlers(): void {
   )
 
   // 搜索工作区文件（用于 @ 引用，递归扫描，支持附加目录）
+  type WorkspaceFileSearchEntry = {
+    name: string
+    path: string
+    type: 'file' | 'dir'
+    source: 'session' | 'workspace'
+  }
+  const workspaceFileSearchIndexCache = new Map<string, {
+    expiresAt: number
+    rootEntries: WorkspaceFileSearchEntry[]
+    workspaceEntries: WorkspaceFileSearchEntry[]
+  }>()
+  const WORKSPACE_FILE_INDEX_CACHE_TTL_MS = 3_000
+  const WORKSPACE_FILE_INDEX_CACHE_MAX_ENTRIES = 20
+
   ipcMain.handle(
     AGENT_IPC_CHANNELS.SEARCH_WORKSPACE_FILES,
     async (_, rootPath: string, query: string, limit = 20, additionalPaths?: string[], sessionPaths?: string[]): Promise<FileSearchResult> => {
@@ -3873,15 +3887,18 @@ export function registerIpcHandlers(): void {
       const { resolve, relative, basename } = await import('node:path')
 
       const safeRoot = resolve(rootPath)
+      const resolvedAdditionalPaths = (additionalPaths ?? []).map((entry) => resolve(entry))
+      const resolvedSessionPaths = (sessionPaths ?? []).map((entry) => resolve(entry))
       const ignoreDirs = new Set(['node_modules', '.git', 'dist', '.next', '__pycache__', '.venv', 'build', '.cache'])
       const ignoreFiles = new Set(['.DS_Store', '.Spotlight-V100', '.Trashes', 'Thumbs.db', 'desktop.ini'])
       const BROWSE_LIMIT_PER_GROUP = 2000
       const BROWSE_TOTAL_CAP = 3000
+      const INDEX_ENTRY_CAP_PER_GROUP = 10_000
 
       // 按来源分组收集文件
-      type Entry = { name: string; path: string; type: 'file' | 'dir'; source: 'session' | 'workspace' }
-      const rootEntries: Entry[] = []
-      const workspaceEntries: Entry[] = []
+      type Entry = WorkspaceFileSearchEntry
+      let rootEntries: Entry[] = []
+      let workspaceEntries: Entry[] = []
 
       function scan(
         dir: string,
@@ -3891,10 +3908,11 @@ export function registerIpcHandlers(): void {
         useAbsPath: boolean,
         source: 'session' | 'workspace',
       ): void {
-        if (depth > 10) return
+        if (depth > 10 || target.length >= INDEX_ENTRY_CAP_PER_GROUP) return
         try {
           const items = readdirSync(dir, { withFileTypes: true })
           for (const item of items) {
+            if (target.length >= INDEX_ENTRY_CAP_PER_GROUP) break
             if (ignoreFiles.has(item.name)) continue
             if (item.isDirectory() && ignoreDirs.has(item.name)) continue
 
@@ -3917,6 +3935,7 @@ export function registerIpcHandlers(): void {
       }
 
       function addAttachedPath(pathValue: string, target: Entry[], source: 'session' | 'workspace'): void {
+        if (target.length >= INDEX_ENTRY_CAP_PER_GROUP) return
         try {
           const attachedPath = resolve(pathValue)
           const name = basename(attachedPath)
@@ -3924,6 +3943,7 @@ export function registerIpcHandlers(): void {
 
           const stats = statSync(attachedPath)
           if (stats.isFile()) {
+            if (target.length >= INDEX_ENTRY_CAP_PER_GROUP) return
             target.push({
               name,
               path: attachedPath,
@@ -3936,6 +3956,7 @@ export function registerIpcHandlers(): void {
           if (!stats.isDirectory()) return
           if (ignoreDirs.has(name)) return
 
+          if (target.length >= INDEX_ENTRY_CAP_PER_GROUP) return
           target.push({
             name: name === 'workspace-files' ? '项目文件' : name,
             path: attachedPath,
@@ -3948,21 +3969,40 @@ export function registerIpcHandlers(): void {
         }
       }
 
-      // session 目录：相对路径
-      scan(safeRoot, 0, safeRoot, rootEntries, false, 'session')
+      const cacheKey = JSON.stringify([safeRoot, resolvedAdditionalPaths, resolvedSessionPaths])
+      const now = Date.now()
+      const cachedIndex = workspaceFileSearchIndexCache.get(cacheKey)
+      if (cachedIndex && cachedIndex.expiresAt > now) {
+        // 查询排序会原地修改数组；每次从缓存复制外壳，索引条目本身保持只读复用。
+        rootEntries = [...cachedIndex.rootEntries]
+        workspaceEntries = [...cachedIndex.workspaceEntries]
+      } else {
+        // session 目录：相对路径
+        scan(safeRoot, 0, safeRoot, rootEntries, false, 'session')
 
-      // 会话级附加路径：绝对路径，标记为 session（归入会话文件分组）
-      if (sessionPaths && sessionPaths.length > 0) {
-        for (const sp of sessionPaths) {
-          addAttachedPath(sp, rootEntries, 'session')
+        // 会话级附加路径：绝对路径，标记为 session（归入会话文件分组）
+        for (const sessionPath of resolvedSessionPaths) {
+          addAttachedPath(sessionPath, rootEntries, 'session')
         }
-      }
 
-      // 工作区文件 + 工作区级附加路径：绝对路径，标记为 workspace
-      if (additionalPaths && additionalPaths.length > 0) {
-        for (const addPath of additionalPaths) {
-          addAttachedPath(addPath, workspaceEntries, 'workspace')
+        // 工作区文件 + 工作区级附加路径：绝对路径，标记为 workspace
+        for (const additionalPath of resolvedAdditionalPaths) {
+          addAttachedPath(additionalPath, workspaceEntries, 'workspace')
         }
+
+        for (const [key, cached] of workspaceFileSearchIndexCache) {
+          if (cached.expiresAt <= now) workspaceFileSearchIndexCache.delete(key)
+        }
+        while (workspaceFileSearchIndexCache.size >= WORKSPACE_FILE_INDEX_CACHE_MAX_ENTRIES) {
+          const oldestKey = workspaceFileSearchIndexCache.keys().next().value
+          if (typeof oldestKey !== 'string') break
+          workspaceFileSearchIndexCache.delete(oldestKey)
+        }
+        workspaceFileSearchIndexCache.set(cacheKey, {
+          expiresAt: now + WORKSPACE_FILE_INDEX_CACHE_TTL_MS,
+          rootEntries: [...rootEntries],
+          workspaceEntries: [...workspaceEntries],
+        })
       }
 
       // 连续排序：来源仅用于解析与 badge，不作为结果分组依据。

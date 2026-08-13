@@ -13,7 +13,7 @@ import { toast } from 'sonner'
 import { FileMentionList } from './FileMentionList'
 import type { FileMentionRef } from './FileMentionList'
 import type { FileIndexEntry } from '@proma/shared'
-import { createLatestSuggestionRequestGuard, createMentionPopup, positionPopup, isSuggestionTriggerPresent, shouldSuppressEscTrigger, shouldClearEscSuppressionOnExit, type EscSuppressedTrigger } from '@/components/agent/mention-popup-utils'
+import { createDebouncedSuggestionLoader, createLatestSuggestionRequestGuard, createMentionPopup, positionPopup, isSuggestionTriggerPresent, shouldSuppressEscTrigger, shouldClearEscSuppressionOnExit, type EscSuppressedTrigger } from '@/components/agent/mention-popup-utils'
 import { shouldAllowMentionTrigger, shouldShowMentionSuggestion } from '@/components/ai-elements/mention-utils'
 import { resolveFileMentionPath } from './file-mention-path'
 
@@ -34,6 +34,7 @@ export function createFileMentionSuggestion(
   // 用文本而非位置判断：删除触发符前的字符导致位置移动时，片段仍延续，继续抑制。
   let suppressedTrigger: EscSuppressedTrigger | null = null
   const requestGuard = createLatestSuggestionRequestGuard<FileIndexEntry>()
+  const queryLoader = createDebouncedSuggestionLoader(requestGuard)
 
   return {
     char: '@',
@@ -56,8 +57,7 @@ export function createFileMentionSuggestion(
       })
     },
 
-    items: async ({ query }): Promise<FileIndexEntry[]> => {
-      const requestId = requestGuard.startRequest()
+    items: ({ query }): Promise<FileIndexEntry[]> => queryLoader.load(async () => {
       const wsPath = workspacePathRef.current
       if (!wsPath) {
         console.warn('[FileMention] workspacePath is null, mention disabled')
@@ -67,14 +67,13 @@ export function createFileMentionSuggestion(
           })
           missingWorkspaceToastShown = true
         }
-        return requestGuard.attachResult(requestId, [])
+        return []
       }
       missingWorkspaceToastShown = false
 
       try {
         const additionalPaths = attachedDirsRef?.current ?? []
         const sessionPaths = sessionAttachedDirsRef?.current ?? []
-
         const result = await window.electronAPI.searchWorkspaceFiles(
           wsPath,
           query ?? '',
@@ -82,12 +81,12 @@ export function createFileMentionSuggestion(
           additionalPaths.length > 0 ? additionalPaths : undefined,
           sessionPaths.length > 0 ? sessionPaths : undefined,
         )
-        return requestGuard.attachResult(requestId, result.entries)
-      } catch(e) {
-        console.error('[FileMention] search failed:', e)
-        return requestGuard.attachResult(requestId, [])
+        return result.entries
+      } catch (error) {
+        console.error('[FileMention] search failed:', error)
+        return []
       }
-    },
+    }),
 
     render: () => {
       let renderer: ReactRenderer<FileMentionRef> | null = null
@@ -128,6 +127,7 @@ export function createFileMentionSuggestion(
       }
 
       function cleanup() {
+        queryLoader.cancel()
         if (blurHandler && editorRef) {
           editorRef.view.dom.removeEventListener('blur', blurHandler, true)
           blurHandler = null
