@@ -594,6 +594,7 @@ export class AgentOrchestrator {
 
   private persistEmptyResponseError(
     sessionId: string,
+    channelId: string,
     resultSubtype: string | undefined,
     resultErrors: string[] | undefined,
   ): string {
@@ -621,7 +622,7 @@ export class AgentOrchestrator {
         { key: 'm', label: '重新选择模型', action: 'select_model' },
       ],
     } as unknown as SDKMessage
-    appendSDKMessages(sessionId, [errorSDKMsg])
+    appendSDKMessages(sessionId, [withAgentMessageChannelIdentity(errorSDKMsg, channelId)])
     console.warn(`[Agent 编排] 本轮没有收到可展示内容: sessionId=${sessionId}, resultSubtype=${subtype}`)
     return errorContent
   }
@@ -1722,11 +1723,12 @@ export class AgentOrchestrator {
                   _errorCanRetry: typedError.canRetry,
                   _errorActions: typedError.actions,
                 } as unknown as SDKMessage
-                appendSDKMessages(sessionId, [withAgentMessageChannelIdentity(errorSDKMsg, channelId)])
+                const persistedErrorSDKMsg = withAgentMessageChannelIdentity(errorSDKMsg, channelId)
+                appendSDKMessages(sessionId, [persistedErrorSDKMsg])
                 console.log(`[Agent 编排] 已保存 TypedError 消息: ${typedError.code} - ${typedError.title}`)
 
-                // 透传归一化后的错误消息到前端，避免 SDK 原始 API Error 直接暴露给用户。
-                this.eventBus.emit(sessionId, { kind: 'sdk_message', message: errorSDKMsg })
+                // 实时帧与持久化帧必须共用同一渠道身份，避免运行中切换下一轮模型时显示错渠道。
+                this.eventBus.emit(sessionId, { kind: 'sdk_message', message: persistedErrorSDKMsg })
                 try { updateAgentSessionMeta(sessionId, {}) } catch { /* 忽略 */ }
                 completeRun({ startedAt: streamStartedAt })
                 return
@@ -1857,7 +1859,7 @@ export class AgentOrchestrator {
           try { updateAgentSessionMeta(sessionId, wasStoppedByUser ? { stoppedByUser: true } : {}) } catch { /* 忽略 */ }
 
           if (!wasStoppedByUser && visibleRunMessageCount === 0) {
-            const errorContent = this.persistEmptyResponseError(sessionId, capturedResultSubtype, capturedResultErrors)
+            const errorContent = this.persistEmptyResponseError(sessionId, channelId, capturedResultSubtype, capturedResultErrors)
             failRun(errorContent, {
               startedAt: streamStartedAt,
               resultSubtype: EMPTY_RESPONSE_RESULT_SUBTYPE,

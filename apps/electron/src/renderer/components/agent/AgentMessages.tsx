@@ -714,7 +714,10 @@ export const AgentMessages = React.memo(function AgentMessages({
   // 从 streamState 属性中计算派生值
   const streamingContent = streamState?.content ?? ''
   const streamingModelId = streamState?.model || sessionModelId
-  const agentStreamingModel = streamingModelId ? resolveModelDisplayName(streamingModelId, channels) : undefined
+  const streamingChannelId = streamState?.channelId
+  const agentStreamingModel = streamingModelId
+    ? resolveModelDisplayName(streamingModelId, channels, streamingChannelId)
+    : undefined
   const retrying = streamState?.retrying
   const startedAt = streamState?.startedAt
 
@@ -1009,7 +1012,7 @@ export const AgentMessages = React.memo(function AgentMessages({
                   <MessageHeader
                     model={agentStreamingModel}
                     time={formatMessageTime(Date.now())}
-                    logo={<AssistantLogo model={streamingModelId} />}
+                    logo={<AssistantLogo model={streamingModelId} channelId={streamingChannelId} />}
                   />
                   <MessageContent>
                     {retrying && <RetryingNotice retrying={retrying} />}
