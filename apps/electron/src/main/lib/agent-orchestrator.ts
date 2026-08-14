@@ -1596,10 +1596,8 @@ export class AgentOrchestrator {
               }
               pendingSkillActivations = []
             }
-            // 只在最终可持久化消息上注入渠道身份；partial 帧仅用于实时渲染。
-            if (!isPartialMessage) {
-              msg = withAgentMessageChannelIdentity(msg, channelId)
-            }
+            // assistant partial 帧也需要渠道身份：它们会立即进入实时 UI，但不会被持久化。
+            msg = withAgentMessageChannelIdentity(msg, channelId)
             // isVisibleRunMessage 已抽到独立模块，不含 partial 判断；
             // pi runtime 的流式 partial 消息不应计入可见消息数，故在此显式排除。
             if (!isPartialMessage && isVisibleRunMessage(msg)) {

@@ -1054,6 +1054,14 @@ export function useGlobalAgentListeners(): void {
               const defaultModelId = store.get(agentModelIdAtom)
               msgRecord._channelModelId = sessionModelMap.get(sessionId) ?? defaultModelId ?? undefined
             }
+            if (msgRecord.type === 'assistant' && !msgRecord._channelId) {
+              const sessionChannelMap = store.get(agentSessionChannelMapAtom)
+              const defaultChannelId = store.get(agentChannelIdAtom)
+              const channelId = sessionChannelMap.get(sessionId) ?? defaultChannelId ?? undefined
+              if (channelId) {
+                msgRecord._channelId = channelId
+              }
+            }
             if (msgRecord.type === 'assistant' && !msgRecord._channelProvider) {
               const sessionChannelMap = store.get(agentSessionChannelMapAtom)
               const defaultChannelId = store.get(agentChannelIdAtom)

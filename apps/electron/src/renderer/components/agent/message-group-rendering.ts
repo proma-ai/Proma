@@ -36,6 +36,7 @@ function canReuseMessageGroup(previous: MessageGroup, next: MessageGroup): boole
 
   return previous.inputMessage === next.inputMessage
     && previous.model === next.model
+    && previous.channelId === next.channelId
     && previous.createdAt === next.createdAt
     && previous.startsAfterWake === next.startsAfterWake
     && arraysShareItems(previous.assistantMessages, next.assistantMessages)

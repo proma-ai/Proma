@@ -8,13 +8,14 @@ describe('Agent 消息渠道身份', () => {
       type: 'assistant',
       message: { content: [{ type: 'text', text: '完成' }] },
       parent_tool_use_id: null,
+      _partial: true,
     } as SDKMessage
     const result = { type: 'result', subtype: 'success', usage: { input_tokens: 1, output_tokens: 1 } } as SDKMessage
 
     const persistedAssistant = withAgentMessageChannelIdentity(assistant, 'channel-official')
     const persistedResult = withAgentMessageChannelIdentity(result, 'channel-official')
 
-    expect(persistedAssistant).toMatchObject({ _channelId: 'channel-official' })
+    expect(persistedAssistant).toMatchObject({ _channelId: 'channel-official', _partial: true })
     expect(persistedResult).toMatchObject({ _channelId: 'channel-official' })
     expect(assistant).not.toHaveProperty('_channelId')
   })
