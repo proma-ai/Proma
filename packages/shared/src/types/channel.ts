@@ -63,9 +63,11 @@ export const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
   zhipu: 'https://open.bigmodel.cn/api/paas/v4',
   'zhipu-coding': 'https://open.bigmodel.cn/api/anthropic',
   'zhipu-coding-team': 'https://open.bigmodel.cn/api/anthropic',
-  'ark-coding-plan': 'https://ark.cn-beijing.volces.com/api/plan',
+  // 火山方舟 Coding Plan 的 Anthropic 兼容协议根地址。
+  'ark-coding-plan': 'https://ark.cn-beijing.volces.com/api/coding',
   minimax: 'https://api.minimaxi.com/anthropic',
-  doubao: 'https://ark.cn-beijing.volces.com/api/v3',
+  // 火山方舟 Coding Plan 的 OpenAI（含 Responses）兼容协议根地址。
+  doubao: 'https://ark.cn-beijing.volces.com/api/coding/v3',
   qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
   'qwen-anthropic': 'https://dashscope.aliyuncs.com/apps/anthropic',
   // Token Plan Anthropic endpoint is provided as a complete messages URL.

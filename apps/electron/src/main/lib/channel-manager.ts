@@ -61,7 +61,14 @@ import { normalizeHttpResponse, normalizeRequestError } from './channel-test-err
 import pkg from '../../../package.json' with { type: 'json' }
 
 /** 当前配置版本 */
-const CONFIG_VERSION = 5
+const CONFIG_VERSION = 6
+
+// v6 前错误写入的火山方舟 Coding Plan 默认协议根地址。
+// 仅迁移精确命中的旧默认值，用户自定义的地址仍按商业版准入规则处理。
+const LEGACY_VOLCENGINE_CODING_URLS: Partial<Record<ProviderType, string>> = {
+  'ark-coding-plan': 'https://ark.cn-beijing.volces.com/api/plan',
+  doubao: 'https://ark.cn-beijing.volces.com/api/v3',
+}
 /** 连接测试 / 模型拉取的统一超时时间 */
 const CHANNEL_TEST_TIMEOUT_MS = 15_000
 // ChatGPT backend 首次经代理 / Cloudflare 建连可能超过普通模型探测的 15 秒。
@@ -224,6 +231,9 @@ function inferProviderFromBaseUrl(provider: ProviderType, baseUrl: string): Prov
  * 自动补端点后缀）」改为「完整请求地址（原样使用）」。把存量 baseUrl 一次性补全为旧版本实际
  * 请求过的完整端点，使升级后的运行时行为与升级前保持一致。详见 migrateCompatibleChannelBaseUrl。
  *
+ * v5 → v6：将历史错误的火山方舟 Coding Plan Anthropic / OpenAI 默认地址迁移到官方 `/api/coding`
+ * 与 `/api/coding/v3`。否则严格准入检查会把仍使用旧默认地址的合法存量渠道误删。
+ *
  * @returns 迁移后的配置；`changed` 标记是否发生实际变更（决定是否需要回写文件）
  */
 function migrateConfig(config: ChannelsConfig): { config: ChannelsConfig; changed: boolean; removed: Channel[] } {
@@ -241,6 +251,18 @@ function migrateConfig(config: ChannelsConfig): { config: ChannelsConfig; change
       if (migratedUrl === channel.baseUrl) return channel
       changed = true
       return { ...channel, baseUrl: migratedUrl }
+    })
+  }
+
+  if (version < 6) {
+    channels = channels.map((channel) => {
+      const legacyUrl = LEGACY_VOLCENGINE_CODING_URLS[channel.provider]
+      if (!legacyUrl || normalizeBaseUrl(channel.baseUrl) !== normalizeBaseUrl(legacyUrl)) {
+        return channel
+      }
+
+      changed = true
+      return { ...channel, baseUrl: PROVIDER_DEFAULT_URLS[channel.provider] }
     })
   }
 
