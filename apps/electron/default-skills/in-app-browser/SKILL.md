@@ -2,7 +2,7 @@
 name: in-app-browser
 description: Proma 内嵌受管浏览器使用指南。当用户要求打开、展示、访问、浏览或操作网页，或提到小红书、X/Twitter、LinkedIn、BOSS 直聘、登录后站内搜索、动态页面、截图或本地 HTML/React 预览时使用。对邮件、消息、文档、项目管理等已有匹配专用 MCP/API/CLI 的服务，必须优先使用专用工具；仅在没有匹配工具、工具无法完成当前能力、网络搜索工具不可用或无法取得足够好的结果、或用户明确要求网页时改用 Browser。浏览器工具出现在当前工具列表时，必须先阅读本 Skill 再进行网页操作；不要因为工具直接可见就跳过。
 group: proma
-version: "1.0.11"
+version: "1.0.12"
 ---
 
 # Proma In-App Browser
@@ -24,7 +24,7 @@ Proma 的 `Browser*` 工具控制当前会话关联的受管浏览器。网页�
 ## 操作流程
 
 0. **首次使用先等待用户确认风险告知**：首次 Browser 调用会打开应用内声明，提示平台可能将 Agent 操作或高频行为识别为自动化，造成验证码、限流、风控或封禁。此时停止网页操作，等待用户在面板中确认；确认后再重试当前步骤，绝不尝试绕过。
-1. **复用当前会话的浏览器与标签**：先 `BrowserListTabs`；需要新页面时再 `BrowserNewTab`，完成后主动用 `BrowserCloseTab` 关闭不再需要的 Agent 标签。用户手动切换页面不会改变 Agent 的默认操作目标；但 Agent 通过 `BrowserNewTab`、`BrowserSelectTab` 或 `BrowserPreviewOpen` 选择的标签会同步激活到用户可见的浏览器面板。标签总数超过 20 时，浏览器还会按最近使用时间自动回收旧 Agent 标签，绝不自动关闭用户标签、前台标签或当前工作标签。需要操作其他 tab 时明确传该 `tabId`。
+1. **复用当前会话的浏览器与标签**：先 `BrowserListTabs`；需要新页面时再 `BrowserNewTab`，完成后主动用 `BrowserCloseTab` 关闭不再需要的 Agent 标签。用户手动切换页面不会改变 Agent 的默认操作目标；当 Agent 对指定标签执行实际页面操作时，该标签会成为所属会话浏览器面板的选中标签；若该会话的面板正在前台，用户即可看到 Agent 正在读取或操作的页面，其他会话不会抢占前台。普通页面操作不会改写 Agent 后续未指定 `tabId` 时的默认工作标签；`BrowserNewTab`、`BrowserSelectTab` 与 `BrowserPreviewOpen` 属于显式工作标签选择，仍会更新它。标签总数超过 20 时，浏览器还会按最近使用时间自动回收旧 Agent 标签，绝不自动关闭用户标签、前台标签或当前工作标签。需要操作其他 tab 时明确传该 `tabId`。
 2. **先观察再操作**：调用 `BrowserObserve` 获取 URL、标题和可交互元素 ref；默认返回 240 个元素（约 160 个可交互元素优先 + 80 个语义上下文），只使用最新观察结果中的 ref。
 3. **页面变化后重新观察**：导航、点击导致的重渲染或切换标签会让旧 ref 失效，必须再次 `BrowserObserve`。
 4. **等待页面状态**：点击、提交或导航后需要等待异步结果时，使用 `BrowserWaitFor`（URL 片段、可见文本或 CSS selector），设置合理超时后再 `BrowserObserve` 验证。

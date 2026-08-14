@@ -820,6 +820,15 @@ export class BrowserController {
     this.emitChangedSessions(changedSessions)
   }
 
+  /**
+   * Agent 通过 tabId 操作另一标签时，面板必须跟随到实际目标，保证用户能看到
+   * 当前读取或操作的页面；但不改变 Agent 的默认工作标签，避免显式 tabId 意外
+   * 改写后续未指定 tabId 的目标。
+   */
+  private activateAgentOperationTab(browserSession: BrowserSessionRecord, tab: BrowserTabRecord): void {
+    this.activateDisplayTab(browserSession, tab)
+  }
+
   private disposePopupChildren(browserSession: BrowserSessionRecord, openerTabId: string): void {
     for (const child of [...browserSession.tabs.values()]) {
       if (child.openerTabId === openerTabId) this.disposeTab(browserSession, child)
@@ -959,6 +968,7 @@ export class BrowserController {
     const browserSession = this.getOrCreateSession(sessionId, [])
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
+    this.activateAgentOperationTab(browserSession, tab)
     const safeUrl = await assertSafeBrowserDestination(url)
     const host = new URL(safeUrl).host
     return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
@@ -1003,6 +1013,7 @@ export class BrowserController {
     const browserSession = this.getOrCreateSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
+    this.activateAgentOperationTab(browserSession, tab)
     if (tab.view.webContents.canGoBack()) tab.view.webContents.goBack()
     this.updateNavigationState(browserSession, tab)
     return structuredClone(this.buildState(browserSession))
@@ -1017,6 +1028,7 @@ export class BrowserController {
     const browserSession = this.getOrCreateSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
+    this.activateAgentOperationTab(browserSession, tab)
     if (tab.view.webContents.canGoForward()) tab.view.webContents.goForward()
     this.updateNavigationState(browserSession, tab)
     return structuredClone(this.buildState(browserSession))
@@ -1031,6 +1043,7 @@ export class BrowserController {
     const browserSession = this.getOrCreateSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
+    this.activateAgentOperationTab(browserSession, tab)
     tab.view.webContents.reload()
     this.updateNavigationState(browserSession, tab)
     return structuredClone(this.buildState(browserSession))
@@ -1045,6 +1058,7 @@ export class BrowserController {
     const browserSession = this.getOrCreateSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
+    this.activateAgentOperationTab(browserSession, tab)
     return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, (operationSignal) => this.observeInternal(browserSession, tab, requestedMaxElements, operationSignal))
   }
 
@@ -1117,6 +1131,7 @@ export class BrowserController {
     const browserSession = this.getOrCreateSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
+    this.activateAgentOperationTab(browserSession, tab)
     return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
       const generation = tab.generation
       const target = this.resolveRef(tab, ref)
@@ -1152,6 +1167,7 @@ export class BrowserController {
     const browserSession = this.getOrCreateSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
+    this.activateAgentOperationTab(browserSession, tab)
     return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
       const generation = tab.generation
       const target = this.resolveRef(tab, ref)
@@ -1179,6 +1195,7 @@ export class BrowserController {
     const browserSession = this.getOrCreateSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
+    this.activateAgentOperationTab(browserSession, tab)
     return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
       if (action.kind === 'key') {
         // rawKeyDown 与 windowsVirtualKeyCode 让 Chromium 识别非字符导航键并触发
@@ -1219,6 +1236,7 @@ export class BrowserController {
     const browserSession = this.getOrCreateSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
+    this.activateAgentOperationTab(browserSession, tab)
     return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
       const startedAt = Date.now()
       const payload = JSON.stringify(condition).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
@@ -1252,6 +1270,7 @@ export class BrowserController {
     const browserSession = this.getOrCreateSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
+    this.activateAgentOperationTab(browserSession, tab)
     return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
       const result = await this.executePageExpression(tab, buildBrowserDomActionExpression(input), operationSignal)
       this.trace(browserSession, tab, 'dom', `DOM ${input.action}：${input.selector.slice(0, 100)}`, 'dispatched')
@@ -1268,6 +1287,7 @@ export class BrowserController {
     const browserSession = this.getOrCreateSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
+    this.activateAgentOperationTab(browserSession, tab)
     return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
       const result = await this.executePageExpression(tab, script, operationSignal)
       this.trace(browserSession, tab, 'script', `执行页面 JavaScript（${script.length} 字符）`, 'dispatched')
@@ -1279,6 +1299,7 @@ export class BrowserController {
     const browserSession = this.getOrCreateSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
+    this.activateAgentOperationTab(browserSession, tab)
     return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
       throwIfBrowserOperationAborted(operationSignal)
       const image = await withBrowserCdpTimeout(() => tab.view.webContents.capturePage(), 'Page.captureScreenshot', BROWSER_OBSERVE_TIMEOUT_MS + 3_000, operationSignal)
