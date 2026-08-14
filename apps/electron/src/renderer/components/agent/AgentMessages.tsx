@@ -304,12 +304,12 @@ function EmptyState(): React.ReactElement {
   return <WelcomeEmptyState />
 }
 
-function AssistantLogo({ model }: { model?: string }): React.ReactElement {
+function AssistantLogo({ model, channelId }: { model?: string; channelId?: string }): React.ReactElement {
   const channels = useAtomValue(channelsAtom)
   if (model) {
     return (
       <img
-        src={getModelLogo(model, resolveModelProvider(model, channels))}
+        src={getModelLogo(model, resolveModelProvider(model, channels, channelId))}
         alt={model}
         className="size-[35px] rounded-[25%] object-cover"
       />
@@ -873,6 +873,7 @@ export const AgentMessages = React.memo(function AgentMessages({
       preview: getGroupPreview(group),
       avatar: group.type === 'user' ? userProfile.avatar : undefined,
       model: group.type === 'assistant-turn' ? group.model : undefined,
+      channelId: group.type === 'assistant-turn' ? group.channelId : undefined,
     })),
     [visibleGroups, userProfile.avatar]
   )

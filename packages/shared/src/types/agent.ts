@@ -227,6 +227,8 @@ export interface SDKAssistantMessage {
   isReplay?: boolean
   /** 渠道配置的模型 ID，持久化/流式期间注入，用于正确匹配模型显示名 */
   _channelModelId?: string
+  /** 产生此消息的渠道 ID；用于在同名模型跨渠道时恢复精确展示信息。 */
+  _channelId?: string
   /** 渠道 provider，用于按 Agent SDK 实际运行窗口计算压缩阈值 */
   _channelProvider?: ProviderType
 }
@@ -290,6 +292,8 @@ export interface SDKResultMessage {
   skill_activations?: SkillActivation[]
   /** 渠道配置的模型 ID，用于缺失 modelUsage.contextWindow 时按 Agent SDK 运行窗口兜底 */
   _channelModelId?: string
+  /** 产生此消息的渠道 ID；用于在同名模型跨渠道时恢复精确展示信息。 */
+  _channelId?: string
   /** 渠道 provider，用于按 Agent SDK 实际运行窗口计算压缩阈值 */
   _channelProvider?: ProviderType
 }
