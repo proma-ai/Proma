@@ -722,6 +722,7 @@ export function useGlobalAgentListeners(): void {
           title: event.title,
           workspaceId: event.workspaceId,
           modelId: event.modelId,
+          channelId: event.channelId ?? eventSession?.channelId,
           startedAt: event.startedAt,
           currentStreamState,
         })
@@ -765,12 +766,7 @@ export function useGlobalAgentListeners(): void {
         })
         store.set(agentStreamingStatesAtom, (prev) => {
           const map = new Map(prev)
-          // 外部 run 没有 AgentView 的本地启动快照；在 activation 时冻结会话渠道，
-          // 防止用户随后切换下一轮模型而污染正在运行的 fallback 气泡。
-          map.set(event.sessionId, {
-            ...activation.streamState,
-            ...(sessionMeta?.channelId ? { channelId: sessionMeta.channelId } : {}),
-          })
+          map.set(event.sessionId, activation.streamState)
           return map
         })
       }

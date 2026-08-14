@@ -20,6 +20,7 @@ describe('外部 Agent 运行激活', () => {
       sessionId: session.id,
       startedAt: 100,
       modelId: 'claude-sonnet-4-6',
+      channelId: 'channel-runtime',
     })
 
     expect(result.tabs).toEqual([
@@ -30,6 +31,7 @@ describe('外部 Agent 运行激活', () => {
     expect(result.streamState).toMatchObject({
       running: true,
       model: 'claude-sonnet-4-6',
+      channelId: 'channel-runtime',
       startedAt: 100,
     })
   })

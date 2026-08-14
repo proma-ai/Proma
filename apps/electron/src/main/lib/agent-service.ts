@@ -353,6 +353,7 @@ export async function runAgentHeadless(
             title: session?.title,
             workspaceId: runInput.workspaceId ?? session?.workspaceId,
             modelId: runInput.modelId,
+            channelId: runInput.channelId,
             startedAt: persistedStartedAt,
             ...(session ? { session } : {}),
           },
