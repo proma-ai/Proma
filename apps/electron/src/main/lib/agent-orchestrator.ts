@@ -42,6 +42,7 @@ import { getMainRepoRoot } from './git-diff-service'
 import { getPiAssistantErrorDetails, hasPiAssistantTextContent, stripPiAssistantError } from './adapters/pi-message-adapter'
 import { extractHttpStatusFromErrorText, friendlyErrorMessage, isPromptTooLongError, isThinkingSignatureError, mapAgentErrorToTypedError } from './agent-error-utils'
 import { getActiveRunRejectionMessage, shouldPersistInitialUserMessage } from './agent-send-message-policy'
+import { withAgentMessageChannelIdentity } from './agent-message-channel-identity'
 import { isSessionNotFoundError } from './error-patterns'
 import { isPromaBillingErrorText } from './proma-billing-error'
 import { getPromaCloudRecoveryAction } from './proma-cloud-recovery'
@@ -626,6 +627,7 @@ export class AgentOrchestrator {
 
   private persistEmptyResponseError(
     sessionId: string,
+    channelId: string,
     resultSubtype: string | undefined,
     resultErrors: string[] | undefined,
   ): string {
@@ -653,7 +655,7 @@ export class AgentOrchestrator {
         { key: 'm', label: '重新选择模型', action: 'select_model' },
       ],
     } as unknown as SDKMessage
-    appendSDKMessages(sessionId, [errorSDKMsg])
+    appendSDKMessages(sessionId, [withAgentMessageChannelIdentity(errorSDKMsg, channelId)])
     console.warn(`[Agent 编排] 本轮没有收到可展示内容: sessionId=${sessionId}, resultSubtype=${subtype}`)
     return errorContent
   }
@@ -725,7 +727,7 @@ export class AgentOrchestrator {
           })(),
         ],
       } as unknown as SDKMessage
-      try { appendSDKMessages(sessionId, [errorSDKMsg]) } catch (e) {
+      try { appendSDKMessages(sessionId, [withAgentMessageChannelIdentity(errorSDKMsg, channelId)]) } catch (e) {
         console.error('[Agent 编排] 持久化 preflight error 失败:', e)
       }
       callbacks.onError(errorContent)
@@ -1673,6 +1675,8 @@ export class AgentOrchestrator {
               }
               pendingSkillActivations = []
             }
+            // assistant partial 帧也需要渠道身份：它们会立即进入实时 UI，但不会被持久化。
+            msg = withAgentMessageChannelIdentity(msg, channelId)
             // isVisibleRunMessage 已抽到独立模块，不含 partial 判断；
             // pi runtime 的流式 partial 消息不应计入可见消息数，故在此显式排除。
             if (!isPartialMessage && isVisibleRunMessage(msg)) {
@@ -1798,7 +1802,7 @@ export class AgentOrchestrator {
                 // 不可重试 → 终止
                 const hasPiPartialOutput = hasPiAssistantTextContent(assistantMsg)
                 if (hasPiPartialOutput) {
-                  const partialOutput = stripPiAssistantError(assistantMsg)
+                  const partialOutput = withAgentMessageChannelIdentity(stripPiAssistantError(assistantMsg), channelId)
                   if (modelId) partialOutput._channelModelId = modelId
                   partialOutput._channelProvider = channel.provider
                   accumulatedMessages.push(partialOutput)
@@ -1837,11 +1841,12 @@ export class AgentOrchestrator {
                     })(),
                   ],
                 } as unknown as SDKMessage
-                appendSDKMessages(sessionId, [errorSDKMsg])
+                const persistedErrorSDKMsg = withAgentMessageChannelIdentity(errorSDKMsg, channelId)
+                appendSDKMessages(sessionId, [persistedErrorSDKMsg])
                 console.log(`[Agent 编排] 已保存 TypedError 消息: ${typedError.code} - ${typedError.title}`)
 
-                // 透传归一化后的错误消息到前端，避免 SDK 原始 API Error 直接暴露给用户。
-                this.eventBus.emit(sessionId, { kind: 'sdk_message', message: errorSDKMsg })
+                // 实时帧与持久化帧必须共用同一渠道身份，避免运行中切换下一轮模型时显示错渠道。
+                this.eventBus.emit(sessionId, { kind: 'sdk_message', message: persistedErrorSDKMsg })
                 try { updateAgentSessionMeta(sessionId, {}) } catch { /* 忽略 */ }
                 completeRun({ startedAt: streamStartedAt })
                 return
@@ -1972,7 +1977,7 @@ export class AgentOrchestrator {
           try { updateAgentSessionMeta(sessionId, wasStoppedByUser ? { stoppedByUser: true } : {}) } catch { /* 忽略 */ }
 
           if (!wasStoppedByUser && visibleRunMessageCount === 0) {
-            const errorContent = this.persistEmptyResponseError(sessionId, capturedResultSubtype, capturedResultErrors)
+            const errorContent = this.persistEmptyResponseError(sessionId, channelId, capturedResultSubtype, capturedResultErrors)
             failRun(errorContent, {
               startedAt: streamStartedAt,
               resultSubtype: EMPTY_RESPONSE_RESULT_SUBTYPE,
@@ -2115,7 +2120,7 @@ export class AgentOrchestrator {
               _errorTitle: errorTitle,
               _errorActions: errorActions,
             } as unknown as SDKMessage
-            appendSDKMessages(sessionId, [errMsg])
+            appendSDKMessages(sessionId, [withAgentMessageChannelIdentity(errMsg, channelId)])
             console.log(`[Agent 编排] 已保存错误消息到 JSONL`)
           } catch (saveError) {
             console.error('[Agent 编排] 保存错误消息失败:', saveError)
@@ -2143,7 +2148,7 @@ export class AgentOrchestrator {
         _errorCode: 'unknown_error',
         _errorTitle: '会话恢复失败',
       } as unknown as SDKMessage
-      appendSDKMessages(sessionId, [recoveryError])
+      appendSDKMessages(sessionId, [withAgentMessageChannelIdentity(recoveryError, channelId)])
       failRun(recoveryFailure, { startedAt: streamStartedAt })
 
     } finally {

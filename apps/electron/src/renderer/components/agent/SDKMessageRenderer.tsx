@@ -266,12 +266,12 @@ function extractToolResultForTask(message: SDKUserMessage, resultBlock: SDKToolR
 
 // ===== 助手头像 =====
 
-function AssistantLogo({ model }: { model?: string }): React.ReactElement {
+function AssistantLogo({ model, channelId }: { model?: string; channelId?: string }): React.ReactElement {
   const channels = useAtomValue(channelsAtom)
   if (model) {
     return (
       <img
-        src={getModelLogo(model, resolveModelProvider(model, channels))}
+        src={getModelLogo(model, resolveModelProvider(model, channels, channelId, 'agent'))}
         alt={model}
         className="size-[35px] rounded-[25%] object-cover"
       />
@@ -539,7 +539,7 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
       <MessageHeader
         model={turn.model ? resolveModelDisplayName(turn.model, channels, resolvedTurnChannelId, 'agent') : undefined}
         time={turn.createdAt ? formatMessageTime(turn.createdAt) : undefined}
-        logo={<AssistantLogo model={turn.model} />}
+        logo={<AssistantLogo model={turn.model} channelId={turn.channelId} />}
       />
       <MessageContent>
         <TurnFileMapProvider map={turnFileMap}>
@@ -694,7 +694,7 @@ export function SDKMessageRenderer({
           <MessageHeader
             model={model ? resolveModelDisplayName(model, channels, resolvedMessageChannelId, 'agent') : undefined}
             time={meta.createdAt ? formatMessageTime(meta.createdAt) : undefined}
-            logo={<AssistantLogo model={model} />}
+            logo={<AssistantLogo model={model} channelId={aMsg._channelId} />}
           />
         )}
         <MessageContent>

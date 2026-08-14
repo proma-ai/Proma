@@ -102,6 +102,8 @@ export interface AgentStreamState {
   content: string
   toolActivities: ToolActivity[]
   model?: string
+  /** 本次运行启动时的渠道 ID；运行中切换模型只影响下一轮，不能覆盖它。 */
+  channelId?: string
   /** 当前输入 token 数（上下文使用量） */
   inputTokens?: number
   /** 输出 token 数 */

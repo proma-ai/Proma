@@ -47,7 +47,7 @@ function ItemIcon({ item }: { item: TabMinimapItem }): React.ReactElement {
   if (item.role === 'assistant' && item.model) {
     return (
       <img
-        src={getModelLogo(item.model, resolveModelProvider(item.model, channels))}
+        src={getModelLogo(item.model, resolveModelProvider(item.model, channels, item.channelId))}
         alt=""
         className="size-4 shrink-0 mt-0.5 rounded-[20%] object-cover"
       />

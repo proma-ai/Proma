@@ -70,7 +70,7 @@ export interface AssistantTurn {
   inputMessage?: SDKUserMessage
   /** 模型名称（取首条 assistant 消息的 model） */
   model?: string
-  /** 渠道 ID（取首条 assistant 消息的 _channelId，多渠道同名模型时用于精确匹配显示名） */
+  /** 产生此 turn 的渠道 ID；与 model 共同构成历史展示身份，用于多渠道同名模型的精确显示。 */
   channelId?: string
   /** 创建时间（取首条 assistant 消息的时间） */
   createdAt?: number
@@ -243,7 +243,7 @@ function mergeAdjacentSameModelTurns(groups: MessageGroup[]): MessageGroup[] {
       if (prev.type === 'user') break // 真正的用户输入阻断合并
       if (prev.type === 'system' && isPersistableSDKSystemMessage(prev.message as SDKSystemMessage)) break
       if (prev.type === 'assistant-turn') {
-        if (prev.model === group.model) {
+        if (prev.model === group.model && prev.channelId === group.channelId) {
           mergeTargetIdx = i
         }
         break // 遇到第一个 assistant-turn 就停止（不跨越不同模型的 turn）

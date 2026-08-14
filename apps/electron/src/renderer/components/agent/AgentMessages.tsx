@@ -307,12 +307,12 @@ function EmptyState(): React.ReactElement {
   return <WelcomeEmptyState />
 }
 
-function AssistantLogo({ model }: { model?: string }): React.ReactElement {
+function AssistantLogo({ model, channelId }: { model?: string; channelId?: string }): React.ReactElement {
   const channels = useAtomValue(channelsAtom)
   if (model) {
     return (
       <img
-        src={getModelLogo(model, resolveModelProvider(model, channels))}
+        src={getModelLogo(model, resolveModelProvider(model, channels, channelId, 'agent'))}
         alt={model}
         className="size-[35px] rounded-[25%] object-cover"
       />
@@ -719,9 +719,10 @@ export const AgentMessages = React.memo(function AgentMessages({
   // 从 streamState 属性中计算派生值
   const streamingContent = streamState?.content ?? ''
   const streamingModelId = streamState?.model || sessionModelId
-  // 多渠道同名模型场景下，流式 header 显示名必须结合当前会话 channelId 精确匹配
+  // 多渠道同名模型场景下，流式 header 显示名必须结合当前会话 channelId 精确匹配。
+  // 优先使用上游新增的实时 stream identity，再回退到商业版的 session map（重放/恢复早期状态）。
   const sessionChannelMap = useAtomValue(agentSessionChannelMapAtom)
-  const streamingChannelId = sessionChannelMap.get(sessionId) ?? sessionChannelId
+  const streamingChannelId = streamState?.channelId ?? sessionChannelMap.get(sessionId) ?? sessionChannelId
   const agentStreamingModel = streamingModelId
     ? resolveModelDisplayName(streamingModelId, channels, streamingChannelId, 'agent')
     : undefined
@@ -883,6 +884,7 @@ export const AgentMessages = React.memo(function AgentMessages({
       preview: getGroupPreview(group),
       avatar: group.type === 'user' ? userProfile.avatar : undefined,
       model: group.type === 'assistant-turn' ? group.model : undefined,
+      channelId: group.type === 'assistant-turn' ? group.channelId : undefined,
     })),
     [visibleGroups, userProfile.avatar]
   )
@@ -1019,7 +1021,7 @@ export const AgentMessages = React.memo(function AgentMessages({
                   <MessageHeader
                     model={agentStreamingModel}
                     time={formatMessageTime(Date.now())}
-                    logo={<AssistantLogo model={streamingModelId} />}
+                    logo={<AssistantLogo model={streamingModelId} channelId={streamingChannelId} />}
                   />
                   <MessageContent>
                     {retrying && <RetryingNotice retrying={retrying} />}

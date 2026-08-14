@@ -122,6 +122,7 @@ import EmbeddingLogo from '@/assets/models/embedding.png'
 // ===== 供应商类型 =====
 
 import type { ProviderType } from '@proma/shared'
+import type { ModelDisplayContext } from './model-display-name'
 export { resolveModelDisplayName } from './model-display-name'
 
 // ===== 正则匹配映射 =====
@@ -370,14 +371,23 @@ export function getChannelLogo(channel: { provider: ProviderType; baseUrl: strin
 }
 
 /**
- * 根据模型 ID 在渠道列表中查找供应商类型
+ * 根据模型 ID 在渠道列表中查找供应商类型；提供 channelId 时只查该渠道。
+ * 模型显示名解析由 ./model-display-name 统一处理，以支持 Agent 模型集。
  */
-export function resolveModelProvider(modelId: string, channels: import('@proma/shared').Channel[]): ProviderType | undefined {
+export function resolveModelProvider(
+  modelId: string,
+  channels: import('@proma/shared').Channel[],
+  channelId?: string,
+  context: ModelDisplayContext = 'chat',
+): ProviderType | undefined {
   for (const channel of channels) {
-    for (const model of channel.models) {
-      if (model.id === modelId) {
-        return channel.provider
-      }
+    if (channelId && channel.id !== channelId) continue
+    const models = context === 'agent' ? channel.agentModels ?? channel.models : channel.models
+    // 预览/缩略图等共享组件未必知道当前是 Chat 还是 Agent；在精确渠道内，
+    // chat 模型未命中后也允许识别 agentModels，避免 Agent 专用模型退回默认 Logo。
+    if (models.some((model) => model.id === modelId)
+      || (context === 'chat' && channel.agentModels?.some((model) => model.id === modelId))) {
+      return channel.provider
     }
   }
   return undefined

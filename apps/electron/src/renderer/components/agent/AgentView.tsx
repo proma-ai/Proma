@@ -1051,6 +1051,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         content: '',
         toolActivities: [],
         model: agentModelId || undefined,
+        channelId,
         startedAt: streamStartedAt,
         inputTokens: existing?.inputTokens,
         contextWindow: existing?.contextWindow,
@@ -1222,6 +1223,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
                 contextWindow: state.contextWindow,
                 contextUsageIsEstimated: state.contextUsageIsEstimated,
                 model: state.model,
+                channelId: state.channelId,
                 contextCompaction: state.contextCompaction,
               })
             } else if (state.backgroundWaiting || state.contextCompaction) {
@@ -1342,6 +1344,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           content: '',
           toolActivities: [],
           model: snapshot.modelId,
+          channelId: snapshot.channelId,
           startedAt: streamStartedAt,
           inputTokens: existing?.inputTokens,
           contextWindow: resolveRunContextWindow(snapshot.modelId, existing?.contextWindow),
@@ -2315,6 +2318,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         content: '',
         toolActivities: [],
         model: agentModelId || undefined,
+        channelId: agentChannelId,
         startedAt: streamStartedAt,
         inputTokens: existing?.inputTokens,
         contextWindow: resolveRunContextWindow(agentModelId || undefined, existing?.contextWindow),
@@ -2424,6 +2428,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         content: '',
         toolActivities: [],
         model: agentModelId || undefined,
+        channelId: agentChannelId,
         startedAt: streamStartedAt,
       }
       map.set(sessionId, {
@@ -2549,6 +2554,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         content: '',
         toolActivities: [],
         model: agentModelId || undefined,
+        channelId: agentChannelId,
         startedAt: streamStartedAt,
         inputTokens: existing?.inputTokens,
         contextWindow: resolveRunContextWindow(agentModelId || undefined, existing?.contextWindow),
@@ -2595,6 +2601,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           content: '',
           toolActivities: [],
           model: agentModelId || undefined,
+          channelId: agentChannelId,
           startedAt: streamStartedAt,
         })
         return map
@@ -3077,7 +3084,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         <div className="px-2.5 pb-2.5 md:px-[18px] md:pb-[18px]" data-input-mode="agent">
           <div
             className={cn(
-              'rounded-[17px] border-[0.5px] border-border bg-background/70 backdrop-blur-sm transition-all duration-200',
+              'rounded-[17px] border-[0.5px] border-border bg-background/95 transition-[border-color,background-color] duration-200',
               (isPlanMode || isPermissionPlanMode) && !isDragOver && 'plan-mode-border',
               isDragOver && 'border-[2px] border-dashed border-[#2ecc71] bg-[#2ecc71]/[0.03]'
             )}

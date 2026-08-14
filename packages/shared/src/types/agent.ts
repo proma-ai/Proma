@@ -235,10 +235,10 @@ export interface SDKAssistantMessage {
   isReplay?: boolean
   /** 渠道配置的模型 ID，持久化/流式期间注入，用于正确匹配模型显示名 */
   _channelModelId?: string
+  /** 产生此消息的渠道 ID；用于在同名模型跨渠道时恢复精确展示信息。 */
+  _channelId?: string
   /** 渠道 provider，用于按 Agent SDK 实际运行窗口计算压缩阈值 */
   _channelProvider?: ProviderType
-  /** 渠道 ID，持久化/流式期间注入，用于在多渠道同名模型时精确匹配显示名 */
-  _channelId?: string
 }
 
 /** SDK user 消息 */
@@ -300,6 +300,8 @@ export interface SDKResultMessage {
   skill_activations?: SkillActivation[]
   /** 渠道配置的模型 ID，用于缺失 modelUsage.contextWindow 时按 Agent SDK 运行窗口兜底 */
   _channelModelId?: string
+  /** 产生此消息的渠道 ID；用于在同名模型跨渠道时恢复精确展示信息。 */
+  _channelId?: string
   /** 渠道 provider，用于按 Agent SDK 实际运行窗口计算压缩阈值 */
   _channelProvider?: ProviderType
 }
@@ -639,7 +641,7 @@ export type PromaEvent =
   | { type: 'context_window'; contextWindow: number }
   | { type: 'permission_mode_changed'; mode: PromaPermissionMode }
   | { type: 'title_updated'; title: string }
-  | { type: 'external_run_started'; source: AgentExternalRunSource; sessionId: string; title?: string; workspaceId?: string; modelId?: string; startedAt: number; session?: AgentSessionMeta }
+  | { type: 'external_run_started'; source: AgentExternalRunSource; sessionId: string; title?: string; workspaceId?: string; modelId?: string; channelId?: string; startedAt: number; session?: AgentSessionMeta }
   /** 普通桌面会话已开始执行；startedAt 用于区分同一会话的连续运行。 */
   | { type: 'run_started'; startedAt: number }
   | { type: 'run_resumed'; sessionId: string }

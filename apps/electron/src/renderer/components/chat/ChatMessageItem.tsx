@@ -175,7 +175,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
             time={formatMessageTime(message.createdAt)}
             logo={
               <img
-                src={getModelLogo(message.model ?? '', resolveModelProvider(message.model ?? '', channels))}
+                src={getModelLogo(message.model ?? '', resolveModelProvider(message.model ?? '', channels, conversationChannelId))}
                 alt={message.model ?? 'AI'}
                 className="size-[35px] rounded-[25%] object-cover"
               />

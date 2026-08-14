@@ -191,3 +191,23 @@ describe('容错与渐进式读取原语', () => {
     expect(md).toContain('答案含关键词 needle')
   })
 })
+
+describe('消息级渠道身份', () => {
+  test('Given 同名模型的历史 assistant 消息 When 分组 Then 保留来源渠道', () => {
+    const groups = groupIntoTurns([
+      {
+        type: 'assistant',
+        parent_tool_use_id: null,
+        _channelModelId: 'gpt-5',
+        _channelId: 'channel-official',
+        message: { content: [{ type: 'text', text: '完成' }] },
+      },
+    ])
+
+    expect(groups).toMatchObject([{
+      type: 'assistant-turn',
+      model: 'gpt-5',
+      channelId: 'channel-official',
+    }])
+  })
+})
