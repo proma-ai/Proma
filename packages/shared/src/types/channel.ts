@@ -63,8 +63,8 @@ export const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
   zhipu: 'https://open.bigmodel.cn/api/paas/v4',
   'zhipu-coding': 'https://open.bigmodel.cn/api/anthropic',
   'zhipu-coding-team': 'https://open.bigmodel.cn/api/anthropic',
-  // 火山方舟 Coding Plan 的 Anthropic 兼容协议根地址。
-  'ark-coding-plan': 'https://ark.cn-beijing.volces.com/api/coding',
+  // 运行时补全为 https://ark.cn-beijing.volces.com/api/plan/v1/messages。
+  'ark-coding-plan': 'https://ark.cn-beijing.volces.com/api/plan',
   minimax: 'https://api.minimaxi.com/anthropic',
   // 火山方舟 Coding Plan 的 OpenAI（含 Responses）兼容协议根地址。
   doubao: 'https://ark.cn-beijing.volces.com/api/coding/v3',

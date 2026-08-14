@@ -61,14 +61,14 @@ import { normalizeHttpResponse, normalizeRequestError } from './channel-test-err
 import pkg from '../../../package.json' with { type: 'json' }
 
 /** 当前配置版本 */
-const CONFIG_VERSION = 6
+const CONFIG_VERSION = 7
 
-// v6 前错误写入的火山方舟 Coding Plan 默认协议根地址。
-// 仅迁移精确命中的旧默认值，用户自定义的地址仍按商业版准入规则处理。
-const LEGACY_VOLCENGINE_CODING_URLS: Partial<Record<ProviderType, string>> = {
-  'ark-coding-plan': 'https://ark.cn-beijing.volces.com/api/plan',
+// v6 前 OpenAI 兼容渠道使用的旧火山方舟地址。
+const LEGACY_VOLCENGINE_OPENAI_URLS: Partial<Record<ProviderType, string>> = {
   doubao: 'https://ark.cn-beijing.volces.com/api/v3',
 }
+// v6 曾错误写入的 Anthropic Coding Plan 协议根地址。
+const INCORRECT_VOLCENGINE_ANTHROPIC_CODING_URL = 'https://ark.cn-beijing.volces.com/api/coding'
 /** 连接测试 / 模型拉取的统一超时时间 */
 const CHANNEL_TEST_TIMEOUT_MS = 15_000
 // ChatGPT backend 首次经代理 / Cloudflare 建连可能超过普通模型探测的 15 秒。
@@ -231,8 +231,10 @@ function inferProviderFromBaseUrl(provider: ProviderType, baseUrl: string): Prov
  * 自动补端点后缀）」改为「完整请求地址（原样使用）」。把存量 baseUrl 一次性补全为旧版本实际
  * 请求过的完整端点，使升级后的运行时行为与升级前保持一致。详见 migrateCompatibleChannelBaseUrl。
  *
- * v5 → v6：将历史错误的火山方舟 Coding Plan Anthropic / OpenAI 默认地址迁移到官方 `/api/coding`
- * 与 `/api/coding/v3`。否则严格准入检查会把仍使用旧默认地址的合法存量渠道误删。
+ * v5 → v6：将火山方舟 OpenAI 兼容渠道从历史 `/api/v3` 地址迁移到官方 Coding `/api/coding/v3`。
+ *
+ * v6 → v7：将误写为 `/api/coding` 的火山方舟 Anthropic Coding Plan Base URL 恢复到 `/api/plan`，
+ * 使运行时请求正确落到 `/api/plan/v1/messages`。
  *
  * @returns 迁移后的配置；`changed` 标记是否发生实际变更（决定是否需要回写文件）
  */
@@ -256,13 +258,27 @@ function migrateConfig(config: ChannelsConfig): { config: ChannelsConfig; change
 
   if (version < 6) {
     channels = channels.map((channel) => {
-      const legacyUrl = LEGACY_VOLCENGINE_CODING_URLS[channel.provider]
+      const legacyUrl = LEGACY_VOLCENGINE_OPENAI_URLS[channel.provider]
       if (!legacyUrl || normalizeBaseUrl(channel.baseUrl) !== normalizeBaseUrl(legacyUrl)) {
         return channel
       }
 
       changed = true
       return { ...channel, baseUrl: PROVIDER_DEFAULT_URLS[channel.provider] }
+    })
+  }
+
+  if (version < 7) {
+    channels = channels.map((channel) => {
+      if (
+        channel.provider !== 'ark-coding-plan'
+        || normalizeBaseUrl(channel.baseUrl) !== INCORRECT_VOLCENGINE_ANTHROPIC_CODING_URL
+      ) {
+        return channel
+      }
+
+      changed = true
+      return { ...channel, baseUrl: PROVIDER_DEFAULT_URLS['ark-coding-plan'] }
     })
   }
 
