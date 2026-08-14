@@ -62,6 +62,7 @@ import {
 } from '@/atoms/notifications'
 import { appModeAtom } from '@/atoms/app-mode'
 import { tabsAtom, activeTabIdAtom, activeSessionIdAtom, openTab, updateTabTitle } from '@/atoms/tab-atoms'
+import { settingsOpenAtom } from '@/atoms/settings-tab'
 import type { AgentStreamState } from '@/atoms/agent-atoms'
 import { agentDiffUnseenChangesAtom, agentDiffUnseenFilesAtom } from '@/atoms/agent-atoms'
 import { channelsAtom } from '@/atoms/chat-atoms'
@@ -1840,7 +1841,10 @@ export function useGlobalAgentListeners(): void {
     const syncVisibleAgentStreamSession = (): void => {
       const sessionId = store.get(activeSessionIdAtom)
       const activeTab = store.get(tabsAtom).find((tab) => tab.id === store.get(activeTabIdAtom))
-      const visibleAgentSessionId = activeTab?.type === 'agent' || activeTab?.type === 'preview'
+      // Settings 以覆盖层呈现，主界面只是 hidden 而未卸载。此时不能继续把
+      // Agent 当作前台会话以 20fps 推送，否则隐藏的历史树仍会抢占设置页主线程。
+      const visibleAgentSessionId = !store.get(settingsOpenAtom)
+        && (activeTab?.type === 'agent' || activeTab?.type === 'preview')
         ? sessionId
         : null
       // 开发时 renderer HMR 可能先于 preload/main 重启；缺少新 IPC 不应让整个应用白屏。
@@ -1851,11 +1855,13 @@ export function useGlobalAgentListeners(): void {
     }
     syncVisibleAgentStreamSession()
     const unsubscribeVisibleSession = store.sub(activeSessionIdAtom, syncVisibleAgentStreamSession)
+    const unsubscribeSettingsOpen = store.sub(settingsOpenAtom, syncVisibleAgentStreamSession)
 
     return () => {
       cleanupEvent()
       streamEventBatcher.dispose()
       unsubscribeVisibleSession()
+      unsubscribeSettingsOpen()
       cleanupComplete()
       cleanupError()
       cleanupTodoAgentSessionReady()
