@@ -196,6 +196,12 @@ interface AgentMessagesProps {
   messagesLoaded?: boolean
   /** Phase 4: 持久化的 SDKMessage（新格式） */
   persistedSDKMessages?: SDKMessage[]
+  /** 是否还有未加载的更早历史记录。 */
+  hasEarlierMessages?: boolean
+  /** 正在向前读取更早历史记录。 */
+  loadingEarlierMessages?: boolean
+  /** 用户主动请求加载更早历史记录。 */
+  onLoadEarlierMessages?: () => void
   /** 当前会话工作目录，用于解析相对文件路径 */
   sessionPath?: string | null
   /** 附加目录列表（与 sessionPath 一并用作相对路径解析候选） */
@@ -589,6 +595,9 @@ export const AgentMessages = React.memo(function AgentMessages({
   sessionModelId,
   messagesLoaded,
   persistedSDKMessages,
+  hasEarlierMessages,
+  loadingEarlierMessages,
+  onLoadEarlierMessages,
   sessionPath,
   attachedDirs,
   stoppedByUser,
@@ -931,6 +940,19 @@ export const AgentMessages = React.memo(function AgentMessages({
           <Conversation resize={ready && !transitioning ? 'smooth' : 'instant'} className={ready ? (skipFadeIn ? 'opacity-100' : 'opacity-100 transition-opacity duration-200') : 'opacity-0'}>
         <ScrollPositionManager id={sessionId} ready={ready} />
         <ConversationContent>
+          {hasEarlierMessages && (
+            <div className="flex justify-center py-2">
+              <button
+                type="button"
+                onClick={onLoadEarlierMessages}
+                disabled={loadingEarlierMessages || !onLoadEarlierMessages}
+                className="titlebar-no-drag inline-flex items-center gap-1.5 rounded-full border border-foreground/10 bg-background/70 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground disabled:cursor-wait disabled:opacity-60"
+              >
+                {loadingEarlierMessages && <Spinner size="sm" />}
+                {loadingEarlierMessages ? '正在加载更早消息…' : '加载更早消息'}
+              </button>
+            </div>
+          )}
           {!hasContent && !streaming ? (
             <EmptyState />
           ) : (

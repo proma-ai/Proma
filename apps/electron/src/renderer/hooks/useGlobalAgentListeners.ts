@@ -71,7 +71,7 @@ import { toast } from 'sonner'
 import type { AgentStreamEvent, AgentStreamCompletePayload, AgentEvent, AgentStreamPayload, SDKAssistantMessage, SDKMessage, SDKUserMessage, SDKSystemMessage, SDKContentBlock, SDKUserContentBlock, PromaEvent, AgentSessionMeta, ProviderType } from '@proma/shared'
 import { inferContextWindow } from '@proma/shared'
 import { buildExternalAgentRunActivation, shouldActivateExternalAgentRun } from '@/lib/external-agent-run'
-import { upsertAgentSession, mergeFetchedAgentSessions } from '@/lib/agent-session-list'
+import { mergeActiveAgentSessions, upsertAgentSession } from '@/lib/agent-session-list'
 import {
   getAgentCompletionMarkers,
   notifyAgentCompletion,
@@ -458,6 +458,16 @@ export function useGlobalAgentListeners(): void {
   const store = useStore()
 
   useEffect(() => {
+    // 所有 active scope 刷新统一保留仍被 Tab 引用的归档 metadata。
+    const mergeActiveSnapshot = (active: import('@proma/shared').AgentSessionMeta[]): void => {
+      const openSessionIds = new Set(
+        store.get(tabsAtom)
+          .filter((tab) => tab.type === 'agent' || tab.type === 'preview')
+          .map((tab) => tab.sessionId),
+      )
+      store.set(agentSessionsAtom, (previous) => mergeActiveAgentSessions(previous, active, openSessionIds))
+    }
+
     /** 正在执行的写工具；写入前的文件存在性用于区分新建和编辑。 */
     const pendingWriteTools = new Map<string, {
       path: string
@@ -771,7 +781,7 @@ export function useGlobalAgentListeners(): void {
         return
       }
 
-      window.electronAPI.listAgentSessions()
+      window.electronAPI.listAgentSessions('active')
         .then((sessions) => {
           unstable_batchedUpdates(() => applyActivation(sessions))
         })
@@ -968,7 +978,7 @@ export function useGlobalAgentListeners(): void {
     })
 
     // ===== 0. 初始化：从持久化 meta 恢复 stoppedByUser 状态 =====
-    window.electronAPI.listAgentSessions().then((sessions) => {
+    window.electronAPI.listAgentSessions('active').then((sessions) => {
       const stoppedIds = new Set<string>(
         sessions.filter((s) => s.stoppedByUser).map((s) => s.id)
       )
@@ -1001,8 +1011,8 @@ export function useGlobalAgentListeners(): void {
         // 自动任务会话被用户接管（毕业）：向用户提示，后续定时运行将新建独立会话
         if (payload.kind === 'proma_event' && payload.event.type === 'automation_graduated') {
           toast('已接管自动任务会话，后续定时运行将创建新会话。', { duration: 3000 })
-          window.electronAPI.listAgentSessions()
-            .then((sessions) => store.set(agentSessionsAtom, (prev) => mergeFetchedAgentSessions(prev, sessions)))
+          window.electronAPI.listAgentSessions('active')
+            .then(mergeActiveSnapshot)
             .catch(console.error)
         }
 
@@ -1010,8 +1020,8 @@ export function useGlobalAgentListeners(): void {
         // 如果收到未知会话的事件（跨工作区场景），立即刷新会话列表
         const knownSessions = store.get(agentSessionsAtom)
         if (!knownSessions.some((s) => s.id === sessionId)) {
-          window.electronAPI.listAgentSessions()
-            .then((sessions) => store.set(agentSessionsAtom, (prev) => mergeFetchedAgentSessions(prev, sessions)))
+          window.electronAPI.listAgentSessions('active')
+            .then(mergeActiveSnapshot)
             .catch(console.error)
         }
 
@@ -1630,6 +1640,25 @@ export function useGlobalAgentListeners(): void {
         // 通知 AgentView 重新加载消息（无论是否为当前会话）
         if (!isNewStreamRunning()) {
           bumpRefresh()
+
+          // 非当前会话不会等待 AgentView 的异步分页刷新；若保留其终态流
+          // state，历史访问越多，后续任一 Agent 的 token 更新就越要复制更大的 Map。
+          // JSONL 已在主进程落盘，重新打开时会按页加载，因此可立即释放。
+          if (!backgroundTasksPending && currentSessionId !== data.sessionId) {
+            store.set(agentStreamingStatesAtom, (prev) => {
+              const state = prev.get(data.sessionId)
+              if (!state || state.running || state.backgroundWaiting) return prev
+              const next = new Map(prev)
+              next.delete(data.sessionId)
+              return next
+            })
+            store.set(liveMessagesMapAtom, (prev) => {
+              if (!prev.has(data.sessionId)) return prev
+              const next = new Map(prev)
+              next.delete(data.sessionId)
+              return next
+            })
+          }
         }
         finalize()
         }) // unstable_batchedUpdates
@@ -1698,10 +1727,10 @@ export function useGlobalAgentListeners(): void {
         }))
         return
       }
-      // 外部桥接可能先发标题、后发 run-start；仅在本地未知该会话时走恢复性全量同步。
+      // 外部桥接可能先发标题、后发 run-start；仅在本地未知该会话时刷新 active metadata。
       window.electronAPI
-        .listAgentSessions()
-        .then((sessions) => store.set(agentSessionsAtom, (prev) => mergeFetchedAgentSessions(prev, sessions)))
+        .listAgentSessions('active')
+        .then(mergeActiveSnapshot)
         .catch(console.error)
     })
 

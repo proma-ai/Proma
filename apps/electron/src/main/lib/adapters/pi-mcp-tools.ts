@@ -21,6 +21,8 @@ import { sanitizeToolResultImageContent } from '../image-content-validation'
 
 const DEFAULT_MCP_REQUEST_TIMEOUT_MS = 60_000
 const DEFAULT_MCP_STARTUP_TIMEOUT_MS = 30_000
+/** 保留相邻回合的热连接，同时回收长期闲置的 stdio/HTTP MCP 进程。 */
+const MCP_CONNECTION_IDLE_TTL_MS = 5 * 60_000
 const OPTIONAL_MCP_BOOTSTRAP_TIMEOUT_MS = 500
 const HTTP_SESSION_REJECTION_PATTERN = /missing session id|no valid session id provided|mcp-session-id header is required/i
 
@@ -55,6 +57,7 @@ interface McpConnectionEntry {
   activeLeases: number
   stale: boolean
   closed: boolean
+  idleTimer?: ReturnType<typeof setTimeout>
 }
 
 interface McpConnectionLease {
@@ -256,6 +259,7 @@ class PiMcpClientManager {
     this.lifecycleGeneration += 1
     const entries = [...this.connections.values()]
     this.connections.clear()
+    for (const entry of entries) this.clearIdleTimer(entry)
     await Promise.allSettled(
       entries.map(async (entry) => {
         try {
@@ -266,6 +270,24 @@ class PiMcpClientManager {
         }
       }),
     )
+  }
+
+  private clearIdleTimer(entry: McpConnectionEntry): void {
+    if (!entry.idleTimer) return
+    clearTimeout(entry.idleTimer)
+    entry.idleTimer = undefined
+  }
+
+  private scheduleIdleClose(key: string, entry: McpConnectionEntry): void {
+    this.clearIdleTimer(entry)
+    entry.idleTimer = setTimeout(() => {
+      entry.idleTimer = undefined
+      if (entry.activeLeases !== 0 || entry.stale || entry.closed || this.connections.get(key) !== entry) return
+      entry.stale = true
+      entry.closed = true
+      this.connections.delete(key)
+      void entry.promise.then((connection) => connection.close()).catch(() => {})
+    }, MCP_CONNECTION_IDLE_TTL_MS)
   }
 
   async listTools(serverName: string, config: PiMcpServerConfig): Promise<McpToolInfo[]> {
@@ -355,12 +377,14 @@ class PiMcpClientManager {
     if (!entry) {
       let createdEntry!: McpConnectionEntry
       const promise = this.createConnection(serverName, config, () => {
+        this.clearIdleTimer(createdEntry)
         createdEntry.stale = true
         createdEntry.closed = true
         if (this.connections.get(key) === createdEntry) {
           this.connections.delete(key)
         }
       }).catch((error) => {
+        this.clearIdleTimer(createdEntry)
         createdEntry.stale = true
         if (this.connections.get(key) === createdEntry) {
           this.connections.delete(key)
@@ -377,6 +401,7 @@ class PiMcpClientManager {
       this.connections.set(key, entry)
     }
 
+    this.clearIdleTimer(entry)
     entry.activeLeases += 1
     try {
       return {
@@ -391,6 +416,7 @@ class PiMcpClientManager {
   }
 
   private markConnectionStale(lease: McpConnectionLease): void {
+    this.clearIdleTimer(lease.entry)
     lease.entry.stale = true
     if (this.connections.get(lease.key) === lease.entry) {
       this.connections.delete(lease.key)
@@ -399,7 +425,12 @@ class PiMcpClientManager {
 
   private async releaseConnection(lease: McpConnectionLease): Promise<void> {
     lease.entry.activeLeases -= 1
-    if (!lease.entry.stale || lease.entry.closed || lease.entry.activeLeases > 0) return
+    if (lease.entry.activeLeases > 0 || lease.entry.closed) return
+    if (!lease.entry.stale) {
+      this.scheduleIdleClose(lease.key, lease.entry)
+      return
+    }
+    lease.entry.closed = true
     try {
       await lease.connection.close()
     } catch {

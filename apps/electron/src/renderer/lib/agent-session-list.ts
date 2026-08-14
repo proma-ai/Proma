@@ -22,6 +22,19 @@ export function replaceAgentSessionInFreshnessOrder(
 }
 
 /**
+ * 合并 active scope 刷新，同时保留仍有 Tab 引用的归档会话。
+ * active 列表本身不含归档条目，直接覆盖会让已打开归档会话丢失 workspace/model metadata。
+ */
+export function mergeActiveAgentSessions(
+  previous: readonly AgentSessionMeta[],
+  active: readonly AgentSessionMeta[],
+  openSessionIds: ReadonlySet<string>,
+): AgentSessionMeta[] {
+  const openArchived = previous.filter((session) => session.archived && openSessionIds.has(session.id))
+  return sortAgentSessionsByUpdatedAtDesc([...active, ...openArchived])
+}
+
+/**
  * 仅插入或更新单个会话条目，保留其余条目原样。
  *
  * 用于 external_run_started 等「我只知道这一个会话的新状态」的场景：

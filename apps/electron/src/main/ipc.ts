@@ -268,7 +268,9 @@ import {
   listAgentSessions,
   createAgentSession,
   getAgentSessionMeta,
+  getAgentSessionCounts,
   getAgentSessionSDKMessages,
+  getAgentSessionSDKMessagesPage,
   updateAgentSessionMeta,
   deleteAgentSession,
   migrateChatToAgentSession,
@@ -2050,10 +2052,20 @@ export function registerIpcHandlers(): void {
 
   // ===== Agent 会话管理相关 =====
 
-  // 获取 Agent 会话列表
+  // renderer 热路径显式取 active；保留 all 默认值以兼容低频既有调用。
   ipcMain.handle(
     AGENT_IPC_CHANNELS.LIST_SESSIONS,
-    async (): Promise<AgentSessionMeta[]> => listAgentSessions()
+    async (_, scope: 'active' | 'archived' | 'all' = 'all'): Promise<AgentSessionMeta[]> => listAgentSessions(scope)
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_SESSION_META,
+    async (_, id: string): Promise<AgentSessionMeta | undefined> => getAgentSessionMeta(id),
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_SESSION_COUNTS,
+    async (): Promise<{ active: number; archived: number }> => getAgentSessionCounts(),
   )
 
   // 创建 Agent 会话
@@ -2157,6 +2169,14 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.GET_SDK_MESSAGES,
     async (_, id: string): Promise<SDKMessage[]> => {
       return getAgentSessionSDKMessages(id)
+    }
+  )
+
+  // 渲染器消息区默认从尾部按页读取，避免长 transcript 全量读取、解析和 IPC。
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_SDK_MESSAGES_PAGE,
+    async (_, id: string, input?: { before?: number; limit?: number }) => {
+      return getAgentSessionSDKMessagesPage(id, input)
     }
   )
 

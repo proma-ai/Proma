@@ -425,6 +425,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const [persistedSDKMessages, setPersistedSDKMessages] = React.useState<SDKMessage[]>([])
   const persistedSDKMessagesRef = React.useRef<SDKMessage[]>([])
   persistedSDKMessagesRef.current = persistedSDKMessages
+  // 长会话默认仅加载末页；用户需要时再向前展开，避免把完整 transcript 放进 renderer。
+  const [earlierMessagesCursor, setEarlierMessagesCursor] = React.useState<number | undefined>()
+  const [loadingEarlierMessages, setLoadingEarlierMessages] = React.useState(false)
   const setStreamingStates = useSetAtom(agentStreamingStatesAtom)
   // 只订阅输入区/工具栏需要的低频流状态。逐 token content/toolActivities 由
   // AgentMessages 独立消费，不能让 3000 行 AgentView 和输入框跟随每个 token 重渲染。
@@ -1165,18 +1168,22 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         setPersistedSDKMessages([])
         setMessagesLoaded(false)
       }
+      setEarlierMessagesCursor(undefined)
     }
     messagesRefreshingRef.current = true
     setMessagesRefreshing(true)
     let cancelled = false
-    window.electronAPI.getAgentSessionSDKMessages(sessionId)
-      .then((sdkMsgs) => {
+    window.electronAPI.getAgentSessionSDKMessagesPage(sessionId)
+      .then((page) => {
         if (cancelled) return
+        const sdkMsgs = page.messages
         // 写入缓存（含 LRU 淘汰，防止会话数增长导致内存无限膨胀）
         setMessagesCache((prev) => setSessionMessagesCache(prev, sessionId, sdkMsgs))
         unstable_batchedUpdates(() => {
           persistedSDKMessagesRef.current = sdkMsgs
           setPersistedSDKMessages(sdkMsgs)
+          setEarlierMessagesCursor(page.nextBefore)
+          setLoadingEarlierMessages(false)
           setMessagesLoaded(true)
           messagesRefreshingRef.current = false
           setMessagesRefreshing(false)
@@ -1242,6 +1249,25 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       })
     return () => { cancelled = true }
   }, [sessionId, refreshVersion, setStreamingStates, setLiveMessagesMap, setMessagesCache, store])
+
+  const handleLoadEarlierMessages = React.useCallback(async (): Promise<void> => {
+    const before = earlierMessagesCursor
+    if (before === undefined || loadingEarlierMessages) return
+
+    setLoadingEarlierMessages(true)
+    try {
+      const page = await window.electronAPI.getAgentSessionSDKMessagesPage(sessionId, { before })
+      const next = [...page.messages, ...persistedSDKMessagesRef.current]
+      persistedSDKMessagesRef.current = next
+      setPersistedSDKMessages(next)
+      setMessagesCache((prev) => setSessionMessagesCache(prev, sessionId, next))
+      setEarlierMessagesCursor(page.nextBefore)
+    } catch (error) {
+      console.error('[Agent 会话] 加载更早消息失败:', error)
+    } finally {
+      setLoadingEarlierMessages(false)
+    }
+  }, [earlierMessagesCursor, loadingEarlierMessages, sessionId, setMessagesCache])
 
   // 从会话元数据初始化附加目录（仅冷启动水合，后续由 handleAttachContent/handleDetachDirectory 实时写入）
   React.useEffect(() => {
@@ -2989,6 +3015,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           sessionModelId={agentModelId || undefined}
           messagesLoaded={messagesLoaded}
           persistedSDKMessages={persistedSDKMessages}
+          hasEarlierMessages={earlierMessagesCursor !== undefined}
+          loadingEarlierMessages={loadingEarlierMessages}
+          onLoadEarlierMessages={handleLoadEarlierMessages}
           sessionPath={sessionPath}
           attachedDirs={allAttachedDirs}
           stoppedByUser={stoppedByUser}

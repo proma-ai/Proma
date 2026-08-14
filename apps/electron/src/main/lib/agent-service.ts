@@ -216,11 +216,10 @@ export async function runAgent(
           })
         }
       },
-      onComplete: (messages, opts) => {
+      onComplete: (opts) => {
         publishRunStopped(input.sessionId, opts?.stoppedByUser, opts?.startedAt)
         if (!webContents.isDestroyed()) {
           sendAgentStreamComplete(webContents, input, {
-            messages,
             stoppedByUser: opts?.stoppedByUser ?? false,
             startedAt: opts?.startedAt,
             resultSubtype: opts?.resultSubtype,
@@ -259,7 +258,6 @@ export async function runAgent(
         error: errorMessage,
       })
       sendAgentStreamComplete(webContents, input, {
-        messages: [],
         stoppedByUser: false,
       })
     }
@@ -283,7 +281,7 @@ export async function runAgentHeadless(
   input: AgentSendInput,
   callbacks: {
     onError: (error: string) => void
-    onComplete: (messages?: AgentMessage[]) => void
+    onComplete: () => void
     onTitleUpdated: (title: string) => void
     source?: AgentExternalRunSource
     originSessionId?: string
@@ -314,13 +312,12 @@ export async function runAgentHeadless(
           })
         }
       },
-      onComplete: (messages, opts) => {
-        callbacks.onComplete(messages)
+      onComplete: (opts) => {
+        callbacks.onComplete()
         publishRunStopped(runInput.sessionId, opts?.stoppedByUser, opts?.startedAt)
         // 同步到渲染进程
         if (wc && !wc.isDestroyed()) {
           sendAgentStreamComplete(wc, runInput, {
-            messages,
             stoppedByUser: opts?.stoppedByUser ?? false,
             startedAt: opts?.startedAt,
             resultSubtype: opts?.resultSubtype,
@@ -370,7 +367,6 @@ export async function runAgentHeadless(
     if (wc && !wc.isDestroyed()) {
       wc.send(AGENT_IPC_CHANNELS.STREAM_ERROR, { sessionId: runInput.sessionId, error: errorMessage })
       sendAgentStreamComplete(wc, runInput, {
-        messages: [],
         stoppedByUser: false,
         startedAt,
       })

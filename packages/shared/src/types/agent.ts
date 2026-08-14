@@ -1278,15 +1278,13 @@ export interface AgentStreamEvent {
 }
 
 /**
- * Agent 流式完成事件载荷（主进程 → 渲染进程）
- * 包含已持久化的消息列表，避免异步重新加载的竞态窗口。
+ * Agent 流式完成事件载荷（主进程 → 渲染进程）。
+ * 消息已在主进程落盘；renderer 收到完成事件后自行按页刷新，避免传输整段历史。
  */
 export interface AgentStreamCompletePayload {
   sessionId: string
   /** 触发来源：用于区分顶层会话与父 Agent 委派的子会话完成 */
   triggeredBy?: AgentSendInput['triggeredBy']
-  /** 已持久化的完整消息列表 */
-  messages?: AgentMessage[]
   /** 是否由用户手动中止 */
   stoppedByUser?: boolean
   /** 本轮流式开始时间戳（用于区分新旧流，防止旧流的 complete 事件重置新流状态） */
@@ -1596,10 +1594,16 @@ export const AGENT_IPC_CHANNELS = {
   // 会话管理
   /** 获取会话列表 */
   LIST_SESSIONS: 'agent:list-sessions',
+  /** 按 ID 获取单条会话元数据（启动恢复归档 Tab 时使用） */
+  GET_SESSION_META: 'agent:get-session-meta',
+  /** 获取活跃/归档会话的数量，不传输完整元数据 */
+  GET_SESSION_COUNTS: 'agent:get-session-counts',
   /** 创建会话 */
   CREATE_SESSION: 'agent:create-session',
   /** 获取会话 SDKMessage（Phase 4 新格式） */
   GET_SDK_MESSAGES: 'agent:get-sdk-messages',
+  /** 分页获取会话尾部 SDKMessage，避免长历史一次性进入 renderer */
+  GET_SDK_MESSAGES_PAGE: 'agent:get-sdk-messages-page',
   /** 更新会话标题 */
   UPDATE_TITLE: 'agent:update-title',
   /** 更新会话模型选择 */

@@ -501,14 +501,26 @@ export interface ElectronAPI {
 
   // ===== Agent 会话管理相关 =====
 
-  /** 获取 Agent 会话列表 */
-  listAgentSessions: () => Promise<AgentSessionMeta[]>
+  /** 获取 Agent 会话列表；renderer 热路径必须显式请求 active，兼容调用默认 all。 */
+  listAgentSessions: (scope?: 'active' | 'archived' | 'all') => Promise<AgentSessionMeta[]>
+
+  /** 按 ID 获取会话元数据，用于恢复少量已打开的归档 Tab。 */
+  getAgentSessionMeta: (id: string) => Promise<AgentSessionMeta | undefined>
+
+  /** 获取活跃/归档会话计数，避免归档入口传输完整 metadata。 */
+  getAgentSessionCounts: () => Promise<{ active: number; archived: number }>
 
   /** 创建 Agent 会话 */
   createAgentSession: (title?: string, channelId?: string, workspaceId?: string, modelId?: string) => Promise<AgentSessionMeta>
 
-  /** 获取 Agent 会话 SDKMessage（Phase 4 新格式） */
+  /** 获取 Agent 会话 SDKMessage（兼容需要完整历史的功能） */
   getAgentSessionSDKMessages: (id: string) => Promise<SDKMessage[]>
+
+  /** 从会话尾部按页读取 SDKMessage，避免长历史一次性进入 renderer。 */
+  getAgentSessionSDKMessagesPage: (
+    id: string,
+    input?: { before?: number; limit?: number },
+  ) => Promise<{ messages: SDKMessage[]; nextBefore?: number }>
 
   /** 更新 Agent 会话标题 */
   updateAgentSessionTitle: (id: string, title: string) => Promise<AgentSessionMeta>
@@ -1691,8 +1703,16 @@ const electronAPI: ElectronAPI = {
   },
 
   // Agent 会话管理
-  listAgentSessions: () => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.LIST_SESSIONS)
+  listAgentSessions: (scope: 'active' | 'archived' | 'all' = 'all') => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.LIST_SESSIONS, scope)
+  },
+
+  getAgentSessionMeta: (id: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_SESSION_META, id)
+  },
+
+  getAgentSessionCounts: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_SESSION_COUNTS)
   },
 
   createAgentSession: (title?: string, channelId?: string, workspaceId?: string, modelId?: string) => {
@@ -1701,6 +1721,10 @@ const electronAPI: ElectronAPI = {
 
   getAgentSessionSDKMessages: (id: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_SDK_MESSAGES, id)
+  },
+
+  getAgentSessionSDKMessagesPage: (id: string, input?: { before?: number; limit?: number }) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_SDK_MESSAGES_PAGE, id, input)
   },
 
   updateAgentSessionTitle: (id: string, title: string) => {
