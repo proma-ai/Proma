@@ -18,7 +18,7 @@ import {
   MessageSquareText,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { MessageResponse } from '@/components/ai-elements/message'
+import { MarkdownStreamingContext, MessageResponse } from '@/components/ai-elements/message'
 import { useSmoothStream } from '@proma/ui'
 import { getToolIcon, extractFilePath } from './tool-utils'
 import { getToolPhrase, getToolResultSummary } from './tool-phrase'
@@ -238,9 +238,13 @@ function SmoothMarkdownFrame({
 
   if (!displayedContent) return null
   return (
-    <MessageResponse className={className} basePath={basePath} basePaths={basePaths}>
-      {displayedContent}
-    </MessageResponse>
+    // 流式逐字追赶期间标记 streaming：跳过语言自动检测等昂贵推断，
+    // 排空后 SmoothMarkdownBody 切回普通 MessageResponse（context 默认 false）再检测一次。
+    <MarkdownStreamingContext.Provider value={true}>
+      <MessageResponse className={className} basePath={basePath} basePaths={basePaths}>
+        {displayedContent}
+      </MessageResponse>
+    </MarkdownStreamingContext.Provider>
   )
 }
 
