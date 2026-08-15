@@ -127,7 +127,7 @@ function isToolUseBlock(block: SDKContentBlock): block is SDKContentBlock & {
     && block.input !== null
 }
 
-function toolStartFromBlock(
+export function toolStartFromBlock(
   block: SDKContentBlock,
   parentToolUseId: string | undefined,
   isFinal: boolean,
@@ -147,7 +147,7 @@ function toolStartFromBlock(
   }
 }
 
-function usageUpdateFromAssistant(message: SDKAssistantMessage): Extract<AgentLiveUpdate, { type: 'usage_update' }> | null {
+export function usageUpdateFromAssistant(message: SDKAssistantMessage): Extract<AgentLiveUpdate, { type: 'usage_update' }> | null {
   if (message.parent_tool_use_id || !message.message.usage) return null
   const usage = message.message.usage
   const modelName = message._channelModelId ?? message.message.model

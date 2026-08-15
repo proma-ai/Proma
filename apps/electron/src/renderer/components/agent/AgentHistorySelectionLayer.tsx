@@ -21,6 +21,7 @@ import { agentDiffPanelTabAtom, agentSidePanelOpenAtom } from '@/atoms/agent-ato
 import { SelectionActionPopover } from '@/components/selection/SelectionActionPopover'
 import { useFocusAgentSessionInput } from '@/hooks/useFocusAgentSessionInput'
 import { SELECTION_ACTION_POPOVER_SELECTOR } from '@/lib/quoted-selection'
+import { getSelectionActionPopoverPosition } from '@/lib/selection-action-popover'
 
 const MAX_AGENT_HISTORY_QUOTED_CHARS = 2000
 const SELECTION_CAPTURE_DEBOUNCE_MS = 80
@@ -217,10 +218,12 @@ export function AgentHistorySelectionLayer({
   const selectionRef = React.useRef<AgentHistorySelection | null>(null)
   const pointerSelectingRef = React.useRef(false)
   const captureTimerRef = React.useRef<number | null>(null)
+  const selectionPointerRef = React.useRef<{ x: number; y: number } | null>(null)
   const openChatPendingRef = React.useRef(false)
 
   const clearSelection = React.useCallback((): void => {
     selectionRef.current = null
+    selectionPointerRef.current = null
     setSelection((current) => current === null ? current : null)
   }, [])
 
@@ -294,10 +297,13 @@ export function AgentHistorySelectionLayer({
       ? selectionStart + rawText.length
       : unboundedSelectionEnd
     const turn = sameMessage ? Number(startMessageEl.dataset.messageTurn) || undefined : undefined
+    const popoverPosition = getSelectionActionPopoverPosition(
+      selectionPointerRef.current,
+      { left: anchorRect.left, width: anchorRect.width, top: anchorRect.top },
+    )
     const nextSelection: AgentHistorySelection = {
       text,
-      x: anchorRect.left + anchorRect.width / 2,
-      y: Math.max(12, anchorRect.top - 12),
+      ...popoverPosition,
       sourceLabel: sameMessage ? getRoleLabel(role) : 'Agent 历史 · 多条消息',
       messageId: sameMessage ? startMessageEl.dataset.messageId : undefined,
       messageRole: sameMessage ? role : undefined,
@@ -332,18 +338,22 @@ export function AgentHistorySelectionLayer({
       const target = event.target
       if (target instanceof Element && target.closest(SELECTION_ACTION_POPOVER_SELECTOR)) return
       pointerSelectingRef.current = true
+      selectionPointerRef.current = null
       clearSelection()
     }
-    const onPointerUp = (): void => {
+    const onPointerUp = (event: PointerEvent): void => {
       if (!pointerSelectingRef.current) return
       pointerSelectingRef.current = false
+      selectionPointerRef.current = { x: event.clientX, y: event.clientY }
       scheduleCaptureSelection()
     }
     const onPointerCancel = (): void => {
       pointerSelectingRef.current = false
+      selectionPointerRef.current = null
     }
     const onKeyUp = (event: KeyboardEvent): void => {
       if (!event.shiftKey && !SELECTION_NAVIGATION_KEYS.has(event.key)) return
+      selectionPointerRef.current = null
       scheduleCaptureSelection()
     }
 

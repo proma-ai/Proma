@@ -17,6 +17,24 @@ export interface ToolPhrase {
   diffStats?: { additions: number; deletions: number }
 }
 
+/**
+ * 优先使用 Agent 为工具调用提供的短意图。
+ * `_intent` 是内部展示元数据；Bash 的 `description` 兼容旧的语义化调用格式。
+ */
+function getExplicitToolIntent(toolName: string, input: Record<string, unknown>): string | null {
+  const intent = input._intent
+  if (typeof intent === 'string' && intent.trim()) return truncate(intent.trim(), 96)
+
+  if (toolName === 'Bash') {
+    const description = input.description
+    if (typeof description === 'string' && description.trim()) {
+      return truncate(description.trim(), 96)
+    }
+  }
+
+  return null
+}
+
 /** 从路径中提取文件名（同时兼容 POSIX `/` 与 Windows `\` 分隔符） */
 function filename(path: string): string {
   return path.split(/[/\\]/).pop() || path
@@ -45,6 +63,11 @@ function truncate(text: string, max: number): string {
  * 返回的 label 应读起来像一个完整动宾短语，无冗余信息。
  */
 export function getToolPhrase(toolName: string, input: Record<string, unknown>): ToolPhrase {
+  const explicitIntent = getExplicitToolIntent(toolName, input)
+  if (explicitIntent && toolName !== 'Edit' && toolName !== 'Write') {
+    return phrase(explicitIntent)
+  }
+
   switch (toolName) {
     case 'Read': {
       const fp = input.file_path ?? input.filePath
@@ -70,25 +93,35 @@ export function getToolPhrase(toolName: string, input: Record<string, unknown>):
       const fp = input.file_path ?? input.filePath
       const name = typeof fp === 'string' ? filename(fp) : '文件'
       const diff = computeDiffStats('Edit', input)
+      const explicitIntent = getExplicitToolIntent(toolName, input)
+      const basePhrase = explicitIntent
+        ? phrase(explicitIntent)
+        : phrase(`编辑 ${name}`)
       if (diff && (diff.additions > 0 || diff.deletions > 0)) {
-        return { ...phrase(`编辑 ${name}`), diffStats: diff }
+        return { ...basePhrase, diffStats: diff }
       }
-      return phrase(`编辑 ${name}`)
+      return basePhrase
     }
 
     case 'Write': {
       const fp = input.file_path ?? input.filePath
       const name = typeof fp === 'string' ? filename(fp) : '文件'
       const content = input.content
+      const explicitIntent = getExplicitToolIntent(toolName, input)
+      const basePhrase = explicitIntent
+        ? phrase(explicitIntent)
+        : phrase(`写入 ${name}`)
       if (typeof content === 'string' && content.length > 0) {
         const lines = content.split('\n').length
-        return { ...phrase(`写入 ${name}`), diffStats: { additions: lines, deletions: 0 } }
+        return { ...basePhrase, diffStats: { additions: lines, deletions: 0 } }
       }
-      return phrase(`写入 ${name}`)
+      return basePhrase
     }
 
     case 'Bash': {
       const cmd = input.command
+      const intent = getExplicitToolIntent(toolName, input)
+      if (intent) return phrase(intent)
       if (typeof cmd === 'string') {
         return phrase(`执行 ${truncate(cmd, 80)}`)
       }
@@ -401,6 +434,29 @@ function phrase(label: string): ToolPhrase {
     label,
     loadingLabel: `正在${label}...`,
   }
+}
+
+/**
+ * 从工具结果提取一条不会挤占主描述的短摘要。
+ * 完整结果仍由 ToolResultRenderer 展示，主行只保留用户需要快速扫读的事实。
+ */
+export function getToolResultSummary(toolName: string, result: string | undefined, isError = false): string | null {
+  if (isError) return '失败'
+  if (!result?.trim()) return null
+
+  if (toolName === 'Read') {
+    const totalLineMatch = result.match(/total\s+(\d+)\s+lines?/i) ?? result.match(/\bof\s+(\d+)\b/i)
+    if (totalLineMatch?.[1]) return `${totalLineMatch[1]} 行`
+
+    const remainingLineCount = result.match(/\[(\d+)\s+more\s+lines?\s+in\s+file/i)?.[1]
+    if (remainingLineCount) return `还有 ${remainingLineCount} 行`
+  }
+  if (toolName === 'Grep' && /(?:no matches|没有匹配|未找到)/i.test(result)) return '无匹配'
+  if (toolName === 'Bash') return '已完成'
+  if (toolName === 'Edit' || toolName === 'Write') return '已更新'
+  if (toolName === 'Glob') return '已完成'
+
+  return null
 }
 
 /** 从 input 中提取第一个有意义的字符串值作为摘要 */

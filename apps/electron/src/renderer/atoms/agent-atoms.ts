@@ -6,7 +6,8 @@
  */
 
 import { atom } from 'jotai'
-import { atomFamily, atomWithStorage, selectAtom } from 'jotai/utils'
+import { atomFamily } from 'jotai-family'
+import { atomWithStorage, selectAtom } from 'jotai/utils'
 import type { AgentSessionMeta, AgentWorkspace, AgentPendingFile, RetryAttempt, PromaPermissionMode, PermissionRequest, AskUserRequest, ExitPlanModeRequest, ThinkingConfig, AgentEffort, SDKMessage, UnstagedChangesResult } from '@proma/shared'
 import type { AgentLiveUpdate } from '@/lib/agent-canonical-stream'
 import { PROMA_DEFAULT_PERMISSION_MODE } from '@proma/shared'
@@ -236,6 +237,27 @@ export function areAgentViewStreamStatesEqual(
     && previous.contextUsageIsEstimated === next.contextUsageIsEstimated
     && previous.isCompacting === next.isCompacting
 }
+
+export type AgentInputStreamState = Pick<AgentStreamState, 'running' | 'backgroundWaiting'>
+
+const EMPTY_AGENT_INPUT_STREAM_STATE: AgentInputStreamState = { running: false }
+
+function areAgentInputStreamStatesEqual(
+  previous: AgentInputStreamState,
+  next: AgentInputStreamState,
+): boolean {
+  return previous.running === next.running
+    && previous.backgroundWaiting === next.backgroundWaiting
+}
+
+/** 输入区只订阅发送/排队需要的生命周期状态，避免 usage_update 触发整页重渲染。 */
+export const agentSessionInputStreamStateAtomFamily = atomFamily((sessionId: string) =>
+  selectAtom(
+    agentSessionStreamingStateAtomFamily(sessionId),
+    (state): AgentInputStreamState => state ?? EMPTY_AGENT_INPUT_STREAM_STATE,
+    areAgentInputStreamStatesEqual,
+  ),
+)
 
 /**
  * AgentView 不订阅逐 token content；完整状态只由 AgentMessages 消费。

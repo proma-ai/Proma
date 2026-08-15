@@ -34,6 +34,12 @@ import { interfaceVariantAtom } from '@/atoms/theme'
 import { cn } from '@/lib/utils'
 import { browserPanelOpenMapAtom, browserPendingNavigationMapAtom, browserStateMapAtom } from '@/atoms/browser-atoms'
 import { BrowserPanel } from '@/components/browser/BrowserPanel'
+import { nextBrowserLayoutRevision } from '@/components/browser/browser-layout-revision'
+
+interface BrowserClosingState {
+  sessionId: string
+  state: BrowserViewState | null
+}
 
 export function MainArea(): React.ReactElement {
   // 记录每个会话上次停留的视图（对话 / 预览），供切回时重建预览 Tab
@@ -58,6 +64,14 @@ export function MainArea(): React.ReactElement {
   const previewDragging = React.useRef(false)
   const rightWorkspaceDragging = React.useRef(false)
   const browserSessionId = activeTab?.type === 'agent' ? activeTab.sessionId : null
+
+  // 原生 WebContentsView 不受 React DOM 卸载同步控制。Session 或主视图切换时先在
+  // layout effect 中清空共享展示槽，避免旧 Session 的页面参与新一帧绘制。
+  React.useLayoutEffect(() => {
+    const hidePresentation = (window.electronAPI as Partial<typeof window.electronAPI>).hideAgentBrowserPresentation
+    if (typeof hidePresentation !== 'function') return
+    void hidePresentation(nextBrowserLayoutRevision()).catch(() => undefined)
+  }, [activeView, browserSessionId])
 
   const publishBrowserState = React.useCallback((state: BrowserViewState) => {
     setBrowserStateMap((previous) => { const next = new Map(previous); next.set(state.sessionId, state); return next })
@@ -86,14 +100,67 @@ export function MainArea(): React.ReactElement {
     return () => { cancelled = true }
   }, [browserSessionId, publishBrowserState])
 
-  const showBrowserPanel = !!browserSessionId && (browserOpenMap.get(browserSessionId) ?? false) && activeView === 'conversations'
+  const [browserClosingState, setBrowserClosingState] = React.useState<BrowserClosingState | null>(null)
+  const browserIsOpen = !!browserSessionId && (browserOpenMap.get(browserSessionId) ?? false)
+  const showBrowserPanel = browserIsOpen && activeView === 'conversations'
+  const showBrowserClosing = !!browserClosingState
+    && browserClosingState.sessionId === browserSessionId
+    && activeView === 'conversations'
+    && !showBrowserPanel
   const browserState = browserSessionId ? browserStateMap.get(browserSessionId) ?? null : null
+  const browserPanelSessionId = showBrowserPanel
+    ? browserSessionId
+    : showBrowserClosing
+      ? browserClosingState?.sessionId ?? null
+      : null
+  const browserPanelState = showBrowserPanel ? browserState : browserClosingState?.state ?? null
   const previewOpen =
-    activeTab?.type === 'agent' && (previewOpenMap.get(activeTab.sessionId) ?? false) && !showBrowserPanel
+    activeTab?.type === 'agent'
+    && (previewOpenMap.get(activeTab.sessionId) ?? false)
+    && !showBrowserPanel
+    && !showBrowserClosing
   const previewSessionId = activeTab?.type === 'agent' ? activeTab.sessionId : null
   const scratchPanelOpen = useAtomValue(scratchPadPanelOpenAtom)
   const showScratchPanel =
-    activeTab?.type === 'agent' && scratchPanelOpen && activeView === 'conversations' && !showBrowserPanel
+    activeTab?.type === 'agent'
+    && scratchPanelOpen
+    && activeView === 'conversations'
+    && !showBrowserPanel
+    && !showBrowserClosing
+
+  const requestCloseBrowser = React.useCallback((sessionId: string) => {
+    setBrowserClosingState({ sessionId, state: browserStateMap.get(sessionId) ?? null })
+    setBrowserOpenMap((previous) => {
+      const next = new Map(previous)
+      next.set(sessionId, false)
+      return next
+    })
+  }, [browserStateMap, setBrowserOpenMap])
+
+  const clearClosedBrowser = React.useCallback((sessionId: string) => {
+    setBrowserClosingState((previous) => previous?.sessionId === sessionId ? null : previous)
+    setBrowserStateMap((previous) => {
+      const next = new Map(previous)
+      next.delete(sessionId)
+      return next
+    })
+    setPendingNavigationMap((previous) => {
+      const next = new Map(previous)
+      next.delete(sessionId)
+      return next
+    })
+  }, [setBrowserStateMap, setPendingNavigationMap])
+
+  React.useEffect(() => {
+    if (!browserClosingState) return
+    if (showBrowserPanel) {
+      setBrowserClosingState(null)
+      return
+    }
+    if (browserClosingState.sessionId !== browserSessionId || activeView !== 'conversations') {
+      clearClosedBrowser(browserClosingState.sessionId)
+    }
+  }, [activeView, browserClosingState, browserSessionId, clearClosedBrowser, showBrowserPanel])
 
   // 关闭动画状态：当 previewOpen 从 true → false 时，播放退出动画再移除 DOM
   // 在 render 阶段同步派生 closing，避免中间帧出现 flex: 1 1 auto 导致左侧瞬间跳到 100% 宽
@@ -210,8 +277,9 @@ export function MainArea(): React.ReactElement {
     }
   }, [tabs, activeTabId, setActiveTabId])
 
-  // 关闭动画期间右侧面板的定位样式（脱离 flex 流，保持原宽度，translateX 向右滑出）
-  const closingOverlayStyle: React.CSSProperties | undefined = closing
+  // 关闭动画期间右侧面板脱离 flex 流，保持原宽度，只使用 transform/opacity 做退出动画。
+  const rightPanelClosing = showBrowserClosing || (closing && !showScratchPanel)
+  const closingOverlayStyle: React.CSSProperties | undefined = rightPanelClosing
     ? {
         position: 'absolute',
         top: 0,
@@ -224,9 +292,8 @@ export function MainArea(): React.ReactElement {
       }
     : undefined
 
-  // 左侧容器宽度：右侧工作区打开时固定占 splitRatio；其他情况（含 closing 动画期间）
-  // 直接 1 1 auto 占满——closing 时右侧 absolute 脱离 flex 流，所以左侧自然占 100%。
-  const showRightPanel = showBrowserPanel || showScratchPanel || showPreviewPane
+  // 左侧容器宽度：右侧工作区打开时固定占 splitRatio；关闭动画结束后再恢复全宽。
+  const showRightPanel = showBrowserPanel || showBrowserClosing || showScratchPanel || showPreviewPane
   const leftFlexStyle: React.CSSProperties = showRightPanel
     ? { flex: `0 0 calc(${splitRatio * 100}% - 6px)` }
     : { flex: '1 1 auto' }
@@ -283,29 +350,29 @@ export function MainArea(): React.ReactElement {
           {/* 右侧：预览/草稿工作区。Preview 和草稿可在同一右侧槽位内并排显示。 */}
           {showRightPanel && (
             <div
-              className={cn(closing && !showScratchPanel ? 'animate-preview-slide-out' : 'flex flex-1 min-w-0')}
-              style={closing && !showScratchPanel ? closingOverlayStyle : undefined}
+              className={cn(rightPanelClosing ? 'animate-preview-slide-out' : 'flex flex-1 min-w-0')}
+              style={rightPanelClosing ? closingOverlayStyle : undefined}
               onAnimationEnd={(e) => {
-                if (closing && e.target === e.currentTarget) setClosingState(false)
+                if (!rightPanelClosing || e.target !== e.currentTarget) return
+                if (showBrowserClosing && browserClosingState) clearClosedBrowser(browserClosingState.sessionId)
+                else if (closing) setClosingState(false)
               }}
             >
-              {!(closing && !showScratchPanel) && (
+              {!rightPanelClosing && (
                 <div
                   className="w-[8px] cursor-col-resize bg-border/40 hover:bg-primary/30 active:bg-primary/50 transition-colors flex-shrink-0 self-stretch"
                   onMouseDown={handlePreviewDragStart}
                 />
               )}
               <div className="flex flex-1 min-w-0 h-full overflow-hidden" data-right-workspace>
-                {showBrowserPanel && browserSessionId && (
+                {(showBrowserPanel || showBrowserClosing) && browserPanelSessionId && (
                   <div className="min-w-0 h-full overflow-hidden flex-1">
                     <BrowserPanel
-                      sessionId={browserSessionId}
-                      state={browserState}
-                      onClose={() => {
-                        setBrowserOpenMap((previous) => { const next = new Map(previous); next.set(browserSessionId, false); return next })
-                        setBrowserStateMap((previous) => { const next = new Map(previous); next.delete(browserSessionId); return next })
-                        setPendingNavigationMap((previous) => { const next = new Map(previous); next.delete(browserSessionId); return next })
-                      }}
+                      key={browserPanelSessionId}
+                      sessionId={browserPanelSessionId}
+                      state={browserPanelState}
+                      isClosing={showBrowserClosing}
+                      onClose={() => requestCloseBrowser(browserPanelSessionId)}
                     />
                   </div>
                 )}

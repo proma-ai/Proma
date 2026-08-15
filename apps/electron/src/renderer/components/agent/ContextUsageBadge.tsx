@@ -10,10 +10,12 @@
  */
 
 import * as React from 'react'
+import { useAtomValue } from 'jotai'
 import { Loader2, Minimize2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { inputToolbarButtonClass } from '@/components/ai-elements/input-toolbar-styles'
+import { agentSessionViewStreamStateAtomFamily } from '@/atoms/agent-atoms'
 import { cn } from '@/lib/utils'
 import {
   calculatePiAutoCompactionThresholdTokens,
@@ -30,7 +32,7 @@ const HOVER_CLOSE_DELAY = 150
 const CONFIRM_RESET_DELAY = 3000
 const UNSUPPORTED_PLAN_QUOTA_MESSAGE = '当前渠道不支持订阅 Plan 额度查询'
 
-interface ContextUsageBadgeProps {
+export interface ContextUsageBadgeProps {
   inputTokens?: number
   outputTokens?: number
   cacheReadTokens?: number
@@ -38,8 +40,8 @@ interface ContextUsageBadgeProps {
   costUsd?: number
   contextWindow?: number
   /** 当前上下文 token 是否为 Pi 手动压缩后的预估值 */
-  isEstimated: boolean
-  isCompacting: boolean
+  isEstimated?: boolean
+  isCompacting?: boolean
   isProcessing: boolean
   onCompact: () => void
   /**
@@ -178,6 +180,20 @@ export function ContextUsageBadge({
   channelId,
   channelUpdatedAt,
 }: ContextUsageBadgeProps): React.ReactElement | null {
+  // usage 高频更新只唤醒这个小组件，不再让 AgentView 和输入框参与 reconciliation。
+  const sessionStreamState = useAtomValue(agentSessionViewStreamStateAtomFamily(sessionId ?? ''))
+  const displayInputTokens = sessionId ? sessionStreamState.inputTokens : inputTokens
+  const displayOutputTokens = sessionId ? sessionStreamState.outputTokens : outputTokens
+  const displayCacheReadTokens = sessionId ? sessionStreamState.cacheReadTokens : cacheReadTokens
+  const displayCacheCreationTokens = sessionId ? sessionStreamState.cacheCreationTokens : cacheCreationTokens
+  const displayContextWindow = sessionId ? sessionStreamState.contextWindow : contextWindow
+  const displayIsEstimated = sessionId
+    ? sessionStreamState.contextUsageIsEstimated === true
+    : isEstimated === true
+  const displayIsCompacting = sessionId
+    ? sessionStreamState.isCompacting === true
+    : isCompacting === true
+
   // 保留最近一次有效的 token 值，避免切换会话时闪烁消失
   const stableRef = React.useRef<{
     inputTokens: number
@@ -194,8 +210,14 @@ export function ContextUsageBadge({
       lastSessionRef.current = sessionId
     }
   }, [sessionId])
-  if (inputTokens && inputTokens > 0) {
-    stableRef.current = { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, contextWindow }
+  if (displayInputTokens && displayInputTokens > 0) {
+    stableRef.current = {
+      inputTokens: displayInputTokens,
+      outputTokens: displayOutputTokens,
+      cacheReadTokens: displayCacheReadTokens,
+      cacheCreationTokens: displayCacheCreationTokens,
+      contextWindow: displayContextWindow,
+    }
   }
 
   const [open, setOpen] = React.useState(false)
@@ -249,7 +271,7 @@ export function ContextUsageBadge({
   }, [open, channelId, channelUpdatedAt])
 
   // 压缩中 → 按钮位置显示 spinner
-  if (isCompacting) {
+  if (displayIsCompacting) {
     return (
       <Button
         type="button"
@@ -265,12 +287,12 @@ export function ContextUsageBadge({
 
   // 使用稳定值：优先当前数据，回退到上次有效数据
   const stable = stableRef.current
-  const hasCurrent = inputTokens != null && inputTokens > 0
-  const displayTokens = hasCurrent ? inputTokens : stable?.inputTokens
-  const displayWindow = hasCurrent ? contextWindow : stable?.contextWindow
-  const displayOutput = hasCurrent ? outputTokens : stable?.outputTokens
-  const displayCacheRead = hasCurrent ? cacheReadTokens : stable?.cacheReadTokens
-  const displayCacheCreation = hasCurrent ? cacheCreationTokens : stable?.cacheCreationTokens
+  const hasCurrent = displayInputTokens != null && displayInputTokens > 0
+  const displayTokens = hasCurrent ? displayInputTokens : stable?.inputTokens
+  const displayWindow = hasCurrent ? displayContextWindow : stable?.contextWindow
+  const displayOutput = hasCurrent ? displayOutputTokens : stable?.outputTokens
+  const displayCacheRead = hasCurrent ? displayCacheReadTokens : stable?.cacheReadTokens
+  const displayCacheCreation = hasCurrent ? displayCacheCreationTokens : stable?.cacheCreationTokens
 
   // 从未有过 usage 数据 → 不显示
   if (!displayTokens || displayTokens <= 0) return null
@@ -325,7 +347,7 @@ export function ContextUsageBadge({
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <div className="flex flex-col gap-1.5">
-          {isEstimated ? (
+          {displayIsEstimated ? (
             <DetailRow
               label="压缩后"
               value={`预估 ${formatTokens(displayTokens)} tokens${percent != null ? `（${percent}%）` : ''}`}

@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { createPortal } from 'react-dom'
 import { Bot, MessageCircle } from 'lucide-react'
 
 interface SelectionActionPopoverProps {
@@ -13,18 +14,20 @@ export function SelectionActionPopover({
   y,
   onAddToAgent,
   onOpenChat,
-}: SelectionActionPopoverProps): React.ReactElement {
-  return (
+}: SelectionActionPopoverProps): React.ReactElement | null {
+  if (typeof document === 'undefined' || !document.body) return null
+
+  return createPortal(
     <div
       data-selection-action-popover
-      className="fixed z-[90] -translate-x-1/2 -translate-y-full rounded-xl bg-popover/95 px-2 py-1.5 text-popover-foreground shadow-xl ring-1 ring-border/40 backdrop-blur"
+      className="fixed z-[90] max-w-[calc(100vw-24px)] -translate-x-1/2 -translate-y-full overflow-x-auto rounded-xl bg-popover/95 px-2 py-1.5 text-popover-foreground shadow-xl ring-1 ring-border/40 backdrop-blur"
       style={{ left: x, top: y }}
       onMouseDown={(event) => event.preventDefault()}
     >
-      <div className="flex items-center gap-1">
+      <div className="flex w-max flex-nowrap items-center gap-1">
         <button
           type="button"
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium transition-colors hover:bg-muted"
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 text-[13px] font-medium transition-colors hover:bg-muted"
           onClick={onAddToAgent}
         >
           <Bot className="size-4" />
@@ -32,7 +35,7 @@ export function SelectionActionPopover({
         </button>
         <button
           type="button"
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium transition-colors hover:bg-muted"
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 text-[13px] font-medium transition-colors hover:bg-muted"
           onClick={() => {
             void onOpenChat()
           }}
@@ -41,6 +44,7 @@ export function SelectionActionPopover({
           打开右侧问答
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

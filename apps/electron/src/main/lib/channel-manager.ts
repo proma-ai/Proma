@@ -89,6 +89,7 @@ const ARK_CODING_PLAN_MODELS: ChannelModel[] = [
   { id: 'doubao-seed-2.0-code', name: 'Doubao Seed 2.0 Code', enabled: true },
   { id: 'doubao-seed-2.0-pro', name: 'Doubao Seed 2.0 Pro', enabled: true },
   { id: 'doubao-seed-2.0-lite', name: 'Doubao Seed 2.0 Lite', enabled: true },
+  { id: 'glm-5.3', name: 'GLM-5.3', enabled: true },
   { id: 'glm-5.2', name: 'GLM-5.2', enabled: true },
   { id: 'k3', name: 'Kimi K3', enabled: true },
   { id: 'kimi-k2.7-code', name: 'Kimi K2.7 Code', enabled: true },

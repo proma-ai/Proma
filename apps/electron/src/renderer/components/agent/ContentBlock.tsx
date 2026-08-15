@@ -18,10 +18,10 @@ import {
   MessageSquareText,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { MessageResponse } from '@/components/ai-elements/message'
+import { MarkdownStreamingContext, MessageResponse } from '@/components/ai-elements/message'
 import { useSmoothStream } from '@proma/ui'
 import { getToolIcon, extractFilePath } from './tool-utils'
-import { getToolPhrase } from './tool-phrase'
+import { getToolPhrase, getToolResultSummary } from './tool-phrase'
 import { ToolResultRenderer } from './tool-result-renderers'
 import { PreviewOpenButton } from './tool-result-renderers/preview-open-button'
 import { getTaskGetStatusLabel, parseTaskGetResult, type ParsedTaskGetResult } from './tool-result-renderers/task-get-result'
@@ -238,9 +238,13 @@ function SmoothMarkdownFrame({
 
   if (!displayedContent) return null
   return (
-    <MessageResponse className={className} basePath={basePath} basePaths={basePaths}>
-      {displayedContent}
-    </MessageResponse>
+    // 流式逐字追赶期间标记 streaming：跳过语言自动检测等昂贵推断，
+    // 排空后 SmoothMarkdownBody 切回普通 MessageResponse（context 默认 false）再检测一次。
+    <MarkdownStreamingContext.Provider value={true}>
+      <MessageResponse className={className} basePath={basePath} basePaths={basePaths}>
+        {displayedContent}
+      </MessageResponse>
+    </MarkdownStreamingContext.Provider>
   )
 }
 
@@ -438,8 +442,10 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
 
   const phrase = getToolPhrase(block.name, block.input)
   const ToolIcon = getToolIcon(block.name)
+  const toolKindLabel = block.name.startsWith('mcp__') ? block.name.split('__').slice(1).join(' / ') : block.name
 
   const isCompleted = toolResult !== null
+  const resultSummary = getToolResultSummary(block.name, resultText, isError)
 
   // 运行中显示进行时短语，完成或非流式（已终止）显示完成态短语
   const displayLabel = (isCompleted || !isStreaming) ? phrase.label : phrase.loadingLabel
@@ -469,37 +475,32 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
         )}
         style={animate ? { animationDelay: delay } : undefined}
       >
-        {/* 头部行：折叠箭头 + 状态 + 语义短语 */}
         <button
           type="button"
-          className="w-full flex items-center gap-2 py-0.5 text-left hover:opacity-70 transition-opacity group"
+          className="group flex w-full min-w-0 items-center gap-2 rounded-md py-1 text-left transition-[background-color,opacity] hover:bg-muted/40 hover:opacity-90"
           onClick={() => setChildrenExpanded(!childrenExpanded)}
         >
           <ChevronRight
             className={cn(
-              'size-3 text-muted-foreground/50 transition-transform duration-150 shrink-0',
+              'size-3 shrink-0 text-muted-foreground/45 transition-transform duration-150',
               childrenExpanded && 'rotate-90',
             )}
           />
 
           {/* 状态指示：仅流式中的未完成工具才显示 spinner */}
           {!isCompleted && isStreaming ? (
-            <Loader2 className="size-3.5 animate-spin text-primary/50 shrink-0" />
+            <Loader2 className="size-3.5 shrink-0 animate-spin text-primary/60" />
           ) : isError ? (
-            <XCircle className="size-3.5 text-destructive/70 shrink-0" />
+            <XCircle className="size-3.5 shrink-0 text-destructive/70" />
           ) : null}
 
-          <ToolIcon className={cn('size-3.5 shrink-0', dimmed ? 'text-muted-foreground/70' : 'text-muted-foreground')} />
-
-          <span className={cn(
-            'truncate text-[14px]',
-            dimmed ? 'text-muted-foreground/70' : 'text-muted-foreground',
-          )}>{displayLabel}</span>
-
-          {/* 子工具计数（折叠时显示） */}
+          <ToolIcon className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 max-w-[28%] truncate text-[14px] font-medium text-muted-foreground/65">{toolKindLabel}</span>
+          <span className="shrink-0 text-muted-foreground/30">·</span>
+          <span className="min-w-0 flex-1 truncate text-[14px] text-muted-foreground">{displayLabel}</span>
           {childToolCount > 0 && !childrenExpanded && (
-            <span className="shrink-0 text-[11px] text-muted-foreground/50 tabular-nums">
-              {childToolCount} 项工具调用
+            <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/55">
+              {childToolCount} 项工具
             </span>
           )}
         </button>
@@ -558,63 +559,69 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
       )}
       style={animate ? { animationDelay: delay } : undefined}
     >
-      <button
-        type="button"
-        className={cn(
-          'inline-flex max-w-full items-center gap-2 py-0.5 text-left transition-opacity group',
-          'hover:opacity-70',
-        )}
-        onClick={() => setExpanded(!expanded)}
-      >
-        {!isCompleted && isStreaming ? (
-          <Loader2 className="size-3.5 animate-spin text-primary/50 shrink-0" />
-        ) : isError ? (
-          <XCircle className="size-3.5 text-destructive/70 shrink-0" />
-        ) : null}
+        <button
+          type="button"
+          className="group inline-flex max-w-full min-w-0 items-center gap-2 rounded-md py-1 text-left transition-[background-color,opacity] hover:bg-muted/40 hover:opacity-90"
+          onClick={() => setExpanded(!expanded)}
+        >
+          {!isCompleted && isStreaming ? (
+            <Loader2 className="size-3.5 shrink-0 animate-spin text-primary/60" />
+          ) : isError ? (
+            <XCircle className="size-3.5 shrink-0 text-destructive/70" />
+          ) : null}
 
-        <ToolIcon className={cn('size-3.5 shrink-0', dimmed ? 'text-muted-foreground/70' : 'text-muted-foreground')} />
+          <ToolIcon className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 max-w-[28%] truncate text-[14px] font-medium text-muted-foreground/65">{toolKindLabel}</span>
+          <span className="shrink-0 text-muted-foreground/30">·</span>
+          <span className={cn(
+            'min-w-0 max-w-[60%] truncate text-[14px]',
+            dimmed ? 'text-muted-foreground/70' : 'text-muted-foreground',
+          )}>{displayLabel}</span>
 
-        <span className={cn(
-          'min-w-0 truncate text-[14px]',
-          taskGetSummary || taskListSummary ? 'shrink-0' : '',
-          dimmed ? 'text-muted-foreground/70' : 'text-muted-foreground',
-        )}>{displayLabel}</span>
-
-        {phrase.diffStats && (isCompleted || !isStreaming) && (
-          <span className="shrink-0 text-[14px] tabular-nums">
-            {phrase.diffStats.additions > 0 && (
-              <span className="text-green-500">+{phrase.diffStats.additions}</span>
-            )}
-            {phrase.diffStats.additions > 0 && phrase.diffStats.deletions > 0 && ' '}
-            {phrase.diffStats.deletions > 0 && (
-              <span className="text-red-500">-{phrase.diffStats.deletions}</span>
-            )}
-          </span>
-        )}
-
-        {taskGetSummary && (
-          <span className="flex min-w-0 items-center gap-1.5">
-            <TaskGetCollapsedSummary task={taskGetSummary} />
-          </span>
-        )}
-
-        {taskListSummary && (
-          <span className="flex min-w-0 items-center gap-1.5">
-            <TaskListCollapsedSummary tasks={taskListSummary} />
-          </span>
-        )}
-
-        <ChevronRight
-          className={cn(
-            'shrink-0 size-3 text-muted-foreground/45 transition-transform duration-150',
-            expanded && 'rotate-90',
+          {resultSummary && (
+            <span className={cn(
+              'shrink-0 text-[11px] tabular-nums',
+              isError ? 'text-destructive/70' : 'text-muted-foreground/55',
+            )}>
+              {resultSummary}
+            </span>
           )}
-        />
 
-        {isPreviewable && (
-          <PreviewOpenButton filePath={filePath} />
-        )}
-      </button>
+          {phrase.diffStats && (isCompleted || !isStreaming) && (
+            <span className="shrink-0 font-mono text-[12px] tabular-nums">
+              {phrase.diffStats.additions > 0 && (
+                <span className="text-emerald-600 dark:text-emerald-400">+{phrase.diffStats.additions}</span>
+              )}
+              {phrase.diffStats.additions > 0 && phrase.diffStats.deletions > 0 && ' '}
+              {phrase.diffStats.deletions > 0 && (
+                <span className="text-red-600 dark:text-red-400">-{phrase.diffStats.deletions}</span>
+              )}
+            </span>
+          )}
+
+          {taskGetSummary && (
+            <span className="flex min-w-0 max-w-[40%] overflow-hidden items-center gap-1.5">
+              <TaskGetCollapsedSummary task={taskGetSummary} />
+            </span>
+          )}
+
+          {taskListSummary && (
+            <span className="flex min-w-0 max-w-[40%] overflow-hidden items-center gap-1.5">
+              <TaskListCollapsedSummary tasks={taskListSummary} />
+            </span>
+          )}
+
+          <ChevronRight
+            className={cn(
+              'size-3 shrink-0 text-muted-foreground/40 transition-transform duration-150',
+              expanded && 'rotate-90',
+            )}
+          />
+
+          {isPreviewable && (
+            <PreviewOpenButton filePath={filePath} />
+          )}
+        </button>
 
       {shouldShowResult && resultText && expanded && (
         <div className={cn(
@@ -644,18 +651,31 @@ interface ThinkingBlockProps {
 
 /** 思考块折叠行数阈值 */
 const THINKING_COLLAPSE_LINE_THRESHOLD = 4
+const THINKING_STREAMING_COLLAPSE_LINE_THRESHOLD = 2
 
 function ThinkingBlock({ block, dimmed = false, isStreaming = false }: ThinkingBlockProps): React.ReactElement {
   const [isExpanded, setIsExpanded] = React.useState(false)
   const [shouldCollapse, setShouldCollapse] = React.useState(false)
   const contentRef = React.useRef<HTMLDivElement>(null)
+  const wasStreamingRef = React.useRef(isStreaming)
 
-  // 检测内容是否超过阈值行数（useLayoutEffect：在 paint 前同步执行，避免「展开→收起」闪屏）
+  // 流式阶段默认收起，避免 Thinking 持续增长时占满对话区域；完成态保留原有展开阈值。
+  React.useEffect(() => {
+    if (isStreaming && !wasStreamingRef.current) {
+      setIsExpanded(false)
+    }
+    wasStreamingRef.current = isStreaming
+  }, [isStreaming])
+
+  // 检测内容是否超过当前状态的行数阈值（useLayoutEffect：在 paint 前同步执行，避免闪屏）
   React.useLayoutEffect(() => {
-    if (isStreaming || !contentRef.current) return
+    if (!contentRef.current) return
     const el = contentRef.current
     const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 22
-    const maxHeight = lineHeight * THINKING_COLLAPSE_LINE_THRESHOLD
+    const threshold = isStreaming
+      ? THINKING_STREAMING_COLLAPSE_LINE_THRESHOLD
+      : THINKING_COLLAPSE_LINE_THRESHOLD
+    const maxHeight = lineHeight * threshold
     setShouldCollapse(el.scrollHeight > maxHeight + 10)
   }, [block.thinking, isStreaming])
 
@@ -687,7 +707,7 @@ function ThinkingBlock({ block, dimmed = false, isStreaming = false }: ThinkingB
           className={cn(
             'prose prose-sm dark:prose-invert max-w-none prose-p:my-1 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 text-[14px] leading-relaxed overflow-hidden transition-[max-height] duration-200',
             dimmed ? 'text-muted-foreground' : 'text-foreground/90',
-            shouldCollapse && !isExpanded && 'max-h-[5.6em]',
+            shouldCollapse && !isExpanded && (isStreaming ? 'max-h-[3.25em]' : 'max-h-[5.6em]'),
           )}
         >
           <SmoothMarkdownBody
@@ -701,7 +721,7 @@ function ThinkingBlock({ block, dimmed = false, isStreaming = false }: ThinkingB
             type="button"
             onClick={toggleExpand}
             className={cn(
-              'mt-2 flex items-center gap-1 text-xs text-foreground/35 transition-colors',
+              'mt-1 flex items-center gap-1 text-xs leading-none text-foreground/35 transition-colors',
               'hover:text-foreground/55'
             )}
           >

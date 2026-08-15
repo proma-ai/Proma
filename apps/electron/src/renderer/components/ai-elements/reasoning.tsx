@@ -15,7 +15,7 @@ import * as React from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
-import rehypeKatex from 'rehype-katex'
+import { REHYPE_KATEX_PLUGINS } from '@/lib/rehype-katex-options'
 import { Brain, ChevronDown } from 'lucide-react'
 import {
   Collapsible,
@@ -218,7 +218,7 @@ export const ReasoningContent = React.memo(
         <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-1 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
           <Markdown
             remarkPlugins={[remarkGfm, remarkMath]}
-            rehypePlugins={[rehypeKatex]}
+            rehypePlugins={REHYPE_KATEX_PLUGINS}
             components={{
               a: ({ href, children: linkChildren, ...linkProps }) => (
                 <a

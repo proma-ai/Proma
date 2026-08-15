@@ -65,7 +65,7 @@ import { previewPanelOpenMapAtom, quotedSelectionMapAtom, currentQuotedSelection
 import type { QuotedSelection } from '@/atoms/preview-atoms'
 import {
   agentStreamingStatesAtom,
-  agentSessionViewStreamStateAtomFamily,
+  agentSessionInputStreamStateAtomFamily,
   agentChannelIdAtom,
   agentModelIdAtom,
   agentSessionChannelMapAtom,
@@ -106,7 +106,6 @@ import {
   allPendingExitPlanRequestsAtom,
   finalizeStreamingActivities,
 } from '@/atoms/agent-atoms'
-import type { AgentContextStatus } from '@/atoms/agent-atoms'
 import { settingsOpenAtom } from '@/atoms/settings-tab'
 import { longTextPasteAsAttachmentEnabledAtom } from '@/atoms/ui-preferences'
 import { channelsAtom } from '@/atoms/chat-atoms'
@@ -132,6 +131,7 @@ import {
   queuedTextToParagraphHtml,
   removeQueuedMessage,
   restoreQueuedMessageToFront,
+  upsertAgentLiveMessageByUuid,
 } from '@/lib/agent-message-queue'
 import type { AgentQueuedAttachment, AgentQueuedMessage, QueueDropPlacement } from '@/lib/agent-message-queue'
 
@@ -432,7 +432,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const setStreamingStates = useSetAtom(agentStreamingStatesAtom)
   // 只订阅输入区/工具栏需要的低频流状态。逐 token content/toolActivities 由
   // AgentMessages 独立消费，不能让 3000 行 AgentView 和输入框跟随每个 token 重渲染。
-  const streamViewState = useAtomValue(agentSessionViewStreamStateAtomFamily(sessionId))
+  const streamViewState = useAtomValue(agentSessionInputStreamStateAtomFamily(sessionId))
   const streaming = streamViewState.running
   // 软空闲态：本轮主体已结束、UI 可输入，但 SDK 通道仍开着等后台任务唤醒。
   // 此时服务端 activeSessions 仍保留，新消息须走注入通道而非新建 run。
@@ -523,15 +523,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     }
   }, [sessionId, sessionMetaChannelId, sessionMetaModelId, hasSessionMeta, defaultChannelId, defaultModelId, setSessionChannelMap, setSessionModelMap])
 
-  const contextStatus: AgentContextStatus = {
-    isCompacting: streamViewState.isCompacting ?? false,
-    inputTokens: streamViewState.inputTokens,
-    outputTokens: streamViewState.outputTokens,
-    cacheReadTokens: streamViewState.cacheReadTokens,
-    cacheCreationTokens: streamViewState.cacheCreationTokens,
-    contextWindow: streamViewState.contextWindow,
-    contextUsageIsEstimated: streamViewState.contextUsageIsEstimated,
-  }
   const setAgentStreamErrors = useSetAtom(agentStreamErrorsAtom)
   const streamErrors = useAtomValue(agentStreamErrorsAtom)
   const agentError = streamErrors.get(sessionId) ?? null
@@ -967,7 +958,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     store.set(liveMessagesMapAtom, (prev) => {
       const map = new Map(prev)
       const current = map.get(sessionId) ?? []
-      map.set(sessionId, [...current, message])
+      map.set(sessionId, upsertAgentLiveMessageByUuid(current, message))
       return map
     })
   }, [sessionId, store])
@@ -1152,6 +1143,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
   // 消息是否已完成首次加载（用于 auto-send 等待）
   const [messagesLoaded, setMessagesLoaded] = React.useState(false)
+  const [messagesLoadedSessionId, setMessagesLoadedSessionId] = React.useState<string | null>(null)
+  const messagesLoadedForCurrentSession = messagesLoaded && messagesLoadedSessionId === sessionId
   const [messagesRefreshing, setMessagesRefreshing] = React.useState(false)
   const messagesRefreshingRef = React.useRef(false)
   const loadingSessionIdRef = React.useRef<string | null>(null)
@@ -1170,7 +1163,10 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       const cached = store.get(agentSDKMessagesCacheAtom).get(sessionId)
       if (cached) {
         setPersistedSDKMessages(cached)
+        // 缓存页可直接作为首屏数据，IPC 只负责后台校准；刷新期间仍由 messagesRefreshing
+        // 阻止非流式发送，避免用户操作与旧快照覆盖竞态。
         setMessagesLoaded(true)
+        setMessagesLoadedSessionId(sessionId)
       } else {
         setPersistedSDKMessages([])
         setMessagesLoaded(false)
@@ -1192,6 +1188,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           setEarlierMessagesCursor(page.nextBefore)
           setLoadingEarlierMessages(false)
           setMessagesLoaded(true)
+          setMessagesLoadedSessionId(sessionId)
           messagesRefreshingRef.current = false
           setMessagesRefreshing(false)
 
@@ -1250,6 +1247,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         if (cancelled) return
         console.error(error)
         setMessagesLoaded(true)
+        setMessagesLoadedSessionId(sessionId)
         messagesRefreshingRef.current = false
         setMessagesRefreshing(false)
       })
@@ -1309,7 +1307,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   // 等待 messagesLoaded 确保消息加载完成后再插入乐观消息，避免被加载结果覆盖。
   // 使用 queueMicrotask 延迟发送：避免 setState → 重渲染 → cleanup 取消 timer 的竞态。
   React.useEffect(() => {
-    if (!messagesLoaded) return
+    if (!messagesLoadedForCurrentSession) return
     if (!pendingPrompt) return
     if (pendingPrompt.sessionId !== sessionId) return
     if (!agentChannelId || streaming) return
@@ -1385,7 +1383,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         })
       })
     })
-  }, [messagesLoaded, pendingPrompt, sessionId, agentChannelId, agentModelId, agentChannelProvider, currentWorkspaceId, streaming, setPendingPrompt, setStreamingStates, permissionMode, attachedDirs, attachedFileDirectories])
+  }, [messagesLoadedForCurrentSession, pendingPrompt, sessionId, agentChannelId, agentModelId, agentChannelProvider, currentWorkspaceId, streaming, setPendingPrompt, setStreamingStates, permissionMode, attachedDirs, attachedFileDirectories])
   // ===== 附件处理 =====
 
   /** 为文件生成唯一文件名（避免粘贴多张图片时文件名重复导致覆盖） */
@@ -2133,7 +2131,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     // 如果输入为空但有建议，使用建议内容
     const effectiveText = text || suggestion || ''
     const pendingFilesSnapshot = pendingFilesRef.current
-    if (!messagesLoaded || (!effectiveText && pendingFilesSnapshot.length === 0) || !agentChannelId || !hasAvailableModel) return
+    if (!messagesLoadedForCurrentSession || (!effectiveText && pendingFilesSnapshot.length === 0) || !agentChannelId || !hasAvailableModel) return
     if (isStopping) {
       toast.info('正在停止上一轮 Agent', { description: '请等待停止完成后再发送消息。' })
       return
@@ -2350,7 +2348,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         return map
       })
     })
-  }, [createBaseAdditionalDirectories, preparePendingFilesForSend, restoreQueuedAttachmentsToPending, sessionId, agentChannelId, agentModelId, agentChannelProvider, currentWorkspaceId, streaming, backgroundWaiting, suggestion, hasAvailableModel, store, consumeQuotedSelection, setStreamingStates, setAgentStreamErrors, setPromptSuggestions, setInputContent, setLiveMessagesMap, permissionMode, messagesLoaded, setQueuedMessages, setQuotedSelectionMap, sendPlainTextAgentMessage, isLegacyTranscript, isStopping])
+  }, [createBaseAdditionalDirectories, preparePendingFilesForSend, restoreQueuedAttachmentsToPending, sessionId, agentChannelId, agentModelId, agentChannelProvider, currentWorkspaceId, streaming, backgroundWaiting, suggestion, hasAvailableModel, store, consumeQuotedSelection, setStreamingStates, setAgentStreamErrors, setPromptSuggestions, setInputContent, setLiveMessagesMap, permissionMode, messagesLoadedForCurrentSession, setQueuedMessages, setQuotedSelectionMap, sendPlainTextAgentMessage, isLegacyTranscript, isStopping])
 
   /** 停止生成 */
   const handleStop = React.useCallback((): void => {
@@ -2723,7 +2721,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     (allAskUserRequests.get(sessionId)?.length ?? 0) > 0 ||
     (allExitPlanRequests.get(sessionId)?.length ?? 0) > 0
   const hasBlockingRequests = hasBannerOverlay || (allPermissionRequests.get(sessionId)?.length ?? 0) > 0
-  const canSendQueuedNow = messagesLoaded && (streaming || !messagesRefreshing) && !!agentChannelId && hasAvailableModel && !hasBlockingRequests && !isStopping
+  const canSendQueuedNow = messagesLoadedForCurrentSession && (streaming || !messagesRefreshing) && !!agentChannelId && hasAvailableModel && !hasBlockingRequests && !isStopping
   const queuedSendInFlightRef = React.useRef(false)
   const sendingQueuedMessageIdsRef = React.useRef<Set<string>>(new Set())
 
@@ -2823,7 +2821,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     setInputHasContent(hasContent)
   }, [])
   const hasTextInput = inputHasContent
-  const canSend = !isStopping && messagesLoaded && (streaming || !messagesRefreshing) && (hasTextInput || pendingFiles.length > 0 || !!suggestion) && agentChannelId !== null && hasAvailableModel && (!streaming || hasTextInput)
+  const canSend = !isStopping && messagesLoadedForCurrentSession && (streaming || !messagesRefreshing) && (hasTextInput || pendingFiles.length > 0 || !!suggestion) && agentChannelId !== null && hasAvailableModel && (!streaming || hasTextInput)
 
   const inputToolbarItems = React.useMemo<ToolbarItem[]>(() => [
     ...(isCodexFastModeAvailable ? [{
@@ -2894,13 +2892,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       key: 'context-usage',
       node: (
         <ContextUsageBadge
-          inputTokens={contextStatus.inputTokens}
-          outputTokens={contextStatus.outputTokens}
-          cacheReadTokens={contextStatus.cacheReadTokens}
-          cacheCreationTokens={contextStatus.cacheCreationTokens}
-          contextWindow={contextStatus.contextWindow}
-          isEstimated={contextStatus.contextUsageIsEstimated === true}
-          isCompacting={contextStatus.isCompacting}
           isProcessing={streaming}
           sessionId={sessionId}
           channelId={planQuotaChannelId}
@@ -2923,12 +2914,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     sessionId,
     agentThinking,
     setAgentThinking,
-    contextStatus.inputTokens,
-    contextStatus.outputTokens,
-    contextStatus.cacheReadTokens,
-    contextStatus.cacheCreationTokens,
-    contextStatus.contextWindow,
-    contextStatus.isCompacting,
     streaming,
     handleAttachContent,
     handleCompact,
@@ -3019,7 +3004,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         <AgentMessages
           sessionId={sessionId}
           sessionModelId={agentModelId || undefined}
-          messagesLoaded={messagesLoaded}
+          messagesLoaded={messagesLoadedForCurrentSession}
           persistedSDKMessages={persistedSDKMessages}
           hasEarlierMessages={earlierMessagesCursor !== undefined}
           loadingEarlierMessages={loadingEarlierMessages}

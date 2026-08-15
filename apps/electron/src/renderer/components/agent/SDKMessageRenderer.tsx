@@ -19,7 +19,7 @@ import { ImageLightbox, type LightboxImage } from '@/components/ui/image-lightbo
 import { ContentBlock } from './ContentBlock'
 import { TurnFileChangesSummary, buildTurnFileNameMap } from './TurnFileChangesSummary'
 import { TurnSkillUsageSummary } from './TurnSkillUsageSummary'
-import { ProcessBlockGroup, buildAssistantTurnRenderItems } from './ProcessBlockGroup'
+import { ProcessBlockGroup, buildAssistantTurnRenderItems, buildCompletedToolResultIds } from './ProcessBlockGroup'
 import { extractToolResultText, TASK_TOOL_NAMES } from './task-progress'
 import { normalizeThinkTagsInContentBlocks } from './thinking-tag-parser'
 // 会话转录的纯逻辑(Turn 分组 / 快照去重 / 预览)已下沉到 @proma/session-core 作为唯一真源。
@@ -464,14 +464,29 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
     (b) => b.type === 'text' && 'text' in b && !!(b as { text: string }).text
   )
 
+  const completedToolResultIds = React.useMemo(() => {
+    return buildCompletedToolResultIds(turn.turnMessages)
+  }, [turn.turnMessages])
   const renderItems = React.useMemo(() => {
-    return buildAssistantTurnRenderItems(topLevelBlocks, { isStreaming })
-  }, [topLevelBlocks, isStreaming])
+    return buildAssistantTurnRenderItems(topLevelBlocks, {
+      isStreaming,
+      completedToolResultIds,
+    })
+  }, [topLevelBlocks, isStreaming, completedToolResultIds])
 
   // 本轮「文件名 → 绝对路径」映射：与 footer chips 同源，供正文内联文件引用补全裸文件名
   const turnFileMap = React.useMemo(
     () => buildTurnFileNameMap(turn.turnMessages),
     [turn.turnMessages]
+  )
+
+  // 当前 turn 的 header 必须在流式正文为空时也保留，避免 Logo/模型 ID 随 preview 挂载状态闪烁。
+  const assistantHeader = (
+    <MessageHeader
+      model={turn.model ? resolveModelDisplayName(turn.model, channels, turn.channelId) : undefined}
+      time={turn.createdAt ? formatMessageTime(turn.createdAt) : undefined}
+      logo={<AssistantLogo model={turn.model} channelId={turn.channelId} />}
+    />
   )
 
   // 如果只有错误消息
@@ -488,8 +503,11 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
     )
   }
 
-  // 如果没有任何内容
-  if (enrichedBlocks.length === 0 && !hasError) return null
+  // 如果没有任何内容，流式 turn 仍需保留 header，等待正文块到达后在同一消息槽位继续渲染。
+  if (enrichedBlocks.length === 0 && !hasError) {
+    if (!isStreaming) return null
+    return <Message from="assistant">{assistantHeader}</Message>
+  }
 
   const renderTopLevelBlock = (block: SDKContentBlock, i: number): React.ReactNode => {
     // 任务进度由底部浮层统一呈现，输出记录不再重复显示任务卡。
@@ -524,11 +542,7 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
 
   return (
     <Message from="assistant">
-      <MessageHeader
-        model={turn.model ? resolveModelDisplayName(turn.model, channels, turn.channelId) : undefined}
-        time={turn.createdAt ? formatMessageTime(turn.createdAt) : undefined}
-        logo={<AssistantLogo model={turn.model} channelId={turn.channelId} />}
-      />
+      {assistantHeader}
       <MessageContent>
         <TurnFileMapProvider map={turnFileMap}>
         <div className={cn('space-y-2')}>
