@@ -1470,8 +1470,8 @@ export function registerIpcHandlers(): void {
   // 获取对话最近 N 条消息（分页加载）
   ipcMain.handle(
     CHAT_IPC_CHANNELS.GET_RECENT_MESSAGES,
-    async (_, id: string, limit: number): Promise<RecentMessagesResult> => {
-      return getRecentMessages(id, limit)
+    async (_, id: string, limit: number, beforeMessageId?: string): Promise<RecentMessagesResult> => {
+      return getRecentMessages(id, limit, beforeMessageId)
     }
   )
 

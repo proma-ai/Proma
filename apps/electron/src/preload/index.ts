@@ -317,7 +317,7 @@ export interface ElectronAPI {
   getConversationMessages: (id: string) => Promise<ChatMessage[]>
 
   /** 获取对话最近 N 条消息（分页加载） */
-  getRecentMessages: (id: string, limit: number) => Promise<RecentMessagesResult>
+  getRecentMessages: (id: string, limit: number, beforeMessageId?: string) => Promise<RecentMessagesResult>
 
   /** 更新对话标题 */
   updateConversationTitle: (id: string, title: string) => Promise<ConversationMeta>
@@ -1462,8 +1462,8 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(CHAT_IPC_CHANNELS.GET_MESSAGES, id)
   },
 
-  getRecentMessages: (id: string, limit: number) => {
-    return ipcRenderer.invoke(CHAT_IPC_CHANNELS.GET_RECENT_MESSAGES, id, limit)
+  getRecentMessages: (id: string, limit: number, beforeMessageId?: string) => {
+    return ipcRenderer.invoke(CHAT_IPC_CHANNELS.GET_RECENT_MESSAGES, id, limit, beforeMessageId)
   },
 
   updateConversationTitle: (id: string, title: string) => {

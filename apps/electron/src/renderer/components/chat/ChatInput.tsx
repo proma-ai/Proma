@@ -476,6 +476,9 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
           <RichTextInput
             value={content}
             onChange={setContentFromEditor}
+            // Chat 草稿只需在用户停顿后持久化；避免每次按键都做 Markdown 序列化、更新全局 Map，
+            // 从而连带重渲染整棵聊天视图。
+            draftSyncDelayMs={150}
             onSubmit={handleSend}
             onPasteFiles={handlePasteFiles}
             voiceInputId={chatVoiceInputId}

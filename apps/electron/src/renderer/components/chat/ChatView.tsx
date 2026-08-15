@@ -596,12 +596,23 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
       .catch(console.error)
   }, [conversationId, contextDividers])
 
-  /** 加载全部历史消息（向上滚动时触发） */
+  /**
+   * 向上滚动时按页加载历史消息。
+   *
+   * 旧实现会在第一次触顶时一次性拉取整个会话并重渲染所有富文本消息；长对话会造成
+   * 明显的主线程阻塞。保持与初始加载相同的分页大小，只在用户继续向上浏览时追加一页。
+   */
   const handleLoadMore = React.useCallback(async (): Promise<void> => {
-    const allMessages = await window.electronAPI.getConversationMessages(conversationId)
-    setMessages(allMessages)
-    setHasMoreMessages(false)
-  }, [conversationId])
+    const result = await window.electronAPI.getRecentMessages(
+      conversationId,
+      INITIAL_MESSAGE_LIMIT,
+      messages[0]?.id,
+    )
+    if (result.messages.length > 0) {
+      setMessages((current) => [...result.messages, ...current])
+    }
+    setHasMoreMessages(result.hasMore)
+  }, [conversationId, messages])
 
   /** 消息历史中的图片编辑完成 → 作为新附件加入输入框 */
   const handleImageEditComplete = React.useCallback((editedDataUrl: string): void => {

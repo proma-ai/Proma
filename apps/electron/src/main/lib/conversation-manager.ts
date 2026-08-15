@@ -131,13 +131,14 @@ export function getConversationMessages(id: string): ChatMessage[] {
  * 读取对话的最近 N 条消息（从尾部读取）
  *
  * 用于分页加载：首次打开对话时只加载尾部少量消息，
- * 用户向上滚动时再加载全部历史。
+ * 用户向上滚动时使用 beforeMessageId 继续向前加载一页。
  *
  * @param id 对话 ID
  * @param limit 返回的最大消息数
- * @returns 最近的消息列表 + 总数 + 是否还有更多
+ * @param beforeMessageId 仅返回此消息之前的记录
+ * @returns 本页消息列表 + 总数 + 是否还有更多
  */
-export function getRecentMessages(id: string, limit: number): RecentMessagesResult {
+export function getRecentMessages(id: string, limit: number, beforeMessageId?: string): RecentMessagesResult {
   const filePath = getConversationMessagesPath(id)
 
   if (!existsSync(filePath)) {
@@ -149,16 +150,23 @@ export function getRecentMessages(id: string, limit: number): RecentMessagesResu
     const lines = raw.split('\n').filter((line) => line.trim())
     const total = lines.length
 
-    // 如果总数不超过 limit，直接返回全部
-    if (total <= limit) {
-      const messages = lines.map((line) => JSON.parse(line) as ChatMessage)
-      return { messages, total, hasMore: false }
+    // 查找游标前的记录；游标失效时回退到最后一页，避免返回错误的空状态。
+    let endIndex = total
+    if (beforeMessageId) {
+      const cursorIndex = lines.findIndex((line) => {
+        try {
+          return (JSON.parse(line) as ChatMessage).id === beforeMessageId
+        } catch {
+          return false
+        }
+      })
+      if (cursorIndex >= 0) endIndex = cursorIndex
     }
 
-    // 只解析尾部 limit 行
-    const recentLines = lines.slice(-limit)
-    const messages = recentLines.map((line) => JSON.parse(line) as ChatMessage)
-    return { messages, total, hasMore: true }
+    const startIndex = Math.max(0, endIndex - limit)
+    const pageLines = lines.slice(startIndex, endIndex)
+    const messages = pageLines.map((line) => JSON.parse(line) as ChatMessage)
+    return { messages, total, hasMore: startIndex > 0 }
   } catch (error) {
     console.error(`[对话管理] 读取最近消息失败 (${id}):`, error)
     return { messages: [], total: 0, hasMore: false }

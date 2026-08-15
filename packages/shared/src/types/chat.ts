@@ -338,7 +338,7 @@ export interface ModelOption {
  * 最近消息加载结果
  *
  * 用于分页加载：首次仅加载尾部 N 条消息，
- * 向上滚动时再加载全部。
+ * 向上滚动时继续按页获取更早的消息。
  */
 export interface RecentMessagesResult {
   /** 本次返回的消息列表（按时间正序） */
