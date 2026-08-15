@@ -83,6 +83,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
   const [pendingAttachments, setPendingAttachments] = React.useState<PendingAttachment[]>([])
   const pendingAttachmentsRef = React.useRef<PendingAttachment[]>([])
   const [hasMoreMessages, setHasMoreMessages] = React.useState(false)
+  const [historyCursor, setHistoryCursor] = React.useState<string | null>(null)
   const [messagesLoaded, setMessagesLoaded] = React.useState(false)
   const [inlineEditingMessageId, setInlineEditingMessageId] = React.useState<string | null>(null)
   const conversationIdRef = React.useRef(conversationId)
@@ -172,6 +173,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
         if (cancelled || conversationIdRef.current !== conversationId) return
         setMessages(result.messages)
         setHasMoreMessages(result.hasMore)
+        setHistoryCursor(result.nextCursor)
         setMessagesLoaded(true)
 
         // 消息加载完成后，清除已完成的流式状态（streaming=false 的过渡气泡）
@@ -612,27 +614,31 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
    * 旧实现会在第一次触顶时一次性拉取整个会话并重渲染所有富文本消息；长对话会造成
    * 明显的主线程阻塞。保持与初始加载相同的分页大小，只在用户继续向上浏览时追加一页。
    */
-  const handleLoadMore = React.useCallback(async (): Promise<void> => {
-    const cursorId = messages[0]?.id
-    if (!cursorId) return
+  const handleLoadMore = React.useCallback(async (): Promise<boolean> => {
+    const cursor = historyCursor
+    if (!cursor) return false
 
     const result = await window.electronAPI.getRecentMessages(
       conversationId,
       INITIAL_MESSAGE_LIMIT,
-      cursorId,
+      cursor,
     )
     // 请求返回时若用户已切换对话，直接丢弃旧响应，避免污染新会话历史。
-    if (conversationIdRef.current !== conversationId) return
+    if (conversationIdRef.current !== conversationId) return false
 
+    let didPrepend = false
     if (result.messages.length > 0) {
       setMessages((current) => {
-        // 请求期间历史可能被刷新或已加载过该页，游标不再匹配时不追加重复消息。
-        if (current[0]?.id !== cursorId) return current
+        // 请求期间历史可能已刷新或加载过另一页；cursor 不再匹配时不追加重复消息。
+        if (historyCursor !== cursor) return current
+        didPrepend = true
         return [...result.messages, ...current]
       })
     }
     setHasMoreMessages(result.hasMore)
-  }, [conversationId, messages])
+    setHistoryCursor(result.nextCursor)
+    return didPrepend
+  }, [conversationId, historyCursor])
 
   /** 消息历史中的图片编辑完成 → 作为新附件加入输入框 */
   const handleImageEditComplete = React.useCallback((editedDataUrl: string): void => {

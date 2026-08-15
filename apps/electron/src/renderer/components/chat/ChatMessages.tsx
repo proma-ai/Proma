@@ -54,12 +54,14 @@ import type { ChatMessage, ChatToolActivity } from '@proma/shared'
 // ===== 滚动到顶部加载更多 =====
 
 interface ScrollTopLoaderProps {
+  /** 当前对话 ID，用于丢弃切换对话后的异步滚动副作用 */
+  conversationId: string
   /** 是否还有更多历史消息 */
   hasMore: boolean
   /** 是否正在加载 */
   loading: boolean
-  /** 加载更多回调 */
-  onLoadMore: () => Promise<void>
+  /** 加载更多回调。返回 true 时表示当前对话已追加新消息。 */
+  onLoadMore: () => Promise<boolean>
 }
 
 /**
@@ -69,9 +71,14 @@ interface ScrollTopLoaderProps {
  * 监听 scroll 事件，当滚动到顶部附近时触发加载。
  * 加载后恢复滚动位置，保证用户视角不变。
  */
-function ScrollTopLoader({ hasMore, loading, onLoadMore }: ScrollTopLoaderProps): React.ReactElement | null {
+function ScrollTopLoader({ conversationId, hasMore, loading, onLoadMore }: ScrollTopLoaderProps): React.ReactElement | null {
   const { scrollRef } = useStickToBottomContext()
   const triggeredRef = React.useRef(false)
+  const conversationIdRef = React.useRef(conversationId)
+  React.useEffect(() => {
+    conversationIdRef.current = conversationId
+    triggeredRef.current = false
+  }, [conversationId])
 
   // 加载完成后解锁下一页；hasMore 在多页加载期间可能始终为 true，不能仅依赖它变化。
   React.useEffect(() => {
@@ -89,9 +96,12 @@ function ScrollTopLoader({ hasMore, loading, onLoadMore }: ScrollTopLoaderProps)
         const prevHeight = el.scrollHeight
         const prevScrollTop = el.scrollTop
 
-        onLoadMore().then(() => {
+        onLoadMore().then((didPrepend) => {
+          // 对话已切换时，旧请求不应修改复用容器的滚动位置。
+          if (!didPrepend || conversationIdRef.current !== conversationId) return
           // 加载完成后恢复滚动位置：新内容插入顶部，保持用户视角不变。
           requestAnimationFrame(() => {
+            if (conversationIdRef.current !== conversationId) return
             el.scrollTop = prevScrollTop + (el.scrollHeight - prevHeight)
           })
         })
@@ -100,7 +110,7 @@ function ScrollTopLoader({ hasMore, loading, onLoadMore }: ScrollTopLoaderProps)
 
     el.addEventListener('scroll', handleScroll, { passive: true })
     return () => el.removeEventListener('scroll', handleScroll)
-  }, [scrollRef, hasMore, loading, onLoadMore])
+  }, [conversationId, scrollRef, hasMore, loading, onLoadMore])
 
   if (!hasMore) return null
 
@@ -366,6 +376,7 @@ export function ChatMessages({
       <ScrollPositionManager id={conversationId} ready={ready} />
       {/* 滚动到顶部时自动加载更多历史 */}
       <ScrollTopLoader
+        conversationId={conversationId}
         hasMore={hasMore}
         loading={loadingMore}
         onLoadMore={handleLoadMore}

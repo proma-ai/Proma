@@ -7,6 +7,7 @@
  */
 
 import { readFileSync, writeFileSync, appendFileSync, existsSync, unlinkSync, createReadStream } from 'node:fs'
+import { open, stat } from 'node:fs/promises'
 import { createInterface } from 'node:readline'
 import { writeJsonFileAtomic, readJsonFileSafe } from './safe-file'
 import { randomUUID } from 'node:crypto'
@@ -138,38 +139,81 @@ export function getConversationMessages(id: string): ChatMessage[] {
  * @param beforeMessageId 仅返回此消息之前的记录
  * @returns 本页消息列表 + 总数 + 是否还有更多
  */
-export function getRecentMessages(id: string, limit: number, beforeMessageId?: string): RecentMessagesResult {
-  const filePath = getConversationMessagesPath(id)
+interface RecentMessagesCursor {
+  /** 文件字节边界：下一页从此位置之前向前读取。 */
+  offset: number
+  /** 文件版本；编辑/截断后拒绝旧 cursor，避免重复或乱序。 */
+  size: number
+  mtimeMs: number
+}
 
-  if (!existsSync(filePath)) {
-    return { messages: [], total: 0, hasMore: false }
-  }
+function encodeRecentMessagesCursor(cursor: RecentMessagesCursor): string {
+  return Buffer.from(JSON.stringify(cursor)).toString('base64url')
+}
 
+function decodeRecentMessagesCursor(cursor: string): RecentMessagesCursor | null {
   try {
-    const raw = readFileSync(filePath, 'utf-8')
-    const lines = raw.split('\n').filter((line) => line.trim())
-    const total = lines.length
+    const value = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as RecentMessagesCursor
+    if (!Number.isInteger(value.offset) || value.offset < 0 || !Number.isInteger(value.size) || value.size < 0 || !Number.isFinite(value.mtimeMs)) return null
+    return value
+  } catch {
+    return null
+  }
+}
 
-    // 查找游标前的记录；游标失效时回退到最后一页，避免返回错误的空状态。
-    let endIndex = total
-    if (beforeMessageId) {
-      const cursorIndex = lines.findIndex((line) => {
-        try {
-          return (JSON.parse(line) as ChatMessage).id === beforeMessageId
-        } catch {
-          return false
-        }
-      })
-      if (cursorIndex >= 0) endIndex = cursorIndex
+/**
+ * 从 JSONL 文件尾部异步读取一页记录。每页只读取直到凑齐 limit 条记录所需的字节，
+ * 避免长会话上翻时同步读取和解析整份历史。
+ */
+export async function getRecentMessages(id: string, limit: number, cursor?: string): Promise<RecentMessagesResult> {
+  const filePath = getConversationMessagesPath(id)
+  try {
+    const fileStat = await stat(filePath)
+    const decodedCursor = cursor ? decodeRecentMessagesCursor(cursor) : null
+    if (cursor && (!decodedCursor || decodedCursor.size !== fileStat.size || decodedCursor.mtimeMs !== fileStat.mtimeMs)) {
+      // 文件在分页期间已重写：显式让渲染端刷新，不静默回退到末页。
+      return { messages: [], total: 0, hasMore: false, nextCursor: null }
     }
 
-    const startIndex = Math.max(0, endIndex - limit)
-    const pageLines = lines.slice(startIndex, endIndex)
-    const messages = pageLines.map((line) => JSON.parse(line) as ChatMessage)
-    return { messages, total, hasMore: startIndex > 0 }
+    const endOffset = decodedCursor?.offset ?? fileStat.size
+    if (endOffset === 0) return { messages: [], total: 0, hasMore: false, nextCursor: null }
+
+    const handle = await open(filePath, 'r')
+    try {
+      const chunks: Buffer[] = []
+      const blockSize = 64 * 1024
+      let position = endOffset
+      let newlineCount = 0
+      while (position > 0 && newlineCount <= limit) {
+        const bytes = Math.min(blockSize, position)
+        position -= bytes
+        const buffer = Buffer.allocUnsafe(bytes)
+        await handle.read(buffer, 0, bytes, position)
+        chunks.unshift(buffer)
+        for (let index = 0; index < bytes; index += 1) if (buffer[index] === 0x0a) newlineCount += 1
+      }
+
+      const raw = Buffer.concat(chunks).toString('utf8')
+      const records = raw.split('\n')
+      // 文件通常以换行结束；范围结束在一条记录末尾时移除空尾项。
+      if (records.at(-1) === '') records.pop()
+      const pageLines = records.slice(-limit)
+      const messages = pageLines.map((line) => JSON.parse(line) as ChatMessage)
+      const consumedPrefix = records.slice(0, Math.max(0, records.length - pageLines.length)).join('\n')
+      const pageStartOffset = position + Buffer.byteLength(consumedPrefix.length > 0 ? `${consumedPrefix}\n` : '', 'utf8')
+      const hasMore = pageStartOffset > 0
+      return {
+        messages,
+        total: 0,
+        hasMore,
+        nextCursor: hasMore ? encodeRecentMessagesCursor({ offset: pageStartOffset, size: fileStat.size, mtimeMs: fileStat.mtimeMs }) : null,
+      }
+    } finally {
+      await handle.close()
+    }
   } catch (error) {
-    console.error(`[对话管理] 读取最近消息失败 (${id}):`, error)
-    return { messages: [], total: 0, hasMore: false }
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') console.error(`[对话管理] 读取最近消息失败 (${id}):`, error)
+    return { messages: [], total: 0, hasMore: false, nextCursor: null }
   }
 }
 

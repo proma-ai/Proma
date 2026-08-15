@@ -237,6 +237,9 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
   const pendingDraftEditorRef = useRef<NonNullable<ReturnType<typeof useEditor>> | null>(null)
   const pendingDraftScopeKeyRef = useRef<string | null | undefined>(undefined)
   const draftScopeKeyRef = useRef(draftScopeKey)
+  // 与草稿范围绑定的回调；范围变更的 effect 仍需用旧回调同步旧草稿。
+  const onChangeByDraftScopeRef = useRef<Map<string | null | undefined, (markdown: string) => void>>(new Map())
+  onChangeByDraftScopeRef.current.set(draftScopeKey, onChange)
   // 跟踪编辑器自己设置的值，用于区分外部设置和内部更新
   const lastEditorValueRef = useRef<string>('')
   // 记录尚未由 props 确认的本地草稿。长文本连续编辑时，React 可能先提交较旧的
@@ -374,12 +377,13 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
     () => createSessionMentionSuggestion(currentSessionIdRef, mentionActiveRef, mentionItemCountRef),
     [],
   )
-  const syncEditorDraft = useCallback((ed: NonNullable<ReturnType<typeof useEditor>>): string => {
+  const syncEditorDraft = useCallback((ed: NonNullable<ReturnType<typeof useEditor>>, scopeKey = draftScopeKeyRef.current): string => {
+    const onChangeForScope = onChangeByDraftScopeRef.current.get(scopeKey) ?? onChange
     const html = ed.getHTML()
     if (html === '<p></p>') {
       lastEditorValueRef.current = ''
       pendingLocalDraftEchoesRef.current = recordLocalDraftEcho(pendingLocalDraftEchoesRef.current, '')
-      onChange('')
+      onChangeForScope('')
       onHtmlChangeRef.current?.('')
       if (isExpandedRef.current) {
         isExpandedRef.current = false
@@ -395,7 +399,7 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
     ))
     lastEditorValueRef.current = markdown
     pendingLocalDraftEchoesRef.current = recordLocalDraftEcho(pendingLocalDraftEchoesRef.current, markdown)
-    onChange(markdown)
+    onChangeForScope(markdown)
     onHtmlChangeRef.current?.(html)
 
     if (lineCheckTimerRef.current !== null) {
@@ -428,8 +432,8 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
     const pendingScopeKey = ed ? draftScopeKeyRef.current : pendingDraftScopeKeyRef.current
     pendingDraftEditorRef.current = null
     pendingDraftScopeKeyRef.current = undefined
-    if (!pendingEditor || pendingScopeKey !== draftScopeKeyRef.current) return lastEditorValueRef.current
-    return syncEditorDraftRef.current(pendingEditor)
+    if (!pendingEditor || pendingScopeKey === undefined) return lastEditorValueRef.current
+    return syncEditorDraftRef.current(pendingEditor, pendingScopeKey)
   }, [])
 
   const scheduleDraftSync = useCallback((ed: NonNullable<ReturnType<typeof useEditor>>): void => {
@@ -441,9 +445,9 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
       const pendingScopeKey = pendingDraftScopeKeyRef.current
       pendingDraftEditorRef.current = null
       pendingDraftScopeKeyRef.current = undefined
-      // 同一编辑器在切换会话时可能还没卸载；旧 scope 的延迟同步绝不能写进新会话草稿。
-      if (pendingScopeKey !== draftScopeKeyRef.current || !pendingEditor) return
-      syncEditorDraftRef.current(pendingEditor)
+      // 同一编辑器在切换会话时可能还没卸载；回调按 scope 固定，仍应写回原草稿。
+      if (pendingScopeKey === undefined || !pendingEditor) return
+      syncEditorDraftRef.current(pendingEditor, pendingScopeKey)
     }
 
     if (draftSyncDelayMs > 0) {
@@ -894,8 +898,8 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
       const pendingScopeKey = pendingDraftScopeKeyRef.current
       pendingDraftEditorRef.current = null
       pendingDraftScopeKeyRef.current = undefined
-      if (pendingEditor && pendingScopeKey === draftScopeKeyRef.current) {
-        syncEditorDraftRef.current(pendingEditor)
+      if (pendingEditor && pendingScopeKey !== undefined) {
+        syncEditorDraftRef.current(pendingEditor, pendingScopeKey)
       }
     }
   }, [])

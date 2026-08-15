@@ -347,6 +347,8 @@ export interface RecentMessagesResult {
   total: number
   /** 是否还有更多历史消息 */
   hasMore: boolean
+  /** 读取下一页更早历史所需的不透明 cursor；无更多记录时为 null。 */
+  nextCursor: string | null
 }
 
 // ===== IPC 通道常量 =====
