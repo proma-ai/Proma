@@ -163,34 +163,35 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
   }, [conversationId, setPendingRecommendation])
 
   // ===== 加载消息 + 上下文分隔线 =====
+  const loadInitialMessages = React.useCallback(async (expectedConversationId: string): Promise<void> => {
+    const result = await window.electronAPI.getRecentMessages(expectedConversationId, INITIAL_MESSAGE_LIMIT)
+    if (conversationIdRef.current !== expectedConversationId) return
+    setMessages(result.messages)
+    setHasMoreMessages(result.hasMore)
+    setHistoryCursor(result.nextCursor)
+    setMessagesLoaded(true)
+
+    // 消息加载完成后，清除已完成的流式状态（streaming=false 的过渡气泡）
+    // 在同一个微任务中执行，确保 React 在一次渲染中同时显示持久化消息并移除流式气泡
+    setStreamingStates((prev) => {
+      const state = prev.get(expectedConversationId)
+      if (!state || state.streaming) return prev
+      const map = new Map(prev)
+      map.delete(expectedConversationId)
+      return map
+    })
+  }, [setStreamingStates])
+
   React.useEffect(() => {
     let cancelled = false
     setMessagesLoaded(false)
-    window.electronAPI
-      .getRecentMessages(conversationId, INITIAL_MESSAGE_LIMIT)
-      .then((result) => {
-        // 对话已切换或本次加载已过期时，不能覆盖新对话的数据。
-        if (cancelled || conversationIdRef.current !== conversationId) return
-        setMessages(result.messages)
-        setHasMoreMessages(result.hasMore)
-        setHistoryCursor(result.nextCursor)
-        setMessagesLoaded(true)
-
-        // 消息加载完成后，清除已完成的流式状态（streaming=false 的过渡气泡）
-        // 在同一个微任务中执行，确保 React 在一次渲染中同时显示持久化消息并移除流式气泡
-        setStreamingStates((prev) => {
-          const state = prev.get(conversationId)
-          if (!state || state.streaming) return prev  // 仍在流式中，不清除
-          const map = new Map(prev)
-          map.delete(conversationId)
-          return map
-        })
-      })
+    loadInitialMessages(conversationId)
       .catch((error) => {
         if (!cancelled) console.error(error)
       })
     return () => { cancelled = true }
-  }, [conversationId, refreshVersion, setStreamingStates])
+  }, [conversationId, refreshVersion, loadInitialMessages])
+
 
   // 从对话元数据加载分隔线
   React.useEffect(() => {
@@ -625,6 +626,12 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
     )
     // 请求返回时若用户已切换对话，直接丢弃旧响应，避免污染新会话历史。
     if (conversationIdRef.current !== conversationId) return false
+    if (result.cursorInvalidated) {
+      // 历史在分页期间被编辑/截断；从尾页重新建立一致的 cursor 与消息窗口。
+      setMessagesLoaded(false)
+      await loadInitialMessages(conversationId)
+      return false
+    }
 
     let didPrepend = false
     if (result.messages.length > 0) {
@@ -638,7 +645,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
     setHasMoreMessages(result.hasMore)
     setHistoryCursor(result.nextCursor)
     return didPrepend
-  }, [conversationId, historyCursor])
+  }, [conversationId, historyCursor, loadInitialMessages])
 
   /** 消息历史中的图片编辑完成 → 作为新附件加入输入框 */
   const handleImageEditComplete = React.useCallback((editedDataUrl: string): void => {

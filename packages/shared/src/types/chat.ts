@@ -349,6 +349,8 @@ export interface RecentMessagesResult {
   hasMore: boolean
   /** 读取下一页更早历史所需的不透明 cursor；无更多记录时为 null。 */
   nextCursor: string | null
+  /** cursor 对应的文件版本已变化，前端必须从尾页刷新。 */
+  cursorInvalidated: boolean
 }
 
 // ===== IPC 通道常量 =====

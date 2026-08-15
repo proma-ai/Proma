@@ -132,12 +132,12 @@ export function getConversationMessages(id: string): ChatMessage[] {
  * 读取对话的最近 N 条消息（从尾部读取）
  *
  * 用于分页加载：首次打开对话时只加载尾部少量消息，
- * 用户向上滚动时使用 beforeMessageId 继续向前加载一页。
+ * 用户向上滚动时使用不透明 cursor 继续向前加载一页。
  *
  * @param id 对话 ID
  * @param limit 返回的最大消息数
- * @param beforeMessageId 仅返回此消息之前的记录
- * @returns 本页消息列表 + 总数 + 是否还有更多
+ * @param cursor 前一页返回的文件位置 cursor
+ * @returns 本页消息列表 + 下一页 cursor + 是否还有更多
  */
 interface RecentMessagesCursor {
   /** 文件字节边界：下一页从此位置之前向前读取。 */
@@ -172,11 +172,11 @@ export async function getRecentMessages(id: string, limit: number, cursor?: stri
     const decodedCursor = cursor ? decodeRecentMessagesCursor(cursor) : null
     if (cursor && (!decodedCursor || decodedCursor.size !== fileStat.size || decodedCursor.mtimeMs !== fileStat.mtimeMs)) {
       // 文件在分页期间已重写：显式让渲染端刷新，不静默回退到末页。
-      return { messages: [], total: 0, hasMore: false, nextCursor: null }
+      return { messages: [], total: 0, hasMore: false, nextCursor: null, cursorInvalidated: true }
     }
 
     const endOffset = decodedCursor?.offset ?? fileStat.size
-    if (endOffset === 0) return { messages: [], total: 0, hasMore: false, nextCursor: null }
+    if (endOffset === 0) return { messages: [], total: 0, hasMore: false, nextCursor: null, cursorInvalidated: false }
 
     const handle = await open(filePath, 'r')
     try {
@@ -193,27 +193,34 @@ export async function getRecentMessages(id: string, limit: number, cursor?: stri
         for (let index = 0; index < bytes; index += 1) if (buffer[index] === 0x0a) newlineCount += 1
       }
 
-      const raw = Buffer.concat(chunks).toString('utf8')
-      const records = raw.split('\n')
-      // 文件通常以换行结束；范围结束在一条记录末尾时移除空尾项。
-      if (records.at(-1) === '') records.pop()
-      const pageLines = records.slice(-limit)
-      const messages = pageLines.map((line) => JSON.parse(line) as ChatMessage)
-      const consumedPrefix = records.slice(0, Math.max(0, records.length - pageLines.length)).join('\n')
-      const pageStartOffset = position + Buffer.byteLength(consumedPrefix.length > 0 ? `${consumedPrefix}\n` : '', 'utf8')
+      const data = Buffer.concat(chunks)
+      // 全程使用字节索引定位换行，禁止从 UTF-8 解码后的字符串反推 cursor；
+      // 否则多字节字符横跨读取块边界时会把 replacement character 算成错误偏移。
+      const newlineOffsets: number[] = []
+      for (let index = 0; index < data.length; index += 1) {
+        if (data[index] === 0x0a) newlineOffsets.push(index)
+      }
+      const endIndex = data.length > 0 && data[data.length - 1] === 0x0a ? newlineOffsets.length - 1 : newlineOffsets.length
+      const pageStartNewlineIndex = Math.max(0, endIndex - limit)
+      const pageStartInBuffer = pageStartNewlineIndex === 0 ? 0 : newlineOffsets[pageStartNewlineIndex - 1]! + 1
+      const pageEndInBuffer = data.length > 0 && data[data.length - 1] === 0x0a ? data.length - 1 : data.length
+      const pageBuffer = data.subarray(pageStartInBuffer, pageEndInBuffer)
+      const messages = pageBuffer.toString('utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as ChatMessage)
+      const pageStartOffset = position + pageStartInBuffer
       const hasMore = pageStartOffset > 0
       return {
         messages,
         total: 0,
         hasMore,
         nextCursor: hasMore ? encodeRecentMessagesCursor({ offset: pageStartOffset, size: fileStat.size, mtimeMs: fileStat.mtimeMs }) : null,
+        cursorInvalidated: false,
       }
     } finally {
       await handle.close()
     }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') console.error(`[对话管理] 读取最近消息失败 (${id}):`, error)
-    return { messages: [], total: 0, hasMore: false, nextCursor: null }
+    return { messages: [], total: 0, hasMore: false, nextCursor: null, cursorInvalidated: false }
   }
 }
 

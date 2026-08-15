@@ -307,12 +307,15 @@ export function ChatMessages({
   }, [messages, streaming, ready, messagesLoaded])
 
   /** 加载更多历史消息 */
-  const handleLoadMore = React.useCallback(async () => {
-    if (!onLoadMore || loadingMore || !hasMore) return
+  const handleLoadMore = React.useCallback(async (): Promise<boolean> => {
+    if (!onLoadMore || loadingMore || !hasMore) return false
 
     setLoadingMore(true)
-    await onLoadMore()
-    setLoadingMore(false)
+    try {
+      return await onLoadMore()
+    } finally {
+      setLoadingMore(false)
+    }
   }, [onLoadMore, loadingMore, hasMore])
 
   // 并排模式：自动加载全部历史消息（并排视图需要完整上下文）
