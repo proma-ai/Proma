@@ -59,3 +59,4 @@ pnpm-workspace.yaml
 
 # Proma 会话/工作区文档（不应入仓，见 AGENTS.md 红线）
 .context/
+.bitfun/
