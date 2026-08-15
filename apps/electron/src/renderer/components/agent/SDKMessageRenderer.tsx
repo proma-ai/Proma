@@ -474,6 +474,15 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
     [turn.turnMessages]
   )
 
+  // 当前 turn 的 header 必须在流式正文为空时也保留，避免 Logo/模型 ID 随 preview 挂载状态闪烁。
+  const assistantHeader = (
+    <MessageHeader
+      model={turn.model ? resolveModelDisplayName(turn.model, channels, turn.channelId) : undefined}
+      time={turn.createdAt ? formatMessageTime(turn.createdAt) : undefined}
+      logo={<AssistantLogo model={turn.model} channelId={turn.channelId} />}
+    />
+  )
+
   // 如果只有错误消息
   if (enrichedBlocks.length === 0 && hasError && errorContent) {
     return (
@@ -488,8 +497,11 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
     )
   }
 
-  // 如果没有任何内容
-  if (enrichedBlocks.length === 0 && !hasError) return null
+  // 如果没有任何内容，流式 turn 仍需保留 header，等待正文块到达后在同一消息槽位继续渲染。
+  if (enrichedBlocks.length === 0 && !hasError) {
+    if (!isStreaming) return null
+    return <Message from="assistant">{assistantHeader}</Message>
+  }
 
   const renderTopLevelBlock = (block: SDKContentBlock, i: number): React.ReactNode => {
     // 任务进度由底部浮层统一呈现，输出记录不再重复显示任务卡。
@@ -524,11 +536,7 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
 
   return (
     <Message from="assistant">
-      <MessageHeader
-        model={turn.model ? resolveModelDisplayName(turn.model, channels, turn.channelId) : undefined}
-        time={turn.createdAt ? formatMessageTime(turn.createdAt) : undefined}
-        logo={<AssistantLogo model={turn.model} channelId={turn.channelId} />}
-      />
+      {assistantHeader}
       <MessageContent>
         <TurnFileMapProvider map={turnFileMap}>
         <div className={cn('space-y-2')}>
