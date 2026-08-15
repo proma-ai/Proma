@@ -474,6 +474,17 @@ export async function resolvePiVisionRelayRoute(
 ): Promise<PiVisionRelayRoute | undefined> {
   const resolvedModelId = stripLegacyAgentSdkContextSuffix(modelId)
   if (!resolvedModelId) return undefined
+
+  // resolvePiVisionRelayRoute 对 custom provider 会退回全 Pi catalog 按 modelId
+  // （再按 name 兜底）匹配。custom 没有专属 catalog provider，于是遍历所有 provider，
+  // 同名不同源的纯文本模型（如 HuggingFace 的 MiMo-V2.5）会抢在视觉版之前命中，
+  // 导致 input 不含 image，最终误报"不支持图片输入"。
+  // custom 渠道的视觉能力由用户在视觉助手配置中显式声明（channelId + modelId），
+  // 这里直接信任用户配置。
+  if (provider === 'custom') {
+    return { adapterProvider: provider }
+  }
+
   const catalogModel = await findPiCatalogModel(provider, resolvedModelId)
   if (!catalogModel?.input.includes('image')) return undefined
 
