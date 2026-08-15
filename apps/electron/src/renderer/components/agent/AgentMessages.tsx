@@ -47,6 +47,11 @@ import { agentLiveMessagesAtomFamily, agentSessionMessagesStreamStateAtomFamily,
 import type { QuotedSelection } from '@/atoms/preview-atoms'
 
 const EMPTY_SDK_MESSAGES: SDKMessage[] = []
+/**
+ * 在虚拟化列表外保留最近几组消息，避免发送新消息时当前可见的尾部
+ * 从普通文档流迁移到 absolute 虚拟行，造成整屏短暂重排/闪烁。
+ */
+const STABLE_TAIL_GROUP_COUNT = 8
 
 function stableStringify(value: unknown): string {
   if (value == null || typeof value !== 'object') return JSON.stringify(value) ?? String(value)
@@ -594,6 +599,8 @@ function AgentRunningIndicator({ startedAt }: { startedAt?: number }): React.Rea
 interface AgentTranscriptTailProps {
   sessionId: string
   sessionModelId?: string
+  /** 虚拟化列表外的最近已稳定消息。保持其 DOM 槽位，避免发送时可见消息重挂载。 */
+  stableTailGroups: MessageGroup[]
   finalGroup?: AssistantTurn
   finalGroupStreaming: boolean
   /** 运行中在当前 partial 之后注入、但尚未等到前一 assistant stable final 的用户边界。 */
@@ -639,6 +646,7 @@ function mergeAssistantTurns(finalGroup: AssistantTurn, previewGroup: AssistantT
 const AgentTranscriptTail = React.memo(function AgentTranscriptTail({
   sessionId,
   sessionModelId,
+  stableTailGroups,
   finalGroup,
   finalGroupStreaming,
   pendingBoundaryGroups,
@@ -684,12 +692,33 @@ const AgentTranscriptTail = React.memo(function AgentTranscriptTail({
   const disableActions = isStreaming && !isErrorGroup
   const showRunningState = !suppressRunning && (running || retrying !== undefined)
 
-  if (!group && !showRunningState && pendingBoundaryGroups.length === 0) return null
+  if (!group && !showRunningState && stableTailGroups.length === 0 && pendingBoundaryGroups.length === 0) return null
 
   return (
     <>
+      {stableTailGroups.map((stableGroup) => (
+        <MessageGroupRenderer
+          key={getGroupId(stableGroup)}
+          group={stableGroup}
+          allMessages={stableGroup.type === 'assistant-turn' ? allMessages : EMPTY_SDK_MESSAGES}
+          externalMetadataSignature={stableGroup.type === 'assistant-turn' ? externalMetadataSignature : ''}
+          basePath={basePath}
+          onFork={onFork}
+          onRewind={onRewind}
+          onAgentHistoryQuoteClick={onAgentHistoryQuoteClick}
+          onCreateTodo={onCreateTodo}
+          onRetry={onRetry}
+          onRetryInNewSession={onRetryInNewSession}
+          onCompact={onCompact}
+          onRelinkProjectRoot={onRelinkProjectRoot}
+          onRestoreProjectRoot={onRestoreProjectRoot}
+          historyTurn={groupHistoryTurns.get(stableGroup)}
+          sessionModelId={sessionModelId}
+        />
+      ))}
       {stablePreviousGroup && (
         <MessageGroupRenderer
+          key={getGroupId(stablePreviousGroup)}
           group={stablePreviousGroup}
           allMessages={allMessages}
           externalMetadataSignature={externalMetadataSignature}
@@ -710,6 +739,7 @@ const AgentTranscriptTail = React.memo(function AgentTranscriptTail({
       )}
       {group && (
         <MessageGroupRenderer
+          key={getGroupId(group)}
           group={group}
           allMessages={allMessages}
           externalMetadataSignature={externalMetadataSignature}
@@ -1099,7 +1129,11 @@ export const AgentMessages = React.memo(function AgentMessages({
   const finalTailGroup = orderedVisibleGroups.at(-1)?.type === 'assistant-turn'
     ? orderedVisibleGroups.at(-1) as AssistantTurn
     : undefined
-  const transcriptGroups = finalTailGroup ? orderedVisibleGroups.slice(0, -1) : orderedVisibleGroups
+  // 保留可见尾部在普通文档流。否则发送用户消息时，上一条 assistant 会从 tail
+  // 移入 absolute 虚拟行，React 与 StickToBottom 会同时重排并出现整屏闪烁。
+  const groupsBeforeFinalTail = finalTailGroup ? orderedVisibleGroups.slice(0, -1) : orderedVisibleGroups
+  const stableTailGroups = groupsBeforeFinalTail.slice(-STABLE_TAIL_GROUP_COUNT)
+  const transcriptGroups = groupsBeforeFinalTail.slice(0, -stableTailGroups.length)
 
   // 标记哪些 group 属于实时流式消息（用于 isStreaming / onFork 差异化渲染）
   const liveGroupSet = React.useMemo(() => {
@@ -1235,6 +1269,7 @@ export const AgentMessages = React.memo(function AgentMessages({
               <AgentTranscriptTail
                 sessionId={sessionId}
                 sessionModelId={sessionModelId}
+                stableTailGroups={stableTailGroups}
                 finalGroup={finalTailGroup}
                 finalGroupStreaming={finalTailGroup ? liveGroupSet.has(finalTailGroup) : false}
                 pendingBoundaryGroups={pendingBoundaryGroups}
