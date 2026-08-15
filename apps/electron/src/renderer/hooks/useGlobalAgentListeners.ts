@@ -80,7 +80,7 @@ import { updatePlanModeSessionSet } from '@/lib/agent-plan-mode'
 import { buildTodoAgentPrompt } from '@/lib/todo-agent-prompt'
 import { detectIsWindows } from '@/lib/platform'
 import { getSessionFileChangeKind, arePathsEqual, isPathWithinRoot, upsertSessionFileChange } from '@/lib/session-file-changes'
-import { buildQueuedMessageSendPayload, removeQueuedMessage, restoreQueuedMessageToFront, shouldAutoDispatchQueuedMessage } from '@/lib/agent-message-queue'
+import { buildQueuedMessageSendPayload, removeQueuedMessage, restoreQueuedMessageToFront, shouldAutoDispatchQueuedMessage, upsertAgentLiveMessageByUuid } from '@/lib/agent-message-queue'
 import { buildQuotedSelectionBlock } from '@/lib/quoted-selection'
 import { agentLiveTranscriptStore } from '@/lib/agent-live-transcript-store'
 import { claimFinalToolSideEffects, isAgentRunSignalForCurrent, isRunScopedRetryUpdate, projectAgentLiveUpdates, shouldAcceptAgentRunStart } from '@/lib/agent-canonical-stream'
@@ -219,7 +219,7 @@ export function useGlobalAgentListeners(): void {
         return
       }
 
-      const optimisticMessageUuid = `queued-${message.id}`
+      const optimisticMessageUuid = message.id
       const optimisticMessage: SDKMessage = {
         type: 'user',
         uuid: optimisticMessageUuid,
@@ -230,7 +230,8 @@ export function useGlobalAgentListeners(): void {
       } as unknown as SDKMessage
       store.set(liveMessagesMapAtom, (prev) => {
         const map = new Map(prev)
-        map.set(sessionId, [...(map.get(sessionId) ?? []), optimisticMessage])
+        const current = map.get(sessionId) ?? []
+        map.set(sessionId, upsertAgentLiveMessageByUuid(current, optimisticMessage))
         return map
       })
       store.set(agentStreamErrorsAtom, (prev) => {
@@ -742,12 +743,17 @@ export function useGlobalAgentListeners(): void {
           }
         }
 
+        let liveUpdates = payload.kind === 'assistant_message_delta'
+          ? []
+          : projectAgentLiveUpdates(payload)
         if (payload.kind === 'assistant_message_delta') {
           if (payload.reset) {
             enrichLiveAssistantMessage(sessionId, payload.reset as unknown as Record<string, unknown>)
           }
-          // delta 被 store 拒绝时，不得再进入 tool/usage projector 触发副作用。
-          if (!agentLiveTranscriptStore.apply(sessionId, payload)) return
+          // assistant delta 在归约正文时同步产出语义更新，避免再次扫描同一份 operations。
+          const applied = agentLiveTranscriptStore.applyWithUpdates(sessionId, payload)
+          if (!applied) return
+          liveUpdates = applied.updates
         }
 
         if (payload.kind === 'proma_event' && payload.event.type === 'external_run_started') {
@@ -839,8 +845,7 @@ export function useGlobalAgentListeners(): void {
           }
         }
 
-        // 唯一 IPC payload 直接投影为 UI 状态更新；正文不会进入 Jotai 或旧文本 reducer。
-        const liveUpdates = projectAgentLiveUpdates(payload)
+        // canonical payload 直接投影为 UI 状态更新；assistant partial 已在正文归约时同步生成投影。
 
         for (const event of liveUpdates) {
           // 带 run 标识的 retry 更新必须在所有外围副作用前严格匹配当前流；

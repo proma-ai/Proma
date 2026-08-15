@@ -1,5 +1,5 @@
 import type { SDKMessage, SDKUserMessage } from '@proma/shared'
-import { groupIntoTurns, isUserInputMessage, type MessageGroup } from '@proma/session-core'
+import { groupIntoTurns, isUserInputMessage, type AssistantTurn, type MessageGroup } from '@proma/session-core'
 
 export interface MessageGroupRenderCache {
   prefixLength: number
@@ -56,6 +56,25 @@ export function stabilizeMessageGroups(previous: MessageGroup[], next: MessageGr
     return group
   })
   return changed ? stable : previous
+}
+
+/**
+ * 当前运行的 assistant turn 缺少模型元信息时，使用发送阶段已解析的身份补齐展示。
+ * 已从消息中解析出的身份始终优先，避免把运行中的模型泄漏到历史 turn。
+ */
+export function applyOptimisticAssistantTurnMetadata(
+  group: AssistantTurn | undefined,
+  model?: string,
+  channelId?: string,
+): AssistantTurn | undefined {
+  if (!group || (!model && !channelId)) return group
+  if ((!model || group.model) && (!channelId || group.channelId)) return group
+
+  return {
+    ...group,
+    model: group.model ?? model,
+    channelId: group.channelId ?? channelId,
+  }
 }
 
 function findActiveTurnBoundary(messages: SDKMessage[]): number {

@@ -36,7 +36,7 @@ import { buildLiveGroupSet } from './live-group-set'
 import { AgentBrowserLinkProvider } from '@/components/browser/AgentBrowserLinkProvider'
 import { AgentHistorySelectionLayer } from './AgentHistorySelectionLayer'
 import { TaskProgressOverlay, type ContextCompactionProgress } from './TaskProgressOverlay'
-import { createMessageGroupRenderCache, groupMessagesForRendering } from './message-group-rendering'
+import { applyOptimisticAssistantTurnMetadata, createMessageGroupRenderCache, groupMessagesForRendering } from './message-group-rendering'
 import { useAgentLiveTranscriptMessages } from '@/lib/agent-live-transcript-store'
 import type { AgentEventUsage, RetryAttempt, SDKMessage, SDKSystemMessage } from '@proma/shared'
 import { getSDKCompactStatus } from '@proma/shared'
@@ -672,9 +672,10 @@ const AgentTranscriptTail = React.memo(function AgentTranscriptTail({
   // run 在 user boundary 到达前不得把新回答并入上一轮历史 assistant。
   const shouldMerge = Boolean(finalGroup && previewGroup && finalGroupStreaming)
   const stablePreviousGroup = finalGroup && previewGroup && !shouldMerge ? finalGroup : undefined
-  const group = shouldMerge
+  const rawGroup = shouldMerge
     ? mergeAssistantTurns(finalGroup!, previewGroup!)
     : previewGroup ?? finalGroup
+  const group = applyOptimisticAssistantTurnMetadata(rawGroup, streamingModelId, streamingChannelId)
   const isStreaming = previewGroup !== undefined || (finalGroupStreaming && !stablePreviousGroup)
   const isErrorGroup = group?.assistantMessages.some((message) => !!message.error) ?? false
   const disableActions = isStreaming && !isErrorGroup
@@ -798,19 +799,8 @@ export const AgentMessages = React.memo(function AgentMessages({
       selectionHighlightUsesBrowserSelectionRef.current = false
     }
   }, [])
-  /** 淡入控制：切换会话时先隐藏，等布局完成后再显示。 */
-  const [ready, setReady] = React.useState(false)
-  // 空会话无需淡入过渡（无消息则无滚动位置问题）
-  const [skipFadeIn, setSkipFadeIn] = React.useState(false)
-  const prevSessionIdRef = React.useRef<string | null>(null)
-
-  React.useEffect(() => {
-    if (sessionId !== prevSessionIdRef.current) {
-      prevSessionIdRef.current = sessionId
-      setReady(false)
-      setSkipFadeIn(false)
-    }
-  }, [sessionId])
+  // 切换 Tab 时直接展示内存缓存或正在运行的实时消息，不等待异步持久化加载或下一帧淡入。
+  const ready = messagesLoaded !== false || (streaming && liveMessages.length > 0)
 
   React.useEffect(() => {
     const root = historySelectionRootRef.current
@@ -856,30 +846,6 @@ export const AgentMessages = React.memo(function AgentMessages({
     return () => window.cancelAnimationFrame(frame)
   }, [clearHistoryQuoteHighlight, historyQuoteNavigation, sessionId])
 
-  React.useEffect(() => {
-    if (ready) return
-
-    // 必须等消息加载完成，否则空 SDK 消息会被误判为空对话
-    if (messagesLoaded === false) return
-
-    // 流式进行中且有实时内容 → 跳过 fade 直接显示
-    if (streaming && (liveMessages?.length ?? 0) > 0) {
-      setReady(true)
-      return
-    }
-
-    if ((!persistedSDKMessages || persistedSDKMessages.length === 0) && !streaming) {
-      setSkipFadeIn(true)
-      setReady(true)
-      return
-    }
-    let cancelled = false
-    requestAnimationFrame(() => {
-      if (!cancelled) setReady(true)
-    })
-    return () => { cancelled = true }
-  }, [streaming, liveMessages, persistedSDKMessages, messagesLoaded])
-
   // 从 streamState 属性中计算派生值
   const streamingModelId = streamState?.model || sessionModelId
   const streamingChannelId = streamState?.channelId
@@ -888,38 +854,6 @@ export const AgentMessages = React.memo(function AgentMessages({
     : undefined
   const retrying = streamState?.retrying
   const startedAt = streamState?.startedAt
-
-  /**
-   * 流式完成过渡：streaming 结束到持久化消息加载完成之间，
-   * 强制 resize="instant" 避免中间高度变化触发平滑滚动动画。
-   *
-   * 使用 render-phase 计算避免 useEffect 延迟一帧的问题：
-   * - streaming 变 false 的第一帧就能立即切到 instant，防止闪动
-   * - 后续通过 ref+timeout 延迟 150ms 才允许切回 smooth
-   */
-  const [transitioningCooldown, setTransitioningCooldown] = React.useState(false)
-  const wasStreamingRef = React.useRef(streaming)
-
-  // render-phase 判断：是否处于需要 instant resize 的过渡期
-  // liveMessages 非空说明持久化消息还没加载完（加载完后会清空 liveMessages）
-  const needsInstant = !streaming && liveMessages != null && liveMessages.length > 0
-
-  React.useEffect(() => {
-    // 刚从 streaming → not-streaming：启动 cooldown
-    if (wasStreamingRef.current && !streaming) {
-      setTransitioningCooldown(true)
-    }
-    wasStreamingRef.current = streaming
-  }, [streaming])
-
-  React.useEffect(() => {
-    if (needsInstant) return
-    // 过渡完成后延迟 150ms 才关闭 cooldown，给 StickToBottom 时间稳定
-    const timer = setTimeout(() => setTransitioningCooldown(false), 150)
-    return () => clearTimeout(timer)
-  }, [needsInstant])
-
-  const transitioning = needsInstant || transitioningCooldown
 
   // 合并持久化 + 实时 SDKMessage；历史 group 后续仅接收本 turn 消息，避免全历史依赖扩散。
   const allSDKMessages = React.useMemo(() => {
@@ -1116,7 +1050,10 @@ export const AgentMessages = React.memo(function AgentMessages({
           color: inherit;
         }
       `}</style>
-          <Conversation resize={ready && !transitioning ? 'smooth' : 'instant'} className={ready ? (skipFadeIn ? 'opacity-100' : 'opacity-100 transition-opacity duration-200') : 'opacity-0'}>
+          <Conversation
+            resize="instant"
+            className={ready ? 'opacity-100' : 'opacity-0'}
+          >
         <ScrollPositionManager id={sessionId} ready={ready} />
         <ConversationContent>
           {hasEarlierMessages && (

@@ -237,6 +237,27 @@ export function areAgentViewStreamStatesEqual(
     && previous.isCompacting === next.isCompacting
 }
 
+export type AgentInputStreamState = Pick<AgentStreamState, 'running' | 'backgroundWaiting'>
+
+const EMPTY_AGENT_INPUT_STREAM_STATE: AgentInputStreamState = { running: false }
+
+function areAgentInputStreamStatesEqual(
+  previous: AgentInputStreamState,
+  next: AgentInputStreamState,
+): boolean {
+  return previous.running === next.running
+    && previous.backgroundWaiting === next.backgroundWaiting
+}
+
+/** 输入区只订阅发送/排队需要的生命周期状态，避免 usage_update 触发整页重渲染。 */
+export const agentSessionInputStreamStateAtomFamily = atomFamily((sessionId: string) =>
+  selectAtom(
+    agentSessionStreamingStateAtomFamily(sessionId),
+    (state): AgentInputStreamState => state ?? EMPTY_AGENT_INPUT_STREAM_STATE,
+    areAgentInputStreamStatesEqual,
+  ),
+)
+
 /**
  * AgentView 不订阅逐 token content；完整状态只由 AgentMessages 消费。
  * selectAtom 的 equalityFn 保证纯文本流式更新不会重渲染输入框和工具栏。

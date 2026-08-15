@@ -6,6 +6,11 @@ import type {
   SDKContentBlock,
 } from '@proma/shared'
 
+import type { AgentLiveUpdate } from './agent-canonical-stream'
+import { toolStartFromBlock, usageUpdateFromAssistant } from './agent-canonical-stream'
+
+const EMPTY_MESSAGES: SDKAssistantMessage[] = []
+
 interface LiveAssistantRecord {
   message: SDKAssistantMessage
   sequence: number
@@ -19,7 +24,10 @@ interface SessionLiveTranscript {
   listeners: Set<() => void>
 }
 
-const EMPTY_MESSAGES: SDKAssistantMessage[] = []
+export interface AppliedAgentAssistantDelta {
+  message: SDKAssistantMessage
+  updates: AgentLiveUpdate[]
+}
 
 function cloneAssistantMessage(message: SDKAssistantMessage): SDKAssistantMessage {
   return {
@@ -30,6 +38,15 @@ function cloneAssistantMessage(message: SDKAssistantMessage): SDKAssistantMessag
       ...(message.message.usage && { usage: { ...message.message.usage } }),
     },
   }
+}
+
+function collectToolStart(
+  toolStarts: Map<string, Extract<AgentLiveUpdate, { type: 'tool_start' }>>,
+  block: SDKContentBlock,
+  parentToolUseId: string | undefined,
+): void {
+  const toolStart = toolStartFromBlock(block, parentToolUseId, false)
+  if (toolStart) toolStarts.set(toolStart.toolUseId, toolStart)
 }
 
 function applyOperation(
@@ -97,13 +114,17 @@ export class AgentLiveTranscriptStore {
   private readonly sessions = new Map<string, SessionLiveTranscript>()
 
   apply(sessionId: string, delta: AgentAssistantMessageDelta): SDKAssistantMessage | null {
+    return this.applyWithUpdates(sessionId, delta)?.message ?? null
+  }
+
+  applyWithUpdates(sessionId: string, delta: AgentAssistantMessageDelta): AppliedAgentAssistantDelta | null {
     const session = this.getOrCreateSession(sessionId)
     const previous = session.records.get(delta.messageId)
 
     // run scope 必须先于 sequence 判断：新 run 的 reset 不能被旧 run 的高 sequence 拒绝。
     if (previous && delta.runId !== previous.runId && !delta.reset) return null
     if (previous && delta.runId === previous.runId && delta.sequence <= previous.sequence) {
-      return previous.message
+      return { message: previous.message, updates: [] }
     }
     if (
       previous
@@ -113,9 +134,24 @@ export class AgentLiveTranscriptStore {
     ) return null
     if (!previous && !delta.reset) return null
 
+    const toolStarts = new Map<string, Extract<AgentLiveUpdate, { type: 'tool_start' }>>()
+    const updates: AgentLiveUpdate[] = []
+    const parentToolUseId = delta.metadata?.parentToolUseId ?? delta.reset?.parent_tool_use_id ?? undefined
+
+    if (delta.reset) {
+      if (delta.reset.message.content.length > 0) updates.push({ type: 'assistant_progress' })
+      for (const block of delta.reset.message.content) {
+        collectToolStart(toolStarts, block, parentToolUseId)
+      }
+      const usage = usageUpdateFromAssistant(delta.reset)
+      if (usage) updates.push(usage)
+    }
+
+    if (delta.operations.length > 0) updates.push({ type: 'assistant_progress' })
+
     let nextMessage = delta.reset
       ? cloneAssistantMessage(delta.reset)
-      : cloneAssistantMessage(previous!.message)
+      : previous!.message
 
     for (const operation of delta.operations) {
       const nextBlocks = applyOperation(nextMessage.message.content, operation)
@@ -124,8 +160,17 @@ export class AgentLiveTranscriptStore {
         ...nextMessage,
         message: { ...nextMessage.message, content: nextBlocks },
       }
+      if (operation.type === 'append_block' || operation.type === 'replace_block') {
+        collectToolStart(toolStarts, operation.block, parentToolUseId)
+      }
     }
     nextMessage = applyMetadata(nextMessage, delta)
+
+    if (!delta.reset && delta.metadata?.usage) {
+      const usage = usageUpdateFromAssistant(nextMessage)
+      if (usage) updates.push(usage)
+    }
+    updates.push(...toolStarts.values())
 
     session.records.set(delta.messageId, {
       message: nextMessage,
@@ -134,7 +179,7 @@ export class AgentLiveTranscriptStore {
     })
     if (!session.order.includes(delta.messageId)) session.order.push(delta.messageId)
     this.publish(session)
-    return nextMessage
+    return { message: nextMessage, updates }
   }
 
   finalize(sessionId: string, messageId: string): void {

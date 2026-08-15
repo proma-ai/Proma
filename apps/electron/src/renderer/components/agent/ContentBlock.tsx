@@ -644,18 +644,31 @@ interface ThinkingBlockProps {
 
 /** 思考块折叠行数阈值 */
 const THINKING_COLLAPSE_LINE_THRESHOLD = 4
+const THINKING_STREAMING_COLLAPSE_LINE_THRESHOLD = 2
 
 function ThinkingBlock({ block, dimmed = false, isStreaming = false }: ThinkingBlockProps): React.ReactElement {
   const [isExpanded, setIsExpanded] = React.useState(false)
   const [shouldCollapse, setShouldCollapse] = React.useState(false)
   const contentRef = React.useRef<HTMLDivElement>(null)
+  const wasStreamingRef = React.useRef(isStreaming)
 
-  // 检测内容是否超过阈值行数（useLayoutEffect：在 paint 前同步执行，避免「展开→收起」闪屏）
+  // 流式阶段默认收起，避免 Thinking 持续增长时占满对话区域；完成态保留原有展开阈值。
+  React.useEffect(() => {
+    if (isStreaming && !wasStreamingRef.current) {
+      setIsExpanded(false)
+    }
+    wasStreamingRef.current = isStreaming
+  }, [isStreaming])
+
+  // 检测内容是否超过当前状态的行数阈值（useLayoutEffect：在 paint 前同步执行，避免闪屏）
   React.useLayoutEffect(() => {
-    if (isStreaming || !contentRef.current) return
+    if (!contentRef.current) return
     const el = contentRef.current
     const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 22
-    const maxHeight = lineHeight * THINKING_COLLAPSE_LINE_THRESHOLD
+    const threshold = isStreaming
+      ? THINKING_STREAMING_COLLAPSE_LINE_THRESHOLD
+      : THINKING_COLLAPSE_LINE_THRESHOLD
+    const maxHeight = lineHeight * threshold
     setShouldCollapse(el.scrollHeight > maxHeight + 10)
   }, [block.thinking, isStreaming])
 
@@ -687,7 +700,7 @@ function ThinkingBlock({ block, dimmed = false, isStreaming = false }: ThinkingB
           className={cn(
             'prose prose-sm dark:prose-invert max-w-none prose-p:my-1 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 text-[14px] leading-relaxed overflow-hidden transition-[max-height] duration-200',
             dimmed ? 'text-muted-foreground' : 'text-foreground/90',
-            shouldCollapse && !isExpanded && 'max-h-[5.6em]',
+            shouldCollapse && !isExpanded && (isStreaming ? 'max-h-[3.25em]' : 'max-h-[5.6em]'),
           )}
         >
           <SmoothMarkdownBody
@@ -701,7 +714,7 @@ function ThinkingBlock({ block, dimmed = false, isStreaming = false }: ThinkingB
             type="button"
             onClick={toggleExpand}
             className={cn(
-              'mt-2 flex items-center gap-1 text-xs text-foreground/35 transition-colors',
+              'mt-1 flex items-center gap-1 text-xs leading-none text-foreground/35 transition-colors',
               'hover:text-foreground/55'
             )}
           >
