@@ -740,6 +740,24 @@ export class BrowserController {
     for (const browserSession of changedSessions) this.emit(browserSession)
   }
 
+  /** 清空跨 Session 共享的原生浏览器展示槽，避免切换期间旧 view 短暂覆盖新 Session。 */
+  hidePresentation(revision: number): void {
+    if (!Number.isSafeInteger(revision)) return
+    const changedSessions = new Set<BrowserSessionRecord>()
+    for (const browserSession of this.sessions.values()) {
+      for (const tab of browserSession.tabs.values()) {
+        tab.view.setVisible(false)
+        if (tab.state.visible) {
+          tab.state.visible = false
+          changedSessions.add(browserSession)
+        }
+      }
+    }
+    this.presentation = null
+    this.latestPresentationRevision = Math.max(this.latestPresentationRevision, revision)
+    this.emitChangedSessions(changedSessions)
+  }
+
   setLayout(layout: BrowserViewLayout): void {
     const browserSession = this.sessions.get(layout.sessionId)
     if (!browserSession) return

@@ -1733,6 +1733,7 @@ export const AGENT_IPC_CHANNELS = {
   CLOSE_BROWSER_TAB: 'agent:close-browser-tab',
   GET_BROWSER_STATE: 'agent:get-browser-state',
   SET_BROWSER_LAYOUT: 'agent:set-browser-layout',
+  HIDE_BROWSER_PRESENTATION: 'agent:hide-browser-presentation',
   NAVIGATE_BROWSER: 'agent:navigate-browser',
   GO_BACK_BROWSER: 'agent:go-back-browser',
   GO_FORWARD_BROWSER: 'agent:go-forward-browser',

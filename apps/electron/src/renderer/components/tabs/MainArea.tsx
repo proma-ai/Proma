@@ -34,6 +34,7 @@ import { interfaceVariantAtom } from '@/atoms/theme'
 import { cn } from '@/lib/utils'
 import { browserPanelOpenMapAtom, browserPendingNavigationMapAtom, browserStateMapAtom } from '@/atoms/browser-atoms'
 import { BrowserPanel } from '@/components/browser/BrowserPanel'
+import { nextBrowserLayoutRevision } from '@/components/browser/browser-layout-revision'
 
 interface BrowserClosingState {
   sessionId: string
@@ -63,6 +64,14 @@ export function MainArea(): React.ReactElement {
   const previewDragging = React.useRef(false)
   const rightWorkspaceDragging = React.useRef(false)
   const browserSessionId = activeTab?.type === 'agent' ? activeTab.sessionId : null
+
+  // 原生 WebContentsView 不受 React DOM 卸载同步控制。Session 或主视图切换时先在
+  // layout effect 中清空共享展示槽，避免旧 Session 的页面参与新一帧绘制。
+  React.useLayoutEffect(() => {
+    const hidePresentation = (window.electronAPI as Partial<typeof window.electronAPI>).hideAgentBrowserPresentation
+    if (typeof hidePresentation !== 'function') return
+    void hidePresentation(nextBrowserLayoutRevision()).catch(() => undefined)
+  }, [activeView, browserSessionId])
 
   const publishBrowserState = React.useCallback((state: BrowserViewState) => {
     setBrowserStateMap((previous) => { const next = new Map(previous); next.set(state.sessionId, state); return next })

@@ -2122,6 +2122,14 @@ export function registerIpcHandlers(): void {
     },
   )
   ipcMain.handle(
+    AGENT_IPC_CHANNELS.HIDE_BROWSER_PRESENTATION,
+    async (event, revision: number): Promise<void> => {
+      await assertMainRenderer(event.sender.id)
+      if (!Number.isSafeInteger(revision)) throw new Error('无效的浏览器展示 revision。')
+      browserController.hidePresentation(revision)
+    },
+  )
+  ipcMain.handle(
     AGENT_IPC_CHANNELS.NAVIGATE_BROWSER,
     async (event, input: BrowserNavigateInput): Promise<BrowserViewState> => {
       await assertBrowserSessionAccess(event.sender.id, input.sessionId)
