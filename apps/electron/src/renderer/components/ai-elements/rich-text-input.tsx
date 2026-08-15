@@ -876,6 +876,17 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
     },
   }, [richTextEnabled])
 
+  // 外部同步或可编辑状态切换偶尔会让 ProseMirror 原生节点失焦。只在变更前编辑器
+  // 确实拥有焦点时恢复，避免用户主动点击工具栏/其他输入框后被抢回焦点。
+  const runEditorMutationPreservingFocus = useCallback((mutation: () => void): void => {
+    if (!editor) return
+    const shouldRestoreFocus = editor.isFocused || editor.view.dom.contains(document.activeElement)
+    mutation()
+    if (shouldRestoreFocus && editor.isEditable && editor.view.dom.isConnected && !editor.isFocused) {
+      editor.commands.focus()
+    }
+  }, [editor])
+
   // 卸载时取消未触发的行数检查和草稿同步；同步最后一笔输入，避免快速切换会话丢草稿。
   useEffect(() => {
     return () => {
@@ -944,31 +955,39 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
     onInputActivityRef.current?.(controllerValue.trim().length > 0)
 
     if (controllerValue === '') {
-      editor.commands.clearContent(false)
+      runEditorMutationPreservingFocus(() => {
+        editor.commands.clearContent(false)
+      })
       lastEditorValueRef.current = ''
       isExpandedRef.current = false
       setIsExpanded(false)
       setIsManuallyCollapsed(false)
     } else if (htmlValue) {
       // 优先使用 HTML 草稿恢复（保留 mention 等富文本节点）。外部同步不应再次触发草稿写回。
-      editor.commands.setContent(htmlValue, { emitUpdate: false })
+      runEditorMutationPreservingFocus(() => {
+        editor.commands.setContent(htmlValue, { emitUpdate: false })
+      })
       lastEditorValueRef.current = controllerValue
     } else {
       const html = controllerValue
         .split(/\n\n+/)
         .map(para => `<p>${para.replace(/\n/g, '<br>')}</p>`)
         .join('')
-      editor.commands.setContent(html, { emitUpdate: false })
+      runEditorMutationPreservingFocus(() => {
+        editor.commands.setContent(html, { emitUpdate: false })
+      })
       lastEditorValueRef.current = controllerValue
     }
-  }, [draftScopeKey, draftSyncVersion, editor, value])
+  }, [draftScopeKey, draftSyncVersion, editor, runEditorMutationPreservingFocus, value])
 
   // 同步 disabled 状态
   useEffect(() => {
     if (editor) {
-      editor.setEditable(!disabled)
+      runEditorMutationPreservingFocus(() => {
+        editor.setEditable(!disabled)
+      })
     }
-  }, [editor, disabled])
+  }, [editor, disabled, runEditorMutationPreservingFocus])
 
   // 动态更新 placeholder 文本
   useEffect(() => {
