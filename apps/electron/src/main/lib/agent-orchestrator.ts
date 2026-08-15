@@ -366,16 +366,17 @@ export class AgentOrchestrator {
       if (!result) {
         console.warn('[Agent 标题生成] API 未返回可用标题')
         // OpenCode Go 的推理模型可能把输出预算全花在推理上返回空正文，或
-        // 内容块为数组；任何取不到可用标题的情况都回退到首行兜底，保证会话一定被重命名。
-        return channel.provider === 'opencode-go-openai' ? createFallbackTitle(userMessage) : null
+        // 内容块为数组；自定义渠道（custom）也可能返回空/异常；任何取不到可用标题的情况
+        // 都回退到首行兜底，保证会话一定被重命名。
+        return (channel.provider === 'opencode-go-openai' || channel.provider === 'custom') ? createFallbackTitle(userMessage) : null
       }
 
       console.log(`[Agent 标题生成] 生成标题成功: "${result}"`)
       return result
     } catch (error) {
       console.warn('[Agent 标题生成] 生成失败:', error)
-      // OpenCode Go 的服务端偶发返回空标题/异常响应/超时，异常路径同样要完成重命名。
-      return channel.provider === 'opencode-go-openai' ? createFallbackTitle(userMessage) : null
+      // OpenCode Go / 自定义渠道的服务端偶发返回空标题/异常响应/超时，异常路径同样要完成重命名。
+      return (channel.provider === 'opencode-go-openai' || channel.provider === 'custom') ? createFallbackTitle(userMessage) : null
     }
   }
 
