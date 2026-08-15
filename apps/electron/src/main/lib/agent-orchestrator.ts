@@ -1599,7 +1599,8 @@ export class AgentOrchestrator {
               console.warn(`[Agent 编排] drain timeout: SDK iterator 在 result 后 ${RESULT_DRAIN_TIMEOUT_MS}ms 内未关闭，强制退出`)
               pendingNext?.catch(() => {})
               pendingNext = null
-              void closeQueryIterator().catch(() => {})
+              await this.adapter.abort(sessionId)
+              await closeQueryIterator().catch(() => {})
               break
             }
 
@@ -2105,7 +2106,9 @@ export class AgentOrchestrator {
     browserController.cancelSession(sessionId)
     if (runGeneration != null) this.stoppedBySessions.set(sessionId, runGeneration)
     this.queuedMessageUuids.delete(sessionId)
-    this.adapter.abort(sessionId)
+    void Promise.resolve(this.adapter.abort(sessionId)).catch((error) => {
+      console.warn(`[Agent 编排] 中止会话失败: ${sessionId}`, error)
+    })
     console.log(`[Agent 编排] 已中止会话: ${sessionId}`)
   }
 

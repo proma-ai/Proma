@@ -18,6 +18,7 @@ type PendingQuery = {
   input: PiAgentQueryOptions
   queue: AsyncEventQueue<PiRunSourceEvent>
   accepted: boolean
+  abortRequested: boolean
   runtimeFailed: boolean
 }
 
@@ -53,6 +54,7 @@ export class PiUtilityAdapter {
       input,
       queue,
       accepted: false,
+      abortRequested: false,
       runtimeFailed: false,
     }
     this.pendingQueries.set(queryId, pending)
@@ -63,11 +65,21 @@ export class PiUtilityAdapter {
         queryId,
         input: serializeQueryInput(input),
       }
-      await this.client.call(AGENT_RUNTIME_METHODS.QUERY_START, { queryId: _queryId, input: serializableInput }, {
-        sessionId: input.sessionId,
-        runId: input.runId,
-      })
-      pending.accepted = true
+      try {
+        await this.client.call(AGENT_RUNTIME_METHODS.QUERY_START, { queryId: _queryId, input: serializableInput }, {
+          sessionId: input.sessionId,
+          runId: input.runId,
+        })
+        pending.accepted = true
+      } catch (error) {
+        await this.abortPendingQuery(pending, true).catch(() => {})
+        throw error
+      }
+      if (pending.abortRequested) {
+        await this.abortPendingQuery(pending)
+        ended = true
+        return
+      }
 
       while (true) {
         const result = await queue.next()
@@ -83,16 +95,18 @@ export class PiUtilityAdapter {
     }
   }
 
-  abort(sessionId: string): void {
+  async abort(sessionId: string): Promise<void> {
     let pending: PendingQuery | undefined
     for (const candidate of this.pendingQueries.values()) {
       if (candidate.sessionId === sessionId) pending = candidate
     }
-    if (pending) void this.abortPendingQuery(pending).catch(() => {})
+    if (!pending) return
+    pending.abortRequested = true
+    await this.abortPendingQuery(pending)
   }
 
-  private async abortPendingQuery(pending: PendingQuery): Promise<void> {
-    if (!pending.accepted || pending.runtimeFailed || !this.client.isReady) return
+  private async abortPendingQuery(pending: PendingQuery, force = false): Promise<void> {
+    if ((!pending.accepted && !force) || pending.runtimeFailed || !this.client.isReady) return
     await this.client.call(AGENT_RUNTIME_METHODS.QUERY_ABORT, {
       queryId: pending.queryId,
       sessionId: pending.sessionId,
@@ -125,6 +139,7 @@ export class PiUtilityAdapter {
   dispose(): void {
     this.unsubscribeRuntimeEvents()
     for (const pending of this.pendingQueries.values()) {
+      pending.abortRequested = true
       pending.queue.fail(new Error('Agent utility stopped'))
     }
     this.pendingQueries.clear()
