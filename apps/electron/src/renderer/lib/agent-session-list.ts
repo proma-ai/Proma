@@ -5,6 +5,49 @@ interface AgentSessionTreeLike {
   childSessions: readonly Pick<AgentSessionMeta, 'id'>[]
 }
 
+export interface AgentSessionTreeItem {
+  session: AgentSessionMeta
+  childSessions: AgentSessionMeta[]
+}
+
+/** 委派子会话必须跟随父会话展示，不能在父会话尚未加载时降级为根会话。 */
+export function isDelegatedChildSession(session: AgentSessionMeta): boolean {
+  return !!session.parentSessionId && !!session.sourceDelegationId
+}
+
+/**
+ * 将 Agent 会话构建为父子树。
+ *
+ * 冷启动时子会话的 external_run_started 可能先于父会话元数据进入 renderer；
+ * 这类 orphan child 只暂存于列表状态，不能作为顶层用户会话渲染，否则父会话
+ * 到达后会同时出现一个根节点和一个嵌套节点。
+ */
+export function buildAgentSessionTrees(
+  sessions: readonly AgentSessionMeta[],
+): AgentSessionTreeItem[] {
+  const sessionIds = new Set(sessions.map((session) => session.id))
+  const childrenByParentId = new Map<string, AgentSessionMeta[]>()
+  const roots: AgentSessionMeta[] = []
+
+  for (const session of sessions) {
+    if (isDelegatedChildSession(session)) {
+      if (session.parentSessionId && sessionIds.has(session.parentSessionId)) {
+        const children = childrenByParentId.get(session.parentSessionId) ?? []
+        children.push(session)
+        childrenByParentId.set(session.parentSessionId, children)
+      }
+      continue
+    }
+
+    roots.push(session)
+  }
+
+  return roots.map((session) => ({
+    session,
+    childSessions: childrenByParentId.get(session.id) ?? [],
+  }))
+}
+
 /** 按最近更新时间排序 Agent 会话，保持与主进程 listAgentSessions 一致。 */
 export function sortAgentSessionsByUpdatedAtDesc(
   sessions: readonly AgentSessionMeta[],

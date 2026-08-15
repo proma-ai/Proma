@@ -104,12 +104,15 @@ import { detectIsMac } from '@/lib/platform'
 import { ShortcutKeycaps } from '@/components/shortcuts/ShortcutKeycaps'
 import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-registry'
 import {
+  buildAgentSessionTrees,
   collectAgentSessionTreeIds,
+  isDelegatedChildSession,
   isAgentSessionVisibleInTrees,
   mergeActiveAgentSessions,
   replaceAgentSessionInFreshnessOrder,
   sortAgentSessionsByUpdatedAtDesc,
 } from '@/lib/agent-session-list'
+import type { AgentSessionTreeItem } from '@/lib/agent-session-list'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -322,11 +325,6 @@ interface AgentProjectGroup {
   sessions: AgentSessionMeta[]
 }
 
-interface AgentSessionTreeItem {
-  session: AgentSessionMeta
-  childSessions: AgentSessionMeta[]
-}
-
 /** 合成「自动任务」虚拟项目组的工作区 ID（不对应真实 workspace，仅用于聚合自动任务会话） */
 const AUTOMATION_GROUP_ID = '__automations__'
 /** 供合成组复用 AgentProjectGroupItem 时填充无意义的 workspace 专属回调 */
@@ -483,36 +481,6 @@ function getRailInitial(title: string): string {
  */
 function isHiddenAutomationSession(session: AgentSessionMeta): boolean {
   return !!session.sourceAutomationId && !session.pinned
-}
-
-function isDelegatedChildSession(session: AgentSessionMeta): boolean {
-  return !!session.parentSessionId && !!session.sourceDelegationId
-}
-
-function buildAgentSessionTrees(sessions: AgentSessionMeta[]): AgentSessionTreeItem[] {
-  const sessionIds = new Set(sessions.map((session) => session.id))
-  const childrenByParentId = new Map<string, AgentSessionMeta[]>()
-  const roots: AgentSessionMeta[] = []
-
-  for (const session of sessions) {
-    if (
-      isDelegatedChildSession(session)
-      && session.parentSessionId
-      && sessionIds.has(session.parentSessionId)
-    ) {
-      const children = childrenByParentId.get(session.parentSessionId) ?? []
-      children.push(session)
-      childrenByParentId.set(session.parentSessionId, children)
-      continue
-    }
-
-    roots.push(session)
-  }
-
-  return roots.map((session) => ({
-    session,
-    childSessions: childrenByParentId.get(session.id) ?? [],
-  }))
 }
 
 function getDelegatedChildStatus(
@@ -1002,6 +970,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       const filtered = agentSessions.filter((s) =>
         s.pinned
         && !draftSessionIds.has(s.id)
+        && !isDelegatedChildSession(s)
         && !hasPinnedVisibleParent(s, agentSessions)
       )
       return sortAgentSessionsByUpdatedAtDesc(filtered)

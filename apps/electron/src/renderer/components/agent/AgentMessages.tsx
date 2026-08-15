@@ -41,6 +41,7 @@ import { TaskProgressOverlay, type ContextCompactionProgress } from './TaskProgr
 import { applyOptimisticAssistantTurnMetadata, createMessageGroupRenderCache, groupMessagesForRendering } from './message-group-rendering'
 import { useAgentLiveTranscriptMessages } from '@/lib/agent-live-transcript-store'
 import { getScrollTopAfterPrepend } from '@/lib/agent-scroll-anchor'
+import { mergePersistedAndLiveAgentMessages } from '@/lib/agent-message-merge'
 import type { AgentEventUsage, RetryAttempt, SDKMessage, SDKSystemMessage } from '@proma/shared'
 import { getSDKCompactStatus } from '@proma/shared'
 import { agentLiveMessagesAtomFamily, agentSessionMessagesStreamStateAtomFamily, type AgentStreamState } from '@/atoms/agent-atoms'
@@ -1039,8 +1040,12 @@ export const AgentMessages = React.memo(function AgentMessages({
 
     const persistedWithKeys = persisted.map(stampStableKey)
     const liveWithKeys = live.map(stampStableKey)
-    if (streaming || liveWithKeys.length === 0 || persistedWithKeys.length === 0) {
+    if (liveWithKeys.length === 0 || persistedWithKeys.length === 0) {
       return [...persistedWithKeys, ...liveWithKeys]
+    }
+
+    if (streaming) {
+      return mergePersistedAndLiveAgentMessages(persistedWithKeys, liveWithKeys)
     }
 
     // 流式结束后的刷新中，持久化消息尾部可能已经包含 live 序列。
