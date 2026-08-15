@@ -6,6 +6,8 @@
  */
 
 import * as React from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
+import { useStickToBottomContext } from 'use-stick-to-bottom'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { Bot, RotateCw, AlertTriangle, CheckCircle2, Ban, ChevronDown, ChevronRight } from 'lucide-react'
 import { WelcomeEmptyState } from '@/components/welcome/WelcomeEmptyState'
@@ -38,6 +40,7 @@ import { AgentHistorySelectionLayer } from './AgentHistorySelectionLayer'
 import { TaskProgressOverlay, type ContextCompactionProgress } from './TaskProgressOverlay'
 import { applyOptimisticAssistantTurnMetadata, createMessageGroupRenderCache, groupMessagesForRendering } from './message-group-rendering'
 import { useAgentLiveTranscriptMessages } from '@/lib/agent-live-transcript-store'
+import { getScrollTopAfterPrepend } from '@/lib/agent-scroll-anchor'
 import type { AgentEventUsage, RetryAttempt, SDKMessage, SDKSystemMessage } from '@proma/shared'
 import { getSDKCompactStatus } from '@proma/shared'
 import { agentLiveMessagesAtomFamily, agentSessionMessagesStreamStateAtomFamily, type AgentStreamState } from '@/atoms/agent-atoms'
@@ -760,6 +763,143 @@ const AgentTranscriptTail = React.memo(function AgentTranscriptTail({
   )
 })
 
+interface AgentTranscriptHistoryProps {
+  groups: MessageGroup[]
+  liveGroupSet: ReadonlySet<MessageGroup>
+  allMessages: SDKMessage[]
+  taskNotificationSignature: string
+  sessionPath?: string
+  sessionModelId?: string
+  groupHistoryTurns: Map<MessageGroup, number>
+  onFork?: (upToMessageUuid: string) => void
+  onRewind?: (assistantMessageUuid: string) => void
+  onAgentHistoryQuoteClick?: (quote: QuotedSelection) => void
+  onCreateTodo?: (text: string) => void
+  onRetry?: () => void
+  onRetryInNewSession?: () => void
+  onCompact?: () => void
+  onRelinkProjectRoot?: () => void
+  onRestoreProjectRoot?: () => void
+}
+
+/**
+ * 历史消息只挂载视口附近的 group；当前正在增长的 assistant turn 由 tail 独立承载。
+ * prepend 时按实际 scrollHeight 差值补偿，保持用户正在阅读的消息不跳动。
+ */
+const AgentTranscriptHistory = React.memo(function AgentTranscriptHistory({
+  groups,
+  liveGroupSet,
+  allMessages,
+  taskNotificationSignature,
+  sessionPath,
+  sessionModelId,
+  groupHistoryTurns,
+  onFork,
+  onRewind,
+  onAgentHistoryQuoteClick,
+  onCreateTodo,
+  onRetry,
+  onRetryInNewSession,
+  onCompact,
+  onRelinkProjectRoot,
+  onRestoreProjectRoot,
+}: AgentTranscriptHistoryProps): React.ReactElement {
+  const { scrollRef, isAtBottom } = useStickToBottomContext()
+  const virtualizer = useVirtualizer({
+    count: groups.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 160,
+    getItemKey: (index) => {
+      const group = groups[index]
+      return group ? getGroupId(group) : index
+    },
+    overscan: 6,
+    // measureElement 可能在 React commit 期间回调；避免 TanStack 默认 flushSync 触发 React 警告。
+    useFlushSync: false,
+  })
+  const virtualItems = virtualizer.getVirtualItems()
+  const previousLayoutRef = React.useRef<{
+    count: number
+    firstGroupId: string | undefined
+    scrollHeight: number
+    isAtBottom: boolean
+  } | null>(null)
+
+  React.useLayoutEffect(() => {
+    const element = scrollRef.current
+    if (!element) return
+
+    const previous = previousLayoutRef.current
+    const firstGroupId = groups[0] ? getGroupId(groups[0]) : undefined
+    if (
+      previous
+      && groups.length > previous.count
+      && firstGroupId !== previous.firstGroupId
+      && !previous.isAtBottom
+    ) {
+      const heightDelta = element.scrollHeight - previous.scrollHeight
+      if (heightDelta > 0) {
+        element.scrollTop = getScrollTopAfterPrepend(
+          element.scrollTop,
+          previous.scrollHeight,
+          element.scrollHeight,
+        )
+      }
+    }
+
+    previousLayoutRef.current = {
+      count: groups.length,
+      firstGroupId,
+      scrollHeight: element.scrollHeight,
+      isAtBottom,
+    }
+  }, [groups, isAtBottom, scrollRef])
+
+  return (
+    <div
+      className="relative w-full shrink-0"
+      style={{ height: virtualizer.getTotalSize() }}
+    >
+      {virtualItems.map((item) => {
+        const group = groups[item.index]
+        if (!group) return null
+        const isLive = liveGroupSet.has(group)
+        const isErrorGroup = group.type === 'assistant-turn'
+          && group.assistantMessages.some((message) => !!message.error)
+        const shouldDisableActions = isLive && !isErrorGroup
+        return (
+          <div
+            key={item.key}
+            ref={virtualizer.measureElement}
+            data-index={item.index}
+            className="absolute left-0 top-0 w-full pb-1"
+            style={{ transform: `translateY(${item.start}px)` }}
+          >
+            <MessageGroupRenderer
+              group={group}
+              allMessages={group.type === 'assistant-turn' ? allMessages : EMPTY_SDK_MESSAGES}
+              externalMetadataSignature={group.type === 'assistant-turn' ? taskNotificationSignature : ''}
+              basePath={sessionPath}
+              onFork={shouldDisableActions ? undefined : onFork}
+              onRewind={shouldDisableActions ? undefined : onRewind}
+              onAgentHistoryQuoteClick={onAgentHistoryQuoteClick}
+              onCreateTodo={shouldDisableActions ? undefined : onCreateTodo}
+              onRetry={shouldDisableActions ? undefined : onRetry}
+              onRetryInNewSession={shouldDisableActions ? undefined : onRetryInNewSession}
+              onRelinkProjectRoot={shouldDisableActions ? undefined : onRelinkProjectRoot}
+              onRestoreProjectRoot={shouldDisableActions ? undefined : onRestoreProjectRoot}
+              onCompact={shouldDisableActions ? undefined : onCompact}
+              historyTurn={groupHistoryTurns.get(group)}
+              isStreaming={isLive || undefined}
+              sessionModelId={sessionModelId}
+            />
+          </div>
+        )
+      })}
+    </div>
+  )
+})
+
 export const AgentMessages = React.memo(function AgentMessages({
   sessionId,
   sessionModelId,
@@ -1073,34 +1213,24 @@ export const AgentMessages = React.memo(function AgentMessages({
             <EmptyState />
           ) : (
             <>
-              {/* 统一消息渲染（持久化 + 实时合并为一个列表，确保 system 消息位置正确） */}
-              {transcriptGroups.map((group) => {
-                const isLive = liveGroupSet.has(group)
-                const isErrorGroup = group.type === 'assistant-turn'
-                  && group.assistantMessages.some((m) => !!m.error)
-                const shouldDisableActions = isLive && !isErrorGroup
-                const renderer = (
-                  <MessageGroupRenderer
-                    group={group}
-                    allMessages={group.type === 'assistant-turn' ? allSDKMessages : EMPTY_SDK_MESSAGES}
-                    externalMetadataSignature={group.type === 'assistant-turn' ? taskNotificationSignature : ''}
-                    basePath={sessionPath || undefined}
-                    onFork={shouldDisableActions ? undefined : onFork}
-                    onRewind={shouldDisableActions ? undefined : onRewind}
-                    onAgentHistoryQuoteClick={onAgentHistoryQuoteClick}
-                    onCreateTodo={shouldDisableActions ? undefined : onCreateTodo}
-                    onRetry={shouldDisableActions ? undefined : onRetry}
-                    onRetryInNewSession={shouldDisableActions ? undefined : onRetryInNewSession}
-                    onRelinkProjectRoot={shouldDisableActions ? undefined : onRelinkProjectRoot}
-                    onRestoreProjectRoot={shouldDisableActions ? undefined : onRestoreProjectRoot}
-                    onCompact={shouldDisableActions ? undefined : onCompact}
-                    historyTurn={groupHistoryTurns.get(group)}
-                    isStreaming={isLive || undefined}
-                    sessionModelId={sessionModelId}
-                  />
-                )
-                return <React.Fragment key={getGroupId(group)}>{renderer}</React.Fragment>
-              })}
+              <AgentTranscriptHistory
+                groups={transcriptGroups}
+                liveGroupSet={liveGroupSet}
+                allMessages={allSDKMessages}
+                taskNotificationSignature={taskNotificationSignature}
+                sessionPath={sessionPath || undefined}
+                sessionModelId={sessionModelId}
+                groupHistoryTurns={groupHistoryTurns}
+                onFork={onFork}
+                onRewind={onRewind}
+                onAgentHistoryQuoteClick={onAgentHistoryQuoteClick}
+                onCreateTodo={onCreateTodo}
+                onRetry={onRetry}
+                onRetryInNewSession={onRetryInNewSession}
+                onRelinkProjectRoot={onRelinkProjectRoot}
+                onRestoreProjectRoot={onRestoreProjectRoot}
+                onCompact={onCompact}
+              />
 
               <AgentTranscriptTail
                 sessionId={sessionId}

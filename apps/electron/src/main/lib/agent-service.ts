@@ -39,6 +39,7 @@ import { getAgentSessionMeta, updateAgentSessionMeta } from './agent-session-man
 import { setAgentStopper, setHeadlessAgentRunner } from './agent-headless-runner-registry'
 import { getHeadlessAgentRunTarget } from './agent-headless-run-target'
 import { sendAgentStreamComplete } from './agent-completion-payload'
+import { AgentStreamForwarder } from './agent-stream-forwarder'
 
 // ===== 实例创建 =====
 
@@ -61,6 +62,9 @@ import('./agent-collaboration-tools').then(({ registerCollaborationEventBus }) =
  * runAgent 开始时注册，结束时清理。
  */
 const sessionWebContents = new Map<string, WebContents>()
+/** 每个 renderer 当前可见的 Agent 会话；仅该会话维持 20fps partial。 */
+const visibleAgentSessionByWebContents = new WeakMap<WebContents, string | null>()
+const streamForwarder = new AgentStreamForwarder()
 
 /**
  * 已挂载 destroyed 回收钩子的 webContents 集合。
@@ -77,15 +81,22 @@ const wcWithCleanupHook = new WeakSet<WebContents>()
  * webContents 提前销毁的场景——destroyed 事件兜底。
  */
 function registerWebContents(sessionId: string, wc: WebContents): void {
-  // 旧 wc 的 destroyed 钩子仍由 WeakSet 持有，触发时会扫描 sessionWebContents 清理所有指向它的条目。
+  // 同一 session 切换 renderer 时，丢弃捕获旧 wc 的等待 partial。
+  const previousWebContents = sessionWebContents.get(sessionId)
+  if (previousWebContents && previousWebContents !== wc) streamForwarder.clear(sessionId)
+  // 旧 wc 的 destroyed 钩子仍由 WeakSet 持有，会扫描 sessionWebContents 清理所有指向它的条目。
   sessionWebContents.set(sessionId, wc)
   if (wcWithCleanupHook.has(wc)) return
   wcWithCleanupHook.add(wc)
   wc.once('destroyed', () => {
     // 单个 wc 可能映射到多个 sessionId（同窗口多 tab），需要清理所有指向它的条目
     for (const [sid, mappedWc] of sessionWebContents) {
-      if (mappedWc === wc) sessionWebContents.delete(sid)
+      if (mappedWc === wc) {
+        sessionWebContents.delete(sid)
+        streamForwarder.clear(sid)
+      }
     }
+    visibleAgentSessionByWebContents.delete(wc)
   })
 }
 
@@ -142,7 +153,13 @@ eventBus.use((sessionId, payload, next, runEvent) => {
   const wc = sessionWebContents.get(sessionId)
   if (wc && !wc.isDestroyed()) {
     try {
-      wc.send(AGENT_IPC_CHANNELS.STREAM_EVENT, runEvent satisfies AgentStreamEvent)
+      streamForwarder.forward(
+        runEvent satisfies AgentStreamEvent,
+        (event) => {
+          if (!wc.isDestroyed()) wc.send(AGENT_IPC_CHANNELS.STREAM_EVENT, event)
+        },
+        visibleAgentSessionByWebContents.get(wc) === sessionId,
+      )
     } catch (err) {
       console.error(`[EventBus] wc.send 失败: sessionId=${sessionId}, payload.kind=${(payload as Record<string, unknown>)?.kind}`, err)
     }
@@ -150,8 +167,18 @@ eventBus.use((sessionId, payload, next, runEvent) => {
   next()
 })
 
-/** Pi-native delta 已在 adapter 单点合帧；保留 IPC API 兼容，不再做第二层前后台丢帧。 */
-export function setVisibleAgentSession(_webContents: WebContents, _sessionId: string | null): void {}
+/** renderer 切换标签时更新流式优先级。 */
+export function setVisibleAgentSession(webContents: WebContents, sessionId: string | null): void {
+  const previousSessionId = visibleAgentSessionByWebContents.get(webContents)
+  if (previousSessionId && previousSessionId !== sessionId) {
+    streamForwarder.reprioritize(previousSessionId, false)
+  }
+  visibleAgentSessionByWebContents.set(webContents, sessionId)
+  if (sessionId) {
+    streamForwarder.reprioritize(sessionId, true)
+    streamForwarder.promote(sessionId)
+  }
+}
 
 // ===== IPC 薄包装函数 =====
 
@@ -198,6 +225,7 @@ export async function runAgent(
   try {
     await orchestrator.sendMessage(runInput, {
       onError: (error) => {
+        streamForwarder.flush(runInput.sessionId)
         if (!webContents.isDestroyed()) {
           webContents.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
             sessionId: runInput.sessionId,
@@ -208,6 +236,7 @@ export async function runAgent(
         }
       },
       onComplete: (opts) => {
+        streamForwarder.flush(runInput.sessionId)
         try {
           publishRunStopped(runInput.sessionId, runInput.runId!, opts?.stoppedByUser, opts?.startedAt)
           if (!webContents.isDestroyed()) {
@@ -247,6 +276,7 @@ export async function runAgent(
   } catch (err) {
     console.error('[Agent 服务] runAgent 未处理异常:', err)
     const errorMessage = err instanceof Error ? err.message : '未知错误'
+    streamForwarder.flush(runInput.sessionId)
     try {
       if (!webContents.isDestroyed()) {
         webContents.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
@@ -269,6 +299,7 @@ export async function runAgent(
     // 避免被拒绝的请求误删仍在运行的会话映射
     if (!orchestrator.isActive(runInput.sessionId)) {
       sessionWebContents.delete(runInput.sessionId)
+      streamForwarder.clear(runInput.sessionId)
     }
   }
 }
@@ -309,6 +340,7 @@ export async function runAgentHeadless(
   try {
     await orchestrator.sendMessage(runInput, {
       onError: (error) => {
+        streamForwarder.flush(runInput.sessionId)
         callbacks.onError(error)
         // 同步到渲染进程
         if (wc && !wc.isDestroyed()) {
@@ -321,6 +353,7 @@ export async function runAgentHeadless(
         }
       },
       onComplete: (opts) => {
+        streamForwarder.flush(runInput.sessionId)
         try {
           callbacks.onComplete()
           publishRunStopped(runInput.sessionId, runInput.runId!, opts?.stoppedByUser, opts?.startedAt)
@@ -378,6 +411,7 @@ export async function runAgentHeadless(
   } catch (err) {
     console.error('[Agent 服务] runAgentHeadless 未处理异常:', err)
     const errorMessage = err instanceof Error ? err.message : '未知错误'
+    streamForwarder.flush(runInput.sessionId)
     try {
       callbacks.onError(errorMessage)
       callbacks.onComplete()
@@ -400,6 +434,7 @@ export async function runAgentHeadless(
   } finally {
     if (!orchestrator.isActive(runInput.sessionId)) {
       sessionWebContents.delete(runInput.sessionId)
+      streamForwarder.clear(runInput.sessionId)
     }
   }
 }

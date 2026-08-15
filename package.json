@@ -31,7 +31,8 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "jotai": "^2.17.1"
+    "jotai": "^2.17.1",
+    "jotai-family": "^1.1.0"
   },
   "overrides": {
     "@earendil-works/pi-agent-core": "0.84.2",

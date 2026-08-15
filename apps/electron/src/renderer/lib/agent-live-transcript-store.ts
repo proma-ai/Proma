@@ -131,6 +131,7 @@ export class AgentLiveTranscriptStore {
       && delta.runId === previous.runId
       && delta.sequence !== previous.sequence + 1
       && !delta.reset
+      && !delta.coalesced
     ) return null
     if (!previous && !delta.reset) return null
 

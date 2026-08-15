@@ -6,7 +6,8 @@
  */
 
 import { atom } from 'jotai'
-import { atomFamily, atomWithStorage, selectAtom } from 'jotai/utils'
+import { atomFamily } from 'jotai-family'
+import { atomWithStorage, selectAtom } from 'jotai/utils'
 import type { AgentSessionMeta, AgentWorkspace, AgentPendingFile, RetryAttempt, PromaPermissionMode, PermissionRequest, AskUserRequest, ExitPlanModeRequest, ThinkingConfig, AgentEffort, SDKMessage, UnstagedChangesResult } from '@proma/shared'
 import type { AgentLiveUpdate } from '@/lib/agent-canonical-stream'
 import { PROMA_DEFAULT_PERMISSION_MODE } from '@proma/shared'

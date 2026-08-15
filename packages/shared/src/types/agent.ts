@@ -680,6 +680,8 @@ export interface AgentAssistantMessageDelta {
   sequence: number
   reset?: SDKAssistantMessage
   operations: AgentAssistantDeltaOperation[]
+  /** main -> renderer 调度器已合并多个连续 delta，sequence 允许出现跳跃。 */
+  coalesced?: boolean
   metadata?: AgentAssistantDeltaMetadata
 }
 

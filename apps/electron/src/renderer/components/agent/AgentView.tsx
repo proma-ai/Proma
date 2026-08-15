@@ -1163,10 +1163,10 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       const cached = store.get(agentSDKMessagesCacheAtom).get(sessionId)
       if (cached) {
         setPersistedSDKMessages(cached)
-        setMessagesLoaded(false)
-        // 缓存只作为最新 IPC 快照到达前的预热数据。若立即揭示，完成中的会话
-        // 可能先显示旧尾部，随后 IPC 返回的新 Agent 消息再单独跳出来。
-        // 保持 messagesLoaded=false 会让 AgentMessages 在同一批更新完成后整体显示。
+        // 缓存页可直接作为首屏数据，IPC 只负责后台校准；刷新期间仍由 messagesRefreshing
+        // 阻止非流式发送，避免用户操作与旧快照覆盖竞态。
+        setMessagesLoaded(true)
+        setMessagesLoadedSessionId(sessionId)
       } else {
         setPersistedSDKMessages([])
         setMessagesLoaded(false)
