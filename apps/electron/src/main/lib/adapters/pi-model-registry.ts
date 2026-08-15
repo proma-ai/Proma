@@ -351,6 +351,55 @@ function candidatePiProviders(provider: ProviderType): KnownProvider[] {
   }
 }
 
+/**
+ * 从渠道 baseUrl 推断 catalog 供应商的规则表。
+ *
+ * 仅用于 provider='custom' 的渠道：custom 本身不携带供应商身份，域名/路径才是
+ * 可信信号。规则按「路径更精确优先」排序，因为 opencode.ai 下同时存在 opencode
+ * 与 opencode-go 两个供应商；命中即终止。推断不出返回 undefined，调用方应保守
+ * 拒绝，绝不退回全 catalog 猜测（否则会被同名不同源的模型条目误匹配）。
+ */
+const BASE_URL_PROVIDER_RULES: ReadonlyArray<{ test: (url: string, host: string) => boolean; provider: KnownProvider }> = [
+  { test: (u) => u.startsWith('opencode.ai/zen/go'), provider: 'opencode-go' },
+  { test: (u) => u.startsWith('opencode.ai'), provider: 'opencode' },
+  { test: (u) => u.startsWith('token-plan-cn.xiaomimimo.com'), provider: 'xiaomi-token-plan-cn' },
+  { test: (u) => u.startsWith('token-plan-ams.xiaomimimo.com'), provider: 'xiaomi-token-plan-ams' },
+  { test: (u) => u.startsWith('token-plan-sgp.xiaomimimo.com'), provider: 'xiaomi-token-plan-sgp' },
+  { test: (_u, host) => host === 'xiaomimimo.com' || host.endsWith('.xiaomimimo.com'), provider: 'xiaomi' },
+  { test: (u) => u.startsWith('api.deepseek.com'), provider: 'deepseek' },
+  { test: (u) => u.startsWith('api.openai.com'), provider: 'openai' },
+  { test: (u) => u.startsWith('api.anthropic.com'), provider: 'anthropic' },
+  { test: (u) => u.startsWith('open.bigmodel.cn'), provider: 'zai-coding-cn' },
+  { test: (u) => u.startsWith('api.moonshot.cn'), provider: 'moonshotai-cn' },
+  { test: (u) => u.startsWith('api.moonshot.ai'), provider: 'moonshotai' },
+  { test: (u) => u.startsWith('api.minimaxi.com'), provider: 'minimax-cn' },
+  { test: (u) => u.startsWith('api.minimax.io'), provider: 'minimax' },
+  { test: (u) => u.startsWith('openrouter.ai'), provider: 'openrouter' },
+  { test: (u) => u.startsWith('api.z.ai'), provider: 'zai' },
+  { test: (u) => u.startsWith('router.huggingface.co'), provider: 'huggingface' },
+  { test: (u) => u.startsWith('generativelanguage.googleapis.com'), provider: 'google' },
+  { test: (u) => u.startsWith('api.x.ai'), provider: 'xai' },
+  { test: (u) => u.startsWith('api.cerebras.ai'), provider: 'cerebras' },
+  { test: (u) => u.startsWith('api.groq.com'), provider: 'groq' },
+  { test: (u) => u.startsWith('api.fireworks.ai'), provider: 'fireworks' },
+  { test: (u) => u.startsWith('api.mistral.ai'), provider: 'mistral' },
+  { test: (u) => u.startsWith('api.nvidia.com'), provider: 'nvidia' },
+  { test: (u) => u.startsWith('api.together.ai'), provider: 'together' },
+  { test: (u) => u.startsWith('ai-gateway.vercel.sh'), provider: 'vercel-ai-gateway' },
+]
+
+/**
+ * 从渠道 baseUrl 推断 catalog 供应商。
+ *
+ * 仅用于 provider='custom' 的渠道：custom 本身不携带供应商身份，
+ * 域名/路径才是可信信号。推断不出返回 undefined，调用方应保守拒绝。
+ */
+export function inferPiProviderFromBaseUrl(baseUrl: string): KnownProvider | undefined {
+  const url = baseUrl.toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '')
+  const host = url.split(/[/?]/, 1)[0] ?? ''
+  return BASE_URL_PROVIDER_RULES.find((rule) => rule.test(url, host))?.provider
+}
+
 function findCatalogModelById(models: readonly PiCatalogModel[], modelId: string): PiCatalogModel | undefined {
   const normalized = modelId.toLowerCase()
   // ID 是渠道实际发送到上游的稳定标识；同名展示名称只能在没有 ID 命中时兜底。
@@ -466,10 +515,22 @@ export interface PiVisionRelayRoute {
 export async function resolvePiVisionRelayRoute(
   provider: ProviderType,
   modelId: string | undefined,
+  baseUrl?: string,
 ): Promise<PiVisionRelayRoute | undefined> {
   const resolvedModelId = stripLegacyAgentSdkContextSuffix(modelId)
   if (!resolvedModelId) return undefined
-  const catalogModel = await findPiCatalogModel(provider, resolvedModelId)
+
+  // custom 渠道不携带供应商身份：只接受 baseUrl 推断出的供应商，认不出就直接拒绝，
+  // 绝不退回全 catalog 猜测（否则会被同名不同源的模型条目误匹配，例如 HuggingFace
+  // 的纯文本 MiMo-V2.5 抢占 opencode-go 的视觉版）。非 custom 渠道维持原逻辑。
+  const inferredProvider = provider === 'custom' && baseUrl
+    ? inferPiProviderFromBaseUrl(baseUrl)
+    : undefined
+  if (provider === 'custom' && !inferredProvider) return undefined
+
+  const catalogModel = inferredProvider
+    ? findCatalogModelById(await getCatalogModels(inferredProvider), resolvedModelId)
+    : await findPiCatalogModel(provider, resolvedModelId)
   if (!catalogModel?.input.includes('image')) return undefined
 
   if (provider !== 'opencode-go-openai') {
