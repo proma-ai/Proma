@@ -557,7 +557,7 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
     >
         <button
           type="button"
-          className="group flex w-full min-w-0 items-center gap-2 rounded-md py-1 text-left transition-[background-color,opacity] hover:bg-muted/40 hover:opacity-90"
+          className="group inline-flex max-w-full min-w-0 items-center gap-2 rounded-md py-1 text-left transition-[background-color,opacity] hover:bg-muted/40 hover:opacity-90"
           onClick={() => setExpanded(!expanded)}
         >
           {!isCompleted && isStreaming ? (
@@ -570,7 +570,7 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
           <span className="min-w-0 max-w-[28%] truncate text-[14px] font-medium text-muted-foreground/65">{toolKindLabel}</span>
           <span className="shrink-0 text-muted-foreground/30">·</span>
           <span className={cn(
-            'min-w-0 flex-1 truncate text-[14px]',
+            'min-w-0 max-w-[60%] truncate text-[14px]',
             dimmed ? 'text-muted-foreground/70' : 'text-muted-foreground',
           )}>{displayLabel}</span>
 
