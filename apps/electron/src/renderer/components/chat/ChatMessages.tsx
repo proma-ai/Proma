@@ -73,25 +73,26 @@ function ScrollTopLoader({ hasMore, loading, onLoadMore }: ScrollTopLoaderProps)
   const { scrollRef } = useStickToBottomContext()
   const triggeredRef = React.useRef(false)
 
-  // hasMore 变化时重置触发标记（例如切换对话）
+  // 加载完成后解锁下一页；hasMore 在多页加载期间可能始终为 true，不能仅依赖它变化。
   React.useEffect(() => {
-    triggeredRef.current = false
-  }, [hasMore])
+    if (!loading) triggeredRef.current = false
+  }, [loading, hasMore])
 
   React.useEffect(() => {
     const el = scrollRef.current
-    if (!el || !hasMore || triggeredRef.current) return
+    if (!el || !hasMore) return
 
     const handleScroll = (): void => {
       // 滚动到顶部 100px 以内时触发
-      if (el.scrollTop < 100 && !triggeredRef.current) {
+      if (el.scrollTop < 100 && !triggeredRef.current && !loading) {
         triggeredRef.current = true
         const prevHeight = el.scrollHeight
+        const prevScrollTop = el.scrollTop
 
         onLoadMore().then(() => {
-          // 加载完成后恢复滚动位置：新内容插入顶部，保持用户视角不变
+          // 加载完成后恢复滚动位置：新内容插入顶部，保持用户视角不变。
           requestAnimationFrame(() => {
-            el.scrollTop = el.scrollHeight - prevHeight
+            el.scrollTop = prevScrollTop + (el.scrollHeight - prevHeight)
           })
         })
       }
@@ -99,7 +100,7 @@ function ScrollTopLoader({ hasMore, loading, onLoadMore }: ScrollTopLoaderProps)
 
     el.addEventListener('scroll', handleScroll, { passive: true })
     return () => el.removeEventListener('scroll', handleScroll)
-  }, [scrollRef, hasMore, onLoadMore])
+  }, [scrollRef, hasMore, loading, onLoadMore])
 
   if (!hasMore) return null
 

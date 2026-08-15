@@ -85,6 +85,10 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
   const [hasMoreMessages, setHasMoreMessages] = React.useState(false)
   const [messagesLoaded, setMessagesLoaded] = React.useState(false)
   const [inlineEditingMessageId, setInlineEditingMessageId] = React.useState<string | null>(null)
+  const conversationIdRef = React.useRef(conversationId)
+  React.useEffect(() => {
+    conversationIdRef.current = conversationId
+  }, [conversationId])
   const store = useStore()
 
   // ===== Per-conversation hooks（分屏独立） =====
@@ -159,10 +163,13 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
 
   // ===== 加载消息 + 上下文分隔线 =====
   React.useEffect(() => {
+    let cancelled = false
     setMessagesLoaded(false)
     window.electronAPI
       .getRecentMessages(conversationId, INITIAL_MESSAGE_LIMIT)
       .then((result) => {
+        // 对话已切换或本次加载已过期时，不能覆盖新对话的数据。
+        if (cancelled || conversationIdRef.current !== conversationId) return
         setMessages(result.messages)
         setHasMoreMessages(result.hasMore)
         setMessagesLoaded(true)
@@ -177,7 +184,10 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
           return map
         })
       })
-      .catch(console.error)
+      .catch((error) => {
+        if (!cancelled) console.error(error)
+      })
+    return () => { cancelled = true }
   }, [conversationId, refreshVersion, setStreamingStates])
 
   // 从对话元数据加载分隔线
@@ -603,13 +613,23 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
    * 明显的主线程阻塞。保持与初始加载相同的分页大小，只在用户继续向上浏览时追加一页。
    */
   const handleLoadMore = React.useCallback(async (): Promise<void> => {
+    const cursorId = messages[0]?.id
+    if (!cursorId) return
+
     const result = await window.electronAPI.getRecentMessages(
       conversationId,
       INITIAL_MESSAGE_LIMIT,
-      messages[0]?.id,
+      cursorId,
     )
+    // 请求返回时若用户已切换对话，直接丢弃旧响应，避免污染新会话历史。
+    if (conversationIdRef.current !== conversationId) return
+
     if (result.messages.length > 0) {
-      setMessages((current) => [...result.messages, ...current])
+      setMessages((current) => {
+        // 请求期间历史可能被刷新或已加载过该页，游标不再匹配时不追加重复消息。
+        if (current[0]?.id !== cursorId) return current
+        return [...result.messages, ...current]
+      })
     }
     setHasMoreMessages(result.hasMore)
   }, [conversationId, messages])

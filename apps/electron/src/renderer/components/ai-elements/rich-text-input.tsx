@@ -237,7 +237,6 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
   const pendingDraftEditorRef = useRef<NonNullable<ReturnType<typeof useEditor>> | null>(null)
   const pendingDraftScopeKeyRef = useRef<string | null | undefined>(undefined)
   const draftScopeKeyRef = useRef(draftScopeKey)
-  draftScopeKeyRef.current = draftScopeKey
   // 跟踪编辑器自己设置的值，用于区分外部设置和内部更新
   const lastEditorValueRef = useRef<string>('')
   // 记录尚未由 props 确认的本地草稿。长文本连续编辑时，React 可能先提交较旧的
@@ -900,6 +899,14 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
       }
     }
   }, [])
+
+  // 切换草稿范围前先同步旧输入，避免 debounce 尚未触发时丢失草稿。
+  useEffect(() => {
+    if (draftScopeKeyRef.current !== draftScopeKey) {
+      flushPendingDraftSync()
+      draftScopeKeyRef.current = draftScopeKey
+    }
+  }, [draftScopeKey, flushPendingDraftSync])
 
   // 追踪编辑器实例、草稿范围和显式外部同步版本，重建/切换时强制同步。
   const editorInstanceRef = useRef(editor)
