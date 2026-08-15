@@ -66,6 +66,7 @@ export class AgentRuntimeClient {
   private readonly requestTimeoutMs: number
   private runtimeProcess: UtilityProcess | undefined
   private port: RuntimePort | undefined
+  private runtimeGeneration = 0
   private startPromise: Promise<AgentRuntimeState> | undefined
   private stopPromise: Promise<void> | undefined
   private bootId = AGENT_RUNTIME_BOOTSTRAP_ID
@@ -115,8 +116,10 @@ export class AgentRuntimeClient {
     try {
       return await this.startPromise
     } catch (error) {
-      const runtimeError = serializeAgentRuntimeError(error, 'runtime.start_failed')
-      this.handleRuntimeFailure(runtimeError)
+      if (!this.stopPromise && this.state.status !== 'stopped' && this.state.status !== 'crashed') {
+        const runtimeError = serializeAgentRuntimeError(error, 'runtime.start_failed')
+        this.handleRuntimeFailure(runtimeError)
+      }
       this.port?.close()
       this.port = undefined
       this.runtimeProcess?.kill()
@@ -138,17 +141,20 @@ export class AgentRuntimeClient {
 
   async stop(): Promise<void> {
     if (this.stopPromise) return this.stopPromise
-    if (!this.runtimeProcess) return
+    if (!this.runtimeProcess && !this.startPromise) return
 
+    const pendingStart = this.startPromise
     this.stopPromise = (async () => {
+      const canRequestShutdown = this.state.status === 'ready' && this.port !== undefined
       this.state = { ...this.state, status: 'stopping' }
       try {
-        if (this.port) {
+        if (canRequestShutdown) {
           await this.sendRequest(AGENT_RUNTIME_METHODS.SHUTDOWN, undefined, { timeoutMs: 5_000 })
         }
       } catch (error) {
         console.warn('[AgentRuntime] utility shutdown request failed:', error)
       } finally {
+        this.runtimeGeneration += 1
         this.port?.close()
         this.port = undefined
         this.runtimeProcess?.kill()
@@ -161,6 +167,7 @@ export class AgentRuntimeClient {
           pendingRequests: 0,
         }
       }
+      await pendingStart?.catch(() => {})
     })()
 
     try {
@@ -171,6 +178,7 @@ export class AgentRuntimeClient {
   }
 
   private async spawnAndHandshake(): Promise<AgentRuntimeState> {
+    const generation = ++this.runtimeGeneration
     this.state = { ...this.state, status: 'starting', lastError: undefined }
     const runtimeProcess = utilityProcess.fork(this.entryPath, [], {
       env: { ...process.env, ...this.env },
@@ -180,9 +188,11 @@ export class AgentRuntimeClient {
       on(event: 'exit', listener: (code: number) => void): void
     }
     runtimeEvents.on('exit', (code) => {
+      if (generation !== this.runtimeGeneration || this.runtimeProcess !== runtimeProcess) return
       this.handleProcessExit(code)
     })
     runtimeProcess.on('error', (type, location, report) => {
+      if (generation !== this.runtimeGeneration || this.runtimeProcess !== runtimeProcess) return
       this.handleRuntimeFailure({
         code: 'runtime.process_error',
         message: `Agent runtime fatal error: ${type}`,
@@ -193,7 +203,10 @@ export class AgentRuntimeClient {
     const channel = new MessageChannelMain()
     const port = channel.port2 as unknown as RuntimePort
     this.port = port
-    port.on('message', (event) => this.handlePortMessage(event.data))
+    port.on('message', (event) => {
+      if (generation !== this.runtimeGeneration || this.runtimeProcess !== runtimeProcess || this.port !== port) return
+      this.handlePortMessage(event.data)
+    })
     port.start()
 
     const transfer: AgentRuntimePortTransfer = {
@@ -207,6 +220,9 @@ export class AgentRuntimeClient {
       { protocolVersion: AGENT_RUNTIME_PROTOCOL_VERSION },
       { timeoutMs: this.startupTimeoutMs },
     )
+    if (generation !== this.runtimeGeneration || this.runtimeProcess !== runtimeProcess || this.port !== port || this.state.status === 'stopping' || this.state.status === 'stopped') {
+      throw new Error('Agent runtime stopped during handshake')
+    }
     this.bootId = handshake.state.bootId
     this.state = { ...handshake.state, status: 'ready' }
     return this.currentState
@@ -355,6 +371,7 @@ export class AgentRuntimeClient {
   }
 
   private handleRuntimeFailure(error: AgentRuntimeError): void {
+    if (this.state.status === 'stopping' || this.state.status === 'stopped') return
     this.state = {
       ...this.state,
       status: 'crashed',

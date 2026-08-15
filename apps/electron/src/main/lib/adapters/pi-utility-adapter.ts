@@ -79,18 +79,29 @@ export class PiUtilityAdapter {
       }
     } finally {
       this.pendingQueries.delete(queryId)
-      if (!ended && pending.accepted && !pending.runtimeFailed && this.client.isReady) {
-        await this.client.call(AGENT_RUNTIME_METHODS.QUERY_ABORT, { sessionId: input.sessionId }, {
-          sessionId: input.sessionId,
-          runId: input.runId,
-          timeoutMs: 5_000,
-        }).catch(() => {})
-      }
+      if (!ended) await this.abortPendingQuery(pending)
     }
   }
 
   abort(sessionId: string): void {
-    void this.client.call(AGENT_RUNTIME_METHODS.QUERY_ABORT, { sessionId }, { sessionId, timeoutMs: 5_000 }).catch(() => {})
+    let pending: PendingQuery | undefined
+    for (const candidate of this.pendingQueries.values()) {
+      if (candidate.sessionId === sessionId) pending = candidate
+    }
+    if (pending) void this.abortPendingQuery(pending).catch(() => {})
+  }
+
+  private async abortPendingQuery(pending: PendingQuery): Promise<void> {
+    if (!pending.accepted || pending.runtimeFailed || !this.client.isReady) return
+    await this.client.call(AGENT_RUNTIME_METHODS.QUERY_ABORT, {
+      queryId: pending.queryId,
+      sessionId: pending.sessionId,
+      runId: pending.input.runId,
+    }, {
+      sessionId: pending.sessionId,
+      runId: pending.input.runId,
+      timeoutMs: 5_000,
+    })
   }
 
   async sendQueuedMessage(
@@ -186,6 +197,8 @@ export class PiUtilityAdapter {
   private handleRuntimeEvent(event: AgentRuntimeEvent): void {
     if (event.method === AGENT_RUNTIME_METHODS.EVENT_CRASHED) {
       const error = toRuntimeError(event.payload)
+      for (const controller of this.capabilityAbortControllers.values()) controller.abort()
+      this.capabilityAbortControllers.clear()
       for (const pending of this.pendingQueries.values()) {
         pending.runtimeFailed = true
         pending.queue.fail(error)

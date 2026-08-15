@@ -1542,6 +1542,13 @@ export class AgentOrchestrator {
         // 回退会清除 queryOptions.resumeSessionId；新建 Pi artifact 不应再触发 prompt replay。
         const wasResuming = !!queryOptions.resumeSessionId
         let shouldRetryFromError = false
+        let queryIterator: AsyncIterator<PiRunSourceEvent> | undefined
+        const closeQueryIterator = async (): Promise<void> => {
+          const iterator = queryIterator
+          queryIterator = undefined
+          if (!iterator?.return) return
+          await iterator.return()
+        }
 
         try {
           // stop 可能发生在 active slot 建立后、Pi adapter active session 创建前。
@@ -1555,7 +1562,7 @@ export class AgentOrchestrator {
 
           // 获取异步迭代器（手动 .next() 以支持 Promise.race 中断）
           const queryIterable = this.adapter.query(queryOptions)
-          const queryIterator = queryIterable[Symbol.asyncIterator]()
+          queryIterator = queryIterable[Symbol.asyncIterator]()
 
           // 手动事件循环：Promise.race（Pi runtime event vs result drain timeout）
           let pendingNext: Promise<IteratorResult<PiRunSourceEvent>> | null = null
@@ -1592,7 +1599,7 @@ export class AgentOrchestrator {
               console.warn(`[Agent 编排] drain timeout: SDK iterator 在 result 后 ${RESULT_DRAIN_TIMEOUT_MS}ms 内未关闭，强制退出`)
               pendingNext?.catch(() => {})
               pendingNext = null
-              queryIterator.return?.(undefined as never).catch(() => {})
+              void closeQueryIterator().catch(() => {})
               break
             }
 
@@ -1887,6 +1894,7 @@ export class AgentOrchestrator {
 
           // 错误 break 触发了 → 继续循环
           if (shouldRetryFromError) {
+            await closeQueryIterator()
             continue
           }
 
@@ -1938,6 +1946,7 @@ export class AgentOrchestrator {
             existingSdkSessionId = undefined
             capturedSdkSessionId = undefined
             this.prepareSessionNotFoundRecovery(sessionId, queryOptions, contextualMessage, agentCwd, workspaceSlug, accumulatedMessages, queryStartedAt)
+            await closeQueryIterator()
             continue  // 进入下一次 retry 循环
           }
 
@@ -1956,6 +1965,7 @@ export class AgentOrchestrator {
               '检测到上下文过长，清除 sdkSessionId 并切换到上下文回填模式',
               true,
             )
+            await closeQueryIterator()
             continue  // 进入下一次 retry 循环
           }
 
@@ -1977,6 +1987,7 @@ export class AgentOrchestrator {
               '检测到 thinking signature 不兼容，清除 sdkSessionId 并切换到上下文回填模式',
               true,  // 跨模型签名不兼容是唯一确定永久无效的场景，清除磁盘 sdkSessionId
             )
+            await closeQueryIterator()
             continue  // 进入下一次 retry 循环
           }
 

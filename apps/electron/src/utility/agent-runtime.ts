@@ -37,6 +37,8 @@ type ActiveQuery = {
   sessionId: string
   runId?: string
   sequence: number
+  done: Promise<void>
+  resolveDone: () => void
 }
 
 const bootId = randomUUID()
@@ -192,11 +194,17 @@ function handleQueryStart(request: RuntimeRequest): void {
     return
   }
 
+  let resolveDone!: () => void
+  const done = new Promise<void>((resolve) => {
+    resolveDone = resolve
+  })
   const active: ActiveQuery = {
     queryId,
     sessionId,
     runId: typeof queryInput.runId === 'string' ? queryInput.runId : undefined,
     sequence: 0,
+    done,
+    resolveDone,
   }
   activeQueries.set(queryId, active)
   emitState()
@@ -314,14 +322,44 @@ async function pumpQuery(active: ActiveQuery, input: PiAgentQueryOptions): Promi
     })
   } finally {
     activeQueries.delete(active.queryId)
+    active.resolveDone()
     emitState()
   }
 }
 
-function handleQueryAbort(request: RuntimeRequest): void {
+async function handleQueryAbort(request: RuntimeRequest): Promise<void> {
   const payload = request.payload ?? {}
-  if (typeof payload.sessionId === 'string') piAdapter.abort(payload.sessionId)
-  respond(request, { accepted: true })
+  const queryId = typeof payload.queryId === 'string' ? payload.queryId : ''
+  const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : ''
+  const runId = typeof payload.runId === 'string' ? payload.runId : undefined
+  if (!queryId || !sessionId) {
+    respondError(request, {
+      code: 'agent.query.invalid_abort',
+      message: 'queryId and sessionId are required',
+    })
+    return
+  }
+
+  const active = activeQueries.get(queryId)
+  if (!active || active.sessionId !== sessionId || (runId !== undefined && active.runId !== runId)) {
+    respond(request, { accepted: false, reason: 'stale_or_inactive_query', queryId })
+    return
+  }
+
+  piAdapter.abort(active.sessionId)
+  const completed = await Promise.race([
+    active.done.then(() => true),
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 5_000)),
+  ])
+  if (!completed) {
+    respondError(request, {
+      code: 'agent.query.abort_timeout',
+      message: `Timed out waiting for query to stop: ${queryId}`,
+      retryable: true,
+    })
+    return
+  }
+  respond(request, { accepted: true, queryId })
 }
 
 async function handleQuerySetPermissionMode(request: RuntimeRequest): Promise<void> {
@@ -397,6 +435,13 @@ function requestParent<Result = unknown>(
     const timer = setTimeout(() => {
       if (!pending || !parentRequests.delete(request.requestId)) return
       pending.cleanup?.()
+      void requestParent(AGENT_RUNTIME_METHODS.CAPABILITY_CANCEL, {
+        requestId: request.requestId,
+      }, {
+        sessionId: options.sessionId,
+        runId: options.runId,
+        timeoutMs: 2_000,
+      }).catch(() => {})
       reject(new Error(`Main runtime request timed out: ${method}`))
     }, timeoutMs)
     pending = {
