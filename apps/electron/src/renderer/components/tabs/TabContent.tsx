@@ -15,7 +15,39 @@ import { PreviewTabContent } from '@/components/diff/PreviewTabContent'
 import { MarkdownRichEditor } from '@/components/diff/MarkdownRichEditor'
 import { MarkdownToc } from '@/components/diff/MarkdownToc'
 import { ScratchPadView } from '@/components/scratch-pad/ScratchPadView'
+import { cn } from '@/lib/utils'
 import { TabErrorBoundary } from './TabErrorBoundary'
+
+const AGENT_SESSION_TRANSITION_MS = 140
+
+/**
+ * 切换时立即挂载新会话（不保留旧会话），只给新内容一段短暂进入过渡。
+ * 仅合成 opacity，避免为整段对话测量高度或触发布局动画。
+ */
+function AgentSessionTransition({ children, animate }: { children: React.ReactNode; animate: boolean }): React.ReactElement {
+  const [entered, setEntered] = React.useState(!animate)
+
+  React.useEffect(() => {
+    if (!animate) {
+      setEntered(true)
+      return
+    }
+    const frameId = window.requestAnimationFrame(() => setEntered(true))
+    return () => window.cancelAnimationFrame(frameId)
+  }, [animate])
+
+  return (
+    <div
+      className={cn(
+        'h-full min-h-0 transition-opacity ease-out motion-reduce:transition-none',
+        entered ? 'opacity-100' : 'opacity-0',
+      )}
+      style={{ transitionDuration: `${AGENT_SESSION_TRANSITION_MS}ms` }}
+    >
+      {children}
+    </div>
+  )
+}
 
 export interface TabContentProps {
   tabId: string
@@ -24,6 +56,12 @@ export interface TabContentProps {
 function TabContentView({ tabId }: TabContentProps): React.ReactElement {
   const tabs = useAtomValue(tabsAtom)
   const tab = tabs.find((t) => t.id === tabId)
+  const hasShownAgentSessionRef = React.useRef(false)
+  const shouldAnimateAgentSession = tab?.type === 'agent' && hasShownAgentSessionRef.current
+
+  React.useEffect(() => {
+    if (tab?.type === 'agent') hasShownAgentSessionRef.current = true
+  }, [tab?.sessionId, tab?.type])
 
   // [FLASH-DEBUG] 监控 tab 查找失败（说明 tabId 指向了不存在的标签）
   React.useEffect(() => {
@@ -65,9 +103,11 @@ function TabContentView({ tabId }: TabContentProps): React.ReactElement {
   }
 
   return (
-    <TabErrorBoundary key={tab.sessionId} sessionId={tab.sessionId}>
-      <AgentView sessionId={tab.sessionId} />
-    </TabErrorBoundary>
+    <AgentSessionTransition key={tab.sessionId} animate={shouldAnimateAgentSession}>
+      <TabErrorBoundary sessionId={tab.sessionId}>
+        <AgentView sessionId={tab.sessionId} />
+      </TabErrorBoundary>
+    </AgentSessionTransition>
   )
 }
 
