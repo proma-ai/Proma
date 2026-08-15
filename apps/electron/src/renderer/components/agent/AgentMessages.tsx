@@ -798,8 +798,8 @@ export const AgentMessages = React.memo(function AgentMessages({
       selectionHighlightUsesBrowserSelectionRef.current = false
     }
   }, [])
-  // 切换 Tab 时直接展示内存缓存或正在运行的实时消息，不等待下一帧淡入。
-  const ready = messagesLoaded !== false
+  // 切换 Tab 时直接展示内存缓存或正在运行的实时消息，不等待异步持久化加载或下一帧淡入。
+  const ready = messagesLoaded !== false || (streaming && liveMessages.length > 0)
 
   React.useEffect(() => {
     const root = historySelectionRootRef.current
