@@ -408,10 +408,9 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
           ) : null}
 
           <ToolIcon className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="shrink-0 text-[14px] font-medium text-muted-foreground/65">{toolKindLabel}</span>
+          <span className="min-w-0 max-w-[28%] truncate text-[14px] font-medium text-muted-foreground/65">{toolKindLabel}</span>
           <span className="shrink-0 text-muted-foreground/30">·</span>
-
-          {/* 子工具计数（折叠时显示） */}
+          <span className="min-w-0 flex-1 truncate text-[14px] text-muted-foreground">{displayLabel}</span>
           {childToolCount > 0 && !childrenExpanded && (
             <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/55">
               {childToolCount} 项工具
@@ -485,7 +484,7 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
           ) : null}
 
           <ToolIcon className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="shrink-0 text-[14px] font-medium text-muted-foreground/65">{toolKindLabel}</span>
+          <span className="min-w-0 max-w-[28%] truncate text-[14px] font-medium text-muted-foreground/65">{toolKindLabel}</span>
           <span className="shrink-0 text-muted-foreground/30">·</span>
           <span className={cn(
             'min-w-0 flex-1 truncate text-[14px]',
@@ -514,13 +513,13 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
           )}
 
           {taskGetSummary && (
-            <span className="flex min-w-0 shrink-0 items-center gap-1.5">
+            <span className="flex min-w-0 max-w-[40%] overflow-hidden items-center gap-1.5">
               <TaskGetCollapsedSummary task={taskGetSummary} />
             </span>
           )}
 
           {taskListSummary && (
-            <span className="flex min-w-0 shrink-0 items-center gap-1.5">
+            <span className="flex min-w-0 max-w-[40%] overflow-hidden items-center gap-1.5">
               <TaskListCollapsedSummary tasks={taskListSummary} />
             </span>
           )}

@@ -445,8 +445,11 @@ export function getToolResultSummary(toolName: string, result: string | undefine
   if (!result?.trim()) return null
 
   if (toolName === 'Read') {
-    const lineCount = result.match(/total\s+(\d+)\s+lines?/i)?.[1]
-    if (lineCount) return `${lineCount} 行`
+    const totalLineMatch = result.match(/total\s+(\d+)\s+lines?/i) ?? result.match(/\bof\s+(\d+)\b/i)
+    if (totalLineMatch?.[1]) return `${totalLineMatch[1]} 行`
+
+    const remainingLineCount = result.match(/\[(\d+)\s+more\s+lines?\s+in\s+file/i)?.[1]
+    if (remainingLineCount) return `还有 ${remainingLineCount} 行`
   }
   if (toolName === 'Grep' && /(?:no matches|没有匹配|未找到)/i.test(result)) return '无匹配'
   if (toolName === 'Bash') return '已完成'
