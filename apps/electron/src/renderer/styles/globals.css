@@ -2438,3 +2438,10 @@
 .ProseMirror-focused .ProseMirror-gapcursor {
   display: block;
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-browser-panel-in,
+  .animate-preview-slide-out {
+    animation-duration: 1ms !important;
+  }
+}

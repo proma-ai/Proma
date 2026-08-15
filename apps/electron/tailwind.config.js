@@ -115,11 +115,16 @@ export default {
           '0%': { opacity: '1', transform: 'translateX(0)' },
           '100%': { opacity: '0', transform: 'translateX(100%)' },
         },
+        'browser-panel-in': {
+          from: { opacity: '0', transform: 'translate3d(10px, 0, 0)' },
+          to: { opacity: '1', transform: 'translate3d(0, 0, 0)' },
+        },
       },
       animation: {
         'in': 'slide-in-from-top 0.3s ease-out',
         'out': 'slide-out-to-right 0.2s ease-in',
         'preview-slide-out': 'preview-slide-out 0.25s ease-out forwards',
+        'browser-panel-in': 'browser-panel-in 0.2s cubic-bezier(0.2, 0, 0, 1) both',
       },
     },
   },

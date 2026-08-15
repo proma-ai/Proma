@@ -25,14 +25,22 @@ interface BrowserPanelProps {
   sessionId: string
   state: BrowserViewState | null
   onClose: () => void
+  isClosing?: boolean
 }
 
-export function BrowserPanel({ sessionId, state, onClose }: BrowserPanelProps): React.ReactElement {
+export function BrowserPanel({ sessionId, state, onClose, isClosing = false }: BrowserPanelProps): React.ReactElement {
   const [url, setUrl] = React.useState(state?.url ?? '')
+  const [isEntering, setIsEntering] = React.useState(!isClosing)
+  const previousClosingRef = React.useRef(isClosing)
   const [riskAcknowledged, setRiskAcknowledged] = React.useState<boolean | null>(null)
   const [savingRiskAcknowledgement, setSavingRiskAcknowledgement] = React.useState(false)
   const pendingNavigationUrl = useAtomValue(browserPendingNavigationMapAtom).get(sessionId)
   const setPendingNavigationMap = useSetAtom(browserPendingNavigationMapAtom)
+
+  React.useEffect(() => {
+    if (previousClosingRef.current && !isClosing) setIsEntering(true)
+    previousClosingRef.current = isClosing
+  }, [isClosing])
 
   React.useEffect(() => setUrl(state?.url ?? ''), [state?.url])
   React.useEffect(() => {
@@ -143,8 +151,14 @@ export function BrowserPanel({ sessionId, state, onClose }: BrowserPanelProps): 
 
   const title = state?.title || '受管浏览器'
   const isWindows = React.useMemo(() => detectIsWindows(), [])
+  const finishEntering = React.useCallback((event: React.AnimationEvent<HTMLDivElement>) => {
+    if (event.target === event.currentTarget && event.animationName === 'browser-panel-in') setIsEntering(false)
+  }, [])
   return (
-    <div className="flex flex-col h-full min-w-0 overflow-hidden bg-content-area titlebar-no-drag">
+    <div
+      className={cn('flex flex-col h-full min-w-0 overflow-hidden bg-content-area titlebar-no-drag', isEntering && !isClosing && 'animate-browser-panel-in')}
+      onAnimationEnd={finishEntering}
+    >
       <div className={cn('flex items-center h-[42px] gap-1 px-2 border-b border-border/40 bg-muted/20', getWindowControlsPaddingClass(isWindows))}>
         <Globe2 className="size-4 shrink-0 text-primary ml-1" />
         <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-7" disabled={riskBlocked || !state?.canGoBack} onClick={() => void window.electronAPI.goBackAgentBrowser?.(sessionId)}><ArrowLeft className="size-3.5" /></Button></TooltipTrigger><TooltipContent>后退</TooltipContent></Tooltip>
@@ -197,7 +211,7 @@ export function BrowserPanel({ sessionId, state, onClose }: BrowserPanelProps): 
         </div>
       )}
       {riskAcknowledged === true ? (
-        <BrowserSlot key={activeTabId} sessionId={sessionId} tabId={activeTabId} />
+        <BrowserSlot key={activeTabId} sessionId={sessionId} tabId={activeTabId} nativeViewEnabled={!isEntering && !isClosing} />
       ) : (
         <div className="flex flex-1 min-h-0 items-center justify-center bg-muted/15 px-8 text-center">
           <div className="max-w-sm space-y-2 text-muted-foreground">
