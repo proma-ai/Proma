@@ -271,7 +271,7 @@ export function MainArea(): React.ReactElement {
                 ) : tabs.length === 0 ? (
                   <WelcomeView />
                 ) : activeTabId ? (
-                  <div className="flex-1 min-h-0 titlebar-no-drag">
+                  <div key={activeTabId} className="flex-1 min-h-0 titlebar-no-drag animate-session-content-in">
                     {/* 会话内容必须与侧栏/右侧面板使用同一个活动 Tab，不能延迟到旧会话。 */}
                     <TabContent tabId={activeTabId} />
                   </div>

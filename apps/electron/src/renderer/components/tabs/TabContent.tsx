@@ -21,7 +21,7 @@ export interface TabContentProps {
   tabId: string
 }
 
-export function TabContent({ tabId }: TabContentProps): React.ReactElement {
+function TabContentView({ tabId }: TabContentProps): React.ReactElement {
   const tabs = useAtomValue(tabsAtom)
   const tab = tabs.find((t) => t.id === tabId)
 
@@ -70,6 +70,8 @@ export function TabContent({ tabId }: TabContentProps): React.ReactElement {
     </TabErrorBoundary>
   )
 }
+
+export const TabContent = React.memo(TabContentView)
 
 function TutorialTabContent(): React.ReactElement {
   const [content, setContent] = React.useState('')

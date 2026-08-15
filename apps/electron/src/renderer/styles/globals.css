@@ -2017,6 +2017,30 @@
   background: hsl(var(--primary) / 0.22);
 }
 
+/* Session 切换时只对内容表面做短促的合成层动画，避免大面积布局重排被用户直接看到。 */
+@keyframes session-content-in {
+  from {
+    opacity: 0.72;
+    transform: translate3d(0, 3px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.animate-session-content-in {
+  animation: session-content-in 140ms cubic-bezier(0.2, 0, 0, 1) both;
+  will-change: opacity, transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-session-content-in {
+    animation: none;
+    will-change: auto;
+  }
+}
+
 /* ===== Session Mini Map ===== */
 .session-minimap-popover {
   transform-origin: left center;
