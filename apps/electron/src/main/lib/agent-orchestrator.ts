@@ -1599,8 +1599,16 @@ export class AgentOrchestrator {
               console.warn(`[Agent 编排] drain timeout: SDK iterator 在 result 后 ${RESULT_DRAIN_TIMEOUT_MS}ms 内未关闭，强制退出`)
               pendingNext?.catch(() => {})
               pendingNext = null
-              await this.adapter.abort(sessionId)
-              await closeQueryIterator().catch(() => {})
+              try {
+                await this.adapter.abort(sessionId)
+              } catch (error) {
+                console.warn(`[Agent 编排] drain timeout abort failed: ${sessionId}`, error)
+              } finally {
+                await Promise.race([
+                  closeQueryIterator().catch(() => {}),
+                  new Promise<void>((resolve) => setTimeout(resolve, RESULT_DRAIN_TIMEOUT_MS)),
+                ])
+              }
               break
             }
 

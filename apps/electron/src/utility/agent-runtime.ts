@@ -357,6 +357,12 @@ async function handleQueryAbort(request: RuntimeRequest): Promise<void> {
       message: `Timed out waiting for query to stop: ${queryId}`,
       retryable: true,
     })
+    // An unresponsive Pi query may still hold side-effecting tool work. The
+    // utility cannot safely continue serving other sessions after this point.
+    setTimeout(() => {
+      piAdapter.dispose()
+      process.exit(1)
+    }, 0)
     return
   }
   respond(request, { accepted: true, queryId })
