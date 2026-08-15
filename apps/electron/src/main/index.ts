@@ -84,6 +84,7 @@ import { initializeRuntime } from './lib/runtime-init'
 import { seedDefaultSkills } from './lib/config-paths'
 import { upgradeDefaultSkillsInWorkspaces } from './lib/agent-workspace-manager'
 import { hasActiveAgentSessions, stopAllAgents } from './lib/agent-service'
+import { agentRuntimeClient } from './lib/agent-runtime-client'
 import { disposePiMcpConnections } from './lib/adapters/pi-mcp-tools'
 import { browserController } from './lib/browser-controller'
 import { markRunningDelegationsAsInterrupted } from './lib/agent-session-manager'
@@ -609,6 +610,15 @@ async function bootstrap(): Promise<void> {
   // 或由用户从设置手动检测；启动时不应将其作为 Agent 的前置要求。
   await safeAwait('initializeRuntime', () => initializeRuntime({ skipNodeDetection: true }))
 
+  // Phase 1: start the isolated Pi runtime host. The main process still owns
+  // orchestration and Electron capabilities during this migration phase.
+  if (process.env.PROMA_AGENT_RUNTIME !== 'in-process' && process.env.PROMA_AGENT_RUNTIME !== 'off') {
+    await safeAwait('startAgentRuntime', async () => {
+      const state = await agentRuntimeClient.start()
+      console.info(`[AgentRuntime] utility ready: pid=${state.pid ?? 'unknown'} bootId=${state.bootId}`)
+    })
+  }
+
   // 同步默认 Skills 模板到 ~/.proma/default-skills/
   safeRun('seedDefaultSkills', seedDefaultSkills)
 
@@ -834,8 +844,10 @@ app.on('before-quit', () => {
   // 标记正在退出，让 close 事件不再阻止关闭
   setQuitting()
 
-  // 中止所有活跃的 Agent 和 Chat 子进程
+  // Stop active Agent queries before tearing down the utility process. The
+  // adapter sends best-effort abort requests while the runtime is still ready.
   stopAllAgents()
+  void agentRuntimeClient.stop()
   browserController.dispose()
   stopAllGenerations()
   // 清理更新器定时器

@@ -78,7 +78,11 @@ import { createFallbackTitle, sanitizeGeneratedTitle, TITLE_PROMPT } from './tit
 import { claimWorkspaceMemoryRefreshOpportunity } from './agent-memory-refresh-service'
 import { browserController } from './browser-controller'
 
-// ===== 类型定义 =====
+type PiAgentAdapterLike = Pick<
+  PiAgentAdapter,
+  'query' | 'abort' | 'dispose' | 'setPermissionMode' | 'sendQueuedMessage'
+>
+
 
 /**
  * 会话控制信号回调
@@ -213,7 +217,7 @@ function resolveLocalProjectRootForRewind(projectRootPath: string): string {
 // ===== AgentOrchestrator =====
 
 export class AgentOrchestrator {
-  private adapter: PiAgentAdapter
+  private adapter: PiAgentAdapterLike
   private eventBus: AgentEventBus
   private activeSessions = new Map<string, number>()
   private nextRunGeneration = 0
@@ -229,7 +233,7 @@ export class AgentOrchestrator {
   /** 运行中会话的当前权限模式（支持运行时动态切换） */
   private sessionPermissionModes = new Map<string, PromaPermissionMode>()
 
-  constructor(adapter: PiAgentAdapter, eventBus: AgentEventBus) {
+  constructor(adapter: PiAgentAdapterLike, eventBus: AgentEventBus) {
     this.adapter = adapter
     this.eventBus = eventBus
   }

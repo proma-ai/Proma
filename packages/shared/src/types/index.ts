@@ -11,6 +11,7 @@ export interface Workspace {
 
 // 运行时相关类型
 export * from './runtime'
+export * from './agent-runtime'
 
 // 渠道（AI 供应商）相关类型
 export * from './channel'

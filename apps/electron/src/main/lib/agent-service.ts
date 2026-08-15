@@ -31,6 +31,8 @@ import type {
   AgentMessage,
 } from '@proma/shared'
 import { PiAgentAdapter } from './adapters/pi-agent-adapter'
+import { PiUtilityAdapter } from './adapters/pi-utility-adapter'
+import { agentRuntimeClient } from './agent-runtime-client'
 import { AgentEventBus } from './agent-event-bus'
 import { AgentOrchestrator } from './agent-orchestrator'
 import { getAgentSessionWorkspacePath } from './config-paths'
@@ -44,7 +46,14 @@ import { AgentStreamForwarder } from './agent-stream-forwarder'
 // ===== 实例创建 =====
 
 const eventBus = new AgentEventBus()
-const adapter = new PiAgentAdapter()
+const useUtilityAgentRuntime = process.env.PROMA_AGENT_RUNTIME !== 'in-process'
+  && process.env.PROMA_AGENT_RUNTIME !== 'off'
+const adapter = useUtilityAgentRuntime
+  ? new PiUtilityAdapter(agentRuntimeClient)
+  : new PiAgentAdapter()
+if (adapter instanceof PiUtilityAdapter) {
+  agentRuntimeClient.setRequestHandler((request) => adapter.handleRuntimeRequest(request))
+}
 const orchestrator = new AgentOrchestrator(adapter, eventBus)
 
 /** 导出 EventBus 供飞书 Bridge 等外部服务订阅事件 */
