@@ -52,7 +52,12 @@ interface PiModelDefaults {
 const ZERO_MODEL_COST: PiModelCost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
 export const DEFAULT_CONTEXT_WINDOW = 200_000
 const DEFAULT_MAX_TOKENS = 64_000
-const VOLCENGINE_GLM_52_MAX_TOKENS = 128_000
+const VOLCENGINE_GLM_MAX_TOKENS = 128_000
+/**
+ * 当 Pi catalog 尚未包含 GLM-5.3 时，补回其官方最大输出上限，避免落到默认 64K。
+ * 智谱官方文档标注 GLM-5.3 最大输出 128K，与目录中 GLM-5.2 的 131072 同一口径。
+ */
+const GLM_53_MAX_TOKENS = 131_072
 const CODEX_BASE_URL = 'https://chatgpt.com/backend-api'
 const CODEX_MAX_TOKENS = 128_000
 /**
@@ -117,6 +122,18 @@ function compilePiReasoningCapabilities(
         },
         thinkingLevelMap,
       }
+    case 'zai-toggle':
+      return {
+        compat: {
+          supportsDeveloperRole: false,
+          supportsReasoningEffort: false,
+          thinkingFormat: 'zai',
+          zaiToolStream: true,
+        },
+        thinkingLevelMap,
+      }
+    case 'anthropic-manual':
+      return { thinkingLevelMap }
   }
 }
 
@@ -339,6 +356,7 @@ function candidatePiProviders(provider: ProviderType): KnownProvider[] {
     case 'zhipu':
       return ['zai']
     case 'zhipu-coding':
+    case 'zhipu-coding-team':
       return ['zai-coding-cn', 'zai']
     case 'minimax':
       return ['minimax', 'minimax-cn']
@@ -532,8 +550,10 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
   const codexAlignedCapabilities = getCodexAlignedGPT5Capabilities(input.model)
   const api = normalizePiApi(input.provider)
   const providerSpecificCapabilities = compilePiReasoningCapabilities(api, input.model)
-  const isVolcengineGlm52 = (input.provider === 'doubao' || input.provider === 'ark-coding-plan')
-    && input.model?.toLowerCase() === 'glm-5.2'
+  const glmModelId = input.model?.toLowerCase()
+  const isVolcengineGlm5x = (input.provider === 'doubao' || input.provider === 'ark-coding-plan')
+    && (glmModelId === 'glm-5.2' || glmModelId === 'glm-5.3')
+  const isCatalogMissingGlm53 = !catalogModel && glmModelId === 'glm-5.3'
   const catalogContextWindow = catalogModel?.contextWindow ?? DEFAULT_CONTEXT_WINDOW
   const inferredContextWindow = inferContextWindow(input.model) ?? DEFAULT_CONTEXT_WINDOW
   return {
@@ -545,10 +565,10 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
     cost: catalogModel ? { ...catalogModel.cost } : { ...ZERO_MODEL_COST },
     // Codex 对齐策略优先；其他模型仍保留 catalog 与 shared inference 中更大的已验证能力。
     contextWindow: codexAlignedCapabilities?.contextWindow ?? Math.max(catalogContextWindow, inferredContextWindow),
-    // Pi 的智谱目录将 GLM-5.2 标为 131072，但火山方舟兼容端点上限为 128000。
-    maxTokens: isVolcengineGlm52
-      ? VOLCENGINE_GLM_52_MAX_TOKENS
-      : (catalogModel?.maxTokens ?? DEFAULT_MAX_TOKENS),
+    // Pi 的智谱目录将 GLM-5.2 标为 131072，但火山方舟兼容端点上限为 128000；GLM-5.3 同理。
+    maxTokens: isVolcengineGlm5x
+      ? VOLCENGINE_GLM_MAX_TOKENS
+      : (catalogModel?.maxTokens ?? (isCatalogMissingGlm53 ? GLM_53_MAX_TOKENS : DEFAULT_MAX_TOKENS)),
   }
 }
 
