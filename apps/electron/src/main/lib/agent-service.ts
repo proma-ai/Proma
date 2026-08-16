@@ -548,6 +548,15 @@ export async function promoteAgentQueuedMessage(
   return agentQueueCoordinator.promote(input)
 }
 
+export function bindAgentQueuedMessageWebContents(sessionId: string, webContents: WebContents): void {
+  agentQueueCoordinator.bindWebContents(sessionId, webContents)
+  agentQueueCoordinator.wake(sessionId)
+}
+
+export function onAgentQueueBlockingRequestResolved(sessionId: string): void {
+  agentQueueCoordinator.onBlockingRequestResolved(sessionId)
+}
+
 export function listAgentQueuedMessages(sessionId?: string) {
   return agentQueueCoordinator.list(sessionId)
 }

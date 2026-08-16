@@ -49,6 +49,9 @@ export class AgentQueueCoordinator {
     }
     const inFlight = this.inFlight.get(sessionId)
     if (inFlight) inFlight.webContents = webContents
+  }
+
+  wake(sessionId: string): void {
     this.tryDispatch(sessionId)
   }
 
@@ -106,6 +109,8 @@ export class AgentQueueCoordinator {
 
     const insertIndex = input.placement === 'after' ? targetIndex + 1 : targetIndex
     queue.splice(insertIndex, 0, source)
+    this.failed.delete(input.sessionId)
+    this.tryDispatch(input.sessionId)
     return true
   }
 
@@ -144,8 +149,8 @@ export class AgentQueueCoordinator {
         this.restoreEntry(input.sessionId, entry)
         this.failed.add(input.sessionId)
         this.emit(entry.webContents, entry.input, 'failed', error)
+        return false
       }
-      return true
     }
 
     this.dispatching.set(input.sessionId, entry.input.queueMessageId)
@@ -217,6 +222,10 @@ export class AgentQueueCoordinator {
     this.backgroundWaiting.delete(sessionId)
     this.stopped.delete(sessionId)
     this.failed.delete(sessionId)
+  }
+
+  onBlockingRequestResolved(sessionId: string): void {
+    this.tryDispatch(sessionId)
   }
 
   private tryDispatch(sessionId: string): void {

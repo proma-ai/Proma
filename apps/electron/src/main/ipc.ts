@@ -279,7 +279,7 @@ import {
   searchAgentSessionMessages,
   searchAgentSessionReferences,
 } from './lib/agent-session-manager'
-import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive, queueAgentMessage, enqueueAgentQueuedMessage, cancelAgentQueuedMessage, moveAgentQueuedMessage, promoteAgentQueuedMessage, listAgentQueuedMessages, clearAgentQueuedMessages, updateAgentPermissionMode, rewindAgentSession, setVisibleAgentSession } from './lib/agent-service'
+import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive, queueAgentMessage, enqueueAgentQueuedMessage, cancelAgentQueuedMessage, moveAgentQueuedMessage, promoteAgentQueuedMessage, bindAgentQueuedMessageWebContents, onAgentQueueBlockingRequestResolved, listAgentQueuedMessages, clearAgentQueuedMessages, updateAgentPermissionMode, rewindAgentSession, setVisibleAgentSession } from './lib/agent-service'
 import { permissionService } from './lib/agent-permission-service'
 import { askUserService } from './lib/agent-ask-user-service'
 import { exitPlanService } from './lib/agent-exit-plan-service'
@@ -2889,7 +2889,8 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(
     AGENT_IPC_CHANNELS.LIST_QUEUED_MESSAGES,
-    async (_, sessionId?: string): Promise<import('@proma/shared').AgentQueuedMessage[]> => {
+    async (event, sessionId?: string): Promise<import('@proma/shared').AgentQueuedMessage[]> => {
+      if (sessionId) bindAgentQueuedMessageWebContents(sessionId, event.sender)
       return listAgentQueuedMessages(sessionId)
     },
   )
@@ -2922,6 +2923,7 @@ export function registerIpcHandlers(): void {
     async (event, response: PermissionResponse): Promise<void> => {
       const { requestId, behavior, alwaysAllow } = response
       const sessionId = permissionService.respondToPermission(requestId, behavior, alwaysAllow)
+      if (sessionId) onAgentQueueBlockingRequestResolved(sessionId)
 
       // 发送 permission_resolved 事件给渲染进程
       if (sessionId) {
@@ -3147,6 +3149,7 @@ export function registerIpcHandlers(): void {
     async (event, response: AskUserResponse): Promise<void> => {
       const { requestId, answers } = response
       const sessionId = askUserService.respondToAskUser(requestId, answers)
+      if (sessionId) onAgentQueueBlockingRequestResolved(sessionId)
 
       if (sessionId) {
         event.sender.send(AGENT_IPC_CHANNELS.STREAM_EVENT, {
@@ -3164,6 +3167,7 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.EXIT_PLAN_MODE_RESPOND,
     async (event, response: ExitPlanModeResponse): Promise<void> => {
       const result = exitPlanService.respondToExitPlanMode(response)
+      if (result) onAgentQueueBlockingRequestResolved(result.sessionId)
 
       if (result) {
         const { sessionId, targetMode } = result
