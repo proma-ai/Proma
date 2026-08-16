@@ -2695,6 +2695,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     const pushSessionTreeRows = (
       item: AgentSessionTreeItem,
       isAutomationGroup: boolean,
+      showPinIcon: boolean,
       workspaceNameMapForRow?: Map<string, string>,
       projectWorkspaceId?: string,
     ): void => {
@@ -2719,7 +2720,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
               session={item.session}
               active={treeActive}
               indicatorStatus={rowStatus}
-              showPinIcon={!isAutomationGroup}
+              showPinIcon={showPinIcon && !!item.session.pinned}
               disableMiniMap={!sessionHoverPreviewEnabled}
               delegationSummary={childCount > 0
                 ? {
@@ -2784,7 +2785,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
         content: <div className="pl-[18px] pr-3.5 pt-2 pb-1 text-[13px] font-medium leading-[18px] text-foreground/40 select-none">置顶</div>,
       })
       for (const item of pinnedAgentSessionTrees) {
-        pushSessionTreeRows(item, false, workspaceNameMap)
+        pushSessionTreeRows(item, false, false, workspaceNameMap)
       }
     }
 
@@ -2920,7 +2921,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
             content: <div className="ml-5 px-1.5 py-0.5 text-[12px] text-foreground/22 select-none">暂无会话</div>,
           })
         } else {
-          for (const item of visible.sessions) pushSessionTreeRows(item, isAuto, workspaceNameMap, group.workspace.id)
+          for (const item of visible.sessions) pushSessionTreeRows(item, isAuto, true, workspaceNameMap, group.workspace.id)
           if (visible.hiddenCount > 0 || extraCount > 0) {
             rows.push({
               id: `agent-project-controls-${group.workspace.id}`,
