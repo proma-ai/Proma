@@ -99,7 +99,6 @@ export interface AgentStreamState {
    * 此状态下 running 为 false，但服务端 activeSessions 仍保留，新消息必须走注入通道而非新建 run。
    */
   backgroundWaiting?: boolean
-  content: string
   toolActivities: ToolActivity[]
   model?: string
   /** 当前输入 token 数（上下文使用量） */
@@ -146,6 +145,11 @@ function clearFinishedCompactionForResumedWork(prev: AgentStreamState): AgentStr
     compactInFlight: false,
     contextCompaction: undefined,
   }
+}
+
+export function resumeAgentStreamState(prev: AgentStreamState): AgentStreamState {
+  const resumed = clearFinishedCompactionForResumedWork(prev)
+  return resumed.retrying === undefined ? resumed : { ...resumed, retrying: undefined }
 }
 
 /** 从 ToolActivity 派生状态 */
@@ -668,12 +672,6 @@ export const agentStreamingAtom = atom<boolean>((get) => {
   return get(agentStreamingStatesAtom).get(currentId)?.running ?? false
 })
 
-export const agentStreamingContentAtom = atom<string>((get) => {
-  const currentId = get(currentAgentSessionIdAtom)
-  if (!currentId) return ''
-  return get(agentStreamingStatesAtom).get(currentId)?.content ?? ''
-})
-
 export const agentToolActivitiesAtom = atom<ToolActivity[]>((get) => {
   const currentId = get(currentAgentSessionIdAtom)
   if (!currentId) return []
@@ -773,18 +771,6 @@ export function applyAgentEvent(
   event: AgentEvent,
 ): AgentStreamState {
   switch (event.type) {
-    case 'text_delta': {
-      // 开始接收文本 - 清除重试状态（重试成功）
-      const resumed = clearFinishedCompactionForResumedWork(prev)
-      return { ...resumed, content: resumed.content + event.text, retrying: undefined }
-    }
-
-    case 'text_complete': {
-      // 用完整文本替换增量累积的文本（用于回放场景：只需 text_complete 即可重建文本状态）
-      const resumed = clearFinishedCompactionForResumedWork(prev)
-      return { ...resumed, content: event.text }
-    }
-
     case 'tool_start': {
       const resumed = clearFinishedCompactionForResumedWork(prev)
       const existing = resumed.toolActivities.find((t) => t.toolUseId === event.toolUseId)

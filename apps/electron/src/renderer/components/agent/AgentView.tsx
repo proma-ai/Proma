@@ -1026,7 +1026,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       const existing = prev.get(sessionId)
       map.set(sessionId, {
         running: true,
-        content: '',
         toolActivities: [],
         model: agentModelId || undefined,
         startedAt: streamStartedAt,
@@ -1180,14 +1179,13 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
             // 仍在运行中：不清除
             if (!state || state.running) return prev
             const map = new Map(prev)
-            // 软空闲态（后台任务等待）：必须保留 backgroundWaiting 标志（否则 handleSend 误走新建 run），
-            // 但展示字段 content/toolActivities 仍要清空——否则上一轮流式文本残留会被兜底气泡渲染成重复消息。
+            // 软空闲态（后台任务等待）：必须保留 backgroundWaiting 标志（否则 handleSend 误走新建 run）。
+            // 实时文本只在 liveMessages 中，完成消息刷新时随其统一清理。
             if (state.inputTokens !== undefined) {
-              // 保留 usage 数据，仅清除流式展示字段
+              // 保留 usage 数据，仅清除本轮工具活动展示状态。
               map.set(sessionId, {
                 running: false,
                 backgroundWaiting: state.backgroundWaiting,
-                content: '',
                 toolActivities: [],
                 inputTokens: state.inputTokens,
                 outputTokens: state.outputTokens,
@@ -1203,7 +1201,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               map.set(sessionId, {
                 running: false,
                 backgroundWaiting: state.backgroundWaiting,
-                content: '',
                 toolActivities: [],
                 contextCompaction: state.contextCompaction,
               })
@@ -1294,7 +1291,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         const existing = prev.get(sessionId)
         map.set(sessionId, {
           running: true,
-          content: '',
           toolActivities: [],
           model: snapshot.modelId,
           startedAt: streamStartedAt,
@@ -2253,7 +2249,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       const existing = prev.get(sessionId)
       map.set(sessionId, {
         running: true,
-        content: '',
         toolActivities: [],
         model: agentModelId || undefined,
         startedAt: streamStartedAt,
@@ -2362,7 +2357,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       const map = new Map(prev)
       const current = prev.get(sessionId) ?? {
         running: true,
-        content: '',
         toolActivities: [],
         model: agentModelId || undefined,
         startedAt: streamStartedAt,
@@ -2487,7 +2481,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       const existing = prev.get(sessionId)
       map.set(sessionId, {
         running: true,
-        content: '',
         toolActivities: [],
         model: agentModelId || undefined,
         startedAt: streamStartedAt,
@@ -2533,7 +2526,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         const map = new Map(prev)
         map.set(meta.id, {
           running: true,
-          content: '',
           toolActivities: [],
           model: agentModelId || undefined,
           startedAt: streamStartedAt,

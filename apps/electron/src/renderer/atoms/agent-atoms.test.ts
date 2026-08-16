@@ -12,7 +12,6 @@ import {
 function createStreamState(overrides: Partial<AgentStreamState> = {}): AgentStreamState {
   return {
     running: true,
-    content: '',
     toolActivities: [],
     inputTokens: 180_000,
     outputTokens: 2_000,
@@ -223,7 +222,7 @@ describe('Agent retry 状态机', () => {
     expect(exhausted.retrying?.history[0]).toMatchObject({ attempt: 8, timestamp: 2_000, reason: '最终请求仍然失败' })
   })
 
-  test('given retry 成功 when 后续输出到达 then 成功状态被自然收起', () => {
+  test('given retry 成功 when 后续工具调用到达 then 成功状态被自然收起', () => {
     const running = applyAgentEvent(createStreamState({ startedAt: runStartedAt }), {
       type: 'retry_attempt',
       attemptData: retryAttempt,
@@ -238,7 +237,18 @@ describe('Agent retry 状态机', () => {
     })
 
     expect(succeeded.retrying?.phase).toBe('succeeded')
-    expect(applyAgentEvent(succeeded, { type: 'text_delta', text: '已恢复' }).retrying).toBeUndefined()
+    expect(applyAgentEvent(succeeded, {
+      type: 'tool_start',
+      toolName: 'Read',
+      toolUseId: 'resume-read',
+      input: {},
+    }).retrying).toBeUndefined()
+  })
+
+  test('given legacy text delta when the runtime reducer receives it then it does not duplicate the live transcript', () => {
+    const state = createStreamState()
+
+    expect(applyAgentEvent(state, { type: 'text_delta', text: '只由 live SDKMessage 渲染' })).toBe(state)
   })
 
   test('given 旧 run 的 retry 终态 when 新流已经开始 then 忽略迟到事件', () => {

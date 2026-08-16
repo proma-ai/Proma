@@ -7,13 +7,13 @@
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { Bot, RotateCw, AlertTriangle, CheckCircle2, Ban, ChevronDown, ChevronRight } from 'lucide-react'
+import { RotateCw, AlertTriangle, CheckCircle2, Ban, ChevronDown, ChevronRight } from 'lucide-react'
 import { WelcomeEmptyState } from '@/components/welcome/WelcomeEmptyState'
 import {
-  Message,
-  MessageHeader,
-  MessageContent,
   BasePathsProvider,
+  Message,
+  MessageContent,
+  MessageHeader,
 } from '@/components/ai-elements/message'
 import {
   Conversation,
@@ -22,11 +22,10 @@ import {
 import { ScrollMinimap } from '@/components/ai-elements/scroll-minimap'
 import type { MinimapItem } from '@/components/ai-elements/scroll-minimap'
 import { StickyUserMessage } from '@/components/ai-elements/sticky-user-message'
-import { useSmoothStream } from '@proma/ui'
 import { useStickToBottomContext } from 'use-stick-to-bottom'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { formatMessageTime } from '@/components/chat/ChatMessageItem'
-import { getModelLogo, resolveModelDisplayName, resolveModelProvider } from '@/lib/model-logo'
+import { resolveModelDisplayName } from '@/lib/model-logo'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { tabMinimapCacheAtom } from '@/atoms/tab-atoms'
 import { channelsAtom } from '@/atoms/chat-atoms'
@@ -34,11 +33,9 @@ import { ScrollPositionManager } from '@/hooks/useScrollPositionMemory'
 import { cn } from '@/lib/utils'
 import { Spinner } from '@/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { groupIntoTurns, MessageGroupRenderer, getGroupId, getGroupPreview, extractUserText, parseAttachedFiles as sdkParseAttachedFiles, isImageFile as sdkIsImageFile, buildTaskProgressDataForTurn, type MessageGroup } from './SDKMessageRenderer'
+import { groupIntoTurns, AssistantLogo, MessageGroupRenderer, getGroupId, getGroupPreview, extractUserText, parseAttachedFiles as sdkParseAttachedFiles, isImageFile as sdkIsImageFile, buildTaskProgressDataForTurn, type MessageGroup } from './SDKMessageRenderer'
 import { buildLiveGroupSet } from './live-group-set'
-import { ContentBlock } from './ContentBlock'
 import { AgentBrowserLinkProvider } from '@/components/browser/AgentBrowserLinkProvider'
-import { parseThinkTagsFromText } from './thinking-tag-parser'
 import { AgentHistorySelectionLayer } from './AgentHistorySelectionLayer'
 import { TaskProgressOverlay, type ContextCompactionProgress } from './TaskProgressOverlay'
 import { createMessageGroupRenderCache, groupMessagesForRendering } from './message-group-rendering'
@@ -298,24 +295,6 @@ function applyAgentHistoryQuoteHighlight(range: Range): boolean {
 /** 空状态引导 — 使用 WelcomeEmptyState */
 function EmptyState(): React.ReactElement {
   return <WelcomeEmptyState />
-}
-
-function AssistantLogo({ model }: { model?: string }): React.ReactElement {
-  const channels = useAtomValue(channelsAtom)
-  if (model) {
-    return (
-      <img
-        src={getModelLogo(model, resolveModelProvider(model, channels))}
-        alt={model}
-        className="size-[35px] rounded-[25%] object-cover"
-      />
-    )
-  }
-  return (
-    <div className="size-[35px] rounded-[25%] bg-primary/10 flex items-center justify-center">
-      <Bot size={18} className="text-primary" />
-    </div>
-  )
 }
 
 /** 重试提示组件 - 折叠式 */
@@ -856,8 +835,8 @@ export const AgentMessages = React.memo(function AgentMessages({
   const liveMessages = useAtomValue(agentLiveMessagesAtomFamily(sessionId))
   const streaming = streamState?.running ?? false
   const userProfile = useAtomValue(userProfileAtom)
-  const setMinimapCache = useSetAtom(tabMinimapCacheAtom)
   const channels = useAtomValue(channelsAtom)
+  const setMinimapCache = useSetAtom(tabMinimapCacheAtom)
   const historySelectionRootRef = React.useRef<HTMLDivElement>(null)
   const historyVirtualizerRef = React.useRef<AgentTranscriptHistoryHandle>(null)
   const visibleGroupsRef = React.useRef<MessageGroup[]>([])
@@ -962,28 +941,15 @@ export const AgentMessages = React.memo(function AgentMessages({
     return () => { cancelled = true }
   }, [streaming, liveMessages, persistedSDKMessages, messagesLoaded])
 
-  // 从 streamState 属性中计算派生值
-  const streamingContent = streamState?.content ?? ''
-  const streamingModelId = streamState?.model || sessionModelId
-  const agentStreamingModel = streamingModelId ? resolveModelDisplayName(streamingModelId, channels) : undefined
+  // 实时文本仅从 liveMessages 读取。AgentStreamState 只保留运行/控制状态，
+  // 避免每个 sdk_delta 同时更新 transcript 和 legacy content 两条路径。
   const retrying = streamState?.retrying
   const startedAt = streamState?.startedAt
-
-  const { displayedContent: rawSmoothContent } = useSmoothStream({
-    content: streamingContent,
-    isStreaming: streaming,
-  })
-
-  // 防闪屏守卫：useSmoothStream 通过 useEffect 重置 displayedContent，比 render 晚一帧。
-  // 当 streamingContent 已清空但 smoothContent 仍持有旧值时，
-  // 会导致 fallback 气泡与持久化消息同时渲染一帧（重复内容闪烁）。
-  // 用原始 streamingContent 作为守卫：内容已清空且不在流式中，立即归零。
-  const smoothContent = (streaming || streamingContent) ? rawSmoothContent : ''
-  const smoothContentBlocks = React.useMemo(() => {
-    if (!smoothContent) return []
-    return parseThinkTagsFromText(smoothContent)
-  }, [smoothContent])
-  const hasSmoothTextContent = smoothContentBlocks.some((block) => block.type === 'text')
+  const optimisticModelId = streamState?.model || sessionModelId
+  const optimisticModel = optimisticModelId
+    ? resolveModelDisplayName(optimisticModelId, channels)
+    : undefined
+  const optimisticTime = startedAt ? formatMessageTime(startedAt) : undefined
 
   /**
    * 流式完成过渡：streaming 结束到持久化消息加载完成之间，
@@ -998,7 +964,7 @@ export const AgentMessages = React.memo(function AgentMessages({
 
   // render-phase 判断：是否处于需要 instant resize 的过渡期
   // liveMessages 非空说明持久化消息还没加载完（加载完后会清空 liveMessages）
-  const needsInstant = !streaming && (!!streamingContent || !!smoothContent || (liveMessages != null && liveMessages.length > 0))
+  const needsInstant = !streaming && liveMessages != null && liveMessages.length > 0
 
   React.useEffect(() => {
     // 刚从 streaming → not-streaming：启动 cooldown
@@ -1231,38 +1197,17 @@ export const AgentMessages = React.memo(function AgentMessages({
                 </div>
               )}
 
-              {/* 无实时助手内容时：显示完整气泡（含头像/名称/时间） */}
-              {/* 注意：工具活动已通过 SDK 渲染路径（liveGroups）展示 */}
-              {!hasLiveAssistantContent && !suppressAgentRunning && (streaming || smoothContent || retrying) && (
+              {/* 首个 live assistant block 到达前，先乐观渲染 assistant 外壳和 Logo；文本仍完全由 SDKMessage 渲染。 */}
+              {!hasLiveAssistantContent && !suppressAgentRunning && (streaming || retrying) && (
                 <Message from="assistant">
                   <MessageHeader
-                    model={agentStreamingModel}
-                    time={formatMessageTime(Date.now())}
-                    logo={<AssistantLogo model={streamingModelId} />}
+                    model={optimisticModel}
+                    time={optimisticTime}
+                    logo={<AssistantLogo model={optimisticModelId} />}
                   />
                   <MessageContent>
                     {retrying && <RetryingNotice retrying={retrying} />}
-                    {smoothContent ? (
-                      <>
-                        <div className={cn('space-y-2')}>
-                          {smoothContentBlocks.map((block, index) => (
-                            <ContentBlock
-                              key={index}
-                              block={block}
-                              allMessages={allSDKMessages}
-                              basePath={sessionPath || undefined}
-                              basePaths={attachedDirs}
-                              index={index}
-                              dimmed={hasSmoothTextContent && block.type !== 'text'}
-                              isStreaming={streaming}
-                            />
-                          ))}
-                        </div>
-                        {streaming && <AgentRunningIndicator startedAt={startedAt} />}
-                      </>
-                    ) : (
-                      streaming && <AgentRunningIndicator startedAt={startedAt} />
-                    )}
+                    {streaming && <AgentRunningIndicator startedAt={startedAt} />}
                   </MessageContent>
                 </Message>
               )}
