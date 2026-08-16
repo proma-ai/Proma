@@ -1186,6 +1186,11 @@ export interface AgentSendInput {
 
 // ===== Agent 队列消息 =====
 
+/** 等待当前 run 结束后由主进程启动的消息。 */
+export interface AgentDeferredQueueMessageInput extends AgentSendInput {
+  queueMessageId: string
+}
+
 /** 流式追加消息的输入参数（Agent 流式中发送新消息） */
 export interface AgentQueueMessageInput {
   /** 会话 ID */
@@ -1212,6 +1217,27 @@ export interface AgentQueueMessageInput {
   mentionedTodoIds?: string[]
   /** 用户通过 &calendar_event:xxx 引用的日程 ID 列表 */
   mentionedCalendarEventIds?: string[]
+}
+
+export interface AgentQueuedMessageControlInput {
+  sessionId: string
+  messageId: string
+}
+
+export interface AgentMoveQueuedMessageInput {
+  sessionId: string
+  sourceId: string
+  targetId: string
+  placement: 'before' | 'after'
+}
+
+export interface AgentQueuedMessageStatus {
+  sessionId: string
+  messageId: string
+  status: 'started'
+  userMessage: string
+  rawUserMessage?: string
+  startedAt: number
 }
 
 // ===== 会话迁移输入 =====
@@ -1895,10 +1921,14 @@ export const AGENT_IPC_CHANNELS = {
   EXIT_PLAN_MODE_RESPOND: 'agent:exit-plan-mode:respond',
 
   // 队列消息（Agent 运行中排队发送）
-  /** 排队发送消息 */
+  /** 流式追加发送消息 */
   QUEUE_MESSAGE: 'agent:queue-message',
+  /** 排队发送消息（主进程 deferred queue） */
+  ENQUEUE_QUEUED_MESSAGE: 'agent:enqueue-queued-message',
   /** 取消队列消息 */
   CANCEL_QUEUED_MESSAGE: 'agent:cancel-queued-message',
+  /** 调整队列顺序 */
+  MOVE_QUEUED_MESSAGE: 'agent:move-queued-message',
   /** 提升队列消息为立即发送 */
   PROMOTE_QUEUED_MESSAGE: 'agent:promote-queued-message',
   /** 队列消息状态变更通知（主进程 → 渲染进程推送） */
