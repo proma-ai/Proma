@@ -428,6 +428,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   )
   const persistedSDKMessagesRef = React.useRef<SDKMessage[]>([])
   persistedSDKMessagesRef.current = persistedSDKMessages
+  const messagesRequestIdRef = React.useRef(0)
+  const messagesMutationVersionRef = React.useRef(0)
   const setStreamingStates = useSetAtom(agentStreamingStatesAtom)
   // 只订阅输入区/工具栏需要的低频流状态。
   const streamViewState = useAtomValue(agentSessionInputStreamStateAtomFamily(sessionId))
@@ -945,6 +947,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const appendOptimisticPersistedMessage = React.useCallback((message: SDKMessage) => {
     // 切会话时优先命中内存缓存，因此乐观插入的用户消息也要同步写入缓存，
     // 否则“发送后立刻切走再切回”会短暂回退到旧消息数组。
+    // 本地乐观消息优先于正在进行中的旧 IPC 快照。
+    messagesMutationVersionRef.current += 1
     const next = [...persistedSDKMessagesRef.current, message]
     persistedSDKMessagesRef.current = next
     setPersistedSDKMessages(next)
@@ -1158,10 +1162,19 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     }
     messagesRefreshingRef.current = true
     setMessagesRefreshing(true)
+    const requestId = ++messagesRequestIdRef.current
+    const requestMutationVersion = messagesMutationVersionRef.current
     let cancelled = false
     window.electronAPI.getAgentSessionSDKMessages(sessionId)
       .then((sdkMsgs) => {
-        if (cancelled) return
+        if (cancelled || requestId !== messagesRequestIdRef.current) return
+        if (requestMutationVersion !== messagesMutationVersionRef.current) {
+          // 请求期间已有本地消息变更，旧 IPC 快照不能覆盖当前内存消息。
+          setMessagesLoaded(true)
+          messagesRefreshingRef.current = false
+          setMessagesRefreshing(false)
+          return
+        }
         // 写入缓存（含 LRU 淘汰，防止会话数增长导致内存无限膨胀）
         setMessagesCache((prev) => setSessionMessagesCache(prev, sessionId, sdkMsgs))
         unstable_batchedUpdates(() => {
@@ -2457,6 +2470,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     // 在下一轮回复开始前仍被页面渲染。旧会话没有 UUID 时保留历史，由主进程幂等处理。
     const messagesAfterCleanup = removeRetriedErrorSDKMessage(persistedSDKMessages, retryOfErrorUuid)
     if (messagesAfterCleanup !== persistedSDKMessages) {
+      messagesMutationVersionRef.current += 1
       persistedSDKMessagesRef.current = messagesAfterCleanup
       setPersistedSDKMessages(messagesAfterCleanup)
       setMessagesCache((prev) => setSessionMessagesCache(prev, sessionId, messagesAfterCleanup))
