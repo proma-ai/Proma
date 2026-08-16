@@ -19,7 +19,7 @@ import { ImageLightbox, type LightboxImage } from '@/components/ui/image-lightbo
 import { ContentBlock } from './ContentBlock'
 import { TurnFileChangesSummary, buildTurnFileNameMap } from './TurnFileChangesSummary'
 import { TurnSkillUsageSummary } from './TurnSkillUsageSummary'
-import { ProcessBlockGroup, buildAssistantTurnRenderItems, buildCompletedToolResultIds, MAX_EXPANDED_PROCESS_BLOCKS } from './ProcessBlockGroup'
+import { ProcessBlockGroup, buildAssistantTurnRenderItems, buildCompletedToolResultIds } from './ProcessBlockGroup'
 import { extractToolResultText, TASK_TOOL_NAMES } from './task-progress'
 import { normalizeThinkTagsInContentBlocks } from './thinking-tag-parser'
 // 会话转录的纯逻辑(Turn 分组 / 快照去重 / 预览)已下沉到 @proma/session-core 作为唯一真源。
@@ -551,16 +551,11 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
                 key={groupKey}
                 blocks={groupBlocks}
                 isStreaming={isStreaming}
-                renderChildren={(mode) => {
-                  const groupItems = mode === 'preview'
-                    ? item.items.slice(-MAX_EXPANDED_PROCESS_BLOCKS)
-                    : item.items
-                  return groupItems.map((groupItem) => (
-                    <React.Fragment key={groupItem.index}>
-                      {renderProcessGroupBlock(groupItem.block, groupItem.index)}
-                    </React.Fragment>
-                  ))
-                }}
+                renderChildren={() => item.items.map((groupItem) => (
+                  <React.Fragment key={groupItem.index}>
+                    {renderProcessGroupBlock(groupItem.block, groupItem.index)}
+                  </React.Fragment>
+                ))}
                 isMessageTail={itemIndex === renderItems.length - 1}
               />
             )

@@ -13,15 +13,15 @@ import type {
 interface ProcessBlockGroupProps {
   blocks: SDKContentBlock[]
   isStreaming?: boolean
-  /** 按当前显示模式惰性生成过程项，避免流式中提前构造完整历史。 */
-  renderChildren: (mode: 'preview' | 'full') => React.ReactNode
+  /** 惰性生成过程项；流式与历史态均渲染完整内容。 */
+  renderChildren: () => React.ReactNode
   // 该过程组是否为整条消息的末尾项：是则流式中保留最后一段为正常显示，
   // 否则（最终答案已作为后续兄弟块外置）整组统一弱化。
   isMessageTail?: boolean
 }
 
 const MAX_PROCESS_GROUP_ICONS = 4
-export const MAX_EXPANDED_PROCESS_BLOCKS = 10
+const PROCESS_GROUP_VIEWPORT_HEIGHT = 320
 const PROCESS_GROUP_COLLAPSE_DURATION_MS = 500
 const PROCESS_GROUP_AUTO_COLLAPSE_SOUND_DELAY_MS = 900
 const PROCESS_GROUP_AUTO_COLLAPSE_COUNTDOWN_SECONDS = 3
@@ -172,35 +172,34 @@ export function buildProcessGroupToolNames(blocks: SDKContentBlock[]): string[] 
   return toolNames
 }
 
-type ProcessGroupDisplayMode = 'collapsed' | 'partial' | 'expanded'
+type ProcessGroupDisplayMode = 'collapsed' | 'expanded'
+
+function getProcessChildKey(child: React.ReactNode, index: number): string {
+  if (React.isValidElement(child) && child.key != null) return String(child.key)
+  return `process-child-${index}`
+}
 
 export function ProcessBlockGroup({ blocks, isStreaming, renderChildren, isMessageTail = false }: ProcessBlockGroupProps): React.ReactElement {
-  const hasStreamingPreview = !!isStreaming && blocks.length > MAX_EXPANDED_PROCESS_BLOCKS
   const initialDisplayMode: ProcessGroupDisplayMode = !isStreaming
     ? 'collapsed'
-    : hasStreamingPreview
-      ? 'partial'
-      : 'expanded'
+    : 'expanded'
   const [displayMode, setDisplayMode] = React.useState<ProcessGroupDisplayMode>(initialDisplayMode)
   const [shouldRenderContent, setShouldRenderContent] = React.useState(initialDisplayMode !== 'collapsed')
+  const [keepProgressViewport, setKeepProgressViewport] = React.useState(!!isStreaming)
   const [collapseCountdown, setCollapseCountdown] = React.useState<number | null>(null)
   const userToggledRef = React.useRef(false)
+  const followLatestRef = React.useRef(true)
+  const smoothScrollTargetRef = React.useRef<number | null>(null)
+  const scrollFrameRef = React.useRef<number | null>(null)
   const wasStreamingRef = React.useRef(!!isStreaming)
   const autoCollapseTimersRef = React.useRef<number[]>([])
   const contentRef = React.useRef<HTMLDivElement>(null)
+  const contentInnerRef = React.useRef<HTMLDivElement>(null)
   const [measuredHeight, setMeasuredHeight] = React.useState<number | undefined>(undefined)
 
-  const isPreviewMode = displayMode === 'partial' && !!isStreaming && hasStreamingPreview
-  const isContentExpanded = displayMode !== 'collapsed'
-  const renderMode = isPreviewMode ? 'preview' : 'full'
-  const collapsingRenderModeRef = React.useRef<'preview' | 'full'>(renderMode)
-  if (isContentExpanded) {
-    collapsingRenderModeRef.current = renderMode
-  }
+  const isContentExpanded = displayMode === 'expanded'
   const shouldShowContent = isContentExpanded || shouldRenderContent
-  const visibleChildren = shouldShowContent
-    ? renderChildren(isContentExpanded ? renderMode : collapsingRenderModeRef.current)
-    : null
+  const visibleChildren = shouldShowContent ? renderChildren() : null
 
   const clearAutoCollapseTimers = React.useCallback(() => {
     for (const timer of autoCollapseTimersRef.current) window.clearTimeout(timer)
@@ -212,13 +211,18 @@ export function ProcessBlockGroup({ blocks, isStreaming, renderChildren, isMessa
 
     if (isStreaming) {
       setCollapseCountdown(null)
-      if (isStreaming && !wasStreamingRef.current) {
+      setKeepProgressViewport(true)
+      if (!wasStreamingRef.current) {
         userToggledRef.current = false
+        followLatestRef.current = true
+        smoothScrollTargetRef.current = null
+        if (scrollFrameRef.current !== null) {
+          cancelAnimationFrame(scrollFrameRef.current)
+          scrollFrameRef.current = null
+        }
       }
-      if (!userToggledRef.current) {
-        setDisplayMode(hasStreamingPreview ? 'partial' : 'expanded')
-      }
-      wasStreamingRef.current = !!isStreaming
+      if (!userToggledRef.current) setDisplayMode('expanded')
+      wasStreamingRef.current = true
       return
     }
 
@@ -226,9 +230,8 @@ export function ProcessBlockGroup({ blocks, isStreaming, renderChildren, isMessa
     wasStreamingRef.current = false
 
     if (!shouldAutoCollapseAfterCompletion) {
-      if (!userToggledRef.current) {
-        setDisplayMode('collapsed')
-      }
+      setKeepProgressViewport(false)
+      if (!userToggledRef.current) setDisplayMode('collapsed')
       return
     }
 
@@ -243,12 +246,90 @@ export function ProcessBlockGroup({ blocks, isStreaming, renderChildren, isMessa
       autoCollapseTimersRef.current.push(window.setTimeout(() => {
         setCollapseCountdown(null)
         setDisplayMode('collapsed')
+        autoCollapseTimersRef.current.push(window.setTimeout(
+          () => setKeepProgressViewport(false),
+          PROCESS_GROUP_COLLAPSE_DURATION_MS,
+        ))
       }, PROCESS_GROUP_AUTO_COLLAPSE_COUNTDOWN_SECONDS * 1000))
     }, PROCESS_GROUP_AUTO_COLLAPSE_SOUND_DELAY_MS)
     autoCollapseTimersRef.current.push(soundDelayTimer)
 
     return clearAutoCollapseTimers
-  }, [clearAutoCollapseTimers, hasStreamingPreview, isStreaming])
+  }, [clearAutoCollapseTimers, isStreaming])
+
+  const scrollToLatest = React.useCallback(() => {
+    if (!followLatestRef.current) return
+    const viewport = contentRef.current
+    if (!viewport) return
+
+    smoothScrollTargetRef.current = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
+    if (scrollFrameRef.current !== null) return
+
+    const advanceScroll = (): void => {
+      const target = smoothScrollTargetRef.current
+      const activeViewport = contentRef.current
+      if (!followLatestRef.current || target == null || !activeViewport) {
+        scrollFrameRef.current = null
+        return
+      }
+
+      const distance = target - activeViewport.scrollTop
+      if (Math.abs(distance) <= 1) {
+        activeViewport.scrollTop = target
+        smoothScrollTargetRef.current = null
+        scrollFrameRef.current = null
+        return
+      }
+
+      // 内容突增时快速追近，正常增量则保持低成本的连续插值。
+      const nextTop = distance > 72
+        ? target - 48
+        : activeViewport.scrollTop + distance * 0.32
+      activeViewport.scrollTop = nextTop
+      scrollFrameRef.current = requestAnimationFrame(advanceScroll)
+    }
+
+    scrollFrameRef.current = requestAnimationFrame(advanceScroll)
+  }, [])
+
+  React.useLayoutEffect(() => {
+    if (!isStreaming || !keepProgressViewport) return
+    const content = contentInnerRef.current
+    if (!content) return
+
+    const frame = requestAnimationFrame(scrollToLatest)
+    const observer = new ResizeObserver(scrollToLatest)
+    observer.observe(content)
+    return () => {
+      cancelAnimationFrame(frame)
+      if (scrollFrameRef.current !== null) {
+        cancelAnimationFrame(scrollFrameRef.current)
+        scrollFrameRef.current = null
+      }
+      observer.disconnect()
+    }
+  }, [isStreaming, keepProgressViewport, scrollToLatest])
+
+  React.useLayoutEffect(() => {
+    if (isStreaming && keepProgressViewport) scrollToLatest()
+  }, [blocks, isStreaming, keepProgressViewport, scrollToLatest])
+
+  const handleProgressScroll = React.useCallback((event: React.UIEvent<HTMLDivElement>): void => {
+    if (scrollFrameRef.current !== null) return
+    const { clientHeight, scrollHeight, scrollTop } = event.currentTarget
+    if (scrollHeight - scrollTop - clientHeight <= 24) {
+      followLatestRef.current = true
+    }
+  }, [])
+
+  const handleProgressScrollIntent = React.useCallback((): void => {
+    smoothScrollTargetRef.current = null
+    followLatestRef.current = false
+    if (scrollFrameRef.current !== null) {
+      cancelAnimationFrame(scrollFrameRef.current)
+      scrollFrameRef.current = null
+    }
+  }, [])
 
   // 折叠前测量实际高度，用于丝滑的 height 过渡（子元素不 reflow，只裁剪边界）
   React.useEffect(() => {
@@ -261,7 +342,7 @@ export function ProcessBlockGroup({ blocks, isStreaming, renderChildren, isMessa
     // 折叠时：先测量当前高度，触发 height 过渡动画，动画结束后卸载 DOM
     const el = contentRef.current
     if (el) {
-      const h = el.scrollHeight
+      const h = el.clientHeight
       setMeasuredHeight(h)
       // 强制浏览器在下一帧开始从 h → 0 的过渡
       requestAnimationFrame(() => setMeasuredHeight(0))
@@ -290,11 +371,8 @@ export function ProcessBlockGroup({ blocks, isStreaming, renderChildren, isMessa
       const dimmed = isStreaming && !(isMessageTail && isLast)
       return (
         <div
-          key={i}
-          className={cn(
-            dimmed && 'opacity-80',
-            isStreaming && 'animate-in fade-in slide-in-from-top-1 duration-200',
-          )}
+          key={getProcessChildKey(child, i)}
+          className={cn(dimmed && 'opacity-80')}
         >
           {child}
         </div>
@@ -314,14 +392,8 @@ export function ProcessBlockGroup({ blocks, isStreaming, renderChildren, isMessa
           userToggledRef.current = true
           clearAutoCollapseTimers()
           setCollapseCountdown(null)
-          setDisplayMode((previous) => {
-            if (hasStreamingPreview) {
-              if (previous === 'partial') return 'collapsed'
-              if (previous === 'collapsed') return 'expanded'
-              return 'collapsed'
-            }
-            return previous === 'collapsed' ? 'expanded' : 'collapsed'
-          })
+          if (!isStreaming) setKeepProgressViewport(false)
+          setDisplayMode((previous) => previous === 'collapsed' ? 'expanded' : 'collapsed')
         }}
       >
         <ChevronRight
@@ -361,8 +433,15 @@ export function ProcessBlockGroup({ blocks, isStreaming, renderChildren, isMessa
         <div
           ref={contentRef}
           data-agent-history-selection-excluded={isContentExpanded ? undefined : 'true'}
-          className="overflow-hidden"
+          className={cn(
+            'overflow-hidden',
+            keepProgressViewport && 'overflow-y-auto overscroll-contain scrollbar-none',
+          )}
+          onScroll={keepProgressViewport ? handleProgressScroll : undefined}
+          onWheel={keepProgressViewport ? handleProgressScrollIntent : undefined}
+          onTouchStart={keepProgressViewport ? handleProgressScrollIntent : undefined}
           style={{
+            maxHeight: keepProgressViewport ? `${PROCESS_GROUP_VIEWPORT_HEIGHT}px` : undefined,
             height: measuredHeight !== undefined ? `${measuredHeight}px` : 'auto',
             opacity: isContentExpanded ? 1 : 0,
             transition: measuredHeight !== undefined
@@ -370,7 +449,7 @@ export function ProcessBlockGroup({ blocks, isStreaming, renderChildren, isMessa
               : `opacity ${PROCESS_GROUP_COLLAPSE_DURATION_MS}ms ease-in-out`,
           }}
         >
-          <div className="space-y-2">
+          <div ref={contentInnerRef} className="space-y-2">
             {renderContentChildren()}
           </div>
         </div>
