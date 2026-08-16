@@ -1186,69 +1186,6 @@ export interface AgentSendInput {
 
 // ===== Agent 队列消息 =====
 
-/** 队列 UI 使用的附件元数据；只传路径和文件信息，不传文件内容。 */
-export interface AgentQueuedAttachment {
-  filename: string
-  mediaType: string
-  size: number
-  targetPath: string
-}
-
-/** 队列消息中可恢复的引用选区。 */
-export interface AgentQueuedSelection {
-  text: string
-  filePath: string
-  sourceType?: 'file' | 'agent-history' | 'scratch-pad'
-  sourceLabel?: string
-  messageId?: string
-  messageRole?: 'user' | 'assistant' | 'system'
-  startLine?: number
-  endLine?: number
-  selectionStart?: number
-  selectionEnd?: number
-  turn?: number
-  capturedAt: number
-}
-
-/** renderer 与主进程共享的队列消息快照。 */
-export interface AgentQueuedMessage {
-  id: string
-  text: string
-  createdAt: number
-  quotedSelection?: AgentQueuedSelection
-  fileReferenceBlock?: string
-  attachments?: AgentQueuedAttachment[]
-  additionalDirectories?: string[]
-}
-
-/** 流式结束后由主进程自动启动的 deferred Agent 消息。 */
-export interface AgentDeferredQueueMessageInput extends AgentSendInput {
-  queueMessageId: string
-  displayMessage: AgentQueuedMessage
-}
-
-export type AgentQueuedMessagePlacement = 'before' | 'after'
-
-export interface AgentQueuedMessageControlInput {
-  sessionId: string
-  messageId: string
-}
-
-export interface AgentMoveQueuedMessageInput {
-  sessionId: string
-  sourceId: string
-  targetId: string
-  placement: AgentQueuedMessagePlacement
-}
-
-export interface AgentQueuedMessageStatus {
-  sessionId: string
-  messageId: string
-  status: 'queued' | 'started' | 'cancelled' | 'failed'
-  message?: AgentQueuedMessage
-  error?: string
-}
-
 /** 流式追加消息的输入参数（Agent 流式中发送新消息） */
 export interface AgentQueueMessageInput {
   /** 会话 ID */
@@ -1957,19 +1894,13 @@ export const AGENT_IPC_CHANNELS = {
   /** ExitPlanMode 响应（渲染进程 → 主进程） */
   EXIT_PLAN_MODE_RESPOND: 'agent:exit-plan-mode:respond',
 
-    // 队列消息（Agent 运行中排队发送）
-  /** 排队发送消息并在当前 run 结束后由主进程自动启动 */
-  ENQUEUE_QUEUED_MESSAGE: 'agent:enqueue-queued-message',
-  /** 排队发送消息（当前运行中的 SDK 注入） */
+  // 队列消息（Agent 运行中排队发送）
+  /** 排队发送消息 */
   QUEUE_MESSAGE: 'agent:queue-message',
   /** 取消队列消息 */
   CANCEL_QUEUED_MESSAGE: 'agent:cancel-queued-message',
-  /** 调整队列消息顺序 */
-  MOVE_QUEUED_MESSAGE: 'agent:move-queued-message',
   /** 提升队列消息为立即发送 */
   PROMOTE_QUEUED_MESSAGE: 'agent:promote-queued-message',
-  /** 查询主进程内存队列 */
-  LIST_QUEUED_MESSAGES: 'agent:list-queued-messages',
   /** 队列消息状态变更通知（主进程 → 渲染进程推送） */
   QUEUED_MESSAGE_STATUS: 'agent:queued-message-status',
 

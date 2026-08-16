@@ -214,13 +214,6 @@ export class AgentPermissionService {
     return sessionId
   }
 
-  hasPendingRequests(sessionId: string): boolean {
-    for (const pending of this.pendingPermissions.values()) {
-      if (pending.request.sessionId === sessionId) return true
-    }
-    return false
-  }
-
   /**
    * 清除指定会话的所有待处理请求（会话结束或中止时调用）
    */

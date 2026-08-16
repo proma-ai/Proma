@@ -135,13 +135,6 @@ export class AgentExitPlanService {
     }
   }
 
-  hasPendingRequests(sessionId: string): boolean {
-    for (const pending of this.pendingRequests.values()) {
-      if (pending.request.sessionId === sessionId) return true
-    }
-    return false
-  }
-
   /**
    * 获取当前所有待处理的 ExitPlanMode 请求（用于渲染进程重载后恢复状态）
    */

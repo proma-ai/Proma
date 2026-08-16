@@ -279,7 +279,7 @@ import {
   searchAgentSessionMessages,
   searchAgentSessionReferences,
 } from './lib/agent-session-manager'
-import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive, queueAgentMessage, enqueueAgentQueuedMessage, cancelAgentQueuedMessage, moveAgentQueuedMessage, promoteAgentQueuedMessage, bindAgentQueuedMessageWebContents, onAgentQueueBlockingRequestResolved, listAgentQueuedMessages, clearAgentQueuedMessages, updateAgentPermissionMode, rewindAgentSession, setVisibleAgentSession } from './lib/agent-service'
+import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive, queueAgentMessage, updateAgentPermissionMode, rewindAgentSession, setVisibleAgentSession } from './lib/agent-service'
 import { permissionService } from './lib/agent-permission-service'
 import { askUserService } from './lib/agent-ask-user-service'
 import { exitPlanService } from './lib/agent-exit-plan-service'
@@ -2234,7 +2234,6 @@ export function registerIpcHandlers(): void {
       askUserService.clearSessionPending(id)
       // 清理 ExitPlanMode 服务中的待处理请求
       exitPlanService.clearSessionPending(id)
-      clearAgentQueuedMessages(id)
       await browserController.close(id)
       deleteAgentSession(id)
       releaseAttachedFileWatchers(attachedFiles)
@@ -2858,43 +2857,6 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // 将等待当前 run 结束的消息交给主进程调度器
-  ipcMain.handle(
-    AGENT_IPC_CHANNELS.ENQUEUE_QUEUED_MESSAGE,
-    async (event, input: import('@proma/shared').AgentDeferredQueueMessageInput): Promise<void> => {
-      enqueueAgentQueuedMessage(input, event.sender)
-    },
-  )
-
-  ipcMain.handle(
-    AGENT_IPC_CHANNELS.CANCEL_QUEUED_MESSAGE,
-    async (_, input: import('@proma/shared').AgentQueuedMessageControlInput): Promise<boolean> => {
-      return cancelAgentQueuedMessage(input)
-    },
-  )
-
-  ipcMain.handle(
-    AGENT_IPC_CHANNELS.MOVE_QUEUED_MESSAGE,
-    async (_, input: import('@proma/shared').AgentMoveQueuedMessageInput): Promise<boolean> => {
-      return moveAgentQueuedMessage(input)
-    },
-  )
-
-  ipcMain.handle(
-    AGENT_IPC_CHANNELS.PROMOTE_QUEUED_MESSAGE,
-    async (_, input: import('@proma/shared').AgentQueuedMessageControlInput & { interrupt?: boolean }): Promise<boolean> => {
-      return promoteAgentQueuedMessage(input)
-    },
-  )
-
-  ipcMain.handle(
-    AGENT_IPC_CHANNELS.LIST_QUEUED_MESSAGES,
-    async (event, sessionId?: string): Promise<import('@proma/shared').AgentQueuedMessage[]> => {
-      if (sessionId) bindAgentQueuedMessageWebContents(sessionId, event.sender)
-      return listAgentQueuedMessages(sessionId)
-    },
-  )
-
   // ===== Agent 后台任务管理 =====
 
   // 获取任务输出（保留接口，供未来扩展）
@@ -2923,7 +2885,6 @@ export function registerIpcHandlers(): void {
     async (event, response: PermissionResponse): Promise<void> => {
       const { requestId, behavior, alwaysAllow } = response
       const sessionId = permissionService.respondToPermission(requestId, behavior, alwaysAllow)
-      if (sessionId) onAgentQueueBlockingRequestResolved(sessionId)
 
       // 发送 permission_resolved 事件给渲染进程
       if (sessionId) {
@@ -3149,7 +3110,6 @@ export function registerIpcHandlers(): void {
     async (event, response: AskUserResponse): Promise<void> => {
       const { requestId, answers } = response
       const sessionId = askUserService.respondToAskUser(requestId, answers)
-      if (sessionId) onAgentQueueBlockingRequestResolved(sessionId)
 
       if (sessionId) {
         event.sender.send(AGENT_IPC_CHANNELS.STREAM_EVENT, {
@@ -3167,7 +3127,6 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.EXIT_PLAN_MODE_RESPOND,
     async (event, response: ExitPlanModeResponse): Promise<void> => {
       const result = exitPlanService.respondToExitPlanMode(response)
-      if (result) onAgentQueueBlockingRequestResolved(result.sessionId)
 
       if (result) {
         const { sessionId, targetMode } = result

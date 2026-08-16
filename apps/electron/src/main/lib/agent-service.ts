@@ -25,9 +25,6 @@ import type {
   AgentStreamEvent,
   AgentStreamPayload,
   AgentQueueMessageInput,
-  AgentDeferredQueueMessageInput,
-  AgentQueuedMessageControlInput,
-  AgentMoveQueuedMessageInput,
   PromaPermissionMode,
   AgentExternalRunSource,
   AgentMessage,
@@ -43,10 +40,6 @@ import { setAgentStopper, setHeadlessAgentRunner } from './agent-headless-runner
 import { getHeadlessAgentRunTarget } from './agent-headless-run-target'
 import { sendAgentStreamComplete } from './agent-completion-payload'
 import { AgentStreamForwarder } from './agent-stream-forwarder'
-import { AgentQueueCoordinator } from './agent-queue-coordinator'
-import { permissionService } from './agent-permission-service'
-import { askUserService } from './agent-ask-user-service'
-import { exitPlanService } from './agent-exit-plan-service'
 
 // ===== 实例创建 =====
 
@@ -95,11 +88,9 @@ function registerWebContents(sessionId: string, wc: WebContents): void {
   if (previousWebContents && previousWebContents !== wc) streamForwarder.clear(sessionId)
   // 旧 wc 的 destroyed 钩子仍由 WeakSet 持有，触发时会扫描 sessionWebContents 清理所有指向它的条目。
   sessionWebContents.set(sessionId, wc)
-  agentQueueCoordinator.bindWebContents(sessionId, wc)
   if (wcWithCleanupHook.has(wc)) return
   wcWithCleanupHook.add(wc)
   wc.once('destroyed', () => {
-    agentQueueCoordinator.detachWebContents(wc)
     // 单个 wc 可能映射到多个 sessionId（同窗口多 tab），需要清理所有指向它的条目
     for (const [sid, mappedWc] of sessionWebContents) {
       if (mappedWc === wc) {
@@ -168,13 +159,6 @@ eventBus.use((sessionId, payload, next) => {
     }
   }
   next()
-  if (
-    payload.kind === 'sdk_message'
-    && payload.message.type === 'system'
-    && payload.message.subtype === 'task_notification'
-  ) {
-    agentQueueCoordinator.onBackgroundTaskComplete(sessionId)
-  }
 })
 
 /** renderer 切换标签时更新流式优先级；切入会话立即 flush 等待中的后台快照。 */
@@ -187,24 +171,6 @@ export function setVisibleAgentSession(webContents: WebContents, sessionId: stri
   visibleAgentSessionByWebContents.set(webContents, sessionId)
   if (sessionId) streamForwarder.promote(sessionId)
 }
-
-const agentQueueCoordinator = new AgentQueueCoordinator({
-  isActive: (sessionId) => orchestrator.isActive(sessionId),
-  canDispatch: (sessionId) => {
-    const session = getAgentSessionMeta(sessionId)
-    return !session?.stoppedByUser
-      && !permissionService.hasPendingRequests(sessionId)
-      && !askUserService.hasPendingRequests(sessionId)
-      && !exitPlanService.hasPendingRequests(sessionId)
-  },
-  startRun: (input, webContents) => runAgent(input, webContents),
-  injectMessage: (input, webContents) => queueAgentMessage(input, webContents),
-  sendStatus: (webContents, status) => {
-    if (!webContents.isDestroyed()) {
-      webContents.send(AGENT_IPC_CHANNELS.QUEUED_MESSAGE_STATUS, status)
-    }
-  },
-})
 
 // ===== IPC 薄包装函数 =====
 
@@ -224,8 +190,6 @@ export async function runAgent(
 ): Promise<void> {
   // 更新 webContents 映射（允许覆盖 — 由 orchestrator.activeSessions 处理真正的并发保护）
   registerWebContents(input.sessionId, webContents)
-  // deferred queue runs carry their queue id at runtime; normal renderer/bridge runs do not.
-  const deferredQueueMessageId = (input as Partial<AgentDeferredQueueMessageInput>).queueMessageId
   // 开始新一轮执行时清除"完成未确认"标记
   try {
     updateAgentSessionMeta(input.sessionId, { completedButUnconfirmed: false })
@@ -248,9 +212,6 @@ export async function runAgent(
   try {
     await orchestrator.sendMessage(input, {
       onError: (error) => {
-        if (deferredQueueMessageId) {
-          agentQueueCoordinator.onRunError(input.sessionId, deferredQueueMessageId, error)
-        }
         if (!webContents.isDestroyed()) {
           webContents.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
             sessionId: input.sessionId,
@@ -272,11 +233,6 @@ export async function runAgent(
             session: getSessionMetaForRenderer(input.sessionId),
           })
         }
-        agentQueueCoordinator.onRunComplete(input.sessionId, {
-          queueMessageId: deferredQueueMessageId,
-          backgroundTasksPending: opts?.backgroundTasksPending === true,
-          stoppedByUser: opts?.stoppedByUser === true,
-        })
       },
       onRunStarted: ({ startedAt }) => {
         eventBus.emit(input.sessionId, {
@@ -300,9 +256,6 @@ export async function runAgent(
   } catch (err) {
     console.error('[Agent 服务] runAgent 未处理异常:', err)
     const errorMessage = err instanceof Error ? err.message : '未知错误'
-    if (deferredQueueMessageId) {
-      agentQueueCoordinator.onRunError(input.sessionId, deferredQueueMessageId, errorMessage)
-    }
     if (!webContents.isDestroyed()) {
       webContents.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
         sessionId: input.sessionId,
@@ -313,11 +266,6 @@ export async function runAgent(
         stoppedByUser: false,
       })
     }
-    agentQueueCoordinator.onRunComplete(input.sessionId, {
-      queueMessageId: deferredQueueMessageId,
-      backgroundTasksPending: false,
-      stoppedByUser: false,
-    })
   } finally {
     // 仅在 orchestrator 已完成此会话时清理映射
     // 避免被拒绝的请求误删仍在运行的会话映射
@@ -385,10 +333,6 @@ export async function runAgentHeadless(
             session: getSessionMetaForRenderer(runInput.sessionId),
           })
         }
-        agentQueueCoordinator.onRunComplete(runInput.sessionId, {
-          backgroundTasksPending: opts?.backgroundTasksPending === true,
-          stoppedByUser: opts?.stoppedByUser === true,
-        })
       },
       onTitleUpdated: (title) => {
         callbacks.onTitleUpdated(title)
@@ -434,10 +378,6 @@ export async function runAgentHeadless(
         startedAt,
       })
     }
-    agentQueueCoordinator.onRunComplete(runInput.sessionId, {
-      backgroundTasksPending: false,
-      stoppedByUser: false,
-    })
   } finally {
     if (!orchestrator.isActive(runInput.sessionId)) {
       sessionWebContents.delete(runInput.sessionId)
@@ -524,45 +464,6 @@ export async function queueAgentMessage(
     input.mentionedTodoIds,
     input.mentionedCalendarEventIds,
   )
-}
-
-/** 将等待当前 run 结束的消息交给主进程内存队列。 */
-export function enqueueAgentQueuedMessage(
-  input: AgentDeferredQueueMessageInput,
-  webContents: WebContents,
-): void {
-  agentQueueCoordinator.enqueue(input, webContents)
-}
-
-export function cancelAgentQueuedMessage(input: AgentQueuedMessageControlInput): boolean {
-  return agentQueueCoordinator.cancel(input)
-}
-
-export function moveAgentQueuedMessage(input: AgentMoveQueuedMessageInput): boolean {
-  return agentQueueCoordinator.move(input)
-}
-
-export async function promoteAgentQueuedMessage(
-  input: AgentQueuedMessageControlInput & { interrupt?: boolean },
-): Promise<boolean> {
-  return agentQueueCoordinator.promote(input)
-}
-
-export function bindAgentQueuedMessageWebContents(sessionId: string, webContents: WebContents): void {
-  agentQueueCoordinator.bindWebContents(sessionId, webContents)
-  agentQueueCoordinator.wake(sessionId)
-}
-
-export function onAgentQueueBlockingRequestResolved(sessionId: string): void {
-  agentQueueCoordinator.onBlockingRequestResolved(sessionId)
-}
-
-export function listAgentQueuedMessages(sessionId?: string) {
-  return agentQueueCoordinator.list(sessionId)
-}
-
-export function clearAgentQueuedMessages(sessionId: string): void {
-  agentQueueCoordinator.clear(sessionId)
 }
 
 // ===== 文件操作 =====
