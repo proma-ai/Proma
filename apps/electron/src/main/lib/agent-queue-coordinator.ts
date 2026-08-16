@@ -151,6 +151,7 @@ export class AgentQueueCoordinator {
         this.emit(entry.webContents, entry.input, 'failed', error)
         return false
       }
+      return true
     }
 
     this.dispatching.set(input.sessionId, entry.input.queueMessageId)
