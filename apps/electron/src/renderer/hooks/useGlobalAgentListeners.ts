@@ -217,7 +217,7 @@ function createAssistantDeltaPreview(payload: AgentAssistantDeltaPayload, metada
     session_id: payload.session_id,
     uuid: payload.uuid,
     _partial: true,
-    _createdAt: Date.now(),
+    _createdAt: payload.runStartedAt ?? Date.now(),
     ...metadata,
   } as SDKAssistantMessage
 }
@@ -1176,15 +1176,18 @@ export function useGlobalAgentListeners(): void {
           } else if (msgRecord.type === 'system' && msgRecord.subtype === 'thinking_tokens') {
             // thinking_tokens 是高频进度估算，只更新流式状态，不进入消息转录。
           } else if (!msgRecord.isReplay) {
+            // 当前 run 的 assistant 消息沿用 run 起始时间，与首个 Delta 预览和乐观 header 保持一致。
+            const activeRunStartedAt = store.get(agentStreamingStatesAtom).get(sessionId)?.startedAt
             // 为实时消息补充 _createdAt 时间戳（与持久化时的逻辑一致），
             // 避免 AssistantTurnRenderer 因缺少时间戳导致 header 时间消失
             if (typeof msgRecord._createdAt !== 'number') {
-              msgRecord._createdAt = Date.now()
+              msgRecord._createdAt = msgRecord.type === 'assistant'
+                ? (activeRunStartedAt ?? Date.now())
+                : Date.now()
             }
 
             // 队列自动派发会在上一轮实时消息尚未落盘刷新时开始下一轮。
             // 标记每条实时消息所属 run，渲染层即可把上一轮立即视为完成并自动收起过程块。
-            const activeRunStartedAt = store.get(agentStreamingStatesAtom).get(sessionId)?.startedAt
             if (activeRunStartedAt != null) {
               msgRecord._promaLiveRunStartedAt = activeRunStartedAt
             }
