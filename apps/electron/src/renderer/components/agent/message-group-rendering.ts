@@ -57,6 +57,44 @@ export function stabilizeMessageGroups(previous: MessageGroup[], next: MessageGr
   return changed ? stable : previous
 }
 
+export function mergeOverlappingMessageSnapshots(
+  persisted: SDKMessage[],
+  live: SDKMessage[],
+  getStableKey: (message: SDKMessage) => string,
+): SDKMessage[] {
+  if (persisted.length === 0) return live
+  if (live.length === 0) return persisted
+
+  const findOverlap = (fromEnd: boolean): number => {
+    const maxOverlap = Math.min(persisted.length, live.length)
+    for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
+      const persistedStart = persisted.length - overlap
+      const liveStart = fromEnd ? live.length - overlap : 0
+      let matches = true
+      for (let index = 0; index < overlap; index += 1) {
+        if (getStableKey(persisted[persistedStart + index]!) !== getStableKey(live[liveStart + index]!)) {
+          matches = false
+          break
+        }
+      }
+      if (matches) return overlap
+    }
+    return 0
+  }
+
+  // live 可能是从本轮首条消息开始的快照，也可能只保留最新尾部；两种情况都要消除重叠。
+  const prefixOverlap = findOverlap(false)
+  const suffixOverlap = findOverlap(true)
+  const overlap = Math.max(prefixOverlap, suffixOverlap)
+
+  if (overlap === 0) return [...persisted, ...live]
+  const liveOverlapStart = prefixOverlap >= suffixOverlap ? 0 : live.length - suffixOverlap
+  return [
+    ...persisted.slice(0, persisted.length - overlap),
+    ...live.slice(liveOverlapStart),
+  ]
+}
+
 function findActiveTurnBoundary(messages: SDKMessage[]): number {
   return messages.findLastIndex((message) => (
     message.type === 'user' && isUserInputMessage(message as SDKUserMessage)
