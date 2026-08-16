@@ -767,9 +767,16 @@ const AgentTranscriptHistory = React.forwardRef<AgentTranscriptHistoryHandle, Ag
       if (candidate < 0) return null
 
       const groupIndex = userGroupIndices[candidate]!
-      const measurement = measurements[groupIndex]
-      const group = groups[groupIndex]
-      if (!measurement || !group || !virtualizer.itemSizeCache.has(measurement.key)) return null
+      let measurement = measurements[groupIndex]
+      let group = groups[groupIndex]
+      while (candidate >= 0 && (!measurement || !virtualizer.itemSizeCache.has(measurement.key))) {
+        candidate -= 1
+        if (candidate < 0) return null
+        const fallbackGroupIndex = userGroupIndices[candidate]!
+        measurement = measurements[fallbackGroupIndex]
+        group = groups[fallbackGroupIndex]
+      }
+      if (!measurement || !group) return null
       return getGroupId(group)
     },
   }), [groups, scrollRef, stopScroll, userGroupIndices, virtualizer])

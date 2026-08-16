@@ -189,7 +189,37 @@ export function ScrollMinimap({ items, onScrollToMessage }: ScrollMinimapProps):
     }, { root: el, threshold: 0 })
 
     updateCenterVisibleRef.current = updateCenterVisible
+    const observeMessageNode = (node: Node): void => {
+      if (node.nodeType !== Node.ELEMENT_NODE) return
+      const element = node as HTMLElement
+      if (element.matches('[data-message-id]')) observer.observe(element)
+      for (const message of element.querySelectorAll<HTMLElement>('[data-message-id]')) {
+        observer.observe(message)
+      }
+    }
     for (const message of el.querySelectorAll<HTMLElement>('[data-message-id]')) observer.observe(message)
+
+    const mutationObserver = new MutationObserver((mutations) => {
+      let changed = false
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) observeMessageNode(node)
+        for (const node of mutation.removedNodes) {
+          if (node.nodeType !== Node.ELEMENT_NODE) continue
+          const element = node as HTMLElement
+          const removedMessages = element.matches('[data-message-id]')
+            ? [element]
+            : [...element.querySelectorAll<HTMLElement>('[data-message-id]')]
+          for (const message of removedMessages) {
+            observer.unobserve(message)
+            const id = message.getAttribute('data-message-id')
+            if (id) visibleElementsRef.current.delete(id)
+            if (id && visible.delete(id)) changed = true
+          }
+        }
+      }
+      if (changed) updateVisibleIds(new Set(visible))
+    })
+    mutationObserver.observe(el, { childList: true, subtree: true })
     updateThumb()
 
     const onScroll = (): void => {
@@ -205,6 +235,7 @@ export function ScrollMinimap({ items, onScrollToMessage }: ScrollMinimapProps):
     return () => {
       el.removeEventListener('scroll', onScroll)
       observer.disconnect()
+      mutationObserver.disconnect()
       resizeObserver.disconnect()
       updateCenterVisibleRef.current = null
       visibleIdsRef.current = new Set()
