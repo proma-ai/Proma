@@ -7,6 +7,43 @@
 
 import { computeDiffStats } from './tool-utils'
 
+const INTERNAL_TOOL_INPUT_PREFIX = '_'
+
+/** 判断工具输入是否提供了可帮助用户识别本次调用的额外上下文。 */
+function hasMeaningfulToolInput(input: Record<string, unknown>): boolean {
+  return Object.entries(input).some(([key, value]) => {
+    if (key.startsWith(INTERNAL_TOOL_INPUT_PREFIX)) {
+      return key === '_intent' && typeof value === 'string' && value.trim().length > 0
+    }
+    if (typeof value === 'string') return value.trim().length > 0
+    if (typeof value === 'number') return Number.isFinite(value)
+    if (Array.isArray(value)) return value.length > 0
+    return typeof value === 'object' && value !== null
+  })
+}
+
+/** 去掉常见分隔符后比较名称和描述，兼容 MCP 工具名称格式。 */
+function normalizeToolLabel(label: string): string {
+  return label.toLocaleLowerCase().replace(/[\s/_.·-]+/g, '')
+}
+
+/**
+ * 判断工具行是否需要显示工具类型前缀。
+ *
+ * 没有调用上下文时，名称后的短语只是工具的泛化描述，显示名称只会造成重复。
+ */
+export function shouldShowToolKindLabel(
+  toolName: string,
+  input: Record<string, unknown>,
+  kindLabel: string,
+  phraseLabel: string,
+): boolean {
+  if (!hasMeaningfulToolInput(input)) return false
+  if (!kindLabel.trim() || !phraseLabel.trim()) return false
+  if (normalizeToolLabel(kindLabel) === normalizeToolLabel(phraseLabel)) return false
+  return normalizeToolLabel(toolName) !== normalizeToolLabel(phraseLabel)
+}
+
 /** 工具短语 */
 export interface ToolPhrase {
   /** 完成态/收起态短语，如 "读取 foo.ts 第 10-60 行" */

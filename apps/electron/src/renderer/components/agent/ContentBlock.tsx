@@ -20,7 +20,7 @@ import {
 import { cn } from '@/lib/utils'
 import { MessageResponse } from '@/components/ai-elements/message'
 import { getToolIcon, extractFilePath } from './tool-utils'
-import { getToolPhrase, getToolResultSummary } from './tool-phrase'
+import { getToolPhrase, getToolResultSummary, shouldShowToolKindLabel } from './tool-phrase'
 import { ToolResultRenderer } from './tool-result-renderers'
 import { PreviewOpenButton } from './tool-result-renderers/preview-open-button'
 import { getTaskGetStatusLabel, parseTaskGetResult, type ParsedTaskGetResult } from './tool-result-renderers/task-get-result'
@@ -356,6 +356,7 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
   const phrase = getToolPhrase(block.name, block.input)
   const ToolIcon = getToolIcon(block.name)
   const toolKindLabel = block.name.startsWith('mcp__') ? block.name.split('__').slice(1).join(' / ') : block.name
+  const showToolKindLabel = shouldShowToolKindLabel(block.name, block.input, toolKindLabel, phrase.label)
 
   const isCompleted = toolResult !== null
   const resultSummary = getToolResultSummary(block.name, resultText, isError)
@@ -408,8 +409,12 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
           ) : null}
 
           <ToolIcon className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 max-w-[28%] truncate text-[14px] font-medium text-muted-foreground/65">{toolKindLabel}</span>
-          <span className="shrink-0 text-muted-foreground/30">·</span>
+          {showToolKindLabel && (
+            <>
+              <span className="min-w-0 max-w-[28%] truncate text-[14px] font-medium text-muted-foreground/65">{toolKindLabel}</span>
+              <span className="shrink-0 text-muted-foreground/30">·</span>
+            </>
+          )}
           <span className="min-w-0 flex-1 truncate text-[14px] text-muted-foreground">{displayLabel}</span>
           {childToolCount > 0 && !childrenExpanded && (
             <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/55">
@@ -484,8 +489,12 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
           ) : null}
 
           <ToolIcon className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 max-w-[28%] truncate text-[14px] font-medium text-muted-foreground/65">{toolKindLabel}</span>
-          <span className="shrink-0 text-muted-foreground/30">·</span>
+          {showToolKindLabel && (
+            <>
+              <span className="min-w-0 max-w-[28%] truncate text-[14px] font-medium text-muted-foreground/65">{toolKindLabel}</span>
+              <span className="shrink-0 text-muted-foreground/30">·</span>
+            </>
+          )}
           <span className={cn(
             'min-w-0 max-w-[60%] truncate text-[14px]',
             dimmed ? 'text-muted-foreground/70' : 'text-muted-foreground',
