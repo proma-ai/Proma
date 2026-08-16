@@ -8,6 +8,8 @@ import type {
   SDKToolResultBlock,
   SDKToolUseBlock,
   SDKUserMessage,
+  SDKTextBlock,
+  SDKThinkingBlock,
 } from '@proma/shared'
 
 interface ProcessBlockGroupProps {
@@ -181,6 +183,25 @@ function getProcessChildKey(child: React.ReactNode, index: number): string {
   return `process-child-${index}`
 }
 
+interface StableProcessChildCacheEntry {
+  child: React.ReactNode
+  snapshot: string
+}
+
+function getProcessChildSnapshot(child: React.ReactNode): string | null {
+  if (!React.isValidElement(child) || child.type !== React.Fragment) return null
+  const fragmentProps = child.props as { children?: React.ReactNode }
+  const content = fragmentProps.children
+  if (!React.isValidElement(content)) return null
+  const contentProps = content.props as { block?: SDKContentBlock }
+  const block = contentProps.block
+  if (!block || (block.type !== 'text' && block.type !== 'thinking')) return null
+  const text = block.type === 'text'
+    ? (block as SDKTextBlock).text
+    : (block as SDKThinkingBlock).thinking
+  return `${block.type}:${text}`
+}
+
 const StableProcessChild = React.memo(
   function StableProcessChild({ child }: { child: React.ReactNode }): React.ReactElement {
     return <>{child}</>
@@ -204,7 +225,7 @@ export function ProcessBlockGroup({ blocks, isStreaming, renderChildren, isMessa
   const autoCollapseTimersRef = React.useRef<number[]>([])
   const contentRef = React.useRef<HTMLDivElement>(null)
   const contentInnerRef = React.useRef<HTMLDivElement>(null)
-  const stableChildrenRef = React.useRef(new Map<string, React.ReactNode>())
+  const stableChildrenRef = React.useRef(new Map<string, StableProcessChildCacheEntry>())
   const collapseFrameRef = React.useRef<number | null>(null)
   const [measuredHeight, setMeasuredHeight] = React.useState<number | undefined>(undefined)
 
@@ -396,10 +417,15 @@ export function ProcessBlockGroup({ blocks, isStreaming, renderChildren, isMessa
     const rendered = childArray.map((child, i) => {
       const key = getProcessChildKey(child, i)
       activeKeys.add(key)
-      const cachedChild = stableChildrenRef.current.get(key)
-      const shouldFreeze = !!isStreaming && i < liveStart
-      const stableChild = shouldFreeze && cachedChild ? cachedChild : child
-      if (!shouldFreeze || !cachedChild) stableChildrenRef.current.set(key, child)
+      const cachedEntry = stableChildrenRef.current.get(key)
+      const snapshot = getProcessChildSnapshot(child)
+      const shouldFreeze = !!isStreaming && i < liveStart && snapshot !== null
+      const stableChild = shouldFreeze && cachedEntry?.snapshot === snapshot
+        ? cachedEntry.child
+        : child
+      if (!shouldFreeze || !cachedEntry || cachedEntry.snapshot !== snapshot) {
+        stableChildrenRef.current.set(key, { child, snapshot: snapshot ?? '' })
+      }
 
       const isLast = i === childArray.length - 1
       const dimmed = isStreaming && !(isMessageTail && isLast)
