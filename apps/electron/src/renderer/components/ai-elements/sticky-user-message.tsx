@@ -42,6 +42,8 @@ interface UserMessageData {
 
 interface StickyUserMessageProps {
   userMessages: UserMessageData[]
+  /** 历史结构变化签名，用于 prepend 非用户消息时刷新用户位置缓存。 */
+  layoutSignature?: string
 }
 
 interface UserMessagePosition {
@@ -51,6 +53,7 @@ interface UserMessagePosition {
 
 export function StickyUserMessage({
   userMessages,
+  layoutSignature,
 }: StickyUserMessageProps): React.ReactElement {
   const { scrollRef, stopScroll, state: stickyState } = useStickToBottomContext()
   const userProfile = useAtomValue(userProfileAtom)
@@ -171,7 +174,7 @@ export function StickyUserMessage({
       el.removeEventListener('scroll', scheduleScrollUpdate)
       resizeObserver.disconnect()
     }
-  }, [scrollRef, userMessageSignature, messageMap, stickyEnabled])
+  }, [scrollRef, userMessageSignature, messageMap, layoutSignature, stickyEnabled])
 
   // 点击回滚到原始消息
   const scrollToOriginal = React.useCallback(() => {

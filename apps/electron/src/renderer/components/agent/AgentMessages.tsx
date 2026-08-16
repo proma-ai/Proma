@@ -1151,6 +1151,11 @@ export const AgentMessages = React.memo(function AgentMessages({
     return turns
   }, [visibleGroups])
 
+  const stickyLayoutSignature = React.useMemo(() => {
+    const firstGroup = visibleGroups[0]
+    return `${visibleGroups.length}:${firstGroup ? getGroupId(firstGroup) : ''}`
+  }, [visibleGroups])
+
   return (
     <BasePathsProvider basePaths={messageBasePaths}>
       <AgentBrowserLinkProvider sessionId={sessionId}>
@@ -1229,6 +1234,7 @@ export const AgentMessages = React.memo(function AgentMessages({
         {allUserMessagesData.length > 0 && (
           <StickyUserMessage
             userMessages={allUserMessagesData}
+            layoutSignature={stickyLayoutSignature}
           />
         )}
           </Conversation>
