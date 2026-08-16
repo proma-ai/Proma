@@ -1718,6 +1718,10 @@ export class AgentOrchestrator {
                   const partialOutput = stripPiAssistantError(assistantMsg)
                   if (modelId) partialOutput._channelModelId = modelId
                   partialOutput._channelProvider = channel.provider
+                  const partialRecord = partialOutput as SDKAssistantMessage & { _createdAt?: number }
+                  if (typeof partialRecord._createdAt !== 'number') {
+                    partialRecord._createdAt = streamStartedAt
+                  }
                   accumulatedMessages.push(partialOutput)
                   // Reuse the Pi UUID to replace the latest partial frame with normal markdown output.
                   this.eventBus.emit(sessionId, { kind: 'sdk_message', message: partialOutput })
@@ -1783,10 +1787,14 @@ export class AgentOrchestrator {
                   }
                   // 为 assistant 消息注入渠道信息，确保持久化后能正确匹配模型显示名与上下文窗口
                   if (msg.type === 'assistant') {
-                    if (modelId) {
-                      (msg as Record<string, unknown>)._channelModelId = modelId
+                    const assistantRecord = msg as Record<string, unknown>
+                    if (typeof assistantRecord._createdAt !== 'number') {
+                      assistantRecord._createdAt = streamStartedAt
                     }
-                    ;(msg as Record<string, unknown>)._channelProvider = channel.provider
+                    if (modelId) {
+                      assistantRecord._channelModelId = modelId
+                    }
+                    assistantRecord._channelProvider = channel.provider
                   }
                   accumulatedMessages.push(msg)
                 }
