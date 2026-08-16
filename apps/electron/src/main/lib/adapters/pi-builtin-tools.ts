@@ -912,7 +912,7 @@ function buildBrowserTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefiniti
     sdk.defineTool({
       name: 'BrowserNavigate',
       label: '在受管浏览器中打开网页',
-      description: 'Navigate the Agent working in-app browser tab to a URL. The managed browser accepts any URL Chromium can load; downloads, popups, and browser permissions remain blocked.',
+      description: 'Navigate the Agent working in-app browser tab to a URL. The managed browser accepts any URL Chromium can load; downloads and popups stay inside the managed browser, while browser permissions remain blocked.',
       parameters: Type.Object({ url: Type.String({ description: 'A complete URL to navigate to. Protocol-relative and bare domain inputs are normalized to HTTPS.' }), tabId: Type.Optional(Type.String({ description: 'Optional tab id. Defaults to the Agent working tab, independent of the tab visible to the user.' })) }),
       async execute(_id, params, signal?: AbortSignal) {
         const args = params as Record<string, unknown>

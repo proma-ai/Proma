@@ -1251,7 +1251,7 @@ export class AgentOrchestrator {
           return { behavior: 'allow' as const }
         }
 
-        // 所有 Pi 会话均可使用受管浏览器。主进程仍隔离网页，并拒绝私网、下载、弹窗和网页权限；
+        // 所有 Pi 会话均可使用受管浏览器。主进程仍隔离网页来源并默认拒绝网页权限；下载和弹窗留在受管浏览器内，
         // 页面内容始终视为不可信输入。计划模式仅允许只读浏览器操作。
         if (toolName.startsWith('Browser')) {
           if (currentMode === 'plan') {
