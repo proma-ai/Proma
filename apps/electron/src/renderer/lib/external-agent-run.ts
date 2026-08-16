@@ -62,7 +62,6 @@ export function buildExternalAgentRunActivation(
     streamState: {
       ...input.currentStreamState,
       running: true,
-      toolActivities: input.currentStreamState?.toolActivities ?? [],
       model: input.modelId ?? input.currentStreamState?.model,
       startedAt: input.startedAt,
     },

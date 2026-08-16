@@ -12,6 +12,8 @@ import { unstable_batchedUpdates } from 'react-dom'
 import { useStore } from 'jotai'
 import {
   agentStreamingStatesAtom,
+  agentSessionStreamingStateAtomFamily,
+  agentRunningSessionIdsAtom,
   agentStreamErrorsAtom,
   agentSessionMessageQueueAtom,
   agentSessionsAtom,
@@ -37,7 +39,6 @@ import {
   agentDefaultPermissionModeAtom,
   stoppedByUserSessionsAtom,
   agentPlanModeSessionsAtom,
-  finalizeStreamingActivities,
   currentAgentSessionIdAtom,
   currentAgentWorkspaceIdAtom,
   agentWorkspacesAtom,
@@ -565,13 +566,23 @@ export function useGlobalAgentListeners(): void {
     // IPC 拒绝后保留失败的队首，直到用户调整队列，避免订阅回调触发自动重试风暴。
     const queuedDispatchSuppressedMessageIds = new Map<string, string>()
 
+    const getStreamState = (sessionId: string): AgentStreamState | undefined =>
+      store.get(agentSessionStreamingStateAtomFamily(sessionId))
+
+    const updateStreamState = (
+      sessionId: string,
+      update: (previous: AgentStreamState | undefined) => AgentStreamState | undefined,
+    ): void => {
+      store.set(agentSessionStreamingStateAtomFamily(sessionId), update)
+    }
+
     const dispatchQueuedMessage = (sessionId: string): void => {
       if (queuedDispatchInFlight.has(sessionId)) return
 
       const queuedMessages = store.get(agentSessionMessageQueueAtom).get(sessionId) ?? []
       if (queuedDispatchSuppressedMessageIds.get(sessionId) === queuedMessages[0]?.id) return
       queuedDispatchSuppressedMessageIds.delete(sessionId)
-      const streamState = store.get(agentStreamingStatesAtom).get(sessionId)
+      const streamState = getStreamState(sessionId)
       const session = store.get(agentSessionsAtom).find((item) => item.id === sessionId)
       if (session?.legacyTranscript?.continuationRequired) return
 
@@ -651,7 +662,6 @@ export function useGlobalAgentListeners(): void {
         const map = new Map(prev)
         map.set(sessionId, {
           running: true,
-          toolActivities: [],
           model: modelId || undefined,
           startedAt: streamStartedAt,
           inputTokens: prev.get(sessionId)?.inputTokens,
@@ -753,7 +763,7 @@ export function useGlobalAgentListeners(): void {
 
     const queuedDispatchUnsubscribers = [
       store.sub(agentSessionMessageQueueAtom, scheduleAllQueuedMessageDispatches),
-      store.sub(agentStreamingStatesAtom, scheduleAllQueuedMessageDispatches),
+      store.sub(agentRunningSessionIdsAtom, scheduleAllQueuedMessageDispatches),
       store.sub(agentSessionsAtom, scheduleAllQueuedMessageDispatches),
       store.sub(agentSessionChannelMapAtom, scheduleAllQueuedMessageDispatches),
       store.sub(agentChannelIdAtom, scheduleAllQueuedMessageDispatches),
@@ -786,7 +796,7 @@ export function useGlobalAgentListeners(): void {
 
     const activateExternalAgentRun = (event: Extract<PromaEvent, { type: 'external_run_started' }>): void => {
       const applyActivation = (sessions: AgentSessionMeta[]): void => {
-        const currentStreamState = store.get(agentStreamingStatesAtom).get(event.sessionId)
+        const currentStreamState = getStreamState(event.sessionId)
         if (!shouldActivateExternalAgentRun(currentStreamState, event.startedAt)) {
           return
         }
@@ -1106,7 +1116,7 @@ export function useGlobalAgentListeners(): void {
         // Phase 2: 直接累积 SDKMessage 到 liveMessagesMapAtom（跳过 replay 消息，避免与持久化消息重复）
         if (payload.kind === 'sdk_delta') {
           const deltaPayload = payload.delta
-          const currentRunStartedAt = store.get(agentStreamingStatesAtom).get(sessionId)?.startedAt
+          const currentRunStartedAt = getStreamState(sessionId)?.startedAt
           // Delta 必须携带产生它的 run 标识。迟到的旧 run Delta 不能借用当前 run，
           // 否则会被 live-group-set 误判为新一轮消息；无标识的旧协议事件也不强行归类。
           if (currentRunStartedAt != null && deltaPayload.runStartedAt !== currentRunStartedAt) return
@@ -1154,15 +1164,12 @@ export function useGlobalAgentListeners(): void {
           // 不会触碰 AgentStreamState，从而避免重新引入逐 token 的第二次 Map 更新。
           const hasAssistantActivity = deltaPayload.deltas.some((delta) => delta.type !== 'start')
           if (hasAssistantActivity) {
-            store.set(agentStreamingStatesAtom, (prev) => {
-              const current = prev.get(sessionId)
+            updateStreamState(sessionId, (current) => {
               const shouldResume = current?.retrying !== undefined
                 || current?.contextCompaction?.status === 'success'
                 || current?.contextCompaction?.status === 'noop'
-              if (!current || !shouldResume) return prev
-              const map = new Map(prev)
-              map.set(sessionId, resumeAgentStreamState(current))
-              return map
+              if (!current || !shouldResume) return current
+              return resumeAgentStreamState(current)
             })
           }
         }
@@ -1177,7 +1184,7 @@ export function useGlobalAgentListeners(): void {
             // thinking_tokens 是高频进度估算，只更新流式状态，不进入消息转录。
           } else if (!msgRecord.isReplay) {
             // 当前 run 的 assistant 消息沿用 run 起始时间，与首个 Delta 预览和乐观 header 保持一致。
-            const activeRunStartedAt = store.get(agentStreamingStatesAtom).get(sessionId)?.startedAt
+            const activeRunStartedAt = getStreamState(sessionId)?.startedAt
             // 为实时消息补充 _createdAt 时间戳（与持久化时的逻辑一致），
             // 避免 AssistantTurnRenderer 因缺少时间戳导致 header 时间消失
             if (typeof msgRecord._createdAt !== 'number') {
@@ -1246,7 +1253,7 @@ export function useGlobalAgentListeners(): void {
         for (const event of legacyEvents) {
           // 带 run 标识的 retry 事件必须在所有外围副作用前严格匹配当前流；
           // 否则旧 IPC 事件会复活已结束的 stream，或错误清掉新 run 的完成提醒。
-          const eventStreamState = store.get(agentStreamingStatesAtom).get(sessionId)
+          const eventStreamState = getStreamState(sessionId)
           if (isRunScopedRetryEvent(event) && event.runStartedAt != null && (
             !eventStreamState || !isRetryEventForCurrentStream(eventStreamState, event)
           )) {
@@ -1255,7 +1262,7 @@ export function useGlobalAgentListeners(): void {
 
           // 会话首次进入 running 时，清除旧的完成提醒状态
           if (event.type !== 'prompt_suggestion') {
-            const prevState = store.get(agentStreamingStatesAtom).get(sessionId)
+            const prevState = getStreamState(sessionId)
             if (!prevState || !prevState.running) {
               store.set(unviewedCompletedSessionIdsAtom, (prev: Set<string>) => {
                 if (!prev.has(sessionId)) return prev
@@ -1268,29 +1275,24 @@ export function useGlobalAgentListeners(): void {
 
           // 更新流式状态（prompt_suggestion 不影响流式状态，跳过以避免在 session 结束后用默认值 running:true 重新激活）
           if (event.type !== 'prompt_suggestion') {
-            store.set(agentStreamingStatesAtom, (prev) => {
-              const existing = prev.get(sessionId)
+            updateStreamState(sessionId, (existing) => {
               // 再做一次 scope 校验，防止同一 batch 内其它回调更新流状态后旧事件落入。
               if (isRunScopedRetryEvent(event) && event.runStartedAt != null && (
                 !existing || !isRetryEventForCurrentStream(existing, event)
               )) {
-                return prev
+                return existing
               }
               const current: AgentStreamState = existing ?? {
                 running: true,
-                toolActivities: [],
                 model: undefined,
                 // 无 run 标识的历史事件才允许 fallback；带标识的 retry 必须已在上方匹配。
                 startedAt: undefined,
               }
-              const next = applyAgentEvent(current, event)
-              const map = new Map(prev)
-              map.set(sessionId, next)
-              return map
+              return applyAgentEvent(current, event)
             })
           }
 
-          const activeRunStartedAt = store.get(agentStreamingStatesAtom).get(sessionId)?.startedAt
+          const activeRunStartedAt = getStreamState(sessionId)?.startedAt
           if (activeRunStartedAt != null) {
             const activeRunId = String(activeRunStartedAt)
             store.set(agentFileChangesCurrentRunAtom, (prev) => {
@@ -1304,7 +1306,7 @@ export function useGlobalAgentListeners(): void {
           // Pi 原生重试成功后仍会沿用同一会话；仅在事件属于当前 stream run 时
           // 清掉过期错误，避免迟到的旧 retry_cleared 掩盖新一轮真实失败。
           if (event.type === 'retry_cleared') {
-            const current = store.get(agentStreamingStatesAtom).get(sessionId)
+            const current = getStreamState(sessionId)
             if (current && isRetryEventForCurrentStream(current, event)) {
               store.set(agentStreamErrorsAtom, (prev) => clearAgentStreamError(prev, sessionId))
             }
@@ -1320,7 +1322,7 @@ export function useGlobalAgentListeners(): void {
               ?? (input?.path as string | undefined)
               ?? (input?.notebook_path as string | undefined)
             const runId = store.get(agentFileChangesCurrentRunAtom).get(sessionId)
-              ?? String(store.get(agentStreamingStatesAtom).get(sessionId)?.startedAt ?? event.turnId ?? Date.now())
+              ?? String(getStreamState(sessionId)?.startedAt ?? event.turnId ?? Date.now())
             const entry = {
               path: targetPath || '',
               sessionId,
@@ -1659,7 +1661,6 @@ export function useGlobalAgentListeners(): void {
             // backgroundTasksPending=true → 进入/保持软空闲态（通道仍开着，handleSend 走注入路径）；
             // false → 真正结束，清除软空闲态，新消息回到新建 run 路径。
             backgroundWaiting: backgroundTasksPending,
-            ...finalizeStreamingActivities(current.toolActivities),
           })
           return map
         })
@@ -1733,7 +1734,7 @@ export function useGlobalAgentListeners(): void {
 
         /** 竞态保护：检查该会话是否已有新的流式请求正在运行 */
         const isNewStreamRunning = (): boolean => {
-          const state = store.get(agentStreamingStatesAtom).get(data.sessionId)
+          const state = getStreamState(data.sessionId)
           return state?.running === true
         }
 
@@ -1802,7 +1803,7 @@ export function useGlobalAgentListeners(): void {
         })
 
         // 递增消息刷新版本号，通知 AgentView 重新加载消息
-        const state = store.get(agentStreamingStatesAtom).get(data.sessionId)
+        const state = getStreamState(data.sessionId)
         if (!state?.running) {
           store.set(agentMessageRefreshAtom, (prev) => {
             const map = new Map(prev)
