@@ -184,6 +184,7 @@ export class AgentRuntimeClient {
     const generation = ++this.generation
     this.state = { ...this.state, status: 'starting', lastError: undefined }
     const runtimeProcess = utilityProcess.fork(this.entryPath, [], {
+      serviceName: 'Proma Runtime',
       env: { ...process.env, ...this.env, PROMA_AGENT_SESSION_ID: this.sessionId },
     })
     this.runtimeProcess = runtimeProcess
