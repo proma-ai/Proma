@@ -80,7 +80,7 @@ import { getPlanModeChangeFromToolName, updatePlanModeSessionSet } from '@/lib/a
 import { buildTodoAgentPrompt } from '@/lib/todo-agent-prompt'
 import { detectIsWindows } from '@/lib/platform'
 import { getSessionFileChangeKind, arePathsEqual, isPathWithinRoot, upsertSessionFileChange } from '@/lib/session-file-changes'
-import { removeQueuedMessage } from '@/lib/agent-message-queue'
+import { removeQueuedMessage, createQueuedAgentStreamState } from '@/lib/agent-message-queue'
 import { createAgentStreamEventBatcher } from '@/lib/agent-stream-event-batcher'
 
 /** 触发右侧文件浏览器自动定位的写入类工具集合 */
@@ -560,6 +560,17 @@ export function useGlobalAgentListeners(): void {
 
     const cleanupQueuedMessageStatus = window.electronAPI.onAgentQueuedMessageStatus((status) => {
       unstable_batchedUpdates(() => {
+        // 主进程在启动 deferred run 前先发送 started 投影。这里必须先建立完整的
+        // 当前 run 状态，否则首个 SDK/tool 事件到达前会被当成空闲；后续事件只能
+        // 隐式创建一个没有 startedAt 的状态，导致续跑的运行计时和 run 边界丢失。
+        store.set(agentStreamingStatesAtom, (prev) => {
+          const current = prev.get(status.sessionId)
+          // 不让迟到的队列状态覆盖已经开始的新一轮 run。
+          if (current?.startedAt != null && current.startedAt > status.startedAt) return prev
+          const map = new Map(prev)
+          map.set(status.sessionId, createQueuedAgentStreamState(current, status.startedAt))
+          return map
+        })
         store.set(agentSessionMessageQueueAtom, (prev) => {
           const current = prev.get(status.sessionId) ?? []
           const next = removeQueuedMessage(current, status.messageId)
@@ -571,7 +582,7 @@ export function useGlobalAgentListeners(): void {
         })
         store.set(liveMessagesMapAtom, (prev) => {
           const current = prev.get(status.sessionId) ?? []
-          const uuid = `queued-`
+          const uuid = `queued-${status.messageId}`
           if (current.some((message) => (message as unknown as { uuid?: string }).uuid === uuid)) return prev
           const optimisticMessage: SDKMessage = {
             type: "user",

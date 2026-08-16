@@ -69,6 +69,29 @@ export function createAgentQueuedMessage(
   return message
 }
 
+export interface AgentQueuedRunStateSeed {
+  running: true
+  backgroundWaiting: false
+  model?: string
+  startedAt: number
+  inputTokens?: number
+  contextWindow?: number
+}
+
+export function createQueuedAgentStreamState(
+  previous: Pick<AgentQueuedRunStateSeed, 'model' | 'inputTokens' | 'contextWindow'> | undefined,
+  startedAt: number,
+): AgentQueuedRunStateSeed {
+  return {
+    running: true,
+    backgroundWaiting: false,
+    model: previous?.model,
+    startedAt,
+    inputTokens: previous?.inputTokens,
+    contextWindow: previous?.contextWindow,
+  }
+}
+
 export function removeQueuedMessage(
   queue: AgentQueuedMessage[],
   messageId: string,
