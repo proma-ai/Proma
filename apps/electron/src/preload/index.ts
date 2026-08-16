@@ -44,7 +44,6 @@ import type {
   AgentThinkingLevel,
   AgentStreamEvent,
   AgentStreamCompletePayload,
-  AgentStreamErrorPayload,
   AgentWorkspace,
   CreateAgentWorkspaceInput,
   CreateAgentProjectResult,
@@ -231,7 +230,6 @@ export interface ElectronAPI {
   closeAgentBrowserTab: (input: import('@proma/shared').BrowserTabInput) => Promise<import('@proma/shared').BrowserViewState | null>
   getAgentBrowserState: (sessionId: string) => Promise<import('@proma/shared').BrowserViewState | null>
   setAgentBrowserLayout: (layout: import('@proma/shared').BrowserViewLayout) => Promise<void>
-  hideAgentBrowserPresentation: (revision: number) => Promise<void>
   navigateAgentBrowser: (input: import('@proma/shared').BrowserNavigateInput) => Promise<import('@proma/shared').BrowserViewState>
   goBackAgentBrowser: (sessionId: string) => Promise<import('@proma/shared').BrowserViewState>
   goForwardAgentBrowser: (sessionId: string) => Promise<import('@proma/shared').BrowserViewState>
@@ -503,26 +501,14 @@ export interface ElectronAPI {
 
   // ===== Agent 会话管理相关 =====
 
-  /** 获取 Agent 会话列表；renderer 热路径必须显式请求 active，兼容调用默认 all。 */
-  listAgentSessions: (scope?: 'active' | 'archived' | 'all') => Promise<AgentSessionMeta[]>
-
-  /** 按 ID 获取会话元数据，用于恢复少量已打开的归档 Tab。 */
-  getAgentSessionMeta: (id: string) => Promise<AgentSessionMeta | undefined>
-
-  /** 获取活跃/归档会话计数，避免归档入口传输完整 metadata。 */
-  getAgentSessionCounts: () => Promise<{ active: number; archived: number }>
+  /** 获取 Agent 会话列表 */
+  listAgentSessions: () => Promise<AgentSessionMeta[]>
 
   /** 创建 Agent 会话 */
   createAgentSession: (title?: string, channelId?: string, workspaceId?: string, modelId?: string) => Promise<AgentSessionMeta>
 
-  /** 获取 Agent 会话 SDKMessage（兼容需要完整历史的功能） */
+  /** 获取 Agent 会话 SDKMessage（Phase 4 新格式） */
   getAgentSessionSDKMessages: (id: string) => Promise<SDKMessage[]>
-
-  /** 从会话尾部按页读取 SDKMessage，避免长历史一次性进入 renderer。 */
-  getAgentSessionSDKMessagesPage: (
-    id: string,
-    input?: { before?: number; limit?: number },
-  ) => Promise<{ messages: SDKMessage[]; nextBefore?: number }>
 
   /** 更新 Agent 会话标题 */
   updateAgentSessionTitle: (id: string, title: string) => Promise<AgentSessionMeta>
@@ -743,7 +729,7 @@ export interface ElectronAPI {
   onAgentStreamComplete: (callback: (data: AgentStreamCompletePayload) => void) => () => void
 
   /** 订阅 Agent 流式错误事件 */
-  onAgentStreamError: (callback: (data: AgentStreamErrorPayload) => void) => () => void
+  onAgentStreamError: (callback: (data: { sessionId: string; error: string }) => void) => () => void
 
   /** 订阅 Agent 标题自动更新事件 */
   onAgentTitleUpdated: (callback: (data: { sessionId: string; title: string }) => void) => () => void
@@ -1340,9 +1326,6 @@ const electronAPI: ElectronAPI = {
   setAgentBrowserLayout: (layout: import('@proma/shared').BrowserViewLayout) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SET_BROWSER_LAYOUT, layout)
   },
-  hideAgentBrowserPresentation: (revision: number) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.HIDE_BROWSER_PRESENTATION, revision)
-  },
   navigateAgentBrowser: (input: import('@proma/shared').BrowserNavigateInput) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.NAVIGATE_BROWSER, input)
   },
@@ -1708,16 +1691,8 @@ const electronAPI: ElectronAPI = {
   },
 
   // Agent 会话管理
-  listAgentSessions: (scope: 'active' | 'archived' | 'all' = 'all') => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.LIST_SESSIONS, scope)
-  },
-
-  getAgentSessionMeta: (id: string) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_SESSION_META, id)
-  },
-
-  getAgentSessionCounts: () => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_SESSION_COUNTS)
+  listAgentSessions: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.LIST_SESSIONS)
   },
 
   createAgentSession: (title?: string, channelId?: string, workspaceId?: string, modelId?: string) => {
@@ -1726,10 +1701,6 @@ const electronAPI: ElectronAPI = {
 
   getAgentSessionSDKMessages: (id: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_SDK_MESSAGES, id)
-  },
-
-  getAgentSessionSDKMessagesPage: (id: string, input?: { before?: number; limit?: number }) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_SDK_MESSAGES_PAGE, id, input)
   },
 
   updateAgentSessionTitle: (id: string, title: string) => {
@@ -2053,8 +2024,8 @@ const electronAPI: ElectronAPI = {
     return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.STREAM_COMPLETE, listener) }
   },
 
-  onAgentStreamError: (callback: (data: AgentStreamErrorPayload) => void) => {
-    const listener = (_: unknown, data: AgentStreamErrorPayload): void => callback(data)
+  onAgentStreamError: (callback: (data: { sessionId: string; error: string }) => void) => {
+    const listener = (_: unknown, data: { sessionId: string; error: string }): void => callback(data)
     ipcRenderer.on(AGENT_IPC_CHANNELS.STREAM_ERROR, listener)
     return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.STREAM_ERROR, listener) }
   },

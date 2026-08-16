@@ -1,23 +1,13 @@
-import type {
-  AgentAssistantDeltaOperation,
-  AgentAssistantMessageDelta,
-  AgentRunEvent,
-  AgentStreamPayload,
-} from '@proma/shared'
+import type { AgentStreamEvent, AgentStreamPayload, SDKMessage } from '@proma/shared'
 
 export const FOREGROUND_PARTIAL_INTERVAL_MS = 50
 export const BACKGROUND_PARTIAL_INTERVAL_MS = 250
 
 type TimerHandle = ReturnType<typeof setTimeout>
-type AppendOperation = Extract<AgentAssistantDeltaOperation, {
-  type: 'append_text' | 'append_thinking'
-}>
-type ThrottlablePartial = AgentAssistantMessageDelta & { operations: AppendOperation[] }
 
 interface PendingPartial {
-  event: AgentRunEvent
-  send: (event: AgentRunEvent) => void
-  foreground: boolean
+  event: AgentStreamEvent
+  send: (event: AgentStreamEvent) => void
   timer?: TimerHandle
 }
 
@@ -27,68 +17,16 @@ export interface AgentStreamForwarderOptions {
   cancel?: (timer: TimerHandle) => void
 }
 
-function isAppendOperation(operation: AgentAssistantDeltaOperation): operation is AppendOperation {
-  return operation.type === 'append_text' || operation.type === 'append_thinking'
-}
-
-function isThrottlablePartial(payload: AgentStreamPayload): payload is ThrottlablePartial {
-  return payload.kind === 'assistant_message_delta'
-    && !payload.reset
-    && payload.operations.length > 0
-    && payload.operations.every(isAppendOperation)
-}
-
-function mergeAppendOperations(
-  previous: AppendOperation[],
-  next: AppendOperation[],
-): AppendOperation[] {
-  const merged: AppendOperation[] = []
-  for (const operation of [...previous, ...next]) {
-    const last = merged[merged.length - 1]
-    if (
-      last
-      && last.type === operation.type
-      && last.blockIndex === operation.blockIndex
-    ) {
-      if (operation.type === 'append_text' && last.type === 'append_text') {
-        merged[merged.length - 1] = { ...last, text: last.text + operation.text }
-      } else if (operation.type === 'append_thinking' && last.type === 'append_thinking') {
-        merged[merged.length - 1] = { ...last, thinking: last.thinking + operation.thinking }
-      }
-    } else {
-      merged.push(operation)
-    }
-  }
-  return merged
-}
-
-function mergePartialEvents(
-  previous: PendingPartial,
-  incoming: AgentRunEvent,
-): AgentRunEvent | null {
-  const previousPayload = previous.event.payload
-  const incomingPayload = incoming.payload
-  if (!isThrottlablePartial(previousPayload) || !isThrottlablePartial(incomingPayload)) return null
-  if (
-    previousPayload.runId !== incomingPayload.runId
-    || previousPayload.messageId !== incomingPayload.messageId
-  ) return null
-
-  const payload: AgentAssistantMessageDelta = {
-    ...incomingPayload,
-    operations: mergeAppendOperations(previousPayload.operations, incomingPayload.operations),
-    // Renderer 只需要知道这是完整合并后的操作集，不应再要求 sequence 连续。
-    coalesced: true,
-  }
-  return { ...incoming, payload }
+function isPartialAssistantPayload(payload: AgentStreamPayload): boolean {
+  return payload.kind === 'sdk_message'
+    && (payload.message as SDKMessage & { _partial?: unknown })._partial === true
 }
 
 /**
- * main -> renderer 的按会话流式调度器。
+ * 在 main → renderer 边界合并 Pi 的累计 partial 消息。
  *
- * Pi-native 已经在 adapter 内把原始字符串合并到 50ms，但后台会话仍不应
- * 以相同频率占用 renderer。这里只合并可安全拼接的文本操作；结构变化、reset
- * 和所有控制/终态事件先 flush，再立即发送。
+ * 前台会话保持 20fps，后台会话降为 4fps；终态消息直接发送并丢弃旧 partial，
+ * 从而不会在 final 后倒灌一个过期快照。
  */
 export class AgentStreamForwarder {
   private readonly pending = new Map<string, PendingPartial>()
@@ -103,52 +41,41 @@ export class AgentStreamForwarder {
     this.cancel = options.cancel ?? clearTimeout
   }
 
-  forward(event: AgentRunEvent, send: (event: AgentRunEvent) => void, foreground: boolean): void {
+  forward(
+    event: AgentStreamEvent,
+    send: (event: AgentStreamEvent) => void,
+    foreground: boolean,
+  ): void {
     const { sessionId, payload } = event
-    if (!isThrottlablePartial(payload)) {
-      this.emit(sessionId)
-      this.lastSentAt.delete(sessionId)
+    if (!isPartialAssistantPayload(payload)) {
+      this.clear(sessionId)
       send(event)
       return
     }
 
     const existing = this.pending.get(sessionId)
     if (existing) {
-      const mergedEvent = mergePartialEvents(existing, event)
-      if (mergedEvent) {
-        existing.event = mergedEvent
-        return
-      }
-      this.emit(sessionId)
+      existing.event = event
+      existing.send = send
+      return
     }
 
-    const pending: PendingPartial = {
-      event,
-      send,
-      foreground,
-    }
+    const pending: PendingPartial = { event, send }
     this.pending.set(sessionId, pending)
-    this.schedulePending(sessionId, pending)
+    this.schedulePending(sessionId, pending, foreground)
   }
 
-  /** 会话切换前后台时重新安排尚未发送的 partial。 */
+  /** 会话切换前后台时按新频率重排尚未发送的快照。 */
   reprioritize(sessionId: string, foreground: boolean): void {
     const pending = this.pending.get(sessionId)
     if (!pending) return
-    pending.foreground = foreground
     if (pending.timer) this.cancel(pending.timer)
-    this.schedulePending(sessionId, pending)
+    this.schedulePending(sessionId, pending, foreground)
   }
 
-  /** 切入会话时立即交付已合并快照。 */
+  /** 当前会话切到前台时立即交付已合并快照，避免等待后台的 250ms 窗口。 */
   promote(sessionId: string): void {
-    this.emit(sessionId)
-  }
-
-  /** 终态通知前交付当前 session 尚未发送的最新 partial。 */
-  flush(sessionId: string): void {
-    this.emit(sessionId)
-    this.lastSentAt.delete(sessionId)
+    if (this.pending.has(sessionId)) this.emit(sessionId)
   }
 
   clear(sessionId: string): void {
@@ -158,20 +85,10 @@ export class AgentStreamForwarder {
     this.lastSentAt.delete(sessionId)
   }
 
-  dispose(): void {
-    for (const sessionId of this.pending.keys()) this.clear(sessionId)
-  }
-
-  private schedulePending(sessionId: string, pending: PendingPartial): void {
-    const intervalMs = pending.foreground
-      ? FOREGROUND_PARTIAL_INTERVAL_MS
-      : BACKGROUND_PARTIAL_INTERVAL_MS
-    const lastSentAt = this.lastSentAt.get(sessionId)
-    const elapsed = lastSentAt == null ? 0 : this.now() - lastSentAt
-    pending.timer = this.schedule(
-      () => this.emit(sessionId),
-      Math.max(0, intervalMs - elapsed),
-    )
+  private schedulePending(sessionId: string, pending: PendingPartial, foreground: boolean): void {
+    const intervalMs = foreground ? FOREGROUND_PARTIAL_INTERVAL_MS : BACKGROUND_PARTIAL_INTERVAL_MS
+    const elapsed = this.now() - (this.lastSentAt.get(sessionId) ?? 0)
+    pending.timer = this.schedule(() => this.emit(sessionId), Math.max(0, intervalMs - elapsed))
   }
 
   private emit(sessionId: string): void {

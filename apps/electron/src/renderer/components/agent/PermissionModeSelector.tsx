@@ -90,7 +90,7 @@ export function PermissionModeSelector({ sessionId }: PermissionModeSelectorProp
   const Icon = MODE_ICONS[displayMode]
 
   return (
-    <TooltipProvider delayDuration={300} disableHoverableContent>
+    <TooltipProvider delayDuration={300}>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button

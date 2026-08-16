@@ -10,7 +10,6 @@
  * 所有业务逻辑已委托给 AgentOrchestrator。
  */
 
-import { randomUUID } from 'node:crypto'
 import { dirname, isAbsolute, join, relative, resolve, sep, win32 } from 'node:path'
 import { accessSync, constants, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { BrowserWindow } from 'electron'
@@ -32,7 +31,6 @@ import type {
 } from '@proma/shared'
 import { PiAgentAdapter } from './adapters/pi-agent-adapter'
 import { PiUtilityAdapter } from './adapters/pi-utility-adapter'
-import { agentRuntimeClient } from './agent-runtime-client'
 import { AgentEventBus } from './agent-event-bus'
 import { AgentOrchestrator } from './agent-orchestrator'
 import { getAgentSessionWorkspacePath } from './config-paths'
@@ -48,12 +46,7 @@ import { AgentStreamForwarder } from './agent-stream-forwarder'
 const eventBus = new AgentEventBus()
 const useUtilityAgentRuntime = process.env.PROMA_AGENT_RUNTIME !== 'in-process'
   && process.env.PROMA_AGENT_RUNTIME !== 'off'
-const adapter = useUtilityAgentRuntime
-  ? new PiUtilityAdapter(agentRuntimeClient)
-  : new PiAgentAdapter()
-if (adapter instanceof PiUtilityAdapter) {
-  agentRuntimeClient.setRequestHandler((request) => adapter.handleRuntimeRequest(request))
-}
+const adapter = useUtilityAgentRuntime ? new PiUtilityAdapter() : new PiAgentAdapter()
 const orchestrator = new AgentOrchestrator(adapter, eventBus)
 
 /** 导出 EventBus 供飞书 Bridge 等外部服务订阅事件 */
@@ -90,10 +83,10 @@ const wcWithCleanupHook = new WeakSet<WebContents>()
  * webContents 提前销毁的场景——destroyed 事件兜底。
  */
 function registerWebContents(sessionId: string, wc: WebContents): void {
-  // 同一 session 切换 renderer 时，丢弃捕获旧 wc 的等待 partial。
+  // 同一 sessionId 切换 renderer 时，先丢弃捕获旧 wc.send 的等待 partial，避免投递到旧窗口。
   const previousWebContents = sessionWebContents.get(sessionId)
   if (previousWebContents && previousWebContents !== wc) streamForwarder.clear(sessionId)
-  // 旧 wc 的 destroyed 钩子仍由 WeakSet 持有，会扫描 sessionWebContents 清理所有指向它的条目。
+  // 旧 wc 的 destroyed 钩子仍由 WeakSet 持有，触发时会扫描 sessionWebContents 清理所有指向它的条目。
   sessionWebContents.set(sessionId, wc)
   if (wcWithCleanupHook.has(wc)) return
   wcWithCleanupHook.add(wc)
@@ -126,7 +119,6 @@ function getMainRendererWebContents(): WebContents | null {
 
 function publishRunStopped(
   sessionId: string,
-  runId: string,
   stoppedByUser: boolean | undefined,
   startedAt: number | undefined,
 ): void {
@@ -135,14 +127,9 @@ function publishRunStopped(
     kind: 'proma_event',
     event: {
       type: 'run_stopped',
-      runId,
       ...(startedAt != null ? { startedAt } : {}),
     },
   })
-}
-
-function finishRendererRun(sessionId: string, runId: string): void {
-  eventBus.endRun(sessionId, runId)
 }
 
 // ===== EventBus IPC 转发中间件 =====
@@ -158,15 +145,13 @@ function getSessionMetaForRenderer(sessionId: string) {
   return meta
 }
 
-eventBus.use((sessionId, payload, next, runEvent) => {
+eventBus.use((sessionId, payload, next) => {
   const wc = sessionWebContents.get(sessionId)
   if (wc && !wc.isDestroyed()) {
     try {
       streamForwarder.forward(
-        runEvent satisfies AgentStreamEvent,
-        (event) => {
-          if (!wc.isDestroyed()) wc.send(AGENT_IPC_CHANNELS.STREAM_EVENT, event)
-        },
+        { sessionId, payload } as AgentStreamEvent,
+        (event) => wc.send(AGENT_IPC_CHANNELS.STREAM_EVENT, event),
         visibleAgentSessionByWebContents.get(wc) === sessionId,
       )
     } catch (err) {
@@ -176,17 +161,15 @@ eventBus.use((sessionId, payload, next, runEvent) => {
   next()
 })
 
-/** renderer 切换标签时更新流式优先级。 */
+/** renderer 切换标签时更新流式优先级；切入会话立即 flush 等待中的后台快照。 */
 export function setVisibleAgentSession(webContents: WebContents, sessionId: string | null): void {
   const previousSessionId = visibleAgentSessionByWebContents.get(webContents)
   if (previousSessionId && previousSessionId !== sessionId) {
+    // 切出后将已排队的前台帧按后台频率重排，避免继续以 20fps 发送。
     streamForwarder.reprioritize(previousSessionId, false)
   }
   visibleAgentSessionByWebContents.set(webContents, sessionId)
-  if (sessionId) {
-    streamForwarder.reprioritize(sessionId, true)
-    streamForwarder.promote(sessionId)
-  }
+  if (sessionId) streamForwarder.promote(sessionId)
 }
 
 // ===== IPC 薄包装函数 =====
@@ -205,26 +188,21 @@ export async function runAgent(
   input: AgentSendInput,
   webContents: WebContents,
 ): Promise<void> {
-  const runInput: AgentSendInput = {
-    ...input,
-    startedAt: input.startedAt ?? Date.now(),
-    runId: input.runId ?? randomUUID(),
-  }
   // 更新 webContents 映射（允许覆盖 — 由 orchestrator.activeSessions 处理真正的并发保护）
-  registerWebContents(runInput.sessionId, webContents)
+  registerWebContents(input.sessionId, webContents)
   // 开始新一轮执行时清除"完成未确认"标记
   try {
-    updateAgentSessionMeta(runInput.sessionId, { completedButUnconfirmed: false })
+    updateAgentSessionMeta(input.sessionId, { completedButUnconfirmed: false })
   } catch { /* 新会话可能尚未写入索引 */ }
   // 自动任务会话"毕业"：用户手动发消息（非定时触发）即视为接管，标记后该会话回到普通项目列表，
   // 调度器也不再复用它注入新的定时运行。
-  if (runInput.triggeredBy !== 'automation') {
+  if (input.triggeredBy !== 'automation') {
     try {
-      const meta = getAgentSessionMeta(runInput.sessionId)
+      const meta = getAgentSessionMeta(input.sessionId)
       if (meta?.sourceAutomationId && !meta.automationGraduated) {
-        updateAgentSessionMeta(runInput.sessionId, { automationGraduated: true })
+        updateAgentSessionMeta(input.sessionId, { automationGraduated: true })
         // 向渲染进程发送毕业事件，触发 toast 提示
-        eventBus.emit(runInput.sessionId, {
+        eventBus.emit(input.sessionId, {
           kind: 'proma_event',
           event: { type: 'automation_graduated' },
         })
@@ -232,51 +210,44 @@ export async function runAgent(
     } catch { /* 新会话可能尚未写入索引 */ }
   }
   try {
-    await orchestrator.sendMessage(runInput, {
+    await orchestrator.sendMessage(input, {
       onError: (error) => {
-        streamForwarder.flush(runInput.sessionId)
         if (!webContents.isDestroyed()) {
           webContents.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
-            sessionId: runInput.sessionId,
-            runId: runInput.runId,
-            startedAt: runInput.startedAt,
+            sessionId: input.sessionId,
             error,
           })
         }
       },
-      onComplete: (opts) => {
-        streamForwarder.flush(runInput.sessionId)
-        try {
-          publishRunStopped(runInput.sessionId, runInput.runId!, opts?.stoppedByUser, opts?.startedAt)
-          if (!webContents.isDestroyed()) {
-            sendAgentStreamComplete(webContents, runInput, {
-              stoppedByUser: opts?.stoppedByUser ?? false,
-              startedAt: opts?.startedAt,
-              resultSubtype: opts?.resultSubtype,
-              resultErrors: opts?.resultErrors,
-              backgroundTasksPending: opts?.backgroundTasksPending,
-              // 只读取刚完成的轻量 meta，renderer 可据此增量更新列表，避免再取 5,000+ 条全量会话。
-              session: getSessionMetaForRenderer(runInput.sessionId),
-            })
-          }
-        } finally {
-          finishRendererRun(runInput.sessionId, runInput.runId!)
+      onComplete: (messages, opts) => {
+        publishRunStopped(input.sessionId, opts?.stoppedByUser, opts?.startedAt)
+        if (!webContents.isDestroyed()) {
+          sendAgentStreamComplete(webContents, input, {
+            messages,
+            stoppedByUser: opts?.stoppedByUser ?? false,
+            startedAt: opts?.startedAt,
+            resultSubtype: opts?.resultSubtype,
+            resultErrors: opts?.resultErrors,
+            backgroundTasksPending: opts?.backgroundTasksPending,
+            // 只读取刚完成的轻量 meta，renderer 可据此增量更新列表，避免再取 5,000+ 条全量会话。
+            session: getSessionMetaForRenderer(input.sessionId),
+          })
         }
       },
-      onRunStarted: ({ runId, startedAt }) => {
-        eventBus.emit(runInput.sessionId, {
+      onRunStarted: ({ startedAt }) => {
+        eventBus.emit(input.sessionId, {
           kind: 'proma_event',
-          event: { type: 'run_started', runId, startedAt },
+          event: { type: 'run_started', startedAt },
         })
       },
       onTitleUpdated: (title) => {
-        eventBus.emit(runInput.sessionId, {
+        eventBus.emit(input.sessionId, {
           kind: 'proma_event',
           event: { type: 'title_updated', title },
         })
         if (!webContents.isDestroyed()) {
           webContents.send(AGENT_IPC_CHANNELS.TITLE_UPDATED, {
-            sessionId: runInput.sessionId,
+            sessionId: input.sessionId,
             title,
           })
         }
@@ -285,30 +256,22 @@ export async function runAgent(
   } catch (err) {
     console.error('[Agent 服务] runAgent 未处理异常:', err)
     const errorMessage = err instanceof Error ? err.message : '未知错误'
-    streamForwarder.flush(runInput.sessionId)
-    try {
-      if (!webContents.isDestroyed()) {
-        webContents.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
-          sessionId: runInput.sessionId,
-          runId: runInput.runId,
-          startedAt: runInput.startedAt,
-          error: errorMessage,
-        })
-        sendAgentStreamComplete(webContents, runInput, {
-          stoppedByUser: false,
-          startedAt: runInput.startedAt,
-        })
-      }
-    } finally {
-      // EventBus scope 属于主进程，不依赖 renderer 是否仍存活或 IPC 是否抛错。
-      finishRendererRun(runInput.sessionId, runInput.runId!)
+    if (!webContents.isDestroyed()) {
+      webContents.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
+        sessionId: input.sessionId,
+        error: errorMessage,
+      })
+      sendAgentStreamComplete(webContents, input, {
+        messages: [],
+        stoppedByUser: false,
+      })
     }
   } finally {
     // 仅在 orchestrator 已完成此会话时清理映射
     // 避免被拒绝的请求误删仍在运行的会话映射
-    if (!orchestrator.isActive(runInput.sessionId)) {
-      sessionWebContents.delete(runInput.sessionId)
-      streamForwarder.clear(runInput.sessionId)
+    if (!orchestrator.isActive(input.sessionId)) {
+      sessionWebContents.delete(input.sessionId)
+      streamForwarder.clear(input.sessionId)
     }
   }
 }
@@ -323,7 +286,7 @@ export async function runAgentHeadless(
   input: AgentSendInput,
   callbacks: {
     onError: (error: string) => void
-    onComplete: () => void
+    onComplete: (messages?: AgentMessage[]) => void
     onTitleUpdated: (title: string) => void
     source?: AgentExternalRunSource
     originSessionId?: string
@@ -336,11 +299,7 @@ export async function runAgentHeadless(
     callbacks.originSessionId,
     getMainRendererWebContents,
   )
-  const runInput: AgentSendInput = {
-    ...input,
-    startedAt: input.startedAt ?? Date.now(),
-    runId: input.runId ?? randomUUID(),
-  }
+  const runInput: AgentSendInput = input.startedAt != null ? input : { ...input, startedAt: Date.now() }
   const startedAt = runInput.startedAt!
   if (wc) {
     registerWebContents(runInput.sessionId, wc)
@@ -349,37 +308,30 @@ export async function runAgentHeadless(
   try {
     await orchestrator.sendMessage(runInput, {
       onError: (error) => {
-        streamForwarder.flush(runInput.sessionId)
         callbacks.onError(error)
         // 同步到渲染进程
         if (wc && !wc.isDestroyed()) {
           wc.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
             sessionId: runInput.sessionId,
-            runId: runInput.runId,
-            startedAt: runInput.startedAt,
             error,
           })
         }
       },
-      onComplete: (opts) => {
-        streamForwarder.flush(runInput.sessionId)
-        try {
-          callbacks.onComplete()
-          publishRunStopped(runInput.sessionId, runInput.runId!, opts?.stoppedByUser, opts?.startedAt)
-          // 同步到渲染进程
-          if (wc && !wc.isDestroyed()) {
-            sendAgentStreamComplete(wc, runInput, {
-              stoppedByUser: opts?.stoppedByUser ?? false,
-              startedAt: opts?.startedAt,
-              resultSubtype: opts?.resultSubtype,
-              resultErrors: opts?.resultErrors,
-              backgroundTasksPending: opts?.backgroundTasksPending,
-              // 只读取刚完成的轻量 meta，renderer 可据此增量更新列表，避免再取 5,000+ 条全量会话。
-              session: getSessionMetaForRenderer(runInput.sessionId),
-            })
-          }
-        } finally {
-          finishRendererRun(runInput.sessionId, runInput.runId!)
+      onComplete: (messages, opts) => {
+        callbacks.onComplete(messages)
+        publishRunStopped(runInput.sessionId, opts?.stoppedByUser, opts?.startedAt)
+        // 同步到渲染进程
+        if (wc && !wc.isDestroyed()) {
+          sendAgentStreamComplete(wc, runInput, {
+            messages,
+            stoppedByUser: opts?.stoppedByUser ?? false,
+            startedAt: opts?.startedAt,
+            resultSubtype: opts?.resultSubtype,
+            resultErrors: opts?.resultErrors,
+            backgroundTasksPending: opts?.backgroundTasksPending,
+            // 只读取刚完成的轻量 meta，renderer 可据此增量更新列表，避免再取 5,000+ 条全量会话。
+            session: getSessionMetaForRenderer(runInput.sessionId),
+          })
         }
       },
       onTitleUpdated: (title) => {
@@ -396,7 +348,7 @@ export async function runAgentHeadless(
           })
         }
       },
-      onRunStarted: ({ runId, startedAt: persistedStartedAt, userMessageUuid }) => {
+      onRunStarted: ({ startedAt: persistedStartedAt }) => {
         const session = getAgentSessionMeta(runInput.sessionId)
         eventBus.emit(runInput.sessionId, {
           kind: 'proma_event',
@@ -404,14 +356,10 @@ export async function runAgentHeadless(
             type: 'external_run_started',
             source: callbacks.source ?? 'bridge',
             sessionId: runInput.sessionId,
-            runId,
             title: session?.title,
             workspaceId: runInput.workspaceId ?? session?.workspaceId,
             modelId: runInput.modelId,
-            channelId: runInput.channelId,
             startedAt: persistedStartedAt,
-            userMessage: runInput.rawUserMessage ?? runInput.userMessage,
-            ...(userMessageUuid ? { userMessageUuid } : {}),
             ...(session ? { session } : {}),
           },
         })
@@ -420,25 +368,15 @@ export async function runAgentHeadless(
   } catch (err) {
     console.error('[Agent 服务] runAgentHeadless 未处理异常:', err)
     const errorMessage = err instanceof Error ? err.message : '未知错误'
-    streamForwarder.flush(runInput.sessionId)
-    try {
-      callbacks.onError(errorMessage)
-      callbacks.onComplete()
-      if (wc && !wc.isDestroyed()) {
-        wc.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
-          sessionId: runInput.sessionId,
-          runId: runInput.runId,
-          startedAt: runInput.startedAt,
-          error: errorMessage,
-        })
-        sendAgentStreamComplete(wc, runInput, {
-          stoppedByUser: false,
-          startedAt,
-        })
-      }
-    } finally {
-      // Headless callback/IPC 自身抛错也不能泄漏 canonical run scope。
-      finishRendererRun(runInput.sessionId, runInput.runId!)
+    callbacks.onError(errorMessage)
+    callbacks.onComplete()
+    if (wc && !wc.isDestroyed()) {
+      wc.send(AGENT_IPC_CHANNELS.STREAM_ERROR, { sessionId: runInput.sessionId, error: errorMessage })
+      sendAgentStreamComplete(wc, runInput, {
+        messages: [],
+        stoppedByUser: false,
+        startedAt,
+      })
     }
   } finally {
     if (!orchestrator.isActive(runInput.sessionId)) {

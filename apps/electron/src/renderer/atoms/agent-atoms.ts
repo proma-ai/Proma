@@ -6,14 +6,15 @@
  */
 
 import { atom } from 'jotai'
-import { atomFamily } from 'jotai-family'
-import { atomWithStorage, selectAtom } from 'jotai/utils'
-import type { AgentSessionMeta, AgentWorkspace, AgentPendingFile, RetryAttempt, PromaPermissionMode, PermissionRequest, AskUserRequest, ExitPlanModeRequest, ThinkingConfig, AgentEffort, SDKMessage, UnstagedChangesResult } from '@proma/shared'
-import type { AgentLiveUpdate } from '@/lib/agent-canonical-stream'
+import { atomFamily, atomWithStorage, selectAtom } from 'jotai/utils'
+import type { AgentSessionMeta, AgentEvent, AgentWorkspace, AgentPendingFile, RetryAttempt, PromaPermissionMode, PermissionRequest, AskUserRequest, ExitPlanModeRequest, ThinkingConfig, AgentEffort, SDKMessage, UnstagedChangesResult } from '@proma/shared'
 import { PROMA_DEFAULT_PERMISSION_MODE } from '@proma/shared'
 import { calculateDockBadgeCount, countPendingRequests } from '@/lib/dock-badge-count'
 import type { AgentQueuedMessage } from '@/lib/agent-message-queue'
 import type { SessionFileChange } from '@/lib/session-file-changes'
+
+/** 活动状态 */
+export type ActivityStatus = 'pending' | 'running' | 'completed' | 'error' | 'backgrounded'
 
 /** 工具活动状态 */
 export interface ToolActivity {
@@ -32,6 +33,12 @@ export interface ToolActivity {
   isBackground?: boolean
   /** MCP 工具返回的图片附件 */
   imageAttachments?: Array<{ localPath: string; filename: string; mediaType: string }>
+}
+
+/** 活动分组（Task 子代理） */
+export interface ActivityGroup {
+  parent: ToolActivity
+  children: ToolActivity[]
 }
 
 /**
@@ -92,10 +99,9 @@ export interface AgentStreamState {
    * 此状态下 running 为 false，但服务端 activeSessions 仍保留，新消息必须走注入通道而非新建 run。
    */
   backgroundWaiting?: boolean
+  content: string
   toolActivities: ToolActivity[]
   model?: string
-  /** 本次运行启动时的渠道 ID；运行中切换模型只影响下一轮，不能覆盖它。 */
-  channelId?: string
   /** 当前输入 token 数（上下文使用量） */
   inputTokens?: number
   /** 输出 token 数 */
@@ -110,6 +116,8 @@ export interface AgentStreamState {
   contextWindow?: number
   /** 当前上下文 token 是 Pi 手动压缩后的预估值 */
   contextUsageIsEstimated?: boolean
+  /** 当前 thinking block 的 token 估算值（SDK 实时估算，非计费值） */
+  thinkingEstimatedTokens?: number
   /** 是否正在压缩上下文 */
   isCompacting?: boolean
   /** 当前或最近一次压缩状态，保留到实时消息清理或同一流恢复正常工作后供底部进度区展示。 */
@@ -120,8 +128,6 @@ export interface AgentStreamState {
    * 否则保留到整个 stream 结束（state 被删除）。用于抑制压缩分隔符切换期间 AgentRunningIndicator 的短暂闪烁。
    */
   compactInFlight?: boolean
-  /** 主进程分配的 opaque run identity，用于精确拒绝迟到终态。 */
-  runId?: string
   /** 流式开始时间戳（用于思考计时持久化） */
   startedAt?: number
   /** 重试状态 */
@@ -140,6 +146,14 @@ function clearFinishedCompactionForResumedWork(prev: AgentStreamState): AgentStr
     compactInFlight: false,
     contextCompaction: undefined,
   }
+}
+
+/** 从 ToolActivity 派生状态 */
+export function getActivityStatus(activity: ToolActivity): ActivityStatus {
+  if (activity.isBackground) return 'backgrounded'
+  if (!activity.done) return 'running'
+  if (activity.isError) return 'error'
+  return 'completed'
 }
 
 interface RetryEventRunScope {
@@ -167,6 +181,85 @@ function upsertRetryAttempt(history: RetryAttempt[], attempt: RetryAttempt): Ret
       : item
   ))
 }
+
+/**
+ * 合并同层 TodoWrite 活动：多次调用只保留最新 input，置底显示
+ *
+ * TodoWrite 每次调用都包含完整的 todo 列表，只需展示最新状态。
+ */
+function mergeTodoWrites(activities: ToolActivity[]): ToolActivity[] {
+  const todoWrites: ToolActivity[] = []
+  const others: ToolActivity[] = []
+
+  for (const a of activities) {
+    if (a.toolName === 'TodoWrite') {
+      todoWrites.push(a)
+    } else {
+      others.push(a)
+    }
+  }
+
+  if (todoWrites.length === 0) return activities
+
+  const latest = todoWrites[todoWrites.length - 1]!
+  const allDone = todoWrites.every((t) => t.done)
+
+  const merged: ToolActivity = {
+    ...latest,
+    done: allDone,
+    isError: allDone && todoWrites.some((t) => t.isError),
+  }
+
+  return [...others, merged]
+}
+
+/**
+ * 将扁平活动列表按 parentToolUseId 分组
+ *
+ * 返回顶层项（ActivityGroup | ToolActivity），
+ * Task 类型的工具作为 group.parent，其子活动嵌套在 children 中。
+ * 每层内 TodoWrite 合并去重并置底。
+ */
+export function groupActivities(activities: ToolActivity[]): Array<ActivityGroup | ToolActivity> {
+  // 过滤幽灵条目：tool_progress 创建的空 input 条目，完成后仍无内容
+  const filtered = activities.filter((a) => {
+    if (a.done && Object.keys(a.input).length === 0 && !a.result) return false
+    return true
+  })
+  const processed = mergeTodoWrites(filtered)
+
+  const parentIds = new Set<string>()
+  for (const a of processed) {
+    if (a.toolName === 'Task' || a.toolName === 'Agent') parentIds.add(a.toolUseId)
+  }
+
+  const childrenMap = new Map<string, ToolActivity[]>()
+  const topLevel: Array<ActivityGroup | ToolActivity> = []
+
+  for (const a of processed) {
+    if (a.parentToolUseId && parentIds.has(a.parentToolUseId)) {
+      const children = childrenMap.get(a.parentToolUseId) ?? []
+      children.push(a)
+      childrenMap.set(a.parentToolUseId, children)
+    } else {
+      topLevel.push(a)
+    }
+  }
+
+  return topLevel.map((item) => {
+    if ('toolUseId' in item && parentIds.has(item.toolUseId)) {
+      const children = childrenMap.get(item.toolUseId) ?? []
+      return { parent: item, children: mergeTodoWrites(children) } as ActivityGroup
+    }
+    return item
+  })
+}
+
+/** 判断是否为 ActivityGroup */
+export function isActivityGroup(item: ActivityGroup | ToolActivity): item is ActivityGroup {
+  return 'parent' in item && 'children' in item
+}
+
 
 /** 待自动发送的 Agent 提示（从设置页"对话完成配置"触发） */
 export interface AgentPendingPrompt {
@@ -238,27 +331,6 @@ export function areAgentViewStreamStatesEqual(
     && previous.isCompacting === next.isCompacting
 }
 
-export type AgentInputStreamState = Pick<AgentStreamState, 'running' | 'backgroundWaiting'>
-
-const EMPTY_AGENT_INPUT_STREAM_STATE: AgentInputStreamState = { running: false }
-
-function areAgentInputStreamStatesEqual(
-  previous: AgentInputStreamState,
-  next: AgentInputStreamState,
-): boolean {
-  return previous.running === next.running
-    && previous.backgroundWaiting === next.backgroundWaiting
-}
-
-/** 输入区只订阅发送/排队需要的生命周期状态，避免 usage_update 触发整页重渲染。 */
-export const agentSessionInputStreamStateAtomFamily = atomFamily((sessionId: string) =>
-  selectAtom(
-    agentSessionStreamingStateAtomFamily(sessionId),
-    (state): AgentInputStreamState => state ?? EMPTY_AGENT_INPUT_STREAM_STATE,
-    areAgentInputStreamStatesEqual,
-  ),
-)
-
 /**
  * AgentView 不订阅逐 token content；完整状态只由 AgentMessages 消费。
  * selectAtom 的 equalityFn 保证纯文本流式更新不会重渲染输入框和工具栏。
@@ -271,52 +343,10 @@ export const agentSessionViewStreamStateAtomFamily = atomFamily((sessionId: stri
   ),
 )
 
-/** AgentMessages 只需要的流生命周期字段；排除 usage 与 toolActivities 高频更新。 */
-export type AgentMessagesStreamState = Pick<
-  AgentStreamState,
-  | 'running'
-  | 'model'
-  | 'channelId'
-  | 'retrying'
-  | 'runId'
-  | 'startedAt'
-  | 'isCompacting'
-  | 'contextCompaction'
-  | 'compactInFlight'
->
-
-const EMPTY_AGENT_MESSAGES_STREAM_STATE: AgentMessagesStreamState = {
-  running: false,
-}
-
-function areAgentMessagesStreamStatesEqual(
-  previous: AgentMessagesStreamState,
-  next: AgentMessagesStreamState,
-): boolean {
-  return previous.running === next.running
-    && previous.model === next.model
-    && previous.channelId === next.channelId
-    && previous.retrying === next.retrying
-    && previous.runId === next.runId
-    && previous.startedAt === next.startedAt
-    && previous.isCompacting === next.isCompacting
-    && previous.contextCompaction === next.contextCompaction
-    && previous.compactInFlight === next.compactInFlight
-}
-
-/** usage_update 不得让历史 transcript 跟随 token 频率重新执行。 */
-export const agentSessionMessagesStreamStateAtomFamily = atomFamily((sessionId: string) =>
-  selectAtom(
-    agentSessionStreamingStateAtomFamily(sessionId),
-    (state): AgentMessagesStreamState => state ?? EMPTY_AGENT_MESSAGES_STREAM_STATE,
-    areAgentMessagesStreamStatesEqual,
-  ),
-)
-
 /**
- * 当前 run 的 final/control SDKMessage 累积 Map。
+ * 实时 SDKMessage 累积 Map — Phase 2 新增
  *
- * assistant partial 正文由 AgentLiveTranscriptStore 维护，不进入此 Jotai Map。
+ * 流式期间每条 SDKMessage 直接追加，供新 UI 渲染。
  * 流式完成后清空（持久化消息从 JSONL 加载）。
  */
 export const liveMessagesMapAtom = atom<Map<string, SDKMessage[]>>(new Map())
@@ -444,7 +474,7 @@ export const agentDiffUnseenFilesAtom = atom(new Map<string, Set<string>>())
  */
 export const agentNonGitFileChangesAtom = atom<Map<string, SessionFileChange[]>>(new Map())
 
-/** 当前 session 的 Agent run ID；主进程 run_started 后使用 opaque runId。 */
+/** 当前 session 的 Agent run ID（即渲染进程生成并传给主进程的 startedAt）。 */
 export const agentFileChangesCurrentRunAtom = atom<Map<string, string>>(new Map())
 
 /**
@@ -609,13 +639,43 @@ export const currentAgentSessionAtom = atom<AgentSessionMeta | null>((get) => {
   const sessions = get(agentSessionsAtom)
   const currentId = get(currentAgentSessionIdAtom)
   if (!currentId) return null
-  return sessions.find((session) => session.id === currentId) ?? null
+  return sessions.find((s) => s.id === currentId) ?? null
 })
 
 export const agentStreamingAtom = atom<boolean>((get) => {
   const currentId = get(currentAgentSessionIdAtom)
   if (!currentId) return false
   return get(agentStreamingStatesAtom).get(currentId)?.running ?? false
+})
+
+export const agentStreamingContentAtom = atom<string>((get) => {
+  const currentId = get(currentAgentSessionIdAtom)
+  if (!currentId) return ''
+  return get(agentStreamingStatesAtom).get(currentId)?.content ?? ''
+})
+
+export const agentToolActivitiesAtom = atom<ToolActivity[]>((get) => {
+  const currentId = get(currentAgentSessionIdAtom)
+  if (!currentId) return []
+  return get(agentStreamingStatesAtom).get(currentId)?.toolActivities ?? []
+})
+
+export const agentStreamingModelAtom = atom<string | undefined>((get) => {
+  const currentId = get(currentAgentSessionIdAtom)
+  if (!currentId) return undefined
+  return get(agentStreamingStatesAtom).get(currentId)?.model
+})
+
+export const agentRetryingAtom = atom<AgentStreamState['retrying'] | undefined>((get) => {
+  const currentId = get(currentAgentSessionIdAtom)
+  if (!currentId) return undefined
+  return get(agentStreamingStatesAtom).get(currentId)?.retrying
+})
+
+export const agentStartedAtAtom = atom<number | undefined>((get) => {
+  const currentId = get(currentAgentSessionIdAtom)
+  if (!currentId) return undefined
+  return get(agentStreamingStatesAtom).get(currentId)?.startedAt
 })
 
 export const agentRunningSessionIdsAtom = atom<Set<string>>((get) => {
@@ -685,16 +745,24 @@ export const agentSessionIndicatorMapAtom = atom<Map<string, SessionIndicatorSta
   return getStableIndicatorMap(Array.from(map.entries()))
 })
 
-/** canonical live projection → 低频业务状态（正文由 AgentLiveTranscriptStore 独立维护）。 */
-export function applyAgentLiveUpdate(
+/**
+ * 处理 AgentEvent 并更新流式状态（纯函数）
+ */
+export function applyAgentEvent(
   prev: AgentStreamState,
-  event: AgentLiveUpdate,
+  event: AgentEvent,
 ): AgentStreamState {
   switch (event.type) {
-    case 'assistant_progress': {
+    case 'text_delta': {
+      // 开始接收文本 - 清除重试状态（重试成功）
       const resumed = clearFinishedCompactionForResumedWork(prev)
-      if (resumed === prev && prev.retrying === undefined) return prev
-      return { ...resumed, retrying: undefined }
+      return { ...resumed, content: resumed.content + event.text, retrying: undefined }
+    }
+
+    case 'text_complete': {
+      // 用完整文本替换增量累积的文本（用于回放场景：只需 text_complete 即可重建文本状态）
+      const resumed = clearFinishedCompactionForResumedWork(prev)
+      return { ...resumed, content: event.text }
     }
 
     case 'tool_start': {
@@ -740,6 +808,18 @@ export function applyAgentLiveUpdate(
       }
     }
 
+    case 'task_backgrounded': {
+      const resumed = clearFinishedCompactionForResumedWork(prev)
+      return {
+        ...resumed,
+        toolActivities: resumed.toolActivities.map((t) =>
+          t.toolUseId === event.toolUseId
+            ? { ...t, isBackground: true, taskId: event.taskId, done: true }
+            : t
+        ),
+      }
+    }
+
     case 'task_progress': {
       const resumed = clearFinishedCompactionForResumedWork(prev)
       // 普通 tool 计时语义（仅当有真实 elapsedSeconds 时更新）
@@ -772,8 +852,35 @@ export function applyAgentLiveUpdate(
       return { ...resumed, toolActivities: nextActivities }
     }
 
+    case 'shell_backgrounded': {
+      const resumed = clearFinishedCompactionForResumedWork(prev)
+      return {
+        ...resumed,
+        toolActivities: resumed.toolActivities.map((t) =>
+          t.toolUseId === event.toolUseId
+            ? { ...t, isBackground: true, shellId: event.shellId, done: true }
+            : t
+        ),
+      }
+    }
+
+    case 'shell_killed':
+      return clearFinishedCompactionForResumedWork(prev)
+
     case 'task_notification':
       return clearFinishedCompactionForResumedWork(prev)
+
+    case 'thinking_tokens': {
+      const resumed = clearFinishedCompactionForResumedWork(prev)
+      return {
+        ...resumed,
+        thinkingEstimatedTokens: event.estimatedTokens,
+      }
+    }
+
+    case 'tool_use_summary':
+      // 工具使用摘要 — 目前不影响流式状态，仅用于 UI 展示
+      return prev
 
     case 'complete': {
       // 成功完成 — 清除 retrying，但保持 running: true
@@ -826,6 +933,11 @@ export function applyAgentLiveUpdate(
       const resumed = clearFinishedCompactionForResumedWork(prev)
       return { ...resumed, running: true, backgroundWaiting: false }
     }
+
+    case 'typed_error':
+      // 终态 IPC 仍可能在后端清理前到达；统一由 STREAM_COMPLETE 释放运行锁，
+      // 避免用户在 active session 尚未销毁时抢先启动新 run。
+      return { ...prev, retrying: undefined }
 
     case 'error':
       // 同上：保留运行锁和 retry 状态，等待专用 retry 终态或 STREAM_COMPLETE 收束。

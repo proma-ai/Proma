@@ -1,6 +1,6 @@
 /**
- * Versioned protocol shared by the Electron main process and the Agent utility process.
- * Keep this layer free of Electron and Pi runtime imports.
+ * Electron main process 与 Pi utility process 之间的版本化协议。
+ * 该文件不能依赖 Electron 或 Pi SDK，保证两端可以独立 bundle。
  */
 
 export const AGENT_RUNTIME_PROTOCOL_VERSION = 1 as const
@@ -10,7 +10,7 @@ export type AgentRuntimeMessageKind = 'request' | 'response' | 'event'
 
 export interface AgentRuntimeContext {
   sessionId?: string
-  runId?: string
+  queryId?: string
   sequence?: number
 }
 
@@ -47,10 +47,18 @@ export interface AgentRuntimeEvent<Payload = unknown> extends AgentRuntimeEnvelo
   payload?: Payload
 }
 
-export type AgentRuntimeEnvelope =
-  | AgentRuntimeRequest
-  | AgentRuntimeResponse
-  | AgentRuntimeEvent
+export type AgentRuntimeEnvelope = AgentRuntimeRequest | AgentRuntimeResponse | AgentRuntimeEvent
+
+export type AgentRuntimeStatus = 'starting' | 'ready' | 'stopping' | 'stopped' | 'crashed'
+
+export interface AgentRuntimeState {
+  status: AgentRuntimeStatus
+  bootId: string
+  pid: number | null
+  active: boolean
+  pendingRequests: number
+  lastError?: AgentRuntimeError
+}
 
 export interface AgentRuntimeHandshakePayload {
   runtimeVersion: string
@@ -59,36 +67,18 @@ export interface AgentRuntimeHandshakePayload {
   state: AgentRuntimeState
 }
 
-export type AgentRuntimeStatus = 'starting' | 'ready' | 'stopping' | 'stopped' | 'crashed'
-
-export interface AgentRuntimeState {
-  status: AgentRuntimeStatus
-  bootId: string
-  pid: number | null
-  activeRuns: number
-  pendingRequests: number
-  lastError?: AgentRuntimeError
-}
-
 export interface AgentRuntimePortTransfer {
   type: 'proma-agent-runtime-port'
   protocolVersion: typeof AGENT_RUNTIME_PROTOCOL_VERSION
 }
 
-export interface AgentRuntimeCancelPayload {
-  requestId: string
-}
-
 export const AGENT_RUNTIME_METHODS = {
   HANDSHAKE: 'runtime.handshake',
-  PING: 'runtime.ping',
-  GET_STATE: 'runtime.getState',
-  CANCEL: 'runtime.cancel',
   SHUTDOWN: 'runtime.shutdown',
   QUERY_START: 'agent.query.start',
   QUERY_ABORT: 'agent.query.abort',
-  QUERY_SET_PERMISSION_MODE: 'agent.query.setPermissionMode',
   QUERY_SEND_QUEUED_MESSAGE: 'agent.query.sendQueuedMessage',
+  QUERY_SET_PERMISSION_MODE: 'agent.query.setPermissionMode',
   CAPABILITY_CAN_USE_TOOL: 'agent.capability.canUseTool',
   CAPABILITY_CANCEL: 'agent.capability.cancel',
   CAPABILITY_CUSTOM_TOOL: 'agent.capability.customTool',

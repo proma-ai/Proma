@@ -26,7 +26,6 @@ export interface MinimapItem {
   preview: string
   avatar?: string
   model?: string
-  channelId?: string
 }
 
 interface ScrollMinimapProps {
@@ -40,7 +39,7 @@ const MAX_BARS = 20
 /** 迷你地图横杠垂直间距（px） */
 const MINIMAP_BAR_SPACING = 8
 /** 右侧滚动位置条宽度（px） */
-const SCROLL_PROGRESS_WIDTH = 5
+const SCROLL_PROGRESS_WIDTH = 8
 
 // ── Markdown 预览配置（轻量级，禁用重量级渲染） ──
 
@@ -574,7 +573,7 @@ function ItemIcon({ item }: { item: MinimapItem }): React.ReactElement {
   if ((item.role === 'assistant') && item.model) {
     return (
       <img
-        src={getModelLogo(item.model, resolveModelProvider(item.model, channels, item.channelId))}
+        src={getModelLogo(item.model, resolveModelProvider(item.model, channels))}
         alt=""
         className="size-4 shrink-0 mt-0.5 rounded-[20%] object-cover"
       />

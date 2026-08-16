@@ -275,9 +275,7 @@ export class OpenAIAdapter implements ProviderAdapter {
     const url = resolveOpenAIChatCompletionsUrl(input.baseUrl, this.providerType)
     // OpenCode Go 的编程模型会将一部分输出预算用于推理；通用标题请求的
     // 50 tokens 不足以稳定产出可见正文，导致自动重命名收到空标题。
-    // const maxTokens = this.providerType === 'opencode-go-openai' ? 512 : 50
-    // 统一设置 512 tokens 解决兼容open ai 供应商 自动重命名收到空标题问题。
-    const maxTokens = 512
+    const maxTokens = this.providerType === 'opencode-go-openai' ? 512 : 50
 
     return {
       url,

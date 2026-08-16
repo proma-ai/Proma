@@ -20,7 +20,7 @@ import { join, dirname } from 'node:path'
 import { accessSync, constants, existsSync, mkdirSync, realpathSync } from 'node:fs'
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 import { app } from 'electron'
-import type { AgentSendInput, AgentMessage, AgentGenerateTitleInput, PiRunSourceEvent, AgentSessionMeta, CodexOAuthCredentials, XaiOAuthCredentials, TypedError, SDKMessage, SDKAssistantMessage, AgentStreamPayload, RewindSessionResult, SkillActivation } from '@proma/shared'
+import type { AgentSendInput, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, AgentSessionMeta, CodexOAuthCredentials, XaiOAuthCredentials, TypedError, SDKMessage, SDKAssistantMessage, AgentStreamPayload, RewindSessionResult, SkillActivation } from '@proma/shared'
 import {
   PROMA_DEFAULT_PERMISSION_MODE,
   PROMA_PERMISSION_MODE_CONFIG,
@@ -37,12 +37,11 @@ import {
   mergeSkillActivations,
 } from '@proma/shared'
 import type { PromaPermissionMode, AskUserRequest, ExitPlanModeRequest, SDKSystemMessage } from '@proma/shared'
-import type { PiAgentAdapter, PiAgentQueryOptions } from './adapters/pi-agent-adapter'
+import type { PiAgentQueryOptions } from './adapters/pi-agent-adapter'
 import { getMainRepoRoot } from './git-diff-service'
-import { getPiAssistantErrorDetails, hasPiAssistantTextContent, stripPiAssistantError } from './adapters/pi-transcript-projection'
+import { getPiAssistantErrorDetails, hasPiAssistantTextContent, stripPiAssistantError } from './adapters/pi-message-adapter'
 import { friendlyErrorMessage, isPromptTooLongError, isThinkingSignatureError, mapAgentErrorToTypedError } from './agent-error-utils'
 import { getActiveRunRejectionMessage, shouldPersistInitialUserMessage } from './agent-send-message-policy'
-import { withAgentMessageChannelIdentity } from './agent-message-channel-identity'
 import { isSessionNotFoundError } from './error-patterns'
 import { AgentEventBus } from './agent-event-bus'
 import { decryptApiKey, getChannelById, listChannels, persistCodexOAuthCredentials, persistXaiOAuthCredentials, resolveChannelRuntimeApiKey, resolveCodexOAuthCredentials, resolveXaiOAuthCredentials } from './channel-manager'
@@ -50,7 +49,7 @@ import { getAdapter, fetchTitle } from '@proma/core'
 import pkg from '../../../package.json' with { type: 'json' }
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
-import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, removeSDKErrorMessage, updateSDKUserMessageSkillActivations, rewindPiAgentSession, resolveAgentCwd, getActiveWorktreePath, getAgentCwdMode, getSessionWorkbenchLayout } from './agent-session-manager'
+import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, removeSDKErrorMessage, updateSDKUserMessageSkillActivations, rewindPiAgentSession, resolveAgentCwd, getActiveWorktreePath, getAgentCwdMode, getSessionWorkbenchLayout } from './agent-session-manager'
 import { getAgentWorkspace, getLocalProjectRootStatus, getProjectFilesPath, getWorkspaceMcpConfig, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles, getWorkspaceAgentsMdPath, readWorkspaceAgentsMd, getWorkspaceMemoryGuidance, isWorkspaceProjectKnowledgeMaintenanceApproved } from './agent-workspace-manager'
 import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getSdkConfigDir, getWorkspaceSkillsDir } from './config-paths'
 import { getRuntimeStatus } from './runtime-init'
@@ -78,11 +77,7 @@ import { createFallbackTitle, sanitizeGeneratedTitle, TITLE_PROMPT } from './tit
 import { claimWorkspaceMemoryRefreshOpportunity } from './agent-memory-refresh-service'
 import { browserController } from './browser-controller'
 
-type PiAgentAdapterLike = Pick<
-  PiAgentAdapter,
-  'query' | 'abort' | 'dispose' | 'setPermissionMode' | 'sendQueuedMessage'
->
-
+// ===== 类型定义 =====
 
 /**
  * 会话控制信号回调
@@ -94,11 +89,11 @@ export interface SessionCallbacks {
   /** 发送流式错误 */
   onError: (error: string) => void
   /** 发送流式完成（携带已持久化的消息列表） */
-  onComplete: (opts?: { stoppedByUser?: boolean; startedAt?: number; resultSubtype?: string; resultErrors?: string[]; backgroundTasksPending?: boolean }) => void
+  onComplete: (messages?: AgentMessage[], opts?: { stoppedByUser?: boolean; startedAt?: number; resultSubtype?: string; resultErrors?: string[]; backgroundTasksPending?: boolean }) => void
   /** 发送标题更新 */
   onTitleUpdated: (title: string) => void
   /** 用户消息已持久化，外部入口可据此通知前端切到实时会话 */
-  onRunStarted?: (opts: { runId: string; startedAt: number; userMessageUuid?: string }) => void
+  onRunStarted?: (opts: { startedAt: number }) => void
 }
 
 type RecoverableAgentQueryOptions = {
@@ -119,7 +114,7 @@ function isMissingActiveQueueChannelError(error: unknown): boolean {
   return errorMessageOf(error).includes('无活跃消息通道可注入队列消息')
 }
 
-function isLegacyPartialSnapshot(message: SDKMessage): boolean {
+function isPartialSDKMessage(message: SDKMessage): boolean {
   return (message as Record<string, unknown>)._partial === true
 }
 
@@ -217,7 +212,7 @@ function resolveLocalProjectRootForRewind(projectRootPath: string): string {
 // ===== AgentOrchestrator =====
 
 export class AgentOrchestrator {
-  private adapter: PiAgentAdapterLike
+  private adapter: AgentProviderAdapter
   private eventBus: AgentEventBus
   private activeSessions = new Map<string, number>()
   private nextRunGeneration = 0
@@ -233,7 +228,7 @@ export class AgentOrchestrator {
   /** 运行中会话的当前权限模式（支持运行时动态切换） */
   private sessionPermissionModes = new Map<string, PromaPermissionMode>()
 
-  constructor(adapter: PiAgentAdapterLike, eventBus: AgentEventBus) {
+  constructor(adapter: AgentProviderAdapter, eventBus: AgentEventBus) {
     this.adapter = adapter
     this.eventBus = eventBus
   }
@@ -371,17 +366,16 @@ export class AgentOrchestrator {
       if (!result) {
         console.warn('[Agent 标题生成] API 未返回可用标题')
         // OpenCode Go 的推理模型可能把输出预算全花在推理上返回空正文，或
-        // 内容块为数组；自定义渠道（custom）也可能返回空/异常；任何取不到可用标题的情况
-        // 都回退到首行兜底，保证会话一定被重命名。
-        return (channel.provider === 'opencode-go-openai' || channel.provider === 'custom') ? createFallbackTitle(userMessage) : null
+        // 内容块为数组；任何取不到可用标题的情况都回退到首行兜底，保证会话一定被重命名。
+        return channel.provider === 'opencode-go-openai' ? createFallbackTitle(userMessage) : null
       }
 
       console.log(`[Agent 标题生成] 生成标题成功: "${result}"`)
       return result
     } catch (error) {
       console.warn('[Agent 标题生成] 生成失败:', error)
-      // OpenCode Go / 自定义渠道的服务端偶发返回空标题/异常响应/超时，异常路径同样要完成重命名。
-      return (channel.provider === 'opencode-go-openai' || channel.provider === 'custom') ? createFallbackTitle(userMessage) : null
+      // OpenCode Go 的服务端偶发返回空标题/异常响应/超时，异常路径同样要完成重命名。
+      return channel.provider === 'opencode-go-openai' ? createFallbackTitle(userMessage) : null
     }
   }
 
@@ -506,7 +500,7 @@ export class AgentOrchestrator {
       (m) => m.type === 'assistant' || m.type === 'user' || m.type === 'result'
         || (m.type === 'system' && isPersistableSDKSystemMessage(m as SDKSystemMessage))
     ).filter((m) => {
-      if (isLegacyPartialSnapshot(m)) return false
+      if (isPartialSDKMessage(m)) return false
       if (m.type === 'system') {
         const sysMsg = m as SDKSystemMessage
         if (hasCompactBoundary && sysMsg.subtype === 'status' && sysMsg.compact_result === 'success') {
@@ -517,8 +511,7 @@ export class AgentOrchestrator {
       if (m.type === 'user') {
         const content = (m as { message?: { content?: Array<{ type: string }> } }).message?.content
         const hasToolResult = Array.isArray(content) && content.some((b) => b.type === 'tool_result')
-        const isQueuedBoundary = (m as Record<string, unknown>)._promaQueuedBoundary === true
-        if (!hasToolResult && !isQueuedBoundary) return false
+        if (!hasToolResult) return false
       }
       return true
     })
@@ -528,15 +521,13 @@ export class AgentOrchestrator {
     // 为没有 _createdAt 的消息补上时间戳（assistant 消息来自 SDK 原始输出，不含时间）
     const now = Date.now()
     const withTimestamps = toPersist.map((m) => {
-      const source = m as Record<string, unknown>
-      const msg = source._promaQueuedBoundary === true ? { ...source } : source
-      delete msg._promaQueuedBoundary
-      if (typeof msg._createdAt === 'number') return msg as unknown as SDKMessage
+      const msg = m as Record<string, unknown>
+      if (typeof msg._createdAt === 'number') return m
       // 为 result 消息附加 _durationMs
       if (m.type === 'result' && durationMs != null) {
-        return { ...msg, _createdAt: now, _durationMs: durationMs } as unknown as SDKMessage
+        return { ...m, _createdAt: now, _durationMs: durationMs } as unknown as SDKMessage
       }
-      return { ...msg, _createdAt: now } as unknown as SDKMessage
+      return { ...m, _createdAt: now } as unknown as SDKMessage
     })
 
     appendSDKMessages(sessionId, withTimestamps)
@@ -602,7 +593,6 @@ export class AgentOrchestrator {
 
   private persistEmptyResponseError(
     sessionId: string,
-    channelId: string,
     resultSubtype: string | undefined,
     resultErrors: string[] | undefined,
   ): string {
@@ -630,7 +620,7 @@ export class AgentOrchestrator {
         { key: 'm', label: '重新选择模型', action: 'select_model' },
       ],
     } as unknown as SDKMessage
-    appendSDKMessages(sessionId, [withAgentMessageChannelIdentity(errorSDKMsg, channelId)])
+    appendSDKMessages(sessionId, [errorSDKMsg])
     console.warn(`[Agent 编排] 本轮没有收到可展示内容: sessionId=${sessionId}, resultSubtype=${subtype}`)
     return errorContent
   }
@@ -648,7 +638,6 @@ export class AgentOrchestrator {
   ): Promise<void> {
     const { sessionId, userMessage, rawUserMessage, channelId, modelId, workspaceId: requestedWorkspaceId, additionalDirectories, permissionModeOverride, mentionedSkills, mentionedMcpServers, mentionedSessionIds, mentionedTodoIds, mentionedCalendarEventIds, automationContext, retryOfErrorUuid } = input
     const streamStartedAt = input.startedAt ?? Date.now()
-    const runId = input.runId ?? randomUUID()
     let userMessagePersisted = false
     let initialUserMessageUuid: string | undefined
     let sessionMeta = getAgentSessionMeta(sessionId)
@@ -670,7 +659,7 @@ export class AgentOrchestrator {
       // 后续消息会随每次点击重复落盘。
       console.warn(`[Agent 编排] 会话 ${sessionId} 正在处理中，拒绝新请求且不保存用户消息`)
       callbacks.onError(getActiveRunRejectionMessage())
-      callbacks.onComplete({ startedAt: streamStartedAt })
+      callbacks.onComplete([], { startedAt: streamStartedAt })
       return
     }
 
@@ -691,7 +680,7 @@ export class AgentOrchestrator {
         const message = error instanceof Error ? error.message : String(error)
         console.error('[Agent 编排] 持久化用户消息失败:', error)
         callbacks.onError(`消息保存失败：${message}`)
-        callbacks.onComplete({ startedAt: streamStartedAt })
+        callbacks.onComplete([], { startedAt: streamStartedAt })
         return
       }
     }
@@ -719,11 +708,11 @@ export class AgentOrchestrator {
         _errorCanRetry: typedError.canRetry,
         _errorActions: typedError.actions,
       } as unknown as SDKMessage
-      try { appendSDKMessages(sessionId, [withAgentMessageChannelIdentity(errorSDKMsg, channelId)]) } catch (e) {
+      try { appendSDKMessages(sessionId, [errorSDKMsg]) } catch (e) {
         console.error('[Agent 编排] 持久化 preflight error 失败:', e)
       }
       callbacks.onError(errorContent)
-      callbacks.onComplete({ startedAt: streamStartedAt })
+      callbacks.onComplete([], { startedAt: streamStartedAt })
     }
 
     // 会话元数据是运行项目的权威来源。渲染端的当前项目只是导航状态，不能
@@ -849,11 +838,7 @@ export class AgentOrchestrator {
     // finally 块会通过 generation 匹配来安全清理，不影响正常流程
     const runGeneration = ++this.nextRunGeneration
     this.activeSessions.set(sessionId, runGeneration)
-    callbacks.onRunStarted?.({
-      runId,
-      startedAt: streamStartedAt,
-      ...(initialUserMessageUuid && { userMessageUuid: initialUserMessageUuid }),
-    })
+    callbacks.onRunStarted?.({ startedAt: streamStartedAt })
 
     const releaseActiveRun = (): void => {
       // 在发送 STREAM_COMPLETE 前释放 active slot，避免渲染进程已进入空闲态、
@@ -866,18 +851,20 @@ export class AgentOrchestrator {
       }
     }
     const completeRun = (
+      messages?: AgentMessage[],
       opts?: { stoppedByUser?: boolean; startedAt?: number; resultSubtype?: string; resultErrors?: string[] },
     ): void => {
       releaseActiveRun()
-      callbacks.onComplete(opts)
+      callbacks.onComplete(messages, opts)
     }
     const failRun = (
       error: string,
+      messages?: AgentMessage[],
       opts?: { stoppedByUser?: boolean; startedAt?: number; resultSubtype?: string; resultErrors?: string[] },
     ): void => {
       releaseActiveRun()
       callbacks.onError(error)
-      callbacks.onComplete(opts)
+      callbacks.onComplete(messages, opts)
     }
 
     // 3. 构建 Pi runtime 环境（代理与 Windows shell 配置）。
@@ -1451,7 +1438,6 @@ export class AgentOrchestrator {
       const piCustomTools = [...piBuiltinTools, ...piMcpTools, ...(extensions.piCustomTools ?? [])]
       const queryOptions: PiAgentQueryOptions = {
         sessionId,
-        runId,
         prompt: finalPrompt,
         // 旧持久化模型 ID 可能带 `[1m]` 上下文后缀；Pi runtime 不支持该变体：
         // 智谱等端点不识别 glm-5.2[1m] 这类后缀，会返回 1211「模型不存在」。
@@ -1542,30 +1528,14 @@ export class AgentOrchestrator {
         // 回退会清除 queryOptions.resumeSessionId；新建 Pi artifact 不应再触发 prompt replay。
         const wasResuming = !!queryOptions.resumeSessionId
         let shouldRetryFromError = false
-        let queryIterator: AsyncIterator<PiRunSourceEvent> | undefined
-        const closeQueryIterator = async (): Promise<void> => {
-          const iterator = queryIterator
-          queryIterator = undefined
-          if (!iterator?.return) return
-          await iterator.return()
-        }
 
         try {
-          // stop 可能发生在 active slot 建立后、Pi adapter active session 创建前。
-          // query() 前做 generation 精确闸门，避免一次已经返回的 abort 之后仍发起模型/工具执行。
-          if (this.stoppedBySessions.get(sessionId) === runGeneration) {
-            const wasStoppedByUser = this.consumeStoppedByUser(sessionId, runGeneration)
-            try { updateAgentSessionMeta(sessionId, { stoppedByUser: wasStoppedByUser }) } catch { /* 会话可能已删除 */ }
-            completeRun({ stoppedByUser: wasStoppedByUser, startedAt: streamStartedAt })
-            return
-          }
-
           // 获取异步迭代器（手动 .next() 以支持 Promise.race 中断）
           const queryIterable = this.adapter.query(queryOptions)
-          queryIterator = queryIterable[Symbol.asyncIterator]()
+          const queryIterator = queryIterable[Symbol.asyncIterator]()
 
-          // 手动事件循环：Promise.race（Pi runtime event vs result drain timeout）
-          let pendingNext: Promise<IteratorResult<PiRunSourceEvent>> | null = null
+          // 手动事件循环：Promise.race（SDKMessage vs result drain timeout）
+          let pendingNext: Promise<IteratorResult<SDKMessage>> | null = null
           // 捕获 result.subtype 以传递给前端（用于区分 success/error_max_turns/error_max_budget_usd）
           let capturedResultSubtype: string | undefined
           // 捕获 result.errors[] 错误详情：SDK 在 error_during_execution 等场景下会把真实错误原因
@@ -1585,7 +1555,7 @@ export class AgentOrchestrator {
               pendingNext = queryIterator.next()
             }
 
-            const racePromises: Array<Promise<{ kind: string; result: IteratorResult<PiRunSourceEvent> | null }>> = [
+            const racePromises: Array<Promise<{ kind: string; result: IteratorResult<SDKMessage> | null }>> = [
               pendingNext.then((r) => ({ kind: 'event' as const, result: r })),
             ]
             if (drainTimeoutPromise) {
@@ -1599,16 +1569,7 @@ export class AgentOrchestrator {
               console.warn(`[Agent 编排] drain timeout: SDK iterator 在 result 后 ${RESULT_DRAIN_TIMEOUT_MS}ms 内未关闭，强制退出`)
               pendingNext?.catch(() => {})
               pendingNext = null
-              try {
-                await this.adapter.abort(sessionId)
-              } catch (error) {
-                console.warn(`[Agent 编排] drain timeout abort failed: ${sessionId}`, error)
-              } finally {
-                await Promise.race([
-                  closeQueryIterator().catch(() => {}),
-                  new Promise<void>((resolve) => setTimeout(resolve, RESULT_DRAIN_TIMEOUT_MS)),
-                ])
-              }
+              queryIterator.return?.(undefined as never).catch(() => {})
               break
             }
 
@@ -1616,12 +1577,8 @@ export class AgentOrchestrator {
             if (!iterResult || iterResult.done) break
 
             pendingNext = null
-            const providerEvent = iterResult.value
-            if (providerEvent.kind === 'assistant_message_delta') {
-              this.eventBus.emit(sessionId, providerEvent)
-              continue
-            }
-            let msg = providerEvent.message
+            let msg = iterResult.value
+            const isPartialMessage = isPartialSDKMessage(msg)
             if (msg.type === 'result') {
               const skillActivations = mergeSkillActivations(
                 pendingSkillActivations,
@@ -1640,9 +1597,9 @@ export class AgentOrchestrator {
               }
               pendingSkillActivations = []
             }
-            // assistant partial 帧也需要渠道身份：它们会立即进入实时 UI，但不会被持久化。
-            msg = withAgentMessageChannelIdentity(msg, channelId)
-            if (isVisibleRunMessage(msg)) {
+            // isVisibleRunMessage 已抽到独立模块，不含 partial 判断；
+            // pi runtime 的流式 partial 消息不应计入可见消息数，故在此显式排除。
+            if (!isPartialMessage && isVisibleRunMessage(msg)) {
               visibleRunMessageCount += 1
             }
 
@@ -1661,7 +1618,7 @@ export class AgentOrchestrator {
             }
 
             // 检测 assistant 消息中的 SDK 错误
-            if (msg.type === 'assistant') {
+            if (msg.type === 'assistant' && !isPartialMessage) {
               const assistantMsg = msg as SDKAssistantMessage
               if (assistantMsg.error) {
                 // Pi keeps generated text and the transport failure in separate fields. Claude's
@@ -1731,7 +1688,7 @@ export class AgentOrchestrator {
                 // 不可重试 → 终止
                 const hasPiPartialOutput = hasPiAssistantTextContent(assistantMsg)
                 if (hasPiPartialOutput) {
-                  const partialOutput = withAgentMessageChannelIdentity(stripPiAssistantError(assistantMsg), channelId)
+                  const partialOutput = stripPiAssistantError(assistantMsg)
                   if (modelId) partialOutput._channelModelId = modelId
                   partialOutput._channelProvider = channel.provider
                   accumulatedMessages.push(partialOutput)
@@ -1764,14 +1721,13 @@ export class AgentOrchestrator {
                   _errorCanRetry: typedError.canRetry,
                   _errorActions: typedError.actions,
                 } as unknown as SDKMessage
-                const persistedErrorSDKMsg = withAgentMessageChannelIdentity(errorSDKMsg, channelId)
-                appendSDKMessages(sessionId, [persistedErrorSDKMsg])
+                appendSDKMessages(sessionId, [errorSDKMsg])
                 console.log(`[Agent 编排] 已保存 TypedError 消息: ${typedError.code} - ${typedError.title}`)
 
-                // 实时帧与持久化帧必须共用同一渠道身份，避免运行中切换下一轮模型时显示错渠道。
-                this.eventBus.emit(sessionId, { kind: 'sdk_message', message: persistedErrorSDKMsg })
+                // 透传归一化后的错误消息到前端，避免 SDK 原始 API Error 直接暴露给用户。
+                this.eventBus.emit(sessionId, { kind: 'sdk_message', message: errorSDKMsg })
                 try { updateAgentSessionMeta(sessionId, {}) } catch { /* 忽略 */ }
-                completeRun({ startedAt: streamStartedAt })
+                completeRun(getAgentSessionMessages(sessionId), { startedAt: streamStartedAt })
                 return
               }
             }
@@ -1782,16 +1738,12 @@ export class AgentOrchestrator {
             // - 对 system 消息，仅累积需要长期可见的状态（压缩 / 权限拒绝）
             if (msg.type === 'assistant' || msg.type === 'user' || msg.type === 'result') {
               const msgRecord = msg as Record<string, unknown>
-              if (!msgRecord.isReplay) {
+              if (!msgRecord.isReplay && !isPartialMessage) {
                 if (msg.type === 'user') {
-                  // 普通初始 user 由步骤 5 落盘；tool_result 与 Pi 实际消费的 queued boundary
-                  // 按 providerQueue 顺序进入本轮 buffer。
+                  // 仅累积包含 tool_result 的 user 消息（跳过 SDK 重新发出的初始用户消息）
                   const content = (msg as { message?: { content?: Array<{ type: string }> } }).message?.content
                   const hasToolResult = Array.isArray(content) && content.some((b) => b.type === 'tool_result')
-                  const isQueuedBoundary = (msg as Record<string, unknown>)._promaQueuedBoundary === true
-                  if (isQueuedBoundary) {
-                    accumulatedMessages.push(msg)
-                  } else if (hasToolResult) {
+                  if (hasToolResult) {
                     accumulatedMessages.push(msg)
                   }
                 } else {
@@ -1817,15 +1769,6 @@ export class AgentOrchestrator {
               if (isPersistableSDKSystemMessage(sysMsg)) {
                 accumulatedMessages.push(msg)
               }
-            }
-
-            // queued user 被 Pi 真正消费时，立即按 providerQueue 顺序提交此前 assistant + user；
-            // 避免 user 先写盘、assistant 到 result 才补写造成历史 U → A 倒序。
-            if (msg.type === 'user' && (msg as Record<string, unknown>)._promaQueuedBoundary === true) {
-              this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
-              accumulatedMessages.length = 0
-              const queuedUuid = (msg as Record<string, unknown>).uuid
-              if (typeof queuedUuid === 'string') this.flushPendingUserSkillActivations(sessionId, queuedUuid)
             }
 
             // Turn 结束时：持久化累积消息
@@ -1888,8 +1831,7 @@ export class AgentOrchestrator {
             if (msg.type === 'user') {
               const content = (msg as { message?: { content?: Array<{ type: string }> } }).message?.content
               const hasToolResult = Array.isArray(content) && content.some((b) => b.type === 'tool_result')
-              const isQueuedBoundary = (msg as Record<string, unknown>)._promaQueuedBoundary === true
-              if (!hasToolResult && !isQueuedBoundary) {
+              if (!hasToolResult) {
                 shouldEmit = false
               }
             }
@@ -1903,7 +1845,6 @@ export class AgentOrchestrator {
 
           // 错误 break 触发了 → 继续循环
           if (shouldRetryFromError) {
-            await closeQueryIterator()
             continue
           }
 
@@ -1915,8 +1856,8 @@ export class AgentOrchestrator {
           try { updateAgentSessionMeta(sessionId, wasStoppedByUser ? { stoppedByUser: true } : {}) } catch { /* 忽略 */ }
 
           if (!wasStoppedByUser && visibleRunMessageCount === 0) {
-            const errorContent = this.persistEmptyResponseError(sessionId, channelId, capturedResultSubtype, capturedResultErrors)
-            failRun(errorContent, {
+            const errorContent = this.persistEmptyResponseError(sessionId, capturedResultSubtype, capturedResultErrors)
+            failRun(errorContent, getAgentSessionMessages(sessionId), {
               startedAt: streamStartedAt,
               resultSubtype: EMPTY_RESPONSE_RESULT_SUBTYPE,
               resultErrors: [errorContent],
@@ -1934,16 +1875,16 @@ export class AgentOrchestrator {
           }
 
           // 发送完成信号
-          completeRun({ stoppedByUser: wasStoppedByUser, startedAt: streamStartedAt, resultSubtype: capturedResultSubtype, resultErrors: capturedResultErrors })
+          completeRun(getAgentSessionMessages(sessionId), { stoppedByUser: wasStoppedByUser, startedAt: streamStartedAt, resultSubtype: capturedResultSubtype, resultErrors: capturedResultErrors })
 
           return
 
         } catch (error) {
-          if (this.stoppedBySessions.get(sessionId) === runGeneration) {
+          if (!this.activeSessions.has(sessionId)) {
             const wasStoppedByUser = this.consumeStoppedByUser(sessionId, runGeneration)
             this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
             try { updateAgentSessionMeta(sessionId, { stoppedByUser: wasStoppedByUser }) } catch { /* 会话可能已删除 */ }
-            completeRun({ stoppedByUser: wasStoppedByUser, startedAt: streamStartedAt })
+            completeRun(getAgentSessionMessages(sessionId), { stoppedByUser: wasStoppedByUser, startedAt: streamStartedAt })
             return
           }
 
@@ -1955,7 +1896,6 @@ export class AgentOrchestrator {
             existingSdkSessionId = undefined
             capturedSdkSessionId = undefined
             this.prepareSessionNotFoundRecovery(sessionId, queryOptions, contextualMessage, agentCwd, workspaceSlug, accumulatedMessages, queryStartedAt)
-            await closeQueryIterator()
             continue  // 进入下一次 retry 循环
           }
 
@@ -1974,7 +1914,6 @@ export class AgentOrchestrator {
               '检测到上下文过长，清除 sdkSessionId 并切换到上下文回填模式',
               true,
             )
-            await closeQueryIterator()
             continue  // 进入下一次 retry 循环
           }
 
@@ -1996,7 +1935,6 @@ export class AgentOrchestrator {
               '检测到 thinking signature 不兼容，清除 sdkSessionId 并切换到上下文回填模式',
               true,  // 跨模型签名不兼容是唯一确定永久无效的场景，清除磁盘 sdkSessionId
             )
-            await closeQueryIterator()
             continue  // 进入下一次 retry 循环
           }
 
@@ -2061,13 +1999,13 @@ export class AgentOrchestrator {
               _errorTitle: errorTitle,
               _errorActions: errorActions,
             } as unknown as SDKMessage
-            appendSDKMessages(sessionId, [withAgentMessageChannelIdentity(errMsg, channelId)])
+            appendSDKMessages(sessionId, [errMsg])
             console.log(`[Agent 编排] 已保存错误消息到 JSONL`)
           } catch (saveError) {
             console.error('[Agent 编排] 保存错误消息失败:', saveError)
           }
 
-          failRun(userFacingError, { startedAt: streamStartedAt })
+          failRun(userFacingError, getAgentSessionMessages(sessionId), { startedAt: streamStartedAt })
 
           // 保留 Pi session ID，确保网络或上游临时失败后的下一轮可继续 resume。
           if (existingSdkSessionId) {
@@ -2089,8 +2027,8 @@ export class AgentOrchestrator {
         _errorCode: 'unknown_error',
         _errorTitle: '会话恢复失败',
       } as unknown as SDKMessage
-      appendSDKMessages(sessionId, [withAgentMessageChannelIdentity(recoveryError, channelId)])
-      failRun(recoveryFailure, { startedAt: streamStartedAt })
+      appendSDKMessages(sessionId, [recoveryError])
+      failRun(recoveryFailure, getAgentSessionMessages(sessionId), { startedAt: streamStartedAt })
 
     } finally {
       // 只在 generation 匹配时才清理，防止旧流的 finally 误删新流的注册
@@ -2103,20 +2041,19 @@ export class AgentOrchestrator {
   }
 
   /**
-   * 中止指定会话的 Agent 执行。
+   * 中止指定会话的 Agent 执行
    *
-   * active slot 必须保留到旧 query 的精确终态：否则 stop 后立刻启动的新 run 会通过
-   * 并发检查，却被仍绑定旧 run 的 EventBus scope 丢弃。停止状态单独按 generation 标记。
+   * 先从 activeSessions 移除（供 sendMessage catch 块检测用户中止），
+   * 再调用 adapter.abort() 中止底层 SDK 进程。
    */
   stop(sessionId: string): void {
     const runGeneration = this.activeSessions.get(sessionId)
+    this.activeSessions.delete(sessionId)
     this.sessionPermissionModes.delete(sessionId)
     browserController.cancelSession(sessionId)
     if (runGeneration != null) this.stoppedBySessions.set(sessionId, runGeneration)
     this.queuedMessageUuids.delete(sessionId)
-    void Promise.resolve(this.adapter.abort(sessionId)).catch((error) => {
-      console.warn(`[Agent 编排] 中止会话失败: ${sessionId}`, error)
-    })
+    this.adapter.abort(sessionId)
     console.log(`[Agent 编排] 已中止会话: ${sessionId}`)
   }
 
@@ -2302,7 +2239,6 @@ export class AgentOrchestrator {
     const sdkMessage = {
       type: 'user' as const,
       message: { role: 'user' as const, content: enrichedText },
-      raw_content: rawText ?? text,
       parent_tool_use_id: null,
       priority: 'now' as const,
       uuid,
@@ -2316,8 +2252,18 @@ export class AgentOrchestrator {
       })
       console.log(`[Agent 编排] 追加消息已注入: sessionId=${sessionId}, uuid=${uuid}, interrupt=${!!opts?.interrupt}`)
 
-      // canonical user boundary 会在 Pi 实际消费该 prompt 的 message_start 时进入
-      // providerQueue；由 sendMessage 事件循环按 A → U → B 顺序落盘，不能在这里抢先 append。
+      // 立即持久化到 JSONL — 仅存原始文本，不含 prompt 工程块（与 sendMessage 路径一致）
+      const persistMsg: SDKMessage = {
+        type: 'user',
+        uuid,
+        message: {
+          content: [{ type: 'text', text: rawText ?? text }],
+        },
+        parent_tool_use_id: null,
+        _createdAt: Date.now(),
+      } as unknown as SDKMessage
+      appendSDKMessages(sessionId, [persistMsg])
+      this.flushPendingUserSkillActivations(sessionId, uuid)
     } catch (error) {
       uuids.delete(uuid)
       this.clearPendingUserSkillActivations(sessionId, uuid)

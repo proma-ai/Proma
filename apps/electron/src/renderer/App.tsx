@@ -108,7 +108,7 @@ export default function App(): React.ReactElement {
   // 显示 onboarding 界面
   if (showOnboarding) {
     return (
-      <TooltipProvider delayDuration={200} disableHoverableContent>
+      <TooltipProvider delayDuration={200}>
         <div className="relative h-screen w-screen overflow-hidden">
           {/* Onboarding 绕过 AppShell 时仍需提供隐藏标题栏窗口的拖拽区，并避开 Windows 控制按钮。 */}
           <div
@@ -133,7 +133,7 @@ export default function App(): React.ReactElement {
 
   // 显示主界面
   return (
-    <TooltipProvider delayDuration={200} disableHoverableContent>
+    <TooltipProvider delayDuration={200}>
       <AppShell contextValue={contextValue} />
       <PlanningReminderRail />
       <ShortcutGuideDialog />

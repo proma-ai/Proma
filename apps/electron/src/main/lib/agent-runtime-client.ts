@@ -18,6 +18,7 @@ import {
   type AgentRuntimeEvent,
   type AgentRuntimeHandshakePayload,
   type AgentRuntimePortTransfer,
+  type AgentRuntimeRequest,
   type AgentRuntimeResponse,
   type AgentRuntimeState,
 } from '@proma/shared'
@@ -26,17 +27,18 @@ type RuntimePort = Pick<MessagePortMain, 'close' | 'postMessage' | 'start'> & {
   on(event: 'message', listener: (event: { data: unknown }) => void): void
 }
 
-type AgentRuntimeRequestHandler = (request: import('@proma/shared').AgentRuntimeRequest) => Promise<unknown>
-
 type PendingRequest = {
   method: string
   resolve: (value: unknown) => void
   reject: (reason: unknown) => void
   timer: ReturnType<typeof setTimeout>
-  cleanup?: () => void
+  cleanup: () => void
 }
 
+type RuntimeRequestHandler = (request: AgentRuntimeRequest) => Promise<unknown>
+
 export interface AgentRuntimeClientOptions {
+  sessionId: string
   entryPath?: string
   env?: NodeJS.ProcessEnv
   startupTimeoutMs?: number
@@ -44,29 +46,27 @@ export interface AgentRuntimeClientOptions {
 }
 
 export interface AgentRuntimeRequestOptions {
-  sessionId?: string
-  runId?: string
+  queryId?: string
   signal?: AbortSignal
   timeoutMs?: number
 }
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000
-const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
+const DEFAULT_REQUEST_TIMEOUT_MS = 120_000
 
 /**
- * Main-process client for the long-lived Pi utility process.
- *
- * This client deliberately owns no Agent state. It only correlates requests,
- * forwards canonical events, and turns utility failures into structured errors.
+ * One client owns exactly one Pi utility process. Keeping this unit per session
+ * prevents a busy Agent from sharing a Node event loop with another Agent.
  */
 export class AgentRuntimeClient {
+  private readonly sessionId: string
   private readonly entryPath: string
   private readonly env: NodeJS.ProcessEnv | undefined
   private readonly startupTimeoutMs: number
   private readonly requestTimeoutMs: number
   private runtimeProcess: UtilityProcess | undefined
   private port: RuntimePort | undefined
-  private runtimeGeneration = 0
+  private generation = 0
   private startPromise: Promise<AgentRuntimeState> | undefined
   private stopPromise: Promise<void> | undefined
   private bootId = AGENT_RUNTIME_BOOTSTRAP_ID
@@ -74,14 +74,15 @@ export class AgentRuntimeClient {
     status: 'stopped',
     bootId: AGENT_RUNTIME_BOOTSTRAP_ID,
     pid: null,
-    activeRuns: 0,
+    active: false,
     pendingRequests: 0,
   }
-  private readonly eventListeners = new Set<(event: AgentRuntimeEvent) => void>()
   private readonly pendingRequests = new Map<string, PendingRequest>()
-  private requestHandler: AgentRuntimeRequestHandler | undefined
+  private readonly eventListeners = new Set<(event: AgentRuntimeEvent) => void>()
+  private requestHandler: RuntimeRequestHandler | undefined
 
-  constructor(options: AgentRuntimeClientOptions = {}) {
+  constructor(options: AgentRuntimeClientOptions) {
+    this.sessionId = options.sessionId
     this.entryPath = options.entryPath ?? join(__dirname, 'agent-runtime.cjs')
     this.env = options.env
     this.startupTimeoutMs = options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS
@@ -96,7 +97,7 @@ export class AgentRuntimeClient {
     return this.state.status === 'ready' && this.port !== undefined
   }
 
-  setRequestHandler(handler: AgentRuntimeRequestHandler | undefined): void {
+  setRequestHandler(handler: RuntimeRequestHandler | undefined): void {
     this.requestHandler = handler
   }
 
@@ -107,23 +108,26 @@ export class AgentRuntimeClient {
 
   async start(): Promise<AgentRuntimeState> {
     if (this.isReady) return this.currentState
-    if (this.stopPromise || this.state.status === 'stopping') {
-      throw new Error('Agent runtime is shutting down')
-    }
+    if (this.stopPromise || this.state.status === 'stopping') throw new Error('Agent runtime is shutting down')
     if (this.startPromise) return this.startPromise
 
     this.startPromise = this.spawnAndHandshake()
     try {
       return await this.startPromise
     } catch (error) {
-      if (!this.stopPromise && this.state.status !== 'stopped' && this.state.status !== 'crashed') {
-        const runtimeError = serializeAgentRuntimeError(error, 'runtime.start_failed')
-        this.handleRuntimeFailure(runtimeError)
-      }
       this.port?.close()
       this.port = undefined
       this.runtimeProcess?.kill()
       this.runtimeProcess = undefined
+      this.rejectPending(error instanceof Error ? error : new Error(String(error)))
+      this.state = {
+        status: 'crashed',
+        bootId: AGENT_RUNTIME_BOOTSTRAP_ID,
+        pid: null,
+        active: false,
+        pendingRequests: 0,
+        lastError: serializeAgentRuntimeError(error, 'runtime.start_failed'),
+      }
       throw error
     } finally {
       this.startPromise = undefined
@@ -145,29 +149,28 @@ export class AgentRuntimeClient {
 
     const pendingStart = this.startPromise
     this.stopPromise = (async () => {
-      const canRequestShutdown = this.state.status === 'ready' && this.port !== undefined
+      const currentGeneration = this.generation
       this.state = { ...this.state, status: 'stopping' }
       try {
-        if (canRequestShutdown) {
-          await this.sendRequest(AGENT_RUNTIME_METHODS.SHUTDOWN, undefined, { timeoutMs: 5_000 })
+        if (this.port && this.state.status === 'stopping') {
+          await this.sendRequest(AGENT_RUNTIME_METHODS.SHUTDOWN, undefined, { timeoutMs: 5_000 }).catch(() => {})
         }
-      } catch (error) {
-        console.warn('[AgentRuntime] utility shutdown request failed:', error)
       } finally {
-        this.runtimeGeneration += 1
+        if (currentGeneration === this.generation) this.generation++
         this.port?.close()
         this.port = undefined
         this.runtimeProcess?.kill()
         this.runtimeProcess = undefined
         this.rejectPending(new Error('Agent runtime stopped'))
         this.state = {
-          ...this.state,
           status: 'stopped',
+          bootId: AGENT_RUNTIME_BOOTSTRAP_ID,
           pid: null,
+          active: false,
           pendingRequests: 0,
         }
+        await pendingStart?.catch(() => {})
       }
-      await pendingStart?.catch(() => {})
     })()
 
     try {
@@ -178,21 +181,21 @@ export class AgentRuntimeClient {
   }
 
   private async spawnAndHandshake(): Promise<AgentRuntimeState> {
-    const generation = ++this.runtimeGeneration
+    const generation = ++this.generation
     this.state = { ...this.state, status: 'starting', lastError: undefined }
     const runtimeProcess = utilityProcess.fork(this.entryPath, [], {
-      env: { ...process.env, ...this.env },
+      env: { ...process.env, ...this.env, PROMA_AGENT_SESSION_ID: this.sessionId },
     })
     this.runtimeProcess = runtimeProcess
-    const runtimeEvents = runtimeProcess as unknown as {
+    const processEvents = runtimeProcess as unknown as {
       on(event: 'exit', listener: (code: number) => void): void
     }
-    runtimeEvents.on('exit', (code) => {
-      if (generation !== this.runtimeGeneration || this.runtimeProcess !== runtimeProcess) return
+    processEvents.on('exit', (code) => {
+      if (generation !== this.generation || this.runtimeProcess !== runtimeProcess) return
       this.handleProcessExit(code)
     })
     runtimeProcess.on('error', (type, location, report) => {
-      if (generation !== this.runtimeGeneration || this.runtimeProcess !== runtimeProcess) return
+      if (generation !== this.generation || this.runtimeProcess !== runtimeProcess) return
       this.handleRuntimeFailure({
         code: 'runtime.process_error',
         message: `Agent runtime fatal error: ${type}`,
@@ -204,7 +207,7 @@ export class AgentRuntimeClient {
     const port = channel.port2 as unknown as RuntimePort
     this.port = port
     port.on('message', (event) => {
-      if (generation !== this.runtimeGeneration || this.runtimeProcess !== runtimeProcess || this.port !== port) return
+      if (generation !== this.generation || this.runtimeProcess !== runtimeProcess || this.port !== port) return
       this.handlePortMessage(event.data)
     })
     port.start()
@@ -220,7 +223,7 @@ export class AgentRuntimeClient {
       { protocolVersion: AGENT_RUNTIME_PROTOCOL_VERSION },
       { timeoutMs: this.startupTimeoutMs },
     )
-    if (generation !== this.runtimeGeneration || this.runtimeProcess !== runtimeProcess || this.port !== port || this.state.status === 'stopping' || this.state.status === 'stopped') {
+    if (generation !== this.generation || this.runtimeProcess !== runtimeProcess || this.port !== port) {
       throw new Error('Agent runtime stopped during handshake')
     }
     this.bootId = handshake.state.bootId
@@ -237,40 +240,37 @@ export class AgentRuntimeClient {
     if (!port) return Promise.reject(new Error('Agent runtime port is not connected'))
 
     const request = createAgentRuntimeRequest(method, payload, {
-      sessionId: options.sessionId,
-      runId: options.runId,
+      sessionId: this.sessionId,
+      queryId: options.queryId,
     }, method === AGENT_RUNTIME_METHODS.HANDSHAKE ? AGENT_RUNTIME_BOOTSTRAP_ID : this.bootId)
     const timeoutMs = options.timeoutMs ?? this.requestTimeoutMs
 
     return new Promise<Result>((resolve, reject) => {
-      let pending: PendingRequest | undefined
       let removeAbortListener = (): void => {}
+      const cleanup = (): void => {
+        clearTimeout(timer)
+        removeAbortListener()
+      }
       const timer = setTimeout(() => {
-        if (!pending || !this.pendingRequests.delete(request.requestId)) return
-        pending.cleanup?.()
+        if (!this.pendingRequests.delete(request.requestId)) return
+        cleanup()
         this.state = { ...this.state, pendingRequests: this.pendingRequests.size }
         reject(new Error(`Agent runtime request timed out: ${method}`))
       }, timeoutMs)
-      pending = {
+      const pending: PendingRequest = {
         method,
         resolve: (value) => resolve(value as Result),
         reject,
         timer,
-        cleanup: () => {
-          clearTimeout(timer)
-          removeAbortListener()
-        },
+        cleanup,
       }
       this.pendingRequests.set(request.requestId, pending)
       this.state = { ...this.state, pendingRequests: this.pendingRequests.size }
 
       if (options.signal) {
         const abort = (): void => {
-          const current = this.pendingRequests.get(request.requestId)
-          if (!current) return
-          void this.sendCancel(request.requestId)
-          this.pendingRequests.delete(request.requestId)
-          current.cleanup?.()
+          if (!this.pendingRequests.delete(request.requestId)) return
+          cleanup()
           this.state = { ...this.state, pendingRequests: this.pendingRequests.size }
           reject(new Error(`Agent runtime request aborted: ${method}`))
         }
@@ -286,71 +286,46 @@ export class AgentRuntimeClient {
         port.postMessage(request)
       } catch (error) {
         this.pendingRequests.delete(request.requestId)
-        pending.cleanup?.()
+        cleanup()
         this.state = { ...this.state, pendingRequests: this.pendingRequests.size }
         reject(error)
       }
     })
   }
 
-  private async sendCancel(requestId: string): Promise<void> {
-    try {
-      await this.sendRequest(AGENT_RUNTIME_METHODS.CANCEL, { requestId }, { timeoutMs: 2_000 })
-    } catch {
-      // The original request is already being aborted; cancellation is best effort.
-    }
-  }
-
   private handlePortMessage(rawMessage: unknown): void {
-    if (!isAgentRuntimeEnvelope(rawMessage)) {
-      console.warn('[AgentRuntime] ignored malformed message from utility')
-      return
-    }
+    if (!isAgentRuntimeEnvelope(rawMessage)) return
     const message = rawMessage as AgentRuntimeEnvelope
     if (message.kind === 'request') {
       void this.handleIncomingRequest(message)
       return
     }
     if (message.kind === 'event') {
-      if (this.bootId !== AGENT_RUNTIME_BOOTSTRAP_ID && message.bootId !== this.bootId) return
-      if (message.method === AGENT_RUNTIME_METHODS.EVENT_STATE) {
-        const nextState = message.payload as AgentRuntimeState
-        if (nextState && typeof nextState.status === 'string') this.state = { ...nextState }
+      if (message.bootId !== this.bootId && message.bootId !== AGENT_RUNTIME_BOOTSTRAP_ID) return
+      if (message.method === AGENT_RUNTIME_METHODS.EVENT_STATE && message.payload) {
+        this.state = { ...(message.payload as AgentRuntimeState) }
       }
-      this.emitEvent(message)
+      for (const listener of this.eventListeners) {
+        try { listener(message) } catch (error) { console.warn('[AgentRuntime] event listener failed:', error) }
+      }
       return
     }
     if (message.kind !== 'response') return
-    if (message.method !== AGENT_RUNTIME_METHODS.HANDSHAKE && message.bootId !== this.bootId) {
-      const stalePending = this.pendingRequests.get(message.requestId)
-      if (!stalePending) return
-      this.pendingRequests.delete(message.requestId)
-      stalePending.cleanup?.()
-      this.state = { ...this.state, pendingRequests: this.pendingRequests.size }
-      stalePending.reject(new Error('Agent runtime response belongs to an older boot'))
-      return
-    }
+    if (message.method !== AGENT_RUNTIME_METHODS.HANDSHAKE && message.bootId !== this.bootId) return
 
     const pending = this.pendingRequests.get(message.requestId)
     if (!pending) return
     this.pendingRequests.delete(message.requestId)
-    pending.cleanup?.()
+    pending.cleanup()
     this.state = { ...this.state, pendingRequests: this.pendingRequests.size }
-    if (message.ok) {
-      pending.resolve(message.payload)
-    } else {
-      pending.reject(this.errorFromResponse(message))
-    }
+    if (message.ok) pending.resolve(message.payload)
+    else pending.reject(this.errorFromResponse(message))
   }
 
-  private async handleIncomingRequest(request: import('@proma/shared').AgentRuntimeRequest): Promise<void> {
-    if (this.bootId !== AGENT_RUNTIME_BOOTSTRAP_ID && request.bootId !== this.bootId) return
+  private async handleIncomingRequest(request: AgentRuntimeRequest): Promise<void> {
+    if (request.bootId !== this.bootId) return
     try {
-      if (!this.requestHandler) {
-        throw Object.assign(new Error(`No main handler for runtime method: ${request.method}`), {
-          code: 'runtime.main_handler_not_found',
-        })
-      }
+      if (!this.requestHandler) throw new Error(`No main handler for runtime method: ${request.method}`)
       const payload = await this.requestHandler(request)
       this.port?.postMessage(createAgentRuntimeResponse(request, { payload }, this.bootId))
     } catch (error) {
@@ -361,10 +336,7 @@ export class AgentRuntimeClient {
   }
 
   private errorFromResponse(response: AgentRuntimeResponse): Error {
-    const runtimeError = response.error ?? {
-      code: 'runtime.request_failed',
-      message: `Agent runtime request failed: ${response.method}`,
-    }
+    const runtimeError = response.error ?? { code: 'runtime.request_failed', message: `Agent runtime request failed: ${response.method}` }
     const error = new Error(runtimeError.message)
     Object.assign(error, runtimeError)
     return error
@@ -372,28 +344,17 @@ export class AgentRuntimeClient {
 
   private handleRuntimeFailure(error: AgentRuntimeError): void {
     if (this.state.status === 'stopping' || this.state.status === 'stopped') return
-    this.state = {
-      ...this.state,
-      status: 'crashed',
-      lastError: error,
-    }
-    this.emitEvent({
-      protocolVersion: AGENT_RUNTIME_PROTOCOL_VERSION,
-      bootId: this.bootId,
-      kind: 'event',
-      method: AGENT_RUNTIME_METHODS.EVENT_CRASHED,
-      payload: error,
-    })
+    this.state = { ...this.state, status: 'crashed', lastError: error, active: false }
     this.rejectPending(Object.assign(new Error(error.message), error))
-  }
-
-  private emitEvent(event: AgentRuntimeEvent): void {
     for (const listener of this.eventListeners) {
-      try {
-        listener(event)
-      } catch (error) {
-        console.warn('[AgentRuntime] event listener failed:', error)
-      }
+      listener({
+        protocolVersion: AGENT_RUNTIME_PROTOCOL_VERSION,
+        bootId: this.bootId,
+        kind: 'event',
+        method: AGENT_RUNTIME_METHODS.EVENT_CRASHED,
+        sessionId: this.sessionId,
+        payload: error,
+      })
     }
   }
 
@@ -403,7 +364,7 @@ export class AgentRuntimeClient {
       code: 'runtime.process_exit',
       message: `Agent runtime exited (code=${code})`,
       retryable: true,
-      details: { code, bootId: this.bootId },
+      details: { code, sessionId: this.sessionId },
     })
     this.port?.close()
     this.port = undefined
@@ -412,12 +373,10 @@ export class AgentRuntimeClient {
 
   private rejectPending(error: Error): void {
     for (const pending of this.pendingRequests.values()) {
-      pending.cleanup?.()
+      pending.cleanup()
       pending.reject(error)
     }
     this.pendingRequests.clear()
     this.state = { ...this.state, pendingRequests: 0 }
   }
 }
-
-export const agentRuntimeClient = new AgentRuntimeClient()

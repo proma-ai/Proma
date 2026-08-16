@@ -4,11 +4,12 @@ import type {
   SDKResultMessage,
   SDKUserMessage,
 } from '@proma/shared'
+import { isPartialSDKMessage } from '../bridge-agent-message-utils'
 
 /**
  * 飞书流式卡片的运行时状态机。
  *
- * 把 AgentStreamPayload（Pi assistant delta + stable sdk_message + proma_event）累积成一个结构化的
+ * 把 AgentStreamPayload（sdk_message + proma_event）累积成一个结构化的
  * RunState，便于渲染层无时序地把状态转成 CardKit 2.0 JSON。设计参考
  * zara/feishu-claude-code-bridge `src/card/run-state.ts`，但消费的是
  * Proma 的 SDKMessage 形态而非 claude CLI 的 stream-json。
@@ -27,8 +28,8 @@ export interface ToolEntry {
 }
 
 export type Block =
-  | { kind: 'text'; content: string; streaming: boolean; messageId?: string; contentIndex?: number }
-  | { kind: 'tool'; tool: ToolEntry; messageId?: string; contentIndex?: number }
+  | { kind: 'text'; content: string; streaming: boolean }
+  | { kind: 'tool'; tool: ToolEntry }
 
 export type FooterStatus = 'thinking' | 'tool_running' | 'streaming' | null
 
@@ -40,12 +41,9 @@ interface PartialAssistantSnapshot {
 
 export interface RunState {
   blocks: Block[]
-  reasoning: { content: string; active: boolean; messageId?: string; contentIndex?: number }
-  /** Pi-native delta 按 assistant messageId 保存的已归约内容，用于 final 缺口校正。 */
+  reasoning: { content: string; active: boolean }
+  /** Pi partial 帧按 assistant UUID 保存的累计快照，用于计算增量。 */
   partialAssistantSnapshots: Record<string, PartialAssistantSnapshot>
-  /** thinking 按 messageId/contentIndex 保存，并按 assistant 消息顺序合成单一 reasoning panel。 */
-  thinkingBlocks: Record<string, Record<number, string>>
-  thinkingMessageOrder: string[]
   footer: FooterStatus
   terminal: Terminal
   errorMsg?: string
@@ -67,8 +65,6 @@ export function createInitialState(): RunState {
     blocks: [],
     reasoning: { content: '', active: false },
     partialAssistantSnapshots: {},
-    thinkingBlocks: {},
-    thinkingMessageOrder: [],
     footer: 'thinking',
     terminal: 'running',
     startedAt: Date.now(),
@@ -131,141 +127,6 @@ function startTool(state: RunState, id: string, name: string, input: unknown): R
   }
 }
 
-function insertOwnedBlock(
-  blocks: Block[],
-  block: Block,
-  messageId: string,
-  contentIndex: number,
-): Block[] {
-  const next = [...blocks]
-  const firstGreater = next.findIndex((candidate) =>
-    candidate.messageId === messageId
-      && candidate.contentIndex != null
-      && candidate.contentIndex > contentIndex
-  )
-  if (firstGreater >= 0) {
-    next.splice(firstGreater, 0, block)
-    return next
-  }
-  let lastOwned = -1
-  for (let index = next.length - 1; index >= 0; index--) {
-    if (next[index]?.messageId === messageId) {
-      lastOwned = index
-      break
-    }
-  }
-  next.splice(lastOwned >= 0 ? lastOwned + 1 : next.length, 0, block)
-  return next
-}
-
-function appendTextAt(
-  state: RunState,
-  messageId: string,
-  contentIndex: number,
-  delta: string,
-): RunState {
-  const existingIndex = state.blocks.findIndex((block) =>
-    block.kind === 'text'
-      && block.messageId === messageId
-      && block.contentIndex === contentIndex
-  )
-  const blocks = existingIndex >= 0
-    ? state.blocks.map((block, index) => index === existingIndex && block.kind === 'text'
-      ? { ...block, content: block.content + delta, streaming: true }
-      : block)
-    : insertOwnedBlock(
-      state.blocks,
-      { kind: 'text', content: delta, streaming: true, messageId, contentIndex },
-      messageId,
-      contentIndex,
-    )
-  return {
-    ...state,
-    blocks,
-    reasoning: { ...state.reasoning, active: false },
-    footer: 'streaming',
-  }
-}
-
-function composeThinking(
-  thinkingBlocks: RunState['thinkingBlocks'],
-  messageOrder: string[],
-): string {
-  return messageOrder
-    .flatMap((messageId) => Object.entries(thinkingBlocks[messageId] ?? {})
-      .sort(([left], [right]) => Number(left) - Number(right))
-      .map(([, value]) => value))
-    .join('')
-}
-
-function appendThinkingAt(
-  state: RunState,
-  messageId: string,
-  contentIndex: number,
-  delta: string,
-): RunState {
-  const messageBlocks = state.thinkingBlocks[messageId] ?? {}
-  const thinkingBlocks = {
-    ...state.thinkingBlocks,
-    [messageId]: {
-      ...messageBlocks,
-      [contentIndex]: (messageBlocks[contentIndex] ?? '') + delta,
-    },
-  }
-  const thinkingMessageOrder = state.thinkingMessageOrder.includes(messageId)
-    ? state.thinkingMessageOrder
-    : [...state.thinkingMessageOrder, messageId]
-  return {
-    ...state,
-    thinkingBlocks,
-    thinkingMessageOrder,
-    reasoning: {
-      content: composeThinking(thinkingBlocks, thinkingMessageOrder),
-      active: true,
-      messageId,
-      contentIndex,
-    },
-    footer: 'thinking',
-  }
-}
-
-function startToolAt(
-  state: RunState,
-  messageId: string,
-  contentIndex: number,
-  id: string,
-  name: string,
-  input: unknown,
-): RunState {
-  const existingIndex = state.blocks.findIndex((block) =>
-    block.kind === 'tool'
-      && (block.tool.id === id
-        || (block.messageId === messageId && block.contentIndex === contentIndex))
-  )
-  if (existingIndex >= 0) {
-    return {
-      ...state,
-      blocks: state.blocks.map((block, index) => index === existingIndex && block.kind === 'tool'
-        ? { ...block, messageId, contentIndex, tool: { ...block.tool, id, name, input } }
-        : block),
-      reasoning: { ...state.reasoning, active: false },
-      footer: 'tool_running',
-    }
-  }
-  const tool: ToolEntry = { id, name, input, status: 'running' }
-  return {
-    ...state,
-    blocks: insertOwnedBlock(
-      closeStreamingText(state.blocks),
-      { kind: 'tool', tool, messageId, contentIndex },
-      messageId,
-      contentIndex,
-    ),
-    reasoning: { ...state.reasoning, active: false },
-    footer: 'tool_running',
-  }
-}
-
 function completeTool(state: RunState, id: string, output: string, isError: boolean): RunState {
   const blocks = state.blocks.map((b) => {
     if (b.kind !== 'tool' || b.tool.id !== id) return b
@@ -306,103 +167,21 @@ function stringifyToolResult(content: unknown): string {
 }
 
 export function reduce(state: RunState, payload: AgentStreamPayload): RunState {
-  if (payload.kind === 'assistant_message_delta') {
-    const previousAttempt = state.partialAssistantSnapshots[payload.messageId]
-    let next = state
-    if (payload.reset) {
-      // Native retry 复用 messageId；删除该 attempt 拥有的全部 text/tool/thinking block。
-      const blocks = previousAttempt
-        ? state.blocks.filter((block) => block.messageId !== payload.messageId)
-        : state.blocks
-      const resetReasoning = previousAttempt && state.reasoning.messageId === payload.messageId
-      const thinkingBlocks = {
-        ...state.thinkingBlocks,
-        [payload.messageId]: {},
-      }
-      next = {
-        ...state,
-        blocks,
-        reasoning: resetReasoning
-          ? { content: composeThinking(thinkingBlocks, state.thinkingMessageOrder), active: false }
-          : state.reasoning,
-        partialAssistantSnapshots: {
-          ...state.partialAssistantSnapshots,
-          [payload.messageId]: { blocks: {} },
-        },
-        thinkingBlocks,
-        ...(payload.metadata?.model && !state.meta.model
-          ? { meta: { ...state.meta, model: payload.metadata.model } }
-          : {}),
-      }
-    }
-    for (const operation of payload.operations) {
-      if (operation.type === 'append_text') {
-        next = appendTextAt(next, payload.messageId, operation.blockIndex, operation.text)
-        const snapshot = next.partialAssistantSnapshots[payload.messageId] ?? { blocks: {} }
-        const previous = snapshot.blocks[operation.blockIndex]
-        next = {
-          ...next,
-          partialAssistantSnapshots: {
-            ...next.partialAssistantSnapshots,
-            [payload.messageId]: {
-              blocks: {
-                ...snapshot.blocks,
-                [operation.blockIndex]: {
-                  type: 'text',
-                  content: (previous?.type === 'text' ? previous.content : '') + operation.text,
-                },
-              },
-            },
-          },
-        }
-      } else if (operation.type === 'append_thinking') {
-        next = appendThinkingAt(next, payload.messageId, operation.blockIndex, operation.thinking)
-        const snapshot = next.partialAssistantSnapshots[payload.messageId] ?? { blocks: {} }
-        const previous = snapshot.blocks[operation.blockIndex]
-        next = {
-          ...next,
-          partialAssistantSnapshots: {
-            ...next.partialAssistantSnapshots,
-            [payload.messageId]: {
-              blocks: {
-                ...snapshot.blocks,
-                [operation.blockIndex]: {
-                  type: 'thinking',
-                  content: (previous?.type === 'thinking' ? previous.content : '') + operation.thinking,
-                },
-              },
-            },
-          },
-        }
-      } else if (operation.type === 'append_block' || operation.type === 'replace_block') {
-        const block = operation.block
-        if (block.type === 'tool_use'
-          && typeof block.id === 'string'
-          && typeof block.name === 'string') {
-          next = startToolAt(
-            next,
-            payload.messageId,
-            operation.blockIndex,
-            block.id,
-            block.name,
-            block.input,
-          )
-        }
-      }
-    }
-    return next
-  }
-
   if (payload.kind === 'sdk_message') {
     const msg = payload.message
 
     if (msg.type === 'assistant') {
       const am = msg as SDKAssistantMessage
+      const isPartial = isPartialSDKMessage(msg)
       const assistantId = typeof (msg as { uuid?: unknown }).uuid === 'string'
         ? (msg as { uuid: string }).uuid
         : undefined
+      // 没有稳定 UUID 时无法从累计快照推导增量，等待终态帧可避免重复文本。
+      if (isPartial && !assistantId) return state
+
       const previousSnapshot = assistantId ? state.partialAssistantSnapshots[assistantId] : undefined
-      const useCumulativeSnapshot = previousSnapshot != null
+      const useCumulativeSnapshot = isPartial || previousSnapshot != null
+      const partialBlocks: PartialAssistantSnapshot['blocks'] = {}
       let next = state
       if (am.message?.model && !next.meta.model) {
         next = { ...next, meta: { ...next.meta, model: am.message.model } }
@@ -421,11 +200,8 @@ export function reduce(state: RunState, payload: AgentStreamPayload): RunState {
             const delta = useCumulativeSnapshot && previous?.type === 'text'
               ? cumulativeDelta(text, previous.content)
               : text
-            if (delta) {
-              next = previousSnapshot && assistantId
-                ? appendTextAt(next, assistantId, index, delta)
-                : appendText(next, delta)
-            }
+            if (delta) next = appendText(next, delta)
+            if (isPartial) partialBlocks[index] = { type: 'text', content: text }
           }
         } else if (block.type === 'thinking') {
           const thinking = (block as { thinking?: unknown }).thinking
@@ -434,22 +210,23 @@ export function reduce(state: RunState, payload: AgentStreamPayload): RunState {
             const delta = useCumulativeSnapshot && previous?.type === 'thinking'
               ? cumulativeDelta(thinking, previous.content)
               : thinking
-            if (delta) {
-              next = previousSnapshot && assistantId
-                ? appendThinkingAt(next, assistantId, index, delta)
-                : appendThinking(next, delta)
-            }
+            if (delta) next = appendThinking(next, delta)
+            if (isPartial) partialBlocks[index] = { type: 'thinking', content: thinking }
           }
         } else if (block.type === 'tool_use') {
           const tb = block as { id?: unknown; name?: unknown; input?: unknown }
           if (typeof tb.id === 'string' && typeof tb.name === 'string') {
-            next = previousSnapshot && assistantId
-              ? startToolAt(next, assistantId, index, tb.id, tb.name, tb.input)
-              : startTool(next, tb.id, tb.name, tb.input)
+            next = startTool(next, tb.id, tb.name, tb.input)
           }
         }
       }
 
+      if (assistantId && isPartial) {
+        return {
+          ...next,
+          partialAssistantSnapshots: { ...next.partialAssistantSnapshots, [assistantId]: { blocks: partialBlocks } },
+        }
+      }
       if (assistantId && previousSnapshot) {
         const { [assistantId]: _, ...partialAssistantSnapshots } = next.partialAssistantSnapshots
         return { ...next, partialAssistantSnapshots }

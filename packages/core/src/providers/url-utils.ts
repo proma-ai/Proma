@@ -169,12 +169,11 @@ export function normalizeOpenAIBaseUrlForSdk(baseUrl: string): string {
  * 内置 OpenAI 协议供应商仍允许填写协议根地址，例如：
  * - "https://api.example.com/v1" → "https://api.example.com/v1/chat/completions"
  * - custom: "https://api.example.com/v1/chat/completions" → 原样使用
- * - 自行拼接 /chat/completions  防止有直接从大模型官网拷贝的baseurl 里没有/chat/completions后缀 增加容错性
  */
 export function resolveOpenAIChatCompletionsUrl(baseUrl: string, provider: ProviderType = 'openai'): string {
-  // if (provider === 'custom') {
-  //   return trimTrailingUrlPathSlash(baseUrl)
-  // }
+  if (provider === 'custom') {
+    return trimTrailingUrlPathSlash(baseUrl)
+  }
   if (hasPathSuffix(baseUrl, '/chat/completions')) {
     return trimTrailingUrlPathSlash(baseUrl)
   }

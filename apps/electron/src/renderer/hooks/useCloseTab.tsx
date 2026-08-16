@@ -23,20 +23,7 @@ import {
 import {
   agentSessionsAtom,
   agentSessionIndicatorMapAtom,
-  agentStreamingStatesAtom,
-  liveMessagesMapAtom,
   unviewedCompletedSessionIdsAtom,
-  agentSessionStreamingStateAtomFamily,
-  agentSessionViewStreamStateAtomFamily,
-  agentSessionMessagesStreamStateAtomFamily,
-  agentLiveMessagesAtomFamily,
-  agentSessionDraftAtomFamily,
-  agentSessionDraftHtmlAtomFamily,
-  agentPendingFilesAtomFamily,
-  agentMessageQueueAtomFamily,
-  backgroundTasksAtomFamily,
-  sessionPersistedPermissionModeAtom,
-  sessionExistsAtom,
 } from '@/atoms/agent-atoms'
 import { agentSideChatMapAtom } from '@/atoms/chat-atoms'
 import { useSyncActiveTabSideEffects } from '@/hooks/useSyncActiveTabSideEffects'
@@ -116,37 +103,6 @@ export function useCloseTab(): UseCloseTabReturn {
           next.delete(closingTab.sessionId)
           return next
         })
-        // atomFamily 按 string key 强引用缓存。关闭 Tab 不清除运行态 base map，
-        // 以免后台 Agent 失去状态；但释放派生 atom 实例，避免频繁打开历史会话长期累积。
-        agentSessionStreamingStateAtomFamily.remove(closingTab.sessionId)
-        agentSessionViewStreamStateAtomFamily.remove(closingTab.sessionId)
-        agentSessionMessagesStreamStateAtomFamily.remove(closingTab.sessionId)
-        agentLiveMessagesAtomFamily.remove(closingTab.sessionId)
-        agentSessionDraftAtomFamily.remove(closingTab.sessionId)
-        agentSessionDraftHtmlAtomFamily.remove(closingTab.sessionId)
-        agentPendingFilesAtomFamily.remove(closingTab.sessionId)
-        agentMessageQueueAtomFamily.remove(closingTab.sessionId)
-        backgroundTasksAtomFamily.remove(closingTab.sessionId)
-        sessionPersistedPermissionModeAtom.remove(closingTab.sessionId)
-        sessionExistsAtom.remove(closingTab.sessionId)
-
-        // 已停止会话关闭后不再需要保留全局 Map 中的终态流数据。
-        // 运行/阻塞会话必须保留，左侧状态和后台恢复仍依赖它们。
-        const status = store.get(agentSessionIndicatorMapAtom).get(closingTab.sessionId)
-        if (status !== 'running' && status !== 'blocked') {
-          store.set(agentStreamingStatesAtom, (prev) => {
-            if (!prev.has(closingTab.sessionId)) return prev
-            const next = new Map(prev)
-            next.delete(closingTab.sessionId)
-            return next
-          })
-          store.set(liveMessagesMapAtom, (prev) => {
-            if (!prev.has(closingTab.sessionId)) return prev
-            const next = new Map(prev)
-            next.delete(closingTab.sessionId)
-            return next
-          })
-        }
       } else if (closingTab.type === 'chat') {
         setSideChatMap((prev) => {
           let changed = false

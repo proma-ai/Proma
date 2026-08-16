@@ -108,10 +108,9 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     })
   }, [openPreview, sessionId, sessionPath, selectedWorktreePath])
 
-  // 动画标志：面板开关使用宽度/透明度过渡，切换会话时只播放内容入场动画
+  // 动画标志：isOpen 变化时启用过渡动画，切换会话时即时显示
   const prevIsOpenRef = React.useRef(isOpen)
   const prevSessionIdRef = React.useRef(sessionId)
-  const sessionChanged = prevSessionIdRef.current !== sessionId
   const shouldAnimate = prevSessionIdRef.current === sessionId && prevIsOpenRef.current !== isOpen
   React.useEffect(() => {
     prevIsOpenRef.current = isOpen
@@ -460,8 +459,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
         className={cn(
           'w-full h-full flex flex-col titlebar-no-drag',
           isWindows ? 'pt-[34px]' : 'pt-0',
-          shouldAnimate && 'transition-[opacity] duration-150 ease-out',
-          sessionChanged && 'animate-session-content-in',
+          shouldAnimate && 'transition-opacity duration-300',
           isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none',
         )}
         >

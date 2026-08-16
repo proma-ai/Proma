@@ -255,15 +255,23 @@ export function ProcessBlockGroup({ blocks, isStreaming, isMessageTail = false, 
   const visibleToolNames = toolNames.slice(0, MAX_PROCESS_GROUP_ICONS)
   const hiddenToolCount = Math.max(0, toolNames.length - visibleToolNames.length)
 
-  // 过程组会在工具完成时因结果状态更新而重渲染。这里不为已挂载的步骤附加入场动画，
-  // 否则相邻的 thinking 块会随工具状态一起重复淡入，形成闪烁。
+  // 内容区子项渲染策略：
+  // - 流式中：每个新块有入场动画，最新一段（消息末尾过程组的最后一个 child）保持正常显示，
+  //   其余步骤轻微弱化以引导视觉重心到最下方。
+  // - 流式结束后用户展开：所有内容以正常颜色显示，无动画。
   const childArray = React.Children.toArray(children)
   const renderContentChildren = (): React.ReactNode =>
     childArray.map((child, i) => {
       const isLast = i === childArray.length - 1
       const dimmed = isStreaming && !(isMessageTail && isLast)
       return (
-        <div key={i} className={cn(dimmed && 'opacity-80')}>
+        <div
+          key={i}
+          className={cn(
+            dimmed && 'opacity-80',
+            isStreaming && 'animate-in fade-in slide-in-from-top-1 duration-200',
+          )}
+        >
           {child}
         </div>
       )

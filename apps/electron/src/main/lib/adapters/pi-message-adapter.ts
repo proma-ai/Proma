@@ -1,8 +1,8 @@
 /**
- * Pi 稳定消息 → Proma legacy transcript projection。
+ * Pi Agent 消息兼容层。
  *
- * 仅在 message_end / run result 等稳定边界生成 SDKMessage，用于现有 JSONL、Bridge
- * 与旧历史 renderer。Pi-native 实时 delta 禁止经过本模块。
+ * 主进程和渲染层仍使用 Claude SDK 兼容的 SDKMessage 协议；本模块集中处理
+ * Pi AgentMessage 与 SDKMessage 之间的形状转换，避免 session 编排代码混入 UI 协议细节。
  */
 
 import { randomUUID } from 'node:crypto'
@@ -73,7 +73,7 @@ export function normalizePermissionInput(piName: string, input: Record<string, u
   }
 }
 
-export function normalizeToolUseInput(piName: string, input: Record<string, unknown>): Record<string, unknown> {
+function normalizeToolUseInput(piName: string, input: Record<string, unknown>): Record<string, unknown> {
   switch (piName) {
     case 'read':
     case 'write':
@@ -210,12 +210,13 @@ function usageFromAssistant(message: AssistantMessage): {
 // 渲染层（SDKMessageRenderer 的 childBlocksMap/agentToolIds 分组）不是死代码：迁移前用旧
 // claude-sdk 持久化的历史会话 JSONL 里子代理消息带非空 parent_tool_use_id，打开老会话时仍
 // 依赖该逻辑正确嵌套显示，不可删除。
-export function projectPiFinalMessage(
+export function convertPiMessage(
   message: AgentMessage,
   sessionId: string,
   channelModelId?: string,
-  options: { uuid?: string } = {},
+  options: { final?: boolean; uuid?: string } = {},
 ): SDKMessage | null {
+  const final = options.final ?? true
   if (!message || typeof message !== 'object' || !('role' in message)) return null
 
   if (message.role === 'user') {
@@ -227,7 +228,7 @@ export function projectPiFinalMessage(
       },
       parent_tool_use_id: null,
       session_id: sessionId,
-      uuid: options.uuid ?? randomUUID(),
+      ...(final && { uuid: options.uuid ?? randomUUID() }),
     } as unknown as SDKMessage
   }
 
@@ -240,13 +241,13 @@ export function projectPiFinalMessage(
     // 上述非终态情况的 errorMessage 只写主进程 console，供开发排查；用户侧完全无感知。
     // Pi 可能先用预览帧报告 error，随后通过同一 transcript 原生重试；
     // 在最终帧到达前不能把它展示成用户可见的终态失败。
-    const isTerminalError = assistant.stopReason === 'error'
+    const isTerminalError = final && assistant.stopReason === 'error'
     const errorType = assistant.errorMessage && isMalformedResponseError(assistant.errorMessage)
       ? 'service_error'
       : assistant.errorMessage && isTransientNetworkError(assistant.errorMessage)
         ? 'network_error'
         : 'provider_error'
-    if (assistant.errorMessage && !isTerminalError) {
+    if (assistant.errorMessage && !isTerminalError && final) {
       console.warn(
         `[pi-adapter] 忽略非终态 errorMessage（stopReason=${assistant.stopReason}）: ${assistant.errorMessage}`,
       )
@@ -262,7 +263,9 @@ export function projectPiFinalMessage(
               type: 'tool_use',
               id: block.id,
               name: displayToolName(block.name, block.arguments as Record<string, unknown>),
-              input: normalizeToolUseInput(block.name, block.arguments as Record<string, unknown>),
+              // Pi 的 toolcall_delta 每帧携带累计 arguments。大 Write content 会随每个 token
+              // 反复穿过 IPC、Jotai 和 React；预览帧只需保留工具身份，最终帧再提供完整 input。
+              input: final ? normalizeToolUseInput(block.name, block.arguments as Record<string, unknown>) : {},
             }
           }
           return block as unknown as Record<string, unknown>
@@ -274,6 +277,7 @@ export function projectPiFinalMessage(
       parent_tool_use_id: null,
       session_id: sessionId,
       uuid: options.uuid ?? randomUUID(),
+      ...(!final && { _partial: true }),
       ...(assistant.errorMessage && isTerminalError && {
         error: { message: assistant.errorMessage, errorType },
       }),

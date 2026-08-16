@@ -6,8 +6,7 @@
  */
 
 import { atom } from 'jotai'
-import { atomFamily } from 'jotai-family'
-import { atomWithStorage } from 'jotai/utils'
+import { atomFamily, atomWithStorage } from 'jotai/utils'
 import type { ConversationMeta, ChatMessage, FileAttachment, ChatToolActivity, Channel } from '@proma/shared'
 
 /** 全局渠道列表缓存（启动时加载一次，设置变更时刷新） */

@@ -20,7 +20,7 @@
  */
 
 import * as React from 'react'
-import { getDisplayName, highlightToTokens, isHighlighterReady, onHighlighterReady } from '@proma/core'
+import { getDisplayName, highlightToTokens, onHighlighterReady } from '@proma/core'
 import type { HighlightToken, HighlightTokensResult } from '@proma/core'
 
 /** react-markdown 传入的 <code> 元素 props */
@@ -38,39 +38,6 @@ interface CodeBlockProps {
 
 /** 节流间隔（ms）：流式输出时限制高亮更新频率 */
 const THROTTLE_MS = 80
-
-// ===== 高亮结果 LRU 缓存 =====
-
-/**
- * (language, code) → token 结果的模块级 LRU。
- *
- * 两个场景命中：
- * 1. 滞后的节流定时器与下一次 effect 对同一份代码重复计算
- * 2. 虚拟化滚动 / 流结束切换渲染路径导致的重新挂载
- */
-const TOKEN_CACHE_MAX = 64
-const tokenResultCache = new Map<string, HighlightTokensResult>()
-
-function highlightToTokensCached(code: string, language: string): HighlightTokensResult | null {
-  const key = `${language}\u0000${code}`
-  const cached = tokenResultCache.get(key)
-  if (cached) {
-    // LRU touch：删除后重新插入以移到最新位置
-    tokenResultCache.delete(key)
-    tokenResultCache.set(key, cached)
-    return cached
-  }
-  const result = highlightToTokens({ code, language })
-  if (result) {
-    tokenResultCache.set(key, result)
-    while (tokenResultCache.size > TOKEN_CACHE_MAX) {
-      const oldest = tokenResultCache.keys().next().value
-      if (oldest === undefined) break
-      tokenResultCache.delete(oldest)
-    }
-  }
-  return result
-}
 
 // ===== 工具函数 =====
 
@@ -165,8 +132,7 @@ const CodeLine = React.memo(function CodeLine({ tokens, rawLine }: CodeLineProps
  *
  * 渲染策略：
  * - 逐行渲染：highlightToTokens → 每行独立 React 元素 + 稳定 key
- * - 节流 80ms：流式输出时控制重计算频率（节流窗口内不做任何 tokenize 计算）
- * - LRU 结果缓存：重复内容 / 重新挂载直接复用
+ * - 节流 80ms：流式输出时控制重计算频率
  * - 异步兜底：首次挂载高亮器未就绪时，异步初始化后触发一次更新
  */
 export function CodeBlock({ children, onCopy }: CodeBlockProps): React.ReactElement {
@@ -179,7 +145,7 @@ export function CodeBlock({ children, onCopy }: CodeBlockProps): React.ReactElem
 
   // ---- 节流 token 高亮 ----
   const [tokenResult, setTokenResult] = React.useState<HighlightTokensResult | null>(
-    () => (isHighlighterReady() ? highlightToTokensCached(trimmedCode, langOrText) : null)
+    () => highlightToTokens({ code: trimmedCode, language: langOrText })
   )
   const pendingCodeRef = React.useRef(trimmedCode)
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -188,33 +154,38 @@ export function CodeBlock({ children, onCopy }: CodeBlockProps): React.ReactElem
   pendingCodeRef.current = trimmedCode
 
   React.useEffect(() => {
+    const now = Date.now()
+    const elapsed = now - lastUpdateRef.current
+
     const doHighlight = () => {
-      const result = highlightToTokensCached(pendingCodeRef.current, langOrText)
+      const currentCode = pendingCodeRef.current
+      const result = highlightToTokens({ code: currentCode, language: langOrText })
       if (result) {
         lastUpdateRef.current = Date.now()
         setTokenResult(result)
       }
     }
 
-    // 高亮器尚未初始化：订阅就绪事件，初始化完成后用同步路径上色
-    if (!isHighlighterReady()) {
-      const unsubscribe = onHighlighterReady(doHighlight)
-      return () => unsubscribe()
-    }
-
-    // 节流窗口内不做任何同步 tokenize（旧实现每次渲染都全量计算一遍再丢弃，
-    // 流式大代码块时是主线程热点）；只安排尾部定时器保证最终状态正确。
-    const elapsed = Date.now() - lastUpdateRef.current
-    if (elapsed >= THROTTLE_MS) {
-      doHighlight()
+    // 同步路径可用时
+    const syncResult = highlightToTokens({ code: trimmedCode, language: langOrText })
+    if (syncResult) {
+      if (elapsed >= THROTTLE_MS) {
+        // 距上次更新已超过节流间隔，立即执行
+        lastUpdateRef.current = now
+        setTokenResult(syncResult)
+      } else if (!timerRef.current) {
+        // 安排延迟执行，确保最终状态正确
+        timerRef.current = setTimeout(() => {
+          timerRef.current = null
+          doHighlight()
+        }, THROTTLE_MS - elapsed)
+      }
       return
     }
-    if (!timerRef.current) {
-      timerRef.current = setTimeout(() => {
-        timerRef.current = null
-        doHighlight()
-      }, THROTTLE_MS - elapsed)
-    }
+
+    // 兜底：高亮器尚未初始化，订阅就绪事件，初始化完成后用同步路径上色
+    const unsubscribe = onHighlighterReady(() => doHighlight())
+    return () => unsubscribe()
   }, [trimmedCode, langOrText])
 
   // 清理节流定时器

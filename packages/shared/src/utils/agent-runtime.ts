@@ -35,7 +35,7 @@ export function createAgentRuntimeResponse<Payload>(
   result: { payload?: Payload; error?: AgentRuntimeError },
   bootId = request.bootId,
 ): AgentRuntimeResponse<Payload> {
-  const response: AgentRuntimeResponse<Payload> = {
+  return {
     protocolVersion: AGENT_RUNTIME_PROTOCOL_VERSION,
     bootId,
     kind: 'response',
@@ -44,18 +44,12 @@ export function createAgentRuntimeResponse<Payload>(
     ok: !result.error,
     ...(result.payload === undefined ? {} : { payload: result.payload }),
     ...(result.error ? { error: result.error } : {}),
+    ...(request.sessionId === undefined ? {} : { sessionId: request.sessionId }),
+    ...(request.queryId === undefined ? {} : { queryId: request.queryId }),
   }
-
-  if (request.sessionId !== undefined) response.sessionId = request.sessionId
-  if (request.runId !== undefined) response.runId = request.runId
-  if (request.sequence !== undefined) response.sequence = request.sequence
-  return response
 }
 
-export function serializeAgentRuntimeError(
-  error: unknown,
-  fallbackCode = 'runtime.internal_error',
-): AgentRuntimeError {
+export function serializeAgentRuntimeError(error: unknown, fallbackCode = 'runtime.internal_error'): AgentRuntimeError {
   if (isAgentRuntimeError(error)) return error
   if (error instanceof Error) {
     return {

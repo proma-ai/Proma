@@ -87,11 +87,6 @@ export interface ResolveReasoningProfileInput {
 const DEEPSEEK_V4_LEVELS = ['off', 'low', 'high', 'xhigh', 'max'] as const satisfies readonly AgentThinkingLevel[]
 const K3_LEVELS = ['off', 'low', 'high', 'max'] as const satisfies readonly AgentThinkingLevel[]
 const GLM_52_LEVELS = ['off', 'high', 'max'] as const satisfies readonly AgentThinkingLevel[]
-/**
- * 智谱自 GLM-5.2 起才支持 reasoning_effort（high / max），且新旗舰沿用同一套语义，
- * 因此 5.2 与 5.3 共用一个 profile；GLM-5.1 及更早仍只有思考开关，不在此列。
- */
-const GLM_52_PROFILE_MODEL_IDS = new Set(['glm-5.2', 'glm-5.3'])
 const OPENAI_STANDARD_LEVELS = ['off', 'low', 'medium', 'high', 'xhigh'] as const satisfies readonly AgentThinkingLevel[]
 const OPENAI_MAX_LEVELS = [...OPENAI_STANDARD_LEVELS, 'max'] as const satisfies readonly AgentThinkingLevel[]
 
@@ -295,7 +290,7 @@ export function resolveReasoningProfile(input: ResolveReasoningProfileInput): Re
       ? DEEPSEEK_V4_PRO_PROFILE
       : /^(?:k3(?:-256k)?|kimi-k3)$/.test(modelId)
         ? K3_PROFILE
-        : GLM_52_PROFILE_MODEL_IDS.has(modelId)
+        : modelId === 'glm-5.2'
           ? GLM_52_PROFILE
           : isOpenAITransport && isOpenAIReasoningModel
             ? /^gpt-5\.6(?:-|$)/.test(modelId) ? OPENAI_MAX_PROFILE : OPENAI_STANDARD_PROFILE

@@ -1,8 +1,8 @@
 /**
  * Pi Agent SDK 适配器
  *
- * 实时链直接发布 Pi assistantMessageEvent 增量；仅在 message_end 等稳定边界
- * 投影为 SDKMessage，供本地 JSONL 历史、Bridge 与 legacy history renderer 使用。
+ * Proma 内部继续使用 SDKMessage 兼容协议，避免渲染层、Jotai 状态、
+ * JSONL 持久化和历史会话展示在 SDK 迁移时一起改名。
  */
 
 import { randomUUID } from 'node:crypto'
@@ -12,17 +12,16 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSy
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import type {
   AgentThinkingLevel,
-  PiRunSourceEvent,
-  SDKAssistantMessage,
+  AgentProviderAdapter,
   CodexOAuthCredentials,
   XaiOAuthCredentials,
-  PiRunQueryInput,
+  AgentQueryInput,
   JsonSchemaOutputFormat,
   PromaPermissionMode,
   ProviderType,
   SendQueuedMessageOptions,
   SDKMessage,
-  PiQueuedUserMessageInput,
+  SDKUserMessageInput,
   SkillActivation,
 } from '@proma/shared'
 import {
@@ -64,7 +63,7 @@ import { createOpenAIReasoningRequestExtension } from './pi-openai-reasoning-req
 import { mergeRuntimeEnv, type AgentRuntimeEnv } from '../agent-runtime-env'
 import { sanitizePiMessageImageContent, sanitizeToolResultImageContent } from '../image-content-validation'
 import {
-  projectPiFinalMessage,
+  convertPiMessage,
   convertResultMessage,
   displayToolName,
   dropTrailingAbortedAssistant,
@@ -72,11 +71,10 @@ import {
   isAbortedAssistantMessage,
   isAssistantPiMessage,
   normalizePermissionInput,
-  normalizeToolUseInput,
   restorePiInput,
-} from './pi-transcript-projection'
+} from './pi-message-adapter'
 import { DEFAULT_CONTEXT_WINDOW, buildModel } from './pi-model-registry'
-import { PiNativeDeltaStream } from './pi-native-delta-stream'
+import { createPartialMessageCoalescer, type PartialMessageCoalescer } from './pi-streaming-control'
 import { PendingPromptSkillActivationTracker } from './pi-skill-activation-tracker'
 import { createPiRetryTerminalGate, mapPiNativeRetryEvent } from './pi-retry-control'
 import {
@@ -98,8 +96,8 @@ const PI_NATIVE_MAX_TOTAL_DELAY_MS = 5 * 60_000
 const PI_NATIVE_RETRY_JITTER_RATIO = 0.2
 const MAX_AUTOMATIC_COMPACTION_CONTINUATIONS = 20
 
-/** Pi SDK 查询选项（扩展 PiRunQueryInput） */
-export interface PiAgentQueryOptions extends PiRunQueryInput {
+/** Pi SDK 查询选项（扩展通用 AgentQueryInput） */
+export interface PiAgentQueryOptions extends AgentQueryInput {
   apiKey: string
   baseUrl?: string
   provider: ProviderType
@@ -180,8 +178,6 @@ interface ActivePiSession {
   abortRequested: boolean
   interrupting: boolean
   pendingInterruptPrompts: PendingInterruptPrompt[]
-  pendingQueuedUserBoundaries: PendingQueuedUserBoundary[]
-  directPromptStartPending: boolean
   interruptAbortPromise?: Promise<void>
   readySettled: boolean
   disposed: boolean
@@ -193,15 +189,9 @@ interface ActivePiSession {
 
 interface PendingInterruptPrompt {
   content: string
-  queuedBoundary: PendingQueuedUserBoundary
   skillActivationId?: number
   resolveAccepted: () => void
   rejectAccepted: (error: unknown) => void
-}
-
-interface PendingQueuedUserBoundary {
-  rawContent: string
-  uuid: string
 }
 
 interface PromaTaskItem {
@@ -250,6 +240,9 @@ interface AsyncQueue<T> {
   close: () => void
   next: () => Promise<IteratorResult<T>>
 }
+
+/** Pi 原生每个 delta 都携带累计消息；20fps 足够流畅，同时避免 IPC/React 事件风暴。 */
+const PI_PARTIAL_UPDATE_INTERVAL_MS = 50
 
 function getCaseInsensitiveRuntimeEnvValue(env: Record<string, string> | undefined, key: string): string | undefined {
   if (!env) return undefined
@@ -369,8 +362,6 @@ function createActivePiSession(): ActivePiSession {
     abortRequested: false,
     interrupting: false,
     pendingInterruptPrompts: [],
-    pendingQueuedUserBoundaries: [],
-    directPromptStartPending: false,
     pendingSkillActivations: new PendingPromptSkillActivationTracker(),
     readySettled: false,
     disposed: false,
@@ -395,16 +386,12 @@ function createAbortError(): Error {
   return error
 }
 
-function rejectInterruptPrompt(active: ActivePiSession, prompt: PendingInterruptPrompt, error: unknown): void {
-  active.pendingSkillActivations.discard(prompt.skillActivationId)
-  const boundaryIndex = active.pendingQueuedUserBoundaries.indexOf(prompt.queuedBoundary)
-  if (boundaryIndex >= 0) active.pendingQueuedUserBoundaries.splice(boundaryIndex, 1)
-  prompt.rejectAccepted(error)
-}
-
 function rejectPendingInterruptPrompts(active: ActivePiSession, error: unknown): void {
   const pending = active.pendingInterruptPrompts.splice(0)
-  for (const prompt of pending) rejectInterruptPrompt(active, prompt, error)
+  for (const prompt of pending) {
+    active.pendingSkillActivations.discard(prompt.skillActivationId)
+    prompt.rejectAccepted(error)
+  }
 }
 
 async function waitForActiveSession(active: ActivePiSession): Promise<AgentSession> {
@@ -1264,31 +1251,13 @@ export function installRuntimeGuardHooks(session: AgentSession, guard: AgentRunt
   }
 }
 
-export class PiAgentAdapter {
+export class PiAgentAdapter implements AgentProviderAdapter {
   private activeSessions = new Map<string, ActivePiSession>()
 
-  async *query(input: PiAgentQueryOptions): AsyncIterable<PiRunSourceEvent> {
+  async *query(input: PiAgentQueryOptions): AsyncIterable<SDKMessage> {
     const active = createActivePiSession()
     this.activeSessions.set(input.sessionId, active)
-    const providerQueue = createAsyncQueue<PiRunSourceEvent>()
-    const pushMessage = (message: SDKMessage): void => {
-      providerQueue.push({ kind: 'sdk_message', message })
-    }
-    const pushQueuedUserBoundary = (boundary: PendingQueuedUserBoundary, sessionId: string): void => {
-      pushMessage({
-        type: 'user',
-        uuid: boundary.uuid,
-        message: { content: [{ type: 'text', text: boundary.rawContent }] },
-        parent_tool_use_id: null,
-        session_id: sessionId,
-        _promaQueuedBoundary: true,
-      } as unknown as SDKMessage)
-    }
-    const flushUnconsumedQueuedUserBoundaries = (): void => {
-      for (const boundary of active.pendingQueuedUserBoundaries.splice(0)) {
-        pushQueuedUserBoundary(boundary, input.sessionId)
-      }
-    }
+    const queue = createAsyncQueue<SDKMessage>()
     const runtimeGuard = createAgentRuntimeGuard(input)
     // 同一 session 的新请求可能在旧 IPC 事件之后开始；所有 retry 生命周期均携带这一轮标识。
     const retryRunStartedAt = input.retryRunStartedAt ?? Date.now()
@@ -1297,14 +1266,14 @@ export class PiAgentAdapter {
     active.onSkillActivated = input.onSkillActivated
     let unsubscribe: (() => void) | undefined
     let requestProxyDispatcher: Dispatcher | undefined
-    let nativeDeltaStream: PiNativeDeltaStream | undefined
+    let partialAssistantCoalescer: PartialMessageCoalescer<{ message: AssistantMessage; uuid: string }> | undefined
 
     const cleanupActiveSession = (): void => {
       try {
         unsubscribe?.()
         unsubscribe = undefined
-        nativeDeltaStream?.dispose()
-        nativeDeltaStream = undefined
+        partialAssistantCoalescer?.dispose()
+        partialAssistantCoalescer = undefined
         if (!active.disposed) {
           active.disposed = true
           rejectPendingInterruptPrompts(active, createAbortError())
@@ -1521,7 +1490,7 @@ export class PiAgentAdapter {
       input.onModelResolved?.(session.model?.id ?? input.model ?? 'default')
       input.onContextWindow?.(model.contextWindow ?? DEFAULT_CONTEXT_WINDOW)
 
-      pushMessage({
+      queue.push({
         type: 'system',
         subtype: 'init',
         session_id: session.sessionId,
@@ -1565,144 +1534,53 @@ export class PiAgentAdapter {
       }): void => {
         finalAssistantUuids.set(terminalRetryError.assistantMessage, terminalRetryError.assistantUuid)
         runtimeGuard.recordMessage(terminalRetryError.assistantMessage)
-        pushMessage(terminalRetryError.sdkMessage)
+        queue.push(terminalRetryError.sdkMessage)
         resetAssistantStream()
       }
 
-      nativeDeltaStream = new PiNativeDeltaStream({
-        runId: input.runId,
-        emit: (delta) => providerQueue.push(delta),
-      })
+      partialAssistantCoalescer = createPartialMessageCoalescer(({ message, uuid }) => {
+        const converted = convertPiMessage(message, session.sessionId, input.model, {
+          final: false,
+          uuid,
+        })
+        if (converted?.type === 'assistant') queue.push(converted)
+      }, PI_PARTIAL_UPDATE_INTERVAL_MS)
 
       unsubscribe = session.subscribe((event: AgentSessionEvent) => {
         try {
           switch (event.type) {
             case 'message_start': {
               const prompt = getPiUserMessageText(event.message)
-              if (prompt) {
-                const pending = active.pendingSkillActivations.consume(prompt)
-                if (pending) active.onSkillActivated?.(pending.activations, pending.userMessageUuid)
-
-                // queued/interrupt 用户边界必须与 Pi 实际消费顺序一起进入 providerQueue。
-                // 这样 orchestrator 能先持久化此前 stable assistant，再持久化该 user。
-                if (active.directPromptStartPending) {
-                  // 初始 prompt、compaction continuation 和 interrupt direct prompt 都由
-                  // runPromptChain 显式管理，不得提前消费 steering/follow-up FIFO。
-                  active.directPromptStartPending = false
-                } else {
-                  // Pi 的 steering/follow-up 队列是 one-at-a-time FIFO；正文可能被 Pi prompt
-                  // template 二次展开，身份不能依赖字符串相等，按已接受队列顺序消费。
-                  const boundary = active.pendingQueuedUserBoundaries.shift()
-                  if (boundary) pushQueuedUserBoundary(boundary, session.sessionId)
-                }
-              }
-              if (isAssistantPiMessage(event.message)) {
-                const messageId = assistantUuidFor()
-                const reset: SDKAssistantMessage = {
-                  type: 'assistant',
-                  message: {
-                    content: [],
-                    model: event.message.model,
-                  },
-                  parent_tool_use_id: null,
-                  session_id: session.sessionId,
-                  uuid: messageId,
-                  ...(input.model && { _channelModelId: input.model }),
-                  ...(input.channelId && { _channelId: input.channelId }),
-                  _channelProvider: input.provider,
-                }
-                nativeDeltaStream?.reset(messageId, reset, {
-                  sessionId: session.sessionId,
-                  channelModelId: input.model,
-                  channelId: input.channelId,
-                  channelProvider: input.provider,
-                })
-              }
+              if (!prompt) break
+              const pending = active.pendingSkillActivations.consume(prompt)
+              if (pending) active.onSkillActivated?.(pending.activations, pending.userMessageUuid)
               break
             }
             case 'message_update': {
               if (!isAssistantPiMessage(event.message)) break
               lastPartialAssistant = event.message
-              const messageId = assistantUuidFor()
-              const update = event.assistantMessageEvent
-              switch (update.type) {
-                case 'text_start':
-                  nativeDeltaStream?.operation(messageId, {
-                    type: 'append_block',
-                    blockIndex: update.contentIndex,
-                    block: { type: 'text', text: '' },
-                  })
-                  break
-                case 'text_delta':
-                  nativeDeltaStream?.appendText(messageId, update.contentIndex, update.delta)
-                  break
-                case 'thinking_start':
-                  nativeDeltaStream?.operation(messageId, {
-                    type: 'append_block',
-                    blockIndex: update.contentIndex,
-                    block: { type: 'thinking', thinking: '' },
-                  })
-                  break
-                case 'thinking_delta':
-                  nativeDeltaStream?.appendThinking(messageId, update.contentIndex, update.delta)
-                  break
-                case 'toolcall_start': {
-                  const block = update.partial.content[update.contentIndex]
-                  if (block?.type === 'toolCall') {
-                    nativeDeltaStream?.operation(messageId, {
-                      type: 'append_block',
-                      blockIndex: update.contentIndex,
-                      block: {
-                        type: 'tool_use',
-                        id: block.id,
-                        name: displayToolName(block.name, block.arguments as Record<string, unknown>),
-                        input: {},
-                      },
-                    })
-                  }
-                  break
-                }
-                case 'toolcall_end':
-                  nativeDeltaStream?.operation(messageId, {
-                    type: 'replace_block',
-                    blockIndex: update.contentIndex,
-                    block: {
-                      type: 'tool_use',
-                      id: update.toolCall.id,
-                      name: displayToolName(
-                        update.toolCall.name,
-                        update.toolCall.arguments as Record<string, unknown>,
-                      ),
-                      input: normalizeToolUseInput(
-                        update.toolCall.name,
-                        update.toolCall.arguments as Record<string, unknown>,
-                      ),
-                    },
-                  })
-                  break
-                case 'text_end':
-                case 'thinking_end':
-                case 'toolcall_delta':
-                  // end 内容由已累计的 delta / final frame 保证；大工具参数不逐 token 过 IPC。
-                  break
-              }
+              // Pi 的 partial 是累计全文。合并为最多 20fps 的最新帧，避免每 token 都在
+              // main → IPC → renderer 路径重复复制整段消息；message_end 始终立即透传。
+              partialAssistantCoalescer?.schedule({ message: event.message, uuid: assistantUuidFor() })
               break
             }
             case 'message_end': {
-              nativeDeltaStream?.flush()
+              partialAssistantCoalescer?.flush()
               if (active.interrupting && isAbortedAssistantMessage(event.message)) {
                 if (lastPartialAssistant) {
-                  const converted = projectPiFinalMessage(lastPartialAssistant, session.sessionId, input.model, {
+                  const converted = convertPiMessage(lastPartialAssistant, session.sessionId, input.model, {
+                    final: true,
                     uuid: assistantUuidFor(),
                   })
-                  if (converted?.type === 'assistant') pushMessage(converted)
+                  if (converted?.type === 'assistant') queue.push(converted)
                 }
                 resetAssistantStream()
                 break
               }
               const isAssistant = isAssistantPiMessage(event.message)
               const assistantUuid = isAssistant ? assistantUuidFor() : undefined
-              const converted = projectPiFinalMessage(event.message, session.sessionId, input.model, {
+              const converted = convertPiMessage(event.message, session.sessionId, input.model, {
+                final: true,
                 ...(assistantUuid && { uuid: assistantUuid }),
               })
               const shouldDeferNativeOverflow = isAssistant
@@ -1721,7 +1599,7 @@ export class PiAgentAdapter {
                 })
               } else {
                 runtimeGuard.recordMessage(event.message)
-                if (converted && (converted.type !== 'user' || hasToolResult(converted))) pushMessage(converted)
+                if (converted && (converted.type !== 'user' || hasToolResult(converted))) queue.push(converted)
                 if (isAssistant && assistantUuid) {
                   finalAssistantUuids.set(event.message as AssistantMessage, assistantUuid)
                   resetAssistantStream()
@@ -1774,7 +1652,7 @@ export class PiAgentAdapter {
               for (const retry of mapPiNativeRetryEvent(event, { runStartedAt: retryRunStartedAt })) input.onRetry?.(retry)
               break
             case 'tool_execution_update':
-              pushMessage({
+              queue.push({
                 type: 'tool_progress',
                 session_id: session.sessionId,
                 tool_use_id: event.toolCallId,
@@ -1785,7 +1663,7 @@ export class PiAgentAdapter {
             case 'compaction_start':
               // 压缩开始（手动 /compact 或自动阈值/溢出触发）：发前端已识别的 compacting system 消息，
               // 展示「正在压缩上下文...」分隔符。此前迁移遗漏了该事件，导致自动压缩与手动压缩都无 UI。
-              pushMessage({
+              queue.push({
                 type: 'system',
                 subtype: 'compacting',
                 session_id: session.sessionId,
@@ -1802,7 +1680,7 @@ export class PiAgentAdapter {
               }
               // 所有压缩结果都必须有可识别的终态，确保 renderer 能结束底部进度追踪。
               if (!event.aborted && event.result) {
-                pushMessage({
+                queue.push({
                   type: 'system',
                   subtype: 'compact_boundary',
                   session_id: session.sessionId,
@@ -1813,7 +1691,7 @@ export class PiAgentAdapter {
                   }),
                 } as unknown as SDKMessage)
               } else if (event.aborted) {
-                pushMessage({
+                queue.push({
                   type: 'system',
                   subtype: 'status',
                   session_id: session.sessionId,
@@ -1821,7 +1699,7 @@ export class PiAgentAdapter {
                   compact_error: '上下文压缩已取消。',
                 } as unknown as SDKMessage)
               } else if (event.errorMessage && !isCompactionNoopError(event.errorMessage)) {
-                pushMessage({
+                queue.push({
                   type: 'system',
                   subtype: 'status',
                   session_id: session.sessionId,
@@ -1840,8 +1718,7 @@ export class PiAgentAdapter {
               break
           }
         } catch (error) {
-          flushUnconsumedQueuedUserBoundaries()
-          providerQueue.fail(error)
+          queue.fail(error)
         }
       })
 
@@ -1851,7 +1728,7 @@ export class PiAgentAdapter {
         // compact() 不发 agent_end，故这里补一个合成 result 消息收束本轮（供 orchestrator 结束消费循环）。
         session.compact()
           .then(() => {
-            pushMessage({
+            queue.push({
               type: 'result',
               subtype: 'success',
               usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
@@ -1859,16 +1736,15 @@ export class PiAgentAdapter {
               isSyntheticCompactionResult: true,
               session_id: session.sessionId,
             } as unknown as SDKMessage)
-            flushUnconsumedQueuedUserBoundaries()
-            providerQueue.close()
+            queue.close()
           })
           .catch((error) => {
             // 「会话太小无需压缩」/「已压缩」是良性情况，不是执行错误：
             // pi 会抛 "Nothing to compact (session too small)" / "Already compacted"。
             // 这里不 fail 队列（否则前端弹通用「执行错误」），改为正常收尾并给出友好提示。
             if (isCompactionNoopError(error)) {
-              pushMessage(createCompactionNoopMessage(session.sessionId, error))
-              pushMessage({
+              queue.push(createCompactionNoopMessage(session.sessionId, error))
+              queue.push({
                 type: 'result',
                 subtype: 'success',
                 usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
@@ -1876,11 +1752,9 @@ export class PiAgentAdapter {
                 isSyntheticCompactionResult: true,
                 session_id: session.sessionId,
               } as unknown as SDKMessage)
-              flushUnconsumedQueuedUserBoundaries()
-              providerQueue.close()
+              queue.close()
             } else {
-              flushUnconsumedQueuedUserBoundaries()
-              providerQueue.fail(error)
+              queue.fail(error)
             }
           })
           .finally(cleanupActiveSession)
@@ -1902,7 +1776,7 @@ export class PiAgentAdapter {
             const currentInterrupt = nextInterrupt
             nextInterrupt = undefined
             if (runtimeGuard.shouldStopBeforeNextTurn()) {
-              if (currentInterrupt) rejectInterruptPrompt(active, currentInterrupt, createAbortError())
+              currentInterrupt?.rejectAccepted(createAbortError())
               rejectPendingInterruptPrompts(active, createAbortError())
               return
             }
@@ -1918,7 +1792,7 @@ export class PiAgentAdapter {
                   input.skillWorkspaceSlug,
                 )
             } catch (error) {
-              if (currentInterrupt) rejectInterruptPrompt(active, currentInterrupt, error)
+              currentInterrupt?.rejectAccepted(error)
               throw error
             }
             const prompt = preparedPrompt.content
@@ -1932,22 +1806,16 @@ export class PiAgentAdapter {
             try {
               if (active.abortRequested) {
                 active.pendingSkillActivations.discard(skillActivationId)
-                if (currentInterrupt) rejectInterruptPrompt(active, currentInterrupt, createAbortError())
+                currentInterrupt?.rejectAccepted(createAbortError())
                 rejectPendingInterruptPrompts(active, createAbortError())
                 return
               }
-              if (currentInterrupt) {
-                const boundaryIndex = active.pendingQueuedUserBoundaries.indexOf(currentInterrupt.queuedBoundary)
-                if (boundaryIndex >= 0) active.pendingQueuedUserBoundaries.splice(boundaryIndex, 1)
-                pushQueuedUserBoundary(currentInterrupt.queuedBoundary, session.sessionId)
-              }
-              active.directPromptStartPending = true
               currentInterrupt?.resolveAccepted()
               await session.prompt(prompt, { source: 'rpc' })
               persistPiEntryBindings()
               if (compactContextRequested) {
                 try {
-                  await compactCurrentSessionAfterTurn(session, (message) => pushMessage(message))
+                  await compactCurrentSessionAfterTurn(session, (message) => queue.push(message))
                 } catch (error) {
                   // 用户在压缩期间停止时，Pi 会取消 summarization；这是正常中止而不是运行错误。
                   if (active.abortRequested) return
@@ -1975,11 +1843,10 @@ export class PiAgentAdapter {
                 pendingNativeOverflowRecovery = false
                 pendingTerminalResult = undefined
               } else if (pendingTerminalResult) {
-                pushMessage(pendingTerminalResult)
+                queue.push(pendingTerminalResult)
                 pendingTerminalResult = undefined
               }
             } finally {
-              active.directPromptStartPending = false
               if (active.interrupting) {
                 session.agent.state.messages = dropTrailingAbortedAssistant(session.agent.state.messages)
               }
@@ -2005,27 +1872,18 @@ export class PiAgentAdapter {
         }
 
         runPromptChain()
-          .then(() => {
-            // 已被 queue API 接受但因 stop/limit 尚未被 Pi 消费的用户输入仍属于
-            // canonical transcript；排在此前 stable assistant 后落盘，不能静默丢失。
-            flushUnconsumedQueuedUserBoundaries()
-            providerQueue.close()
-          })
-          .catch((error) => {
-            flushUnconsumedQueuedUserBoundaries()
-            providerQueue.fail(error)
-          })
+          .then(() => queue.close())
+          .catch((error) => queue.fail(error))
           .finally(cleanupActiveSession)
       }
     } catch (error) {
       rejectActiveReady(active, error)
-      flushUnconsumedQueuedUserBoundaries()
-      providerQueue.fail(error)
+      queue.fail(error)
     }
 
     try {
       while (true) {
-        const next = await providerQueue.next()
+        const next = await queue.next()
         if (next.done) break
         yield next.value
       }
@@ -2046,7 +1904,7 @@ export class PiAgentAdapter {
 
   async sendQueuedMessage(
     sessionId: string,
-    message: PiQueuedUserMessageInput,
+    message: SDKUserMessageInput,
     options?: SendQueuedMessageOptions,
   ): Promise<void> {
     const active = this.activeSessions.get(sessionId)
@@ -2079,53 +1937,41 @@ export class PiAgentAdapter {
       const stopOverride = active.runtimeGuard.getLimitResultOverride()
       throw new Error(stopOverride?.errors[0] ?? 'Agent 已达到运行限制，无法继续追加消息')
     }
-    const queuedBoundary: PendingQueuedUserBoundary = {
-      rawContent: message.raw_content ?? message.message.content,
-      uuid: message.uuid ?? randomUUID(),
-    }
-    active.pendingQueuedUserBoundaries.push(queuedBoundary)
-    const discardQueuedBoundary = (): void => {
-      const index = active.pendingQueuedUserBoundaries.indexOf(queuedBoundary)
-      if (index >= 0) active.pendingQueuedUserBoundaries.splice(index, 1)
-    }
-
-    try {
-      if (options?.interrupt) {
-        const accepted = new Promise<void>((resolve, reject) => {
-          active.pendingInterruptPrompts.push({
-            content,
-            queuedBoundary,
-            skillActivationId,
-            resolveAccepted: resolve,
-            rejectAccepted: reject,
-          })
+    if (options?.interrupt) {
+      const accepted = new Promise<void>((resolve, reject) => {
+        active.pendingInterruptPrompts.push({
+          content,
+          skillActivationId,
+          resolveAccepted: resolve,
+          rejectAccepted: reject,
         })
-        accepted.catch(() => {})
-        if (session.isStreaming) {
-          // Pi 没有单独的 interrupt()；公开取消 API 是 abort()。
-          // 这里把 abort 产生的内部 aborted 终态压住，再由 query 的 prompt chain 发送新消息。
-          active.interrupting = true
-          active.interruptAbortPromise ??= session.abort()
-            .finally(() => {
-              active.interruptAbortPromise = undefined
-            })
-          await active.interruptAbortPromise
-        }
-        await accepted
-        options.onAccepted?.()
-        return
+      })
+      accepted.catch(() => {})
+      if (session.isStreaming) {
+        // Pi 没有单独的 interrupt()；公开取消 API 是 abort()。
+        // 这里把 abort 产生的内部 aborted 终态压住，再由 query 的 prompt chain 发送新消息。
+        active.interrupting = true
+        active.interruptAbortPromise ??= session.abort()
+          .finally(() => {
+            active.interruptAbortPromise = undefined
+          })
+        await active.interruptAbortPromise
       }
+      await accepted
+      options.onAccepted?.()
+      return
+    }
+    try {
       if (message.priority === 'now') {
         await session.steer(content)
       } else {
         await session.followUp(content)
       }
-      options?.onAccepted?.()
     } catch (error) {
-      discardQueuedBoundary()
       active.pendingSkillActivations.discard(skillActivationId)
       throw error
     }
+    options?.onAccepted?.()
   }
 
   async cancelQueuedMessage(_sessionId: string, _messageUuid: string): Promise<void> {

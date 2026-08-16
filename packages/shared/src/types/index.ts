@@ -11,7 +11,6 @@ export interface Workspace {
 
 // 运行时相关类型
 export * from './runtime'
-export * from './agent-runtime'
 
 // 渠道（AI 供应商）相关类型
 export * from './channel'
@@ -29,6 +28,7 @@ export * from './reasoning-profile'
 
 // Agent Provider 适配器接口
 export * from './agent-provider'
+export * from './agent-runtime'
 
 // 环境检测相关类型
 export * from './environment'

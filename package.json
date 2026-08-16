@@ -31,17 +31,16 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "jotai": "^2.17.1",
-    "jotai-family": "^1.1.0"
+    "jotai": "^2.17.1"
   },
   "overrides": {
-    "@earendil-works/pi-agent-core": "0.84.2",
-    "@earendil-works/pi-ai": "0.84.2",
-    "@earendil-works/pi-coding-agent": "0.84.2",
-    "@earendil-works/pi-tui": "0.84.2"
+    "@earendil-works/pi-agent-core": "0.82.1",
+    "@earendil-works/pi-ai": "0.82.1",
+    "@earendil-works/pi-coding-agent": "0.82.1",
+    "@earendil-works/pi-tui": "0.82.1"
   },
   "patchedDependencies": {
-    "@earendil-works/pi-ai@0.84.2": "patches/@earendil-works%2Fpi-ai@0.84.2.patch",
-    "@earendil-works/pi-coding-agent@0.84.2": "patches/@earendil-works%2Fpi-coding-agent@0.84.2.patch"
+    "@earendil-works/pi-ai@0.82.1": "patches/@earendil-works%2Fpi-ai@0.82.1.patch",
+    "@earendil-works/pi-coding-agent@0.82.1": "patches/@earendil-works%2Fpi-coding-agent@0.82.1.patch"
   }
 }

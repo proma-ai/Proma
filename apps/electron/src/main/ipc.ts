@@ -268,9 +268,7 @@ import {
   listAgentSessions,
   createAgentSession,
   getAgentSessionMeta,
-  getAgentSessionCounts,
   getAgentSessionSDKMessages,
-  getAgentSessionSDKMessagesPage,
   updateAgentSessionMeta,
   deleteAgentSession,
   migrateChatToAgentSession,
@@ -281,7 +279,7 @@ import {
   searchAgentSessionMessages,
   searchAgentSessionReferences,
 } from './lib/agent-session-manager'
-import { agentEventBus, runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive, queueAgentMessage, updateAgentPermissionMode, rewindAgentSession, setVisibleAgentSession } from './lib/agent-service'
+import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive, queueAgentMessage, updateAgentPermissionMode, rewindAgentSession, setVisibleAgentSession } from './lib/agent-service'
 import { permissionService } from './lib/agent-permission-service'
 import { askUserService } from './lib/agent-ask-user-service'
 import { exitPlanService } from './lib/agent-exit-plan-service'
@@ -2052,20 +2050,10 @@ export function registerIpcHandlers(): void {
 
   // ===== Agent 会话管理相关 =====
 
-  // renderer 热路径显式取 active；保留 all 默认值以兼容低频既有调用。
+  // 获取 Agent 会话列表
   ipcMain.handle(
     AGENT_IPC_CHANNELS.LIST_SESSIONS,
-    async (_, scope: 'active' | 'archived' | 'all' = 'all'): Promise<AgentSessionMeta[]> => listAgentSessions(scope)
-  )
-
-  ipcMain.handle(
-    AGENT_IPC_CHANNELS.GET_SESSION_META,
-    async (_, id: string): Promise<AgentSessionMeta | undefined> => getAgentSessionMeta(id),
-  )
-
-  ipcMain.handle(
-    AGENT_IPC_CHANNELS.GET_SESSION_COUNTS,
-    async (): Promise<{ active: number; archived: number }> => getAgentSessionCounts(),
+    async (): Promise<AgentSessionMeta[]> => listAgentSessions()
   )
 
   // 创建 Agent 会话
@@ -2122,14 +2110,6 @@ export function registerIpcHandlers(): void {
     },
   )
   ipcMain.handle(
-    AGENT_IPC_CHANNELS.HIDE_BROWSER_PRESENTATION,
-    async (event, revision: number): Promise<void> => {
-      await assertMainRenderer(event.sender.id)
-      if (!Number.isSafeInteger(revision)) throw new Error('无效的浏览器展示 revision。')
-      browserController.hidePresentation(revision)
-    },
-  )
-  ipcMain.handle(
     AGENT_IPC_CHANNELS.NAVIGATE_BROWSER,
     async (event, input: BrowserNavigateInput): Promise<BrowserViewState> => {
       await assertBrowserSessionAccess(event.sender.id, input.sessionId)
@@ -2177,14 +2157,6 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.GET_SDK_MESSAGES,
     async (_, id: string): Promise<SDKMessage[]> => {
       return getAgentSessionSDKMessages(id)
-    }
-  )
-
-  // 渲染器消息区默认从尾部按页读取，避免长 transcript 全量读取、解析和 IPC。
-  ipcMain.handle(
-    AGENT_IPC_CHANNELS.GET_SDK_MESSAGES_PAGE,
-    async (_, id: string, input?: { before?: number; limit?: number }) => {
-      return getAgentSessionSDKMessagesPage(id, input)
     }
   )
 
@@ -2910,15 +2882,15 @@ export function registerIpcHandlers(): void {
   // 响应权限请求
   ipcMain.handle(
     AGENT_IPC_CHANNELS.PERMISSION_RESPOND,
-    async (_, response: PermissionResponse): Promise<void> => {
+    async (event, response: PermissionResponse): Promise<void> => {
       const { requestId, behavior, alwaysAllow } = response
       const sessionId = permissionService.respondToPermission(requestId, behavior, alwaysAllow)
 
-      // 统一经过 canonical EventBus，renderer、协作、Bridge 与 Agent Island 同步收敛。
+      // 发送 permission_resolved 事件给渲染进程
       if (sessionId) {
-        agentEventBus.emit(sessionId, {
-          kind: 'proma_event',
-          event: { type: 'permission_resolved', requestId, behavior },
+        event.sender.send(AGENT_IPC_CHANNELS.STREAM_EVENT, {
+          sessionId,
+          payload: { kind: 'proma_event', event: { type: 'permission_resolved', requestId, behavior } },
         })
       }
     }
@@ -3135,14 +3107,14 @@ export function registerIpcHandlers(): void {
   // 响应 AskUser 请求
   ipcMain.handle(
     AGENT_IPC_CHANNELS.ASK_USER_RESPOND,
-    async (_, response: AskUserResponse): Promise<void> => {
+    async (event, response: AskUserResponse): Promise<void> => {
       const { requestId, answers } = response
       const sessionId = askUserService.respondToAskUser(requestId, answers)
 
       if (sessionId) {
-        agentEventBus.emit(sessionId, {
-          kind: 'proma_event',
-          event: { type: 'ask_user_resolved', requestId },
+        event.sender.send(AGENT_IPC_CHANNELS.STREAM_EVENT, {
+          sessionId,
+          payload: { kind: 'proma_event', event: { type: 'ask_user_resolved', requestId } },
         })
       }
     }
@@ -3153,16 +3125,16 @@ export function registerIpcHandlers(): void {
   // 响应 ExitPlanMode 请求
   ipcMain.handle(
     AGENT_IPC_CHANNELS.EXIT_PLAN_MODE_RESPOND,
-    async (_, response: ExitPlanModeResponse): Promise<void> => {
+    async (event, response: ExitPlanModeResponse): Promise<void> => {
       const result = exitPlanService.respondToExitPlanMode(response)
 
       if (result) {
         const { sessionId, targetMode } = result
 
-        // 请求处理结果也走 canonical EventBus，避免外围消费者保留陈旧 blocked 状态。
-        agentEventBus.emit(sessionId, {
-          kind: 'proma_event',
-          event: { type: 'exit_plan_mode_resolved', requestId: response.requestId },
+        // 通知渲染进程请求已处理
+        event.sender.send(AGENT_IPC_CHANNELS.STREAM_EVENT, {
+          sessionId,
+          payload: { kind: 'proma_event', event: { type: 'exit_plan_mode_resolved', requestId: response.requestId } },
         })
 
         // 如果用户选择了新的权限模式，通知渲染进程更新 UI
@@ -3176,9 +3148,9 @@ export function registerIpcHandlers(): void {
               console.warn(`[IPC] ExitPlanMode 持久化 session 权限模式失败: sessionId=${sessionId}`, err)
             }
           }
-          agentEventBus.emit(sessionId, {
-            kind: 'proma_event',
-            event: { type: 'permission_mode_changed', mode: targetMode },
+          event.sender.send(AGENT_IPC_CHANNELS.STREAM_EVENT, {
+            sessionId,
+            payload: { kind: 'proma_event', event: { type: 'permission_mode_changed', mode: targetMode } },
           })
           console.log(`[IPC] ExitPlanMode 权限模式切换: ${targetMode}`)
         }

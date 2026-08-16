@@ -21,13 +21,12 @@ import * as React from 'react'
 import Markdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
-import { REHYPE_KATEX_PLUGINS } from '@/lib/rehype-katex-options'
+import rehypeKatex from 'rehype-katex'
 import { CalendarDays, ChevronDown, ChevronUp, Paperclip, FileText, ListTodo, Sparkles, Server, Download, MessageSquareText, Quote } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { shouldInspectMermaidCodeBlock, shouldRenderMermaidCodeBlock } from '@/lib/mermaid-detection'
 import { normalizeLatexDelimiters } from '@/lib/normalize-latex'
 import { normalizeMalformedStrongDelimiters } from '@/lib/markdown-emphasis'
-import { splitMarkdownIntoBlocks } from '@/lib/markdown-blocks'
 import { copyTextToClipboard } from '@/lib/clipboard'
 import { Button } from '@/components/ui/button'
 import { ImageLightbox, type LightboxImage } from '@/components/ui/image-lightbox'
@@ -192,7 +191,7 @@ export function MessageAction({
 
   if (tooltip) {
     return (
-      <TooltipProvider disableHoverableContent>
+      <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>{button}</TooltipTrigger>
           <TooltipContent>
@@ -515,15 +514,7 @@ interface MessageResponseProps {
 
 /** 稳定引用的插件数组，避免 react-markdown 每帧重建插件管线 */
 const REMARK_PLUGINS = [remarkGfm, remarkMath]
-const REHYPE_PLUGINS = REHYPE_KATEX_PLUGINS
-
-/**
- * 当前 Markdown 是否处于流式增长中。
- *
- * 流式期间每帧全文重解析，昂贵的按内容推断（highlight.js autodetect 等）
- * 应跳过，等流结束切回静态渲染后再执行一次。由 SmoothMarkdownFrame 提供 true。
- */
-export const MarkdownStreamingContext = React.createContext(false)
+const REHYPE_PLUGINS = [rehypeKatex]
 
 /** 允许 mention:// 和本地绝对路径通过 URL 清洗 */
 function mentionUrlTransform(url: string): string {
@@ -590,9 +581,6 @@ function extractText(node: React.ReactNode): string {
 const MarkdownPre = React.memo(function MarkdownPre({
   children: preChildren,
 }: { children?: React.ReactNode }): React.ReactElement {
-  // 流式增长中跳过昂贵的语言自动检测（highlightAuto 跑 20 种语言）；
-  // 流结束切回静态 MessageResponse 时会重新挂载并检测一次。
-  const isStreamingMarkdown = React.useContext(MarkdownStreamingContext)
   // react-markdown v10 把 <code> 替换成自定义组件后，type 不再是字符串 'code'，
   // 但 pre 的 code child 要么是原生 'code'（v9 及之前），要么是自定义函数/对象组件（v10+）。
   // 通过 type 形态过滤掉意外混入的其他原生 HTML 元素（如 span/div），降低未来 react-markdown
@@ -620,7 +608,7 @@ const MarkdownPre = React.memo(function MarkdownPre({
     }
 
     // 未标注语言且非 Mermaid 时：highlight.js 自动检测，命中后注入 language-xxx 喂给 CodeBlock 高亮
-    if (!hasExplicitLang && !isStreamingMarkdown) {
+    if (!hasExplicitLang) {
       const rawCode = extractText(codeProps.children).replace(/\n$/, '')
       const detected = detectLanguage(rawCode)
       if (detected !== 'text') {
@@ -695,34 +683,6 @@ const MarkdownInlineCode = React.memo(function MarkdownInlineCode({
   )
 })
 
-/**
- * 单个顶层 Markdown block 的记忆化渲染。
- *
- * 流式输出时只有最后一个仍在增长的 block 的 content 会变化，
- * 其余 block 全部命中 memo，避免每帧对全文重跑 remark/rehype/KaTeX 管线。
- * components / 插件数组由父组件 useMemo 保持引用稳定。
- */
-const MemoizedMarkdownBlock = React.memo(function MemoizedMarkdownBlock({
-  content,
-  remarkPlugins,
-  components,
-}: {
-  content: string
-  remarkPlugins: ComponentProps<typeof Markdown>['remarkPlugins']
-  components: ComponentProps<typeof Markdown>['components']
-}): React.ReactElement {
-  return (
-    <Markdown
-      remarkPlugins={remarkPlugins}
-      rehypePlugins={REHYPE_PLUGINS}
-      urlTransform={mentionUrlTransform}
-      components={components}
-    >
-      {content}
-    </Markdown>
-  )
-})
-
 /** 使用 react-markdown 渲染 assistant 消息内容，代码块使用 Shiki 语法高亮 */
 export const MessageResponse = React.memo(
   function MessageResponse({ children, className, basePath, basePaths, remarkPlugins }: MessageResponseProps): React.ReactElement {
@@ -746,14 +706,6 @@ export const MessageResponse = React.memo(
       : children
     ).replace(/<!--PROMA_AUTOMATION:[\s\S]*?-->/g, '').trim()
 
-    // 全文归一化后按顶层边界分块：正则归一化是 O(n) 轻量扫描，
-    // 真正昂贵的 remark 解析由 MemoizedMarkdownBlock 按块记忆化。
-    const normalizedMarkdown = normalizeLatexDelimiters(normalizeMalformedStrongDelimiters(renderedMarkdown))
-    const blocks = React.useMemo(
-      () => splitMarkdownIntoBlocks(normalizedMarkdown),
-      [normalizedMarkdown],
-    )
-
     return (
       <div
         className={cn(
@@ -764,15 +716,14 @@ export const MessageResponse = React.memo(
           className
         )}
       >
-        {blocks.map((block, index) => (
-          <MemoizedMarkdownBlock
-            // 流式只在尾部追加 block，索引 key 保证已完成 block 的 content 跨帧稳定
-            key={index}
-            content={block}
-            remarkPlugins={mergedRemarkPlugins}
-            components={components}
-          />
-        ))}
+        <Markdown
+          remarkPlugins={mergedRemarkPlugins}
+          rehypePlugins={REHYPE_PLUGINS}
+          urlTransform={mentionUrlTransform}
+          components={components}
+        >
+          {normalizeLatexDelimiters(normalizeMalformedStrongDelimiters(renderedMarkdown))}
+        </Markdown>
       </div>
     )
   },
