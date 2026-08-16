@@ -656,6 +656,18 @@ const AgentTranscriptHistory = React.forwardRef<AgentTranscriptHistoryHandle, Ag
     scrollHeight: number
     isAtBottom: boolean
   } | null>(null)
+  const pendingNavigationFrameRef = React.useRef<number | null>(null)
+  const navigationGenerationRef = React.useRef(0)
+
+  React.useEffect(() => {
+    return () => {
+      navigationGenerationRef.current += 1
+      if (pendingNavigationFrameRef.current !== null) {
+        window.cancelAnimationFrame(pendingNavigationFrameRef.current)
+        pendingNavigationFrameRef.current = null
+      }
+    }
+  }, [groups])
 
   React.useLayoutEffect(() => {
     const element = scrollRef.current
@@ -697,8 +709,14 @@ const AgentTranscriptHistory = React.forwardRef<AgentTranscriptHistoryHandle, Ag
       if (!onMounted) return
 
       // 目标行可能在远距离跳转后才挂载；持续等待挂载而不是依赖固定帧数。
+      const generation = ++navigationGenerationRef.current
+      if (pendingNavigationFrameRef.current !== null) {
+        window.cancelAnimationFrame(pendingNavigationFrameRef.current)
+      }
       let frame = 0
       const waitForMounted = (): void => {
+        pendingNavigationFrameRef.current = null
+        if (navigationGenerationRef.current !== generation) return
         frame += 1
         const target = Array.from(scrollRef.current?.querySelectorAll<HTMLElement>('[data-message-id]') ?? [])
           .find((element) => element.dataset.messageId === messageId)
@@ -706,9 +724,11 @@ const AgentTranscriptHistory = React.forwardRef<AgentTranscriptHistoryHandle, Ag
           onMounted(target)
           return
         }
-        if (frame < 120) window.requestAnimationFrame(waitForMounted)
+        if (frame < 120) {
+          pendingNavigationFrameRef.current = window.requestAnimationFrame(waitForMounted)
+        }
       }
-      window.requestAnimationFrame(waitForMounted)
+      pendingNavigationFrameRef.current = window.requestAnimationFrame(waitForMounted)
     },
     getStickyUserMessageId: (scrollTop) => {
       const measurements = virtualizer.measurementsCache
@@ -716,6 +736,8 @@ const AgentTranscriptHistory = React.forwardRef<AgentTranscriptHistoryHandle, Ag
         const measurement = measurements[index]
         const group = measurement ? groups[measurement.index] : undefined
         if (group?.type === 'user' && measurement && measurement.end < scrollTop) {
+          // 未测量行只含 estimateSize，不能据此决定 Sticky 的真实用户消息。
+          if (!virtualizer.itemSizeCache.has(measurement.key)) return null
           return getGroupId(group)
         }
       }

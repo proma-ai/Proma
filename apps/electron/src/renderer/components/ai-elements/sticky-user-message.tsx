@@ -165,6 +165,10 @@ export function StickyUserMessage({
       }
       if (entries.some((entry) => entry.target !== el)) scheduleMeasure()
     })
+    const virtualContent = el.querySelector<HTMLElement>('[data-index]')?.parentElement
+      ?? el.firstElementChild
+    if (virtualContent && virtualContent !== el) resizeObserver.observe(virtualContent)
+
     const mutationObserver = getStickyMessageId ? null : new MutationObserver(scheduleMeasure)
     // 只有最后一条用户消息及其之前的内容会改变用户消息的绝对位置。
     // 当前流式 assistant 位于它之后，不纳入观察，避免每个流式高度更新重测整段历史。
