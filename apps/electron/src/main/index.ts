@@ -493,6 +493,9 @@ function createWindow(): void {
     showRendererFailure(errorDescription)
   })
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    // clean-exit 和应用退出不属于 Renderer 故障；避免退出过程中重新加载主窗口。
+    if (getIsQuitting() || details.reason === 'clean-exit') return
+
     const now = Date.now()
     rendererRecoveryAttempts = rendererRecoveryAttempts.filter(
       (attemptAt) => now - attemptAt < RENDERER_RECOVERY_WINDOW_MS,
