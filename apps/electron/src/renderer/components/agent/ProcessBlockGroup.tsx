@@ -25,6 +25,7 @@ const PROCESS_GROUP_VIEWPORT_HEIGHT = 320
 const PROCESS_GROUP_COLLAPSE_DURATION_MS = 500
 const PROCESS_GROUP_AUTO_COLLAPSE_SOUND_DELAY_MS = 900
 const PROCESS_GROUP_AUTO_COLLAPSE_COUNTDOWN_SECONDS = 3
+const PROGRESS_SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '])
 
 interface IndexedContentBlock {
   block: SDKContentBlock
@@ -331,6 +332,10 @@ export function ProcessBlockGroup({ blocks, isStreaming, renderChildren, isMessa
     }
   }, [])
 
+  const handleProgressKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (PROGRESS_SCROLL_KEYS.has(event.key)) handleProgressScrollIntent()
+  }, [handleProgressScrollIntent])
+
   // 折叠前测量实际高度，用于丝滑的 height 过渡（子元素不 reflow，只裁剪边界）
   React.useEffect(() => {
     if (isContentExpanded) {
@@ -434,12 +439,15 @@ export function ProcessBlockGroup({ blocks, isStreaming, renderChildren, isMessa
           ref={contentRef}
           data-agent-history-selection-excluded={isContentExpanded ? undefined : 'true'}
           className={cn(
-            'overflow-hidden',
+            'overflow-hidden focus:outline-none',
             keepProgressViewport && 'overflow-y-auto overscroll-contain scrollbar-none',
           )}
+          tabIndex={keepProgressViewport ? 0 : undefined}
           onScroll={keepProgressViewport ? handleProgressScroll : undefined}
+          onPointerDown={keepProgressViewport ? handleProgressScrollIntent : undefined}
           onWheel={keepProgressViewport ? handleProgressScrollIntent : undefined}
           onTouchStart={keepProgressViewport ? handleProgressScrollIntent : undefined}
+          onKeyDown={keepProgressViewport ? handleProgressKeyDown : undefined}
           style={{
             maxHeight: keepProgressViewport ? `${PROCESS_GROUP_VIEWPORT_HEIGHT}px` : undefined,
             height: measuredHeight !== undefined ? `${measuredHeight}px` : 'auto',
