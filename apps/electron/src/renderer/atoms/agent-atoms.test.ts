@@ -1,5 +1,13 @@
 import { describe, expect, test } from 'bun:test'
-import { applyAgentEvent, clearAgentStreamError, isRetryEventForCurrentStream, type AgentStreamState } from './agent-atoms'
+import { createStore } from 'jotai/vanilla'
+import {
+  agentSessionInputStreamStateAtomFamily,
+  agentStreamingStatesAtom,
+  applyAgentEvent,
+  clearAgentStreamError,
+  isRetryEventForCurrentStream,
+  type AgentStreamState,
+} from './agent-atoms'
 
 function createStreamState(overrides: Partial<AgentStreamState> = {}): AgentStreamState {
   return {
@@ -285,5 +293,53 @@ describe('Agent 流式错误状态', () => {
     const errors = new Map([['failed-session', '认证失败']])
 
     expect(clearAgentStreamError(errors, 'retried-session')).toBe(errors)
+  })
+})
+
+describe('Agent 输入流状态订阅隔离', () => {
+  test('given usage changes in the active session when the input selector is subscribed then it does not notify', () => {
+    const store = createStore()
+    const inputStateAtom = agentSessionInputStreamStateAtomFamily('active-session')
+    const runningState = createStreamState({ inputTokens: 10_000 })
+    store.set(agentStreamingStatesAtom, new Map([['active-session', runningState]]))
+    store.get(inputStateAtom)
+
+    let notifications = 0
+    const unsubscribe = store.sub(inputStateAtom, () => {
+      notifications += 1
+    })
+
+    store.set(agentStreamingStatesAtom, new Map([[
+      'active-session',
+      { ...runningState, inputTokens: 12_000, outputTokens: 900 },
+    ]]))
+
+    expect(notifications).toBe(0)
+    unsubscribe()
+  })
+
+  test('given another session changes when the input selector is subscribed then it does not notify', () => {
+    const store = createStore()
+    const inputStateAtom = agentSessionInputStreamStateAtomFamily('active-session')
+    const activeState = createStreamState()
+    const otherState = createStreamState({ inputTokens: 20_000 })
+    store.set(agentStreamingStatesAtom, new Map([
+      ['active-session', activeState],
+      ['other-session', otherState],
+    ]))
+    store.get(inputStateAtom)
+
+    let notifications = 0
+    const unsubscribe = store.sub(inputStateAtom, () => {
+      notifications += 1
+    })
+
+    store.set(agentStreamingStatesAtom, new Map([
+      ['active-session', activeState],
+      ['other-session', { ...otherState, inputTokens: 21_000 }],
+    ]))
+
+    expect(notifications).toBe(0)
+    unsubscribe()
   })
 })

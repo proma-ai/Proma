@@ -346,7 +346,7 @@ export type AgentInputStreamState = Pick<AgentStreamState, 'running' | 'backgrou
 
 const EMPTY_AGENT_INPUT_STREAM_STATE: AgentInputStreamState = { running: false }
 
-function areAgentInputStreamStatesEqual(
+export function areAgentInputStreamStatesEqual(
   previous: AgentInputStreamState,
   next: AgentInputStreamState,
 ): boolean {
