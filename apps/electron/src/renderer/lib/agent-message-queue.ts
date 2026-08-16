@@ -1,3 +1,4 @@
+import type { AgentStreamState } from '@/atoms/agent-atoms'
 import type { QuotedSelection } from '@/atoms/preview-atoms'
 import {
   buildAgentHistoryQuoteLabel,
@@ -69,19 +70,10 @@ export function createAgentQueuedMessage(
   return message
 }
 
-export interface AgentQueuedRunStateSeed {
-  running: true
-  backgroundWaiting: false
-  model?: string
-  startedAt: number
-  inputTokens?: number
-  contextWindow?: number
-}
-
 export function createQueuedAgentStreamState(
-  previous: Pick<AgentQueuedRunStateSeed, 'model' | 'inputTokens' | 'contextWindow'> | undefined,
+  previous: Pick<AgentStreamState, 'model' | 'inputTokens' | 'contextWindow'> | undefined,
   startedAt: number,
-): AgentQueuedRunStateSeed {
+): AgentStreamState {
   return {
     running: true,
     backgroundWaiting: false,
