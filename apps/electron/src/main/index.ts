@@ -492,6 +492,10 @@ function createWindow(): void {
     console.error(`[启动] 主 Renderer 加载失败 (${errorCode}): ${errorDescription} (${validatedURL})`)
     showRendererFailure(errorDescription)
   })
+  mainWindow.webContents.on('did-finish-load', () => {
+    // 主 Renderer 成功恢复后重新开始计数；只有连续失败才应进入错误页。
+    if (!hasShownRendererFailure) rendererRecoveryAttempts = []
+  })
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     // clean-exit 和应用退出不属于 Renderer 故障；避免退出过程中重新加载主窗口。
     if (getIsQuitting() || details.reason === 'clean-exit') return
