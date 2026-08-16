@@ -1,3 +1,4 @@
+import type { AgentQueuedAttachment as SharedAgentQueuedAttachment, AgentQueuedMessage as SharedAgentQueuedMessage } from '@proma/shared'
 import type { QuotedSelection } from '@/atoms/preview-atoms'
 import {
   buildAgentHistoryQuoteLabel,
@@ -7,22 +8,9 @@ import {
 
 export type QueueDropPlacement = 'before' | 'after'
 
-export interface AgentQueuedAttachment {
-  filename: string
-  mediaType: string
-  size: number
-  targetPath: string
-}
+export type AgentQueuedAttachment = SharedAgentQueuedAttachment
 
-export interface AgentQueuedMessage {
-  id: string
-  text: string
-  createdAt: number
-  quotedSelection?: QuotedSelection
-  fileReferenceBlock?: string
-  attachments?: AgentQueuedAttachment[]
-  additionalDirectories?: string[]
-}
+export type AgentQueuedMessage = SharedAgentQueuedMessage
 
 /**
  * 队列的自动消费必须由常驻调度器执行，不能依赖某个 AgentView 是否仍挂载。

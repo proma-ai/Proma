@@ -110,6 +110,11 @@ import type {
   WeChatConfig,
   WeChatBridgeState,
   AgentQueueMessageInput,
+  AgentDeferredQueueMessageInput,
+  AgentQueuedMessageControlInput,
+  AgentMoveQueuedMessageInput,
+  AgentQueuedMessageStatus,
+  AgentQueuedMessage,
   PendingRequestsSnapshot,
   NativeAgentIslandSnapshot,
   Automation,
@@ -576,6 +581,18 @@ export interface ElectronAPI {
 
   /** 流式追加发送 Agent 消息（Agent 运行中） */
   queueAgentMessage: (input: AgentQueueMessageInput) => Promise<string>
+  /** 将等待当前 run 结束的消息交给主进程队列。 */
+  enqueueAgentQueuedMessage: (input: AgentDeferredQueueMessageInput) => Promise<void>
+  /** 取消主进程中的等待队列消息；返回是否仍处于 pending。 */
+  cancelAgentQueuedMessage: (input: AgentQueuedMessageControlInput) => Promise<boolean>
+  /** 调整主进程队列顺序。 */
+  moveAgentQueuedMessage: (input: AgentMoveQueuedMessageInput) => Promise<boolean>
+  /** 将队列消息提升为立即发送/注入。 */
+  promoteAgentQueuedMessage: (input: AgentQueuedMessageControlInput & { interrupt?: boolean }) => Promise<boolean>
+  /** 查询主进程当前内存队列，用于 renderer 重载后恢复 UI。 */
+  listAgentQueuedMessages: (sessionId?: string) => Promise<AgentQueuedMessage[]>
+  /** 订阅主进程队列状态变更。 */
+  onAgentQueuedMessageStatus: (callback: (status: AgentQueuedMessageStatus) => void) => () => void
 
   // ===== Agent 后台任务管理 =====
 
@@ -1790,6 +1807,26 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.QUEUE_MESSAGE, input)
   },
 
+  enqueueAgentQueuedMessage: (input: AgentDeferredQueueMessageInput) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.ENQUEUE_QUEUED_MESSAGE, input)
+  },
+
+  cancelAgentQueuedMessage: (input: AgentQueuedMessageControlInput) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.CANCEL_QUEUED_MESSAGE, input)
+  },
+
+  moveAgentQueuedMessage: (input: AgentMoveQueuedMessageInput) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.MOVE_QUEUED_MESSAGE, input)
+  },
+
+  promoteAgentQueuedMessage: (input: AgentQueuedMessageControlInput & { interrupt?: boolean }) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.PROMOTE_QUEUED_MESSAGE, input)
+  },
+
+  listAgentQueuedMessages: (sessionId?: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.LIST_QUEUED_MESSAGES, sessionId)
+  },
+
   // Agent 后台任务管理
   getTaskOutput: (input: GetTaskOutputInput) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_TASK_OUTPUT, input)
@@ -2022,6 +2059,12 @@ const electronAPI: ElectronAPI = {
     const listener = (_: unknown, data: AgentStreamCompletePayload): void => callback(data)
     ipcRenderer.on(AGENT_IPC_CHANNELS.STREAM_COMPLETE, listener)
     return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.STREAM_COMPLETE, listener) }
+  },
+
+  onAgentQueuedMessageStatus: (callback: (status: AgentQueuedMessageStatus) => void) => {
+    const listener = (_: unknown, status: AgentQueuedMessageStatus): void => callback(status)
+    ipcRenderer.on(AGENT_IPC_CHANNELS.QUEUED_MESSAGE_STATUS, listener)
+    return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.QUEUED_MESSAGE_STATUS, listener) }
   },
 
   onAgentStreamError: (callback: (data: { sessionId: string; error: string }) => void) => {

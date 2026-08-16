@@ -279,7 +279,7 @@ import {
   searchAgentSessionMessages,
   searchAgentSessionReferences,
 } from './lib/agent-session-manager'
-import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive, queueAgentMessage, updateAgentPermissionMode, rewindAgentSession, setVisibleAgentSession } from './lib/agent-service'
+import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive, queueAgentMessage, enqueueAgentQueuedMessage, cancelAgentQueuedMessage, moveAgentQueuedMessage, promoteAgentQueuedMessage, listAgentQueuedMessages, clearAgentQueuedMessages, updateAgentPermissionMode, rewindAgentSession, setVisibleAgentSession } from './lib/agent-service'
 import { permissionService } from './lib/agent-permission-service'
 import { askUserService } from './lib/agent-ask-user-service'
 import { exitPlanService } from './lib/agent-exit-plan-service'
@@ -2234,6 +2234,7 @@ export function registerIpcHandlers(): void {
       askUserService.clearSessionPending(id)
       // 清理 ExitPlanMode 服务中的待处理请求
       exitPlanService.clearSessionPending(id)
+      clearAgentQueuedMessages(id)
       await browserController.close(id)
       deleteAgentSession(id)
       releaseAttachedFileWatchers(attachedFiles)
@@ -2855,6 +2856,42 @@ export function registerIpcHandlers(): void {
     async (event, input: import('@proma/shared').AgentQueueMessageInput): Promise<string> => {
       return queueAgentMessage(input, event.sender)
     }
+  )
+
+  // 将等待当前 run 结束的消息交给主进程调度器
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.ENQUEUE_QUEUED_MESSAGE,
+    async (event, input: import('@proma/shared').AgentDeferredQueueMessageInput): Promise<void> => {
+      enqueueAgentQueuedMessage(input, event.sender)
+    },
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.CANCEL_QUEUED_MESSAGE,
+    async (_, input: import('@proma/shared').AgentQueuedMessageControlInput): Promise<boolean> => {
+      return cancelAgentQueuedMessage(input)
+    },
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.MOVE_QUEUED_MESSAGE,
+    async (_, input: import('@proma/shared').AgentMoveQueuedMessageInput): Promise<boolean> => {
+      return moveAgentQueuedMessage(input)
+    },
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.PROMOTE_QUEUED_MESSAGE,
+    async (_, input: import('@proma/shared').AgentQueuedMessageControlInput & { interrupt?: boolean }): Promise<boolean> => {
+      return promoteAgentQueuedMessage(input)
+    },
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.LIST_QUEUED_MESSAGES,
+    async (_, sessionId?: string): Promise<import('@proma/shared').AgentQueuedMessage[]> => {
+      return listAgentQueuedMessages(sessionId)
+    },
   )
 
   // ===== Agent 后台任务管理 =====

@@ -25,6 +25,9 @@ import type {
   AgentStreamEvent,
   AgentStreamPayload,
   AgentQueueMessageInput,
+  AgentDeferredQueueMessageInput,
+  AgentQueuedMessageControlInput,
+  AgentMoveQueuedMessageInput,
   PromaPermissionMode,
   AgentExternalRunSource,
   AgentMessage,
@@ -40,6 +43,7 @@ import { setAgentStopper, setHeadlessAgentRunner } from './agent-headless-runner
 import { getHeadlessAgentRunTarget } from './agent-headless-run-target'
 import { sendAgentStreamComplete } from './agent-completion-payload'
 import { AgentStreamForwarder } from './agent-stream-forwarder'
+import { AgentQueueCoordinator } from './agent-queue-coordinator'
 
 // ===== 实例创建 =====
 
@@ -96,6 +100,7 @@ function registerWebContents(sessionId: string, wc: WebContents): void {
       if (mappedWc === wc) {
         sessionWebContents.delete(sid)
         streamForwarder.clear(sid)
+        agentQueueCoordinator.clear(sid)
       }
     }
     visibleAgentSessionByWebContents.delete(wc)
@@ -172,6 +177,17 @@ export function setVisibleAgentSession(webContents: WebContents, sessionId: stri
   if (sessionId) streamForwarder.promote(sessionId)
 }
 
+const agentQueueCoordinator = new AgentQueueCoordinator({
+  isActive: (sessionId) => orchestrator.isActive(sessionId),
+  startRun: (input, webContents) => runAgent(input, webContents),
+  injectMessage: (input, webContents) => queueAgentMessage(input, webContents),
+  sendStatus: (webContents, status) => {
+    if (!webContents.isDestroyed()) {
+      webContents.send(AGENT_IPC_CHANNELS.QUEUED_MESSAGE_STATUS, status)
+    }
+  },
+})
+
 // ===== IPC 薄包装函数 =====
 
 /** 仅主进程内部使用的单次运行扩展，绝不经 IPC 序列化。 */
@@ -232,6 +248,7 @@ export async function runAgent(
             // 只读取刚完成的轻量 meta，renderer 可据此增量更新列表，避免再取 5,000+ 条全量会话。
             session: getSessionMetaForRenderer(input.sessionId),
           })
+          agentQueueCoordinator.onRunComplete(input.sessionId, opts?.backgroundTasksPending === true)
         }
       },
       onRunStarted: ({ startedAt }) => {
@@ -265,6 +282,7 @@ export async function runAgent(
         messages: [],
         stoppedByUser: false,
       })
+      agentQueueCoordinator.onRunComplete(input.sessionId, false)
     }
   } finally {
     // 仅在 orchestrator 已完成此会话时清理映射
@@ -332,6 +350,7 @@ export async function runAgentHeadless(
             // 只读取刚完成的轻量 meta，renderer 可据此增量更新列表，避免再取 5,000+ 条全量会话。
             session: getSessionMetaForRenderer(runInput.sessionId),
           })
+          agentQueueCoordinator.onRunComplete(runInput.sessionId, opts?.backgroundTasksPending === true)
         }
       },
       onTitleUpdated: (title) => {
@@ -377,6 +396,7 @@ export async function runAgentHeadless(
         stoppedByUser: false,
         startedAt,
       })
+      agentQueueCoordinator.onRunComplete(runInput.sessionId, false)
     }
   } finally {
     if (!orchestrator.isActive(runInput.sessionId)) {
@@ -464,6 +484,36 @@ export async function queueAgentMessage(
     input.mentionedTodoIds,
     input.mentionedCalendarEventIds,
   )
+}
+
+/** 将等待当前 run 结束的消息交给主进程内存队列。 */
+export function enqueueAgentQueuedMessage(
+  input: AgentDeferredQueueMessageInput,
+  webContents: WebContents,
+): void {
+  agentQueueCoordinator.enqueue(input, webContents)
+}
+
+export function cancelAgentQueuedMessage(input: AgentQueuedMessageControlInput): boolean {
+  return agentQueueCoordinator.cancel(input)
+}
+
+export function moveAgentQueuedMessage(input: AgentMoveQueuedMessageInput): boolean {
+  return agentQueueCoordinator.move(input)
+}
+
+export async function promoteAgentQueuedMessage(
+  input: AgentQueuedMessageControlInput & { interrupt?: boolean },
+): Promise<boolean> {
+  return agentQueueCoordinator.promote(input)
+}
+
+export function listAgentQueuedMessages(sessionId?: string) {
+  return agentQueueCoordinator.list(sessionId)
+}
+
+export function clearAgentQueuedMessages(sessionId: string): void {
+  agentQueueCoordinator.clear(sessionId)
 }
 
 // ===== 文件操作 =====
