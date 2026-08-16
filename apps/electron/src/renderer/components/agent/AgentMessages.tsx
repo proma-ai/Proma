@@ -589,11 +589,37 @@ interface AgentTranscriptHistoryProps {
   onCompact?: () => void
 }
 
-/**
- * Agent 历史消息使用普通 DOM 列表，避免滚动期间反复挂载和测量重型消息组件。
- * 历史 group 仍通过 message-group-rendering 缓存和 MessageGroupRenderer.memo 隔离更新。
- */
-const AgentTranscriptHistory = React.forwardRef<AgentTranscriptHistoryHandle, AgentTranscriptHistoryProps>(function AgentTranscriptHistory({
+const EMPTY_LIVE_GROUP_SET: ReadonlySet<MessageGroup> = new Set()
+const EMPTY_MESSAGE_GROUPS: MessageGroup[] = []
+
+function areTranscriptRowsEqual(
+  previous: AgentTranscriptHistoryProps,
+  next: AgentTranscriptHistoryProps,
+): boolean {
+  if (
+    previous.groups.length !== next.groups.length
+    || previous.liveGroupSet !== next.liveGroupSet
+    || previous.taskNotificationSignature !== next.taskNotificationSignature
+    || previous.sessionPath !== next.sessionPath
+    || previous.sessionModelId !== next.sessionModelId
+    || previous.streaming !== next.streaming
+    || previous.stoppedByUser !== next.stoppedByUser
+    || previous.onFork !== next.onFork
+    || previous.onRewind !== next.onRewind
+    || previous.onAgentHistoryQuoteClick !== next.onAgentHistoryQuoteClick
+    || previous.onCreateTodo !== next.onCreateTodo
+    || previous.onRetry !== next.onRetry
+    || previous.onRetryInNewSession !== next.onRetryInNewSession
+    || previous.onRelinkProjectRoot !== next.onRelinkProjectRoot
+    || previous.onRestoreProjectRoot !== next.onRestoreProjectRoot
+    || previous.onCompact !== next.onCompact
+  ) {
+    return false
+  }
+  return previous.groups.every((group, index) => group === next.groups[index])
+}
+
+const AgentTranscriptRows = React.memo(function AgentTranscriptRows({
   groups,
   liveGroupSet,
   allMessages,
@@ -612,62 +638,14 @@ const AgentTranscriptHistory = React.forwardRef<AgentTranscriptHistoryHandle, Ag
   onRelinkProjectRoot,
   onRestoreProjectRoot,
   onCompact,
-}, ref): React.ReactElement {
-  const { scrollRef, isAtBottom, stopScroll } = useStickToBottomContext()
-  const previousLayoutRef = React.useRef<{
-    count: number
-    firstGroupId: string | undefined
-    scrollHeight: number
-    isAtBottom: boolean
-  } | null>(null)
-
-  React.useLayoutEffect(() => {
-    const element = scrollRef.current
-    if (!element) return
-
-    const previous = previousLayoutRef.current
-    const firstGroupId = groups[0] ? getGroupId(groups[0]) : undefined
-    if (
-      previous
-      && previous.firstGroupId !== undefined
-      && groups.length > previous.count
-      && firstGroupId !== previous.firstGroupId
-      && !previous.isAtBottom
-    ) {
-      const heightDelta = element.scrollHeight - previous.scrollHeight
-      if (heightDelta > 0) element.scrollTop += heightDelta
-    }
-
-    previousLayoutRef.current = {
-      count: groups.length,
-      firstGroupId,
-      scrollHeight: element.scrollHeight,
-      isAtBottom,
-    }
-  }, [groups, isAtBottom, scrollRef])
-
+}: AgentTranscriptHistoryProps): React.ReactElement {
   const lastAssistantTurnIndex = React.useMemo(
     () => groups.findLastIndex((group) => group.type === 'assistant-turn'),
     [groups],
   )
 
-  React.useImperativeHandle(ref, () => ({
-    scrollToMessage: (messageId, onMounted) => {
-      const target = Array.from(scrollRef.current?.querySelectorAll<HTMLElement>('[data-message-id]') ?? [])
-        .find((element) => element.dataset.messageId === messageId)
-      if (!target) return
-
-      stopScroll()
-      if (onMounted) {
-        onMounted(target)
-        return
-      }
-      target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
-    },
-  }), [scrollRef, stopScroll])
-
   return (
-    <div className="w-full shrink-0">
+    <>
       {groups.map((group, index) => {
         const isLive = liveGroupSet.has(group)
         const isErrorGroup = group.type === 'assistant-turn'
@@ -701,6 +679,145 @@ const AgentTranscriptHistory = React.forwardRef<AgentTranscriptHistoryHandle, Ag
           </div>
         )
       })}
+    </>
+  )
+}, areTranscriptRowsEqual)
+
+/**
+ * Agent 历史消息使用普通 DOM 列表，避免滚动期间反复挂载和测量重型消息组件。
+ * 稳定历史前缀与实时 tail 分开 memo，token 更新时不重新协调整个历史 DOM。
+ */
+const AgentTranscriptHistory = React.forwardRef<AgentTranscriptHistoryHandle, AgentTranscriptHistoryProps>(function AgentTranscriptHistory({
+  groups,
+  liveGroupSet,
+  allMessages,
+  taskNotificationSignature,
+  sessionPath,
+  sessionModelId,
+  groupHistoryTurns,
+  streaming,
+  stoppedByUser,
+  onFork,
+  onRewind,
+  onAgentHistoryQuoteClick,
+  onCreateTodo,
+  onRetry,
+  onRetryInNewSession,
+  onRelinkProjectRoot,
+  onRestoreProjectRoot,
+  onCompact,
+}, ref): React.ReactElement {
+  const { scrollRef, isAtBottom, stopScroll } = useStickToBottomContext()
+  const previousLayoutRef = React.useRef<{
+    count: number
+    firstGroupId: string | undefined
+    scrollHeight: number
+    isAtBottom: boolean
+  } | null>(null)
+
+  const firstGroupId = groups[0] ? getGroupId(groups[0]) : undefined
+  const groupCount = groups.length
+
+  React.useLayoutEffect(() => {
+    const element = scrollRef.current
+    if (!element) return
+
+    const previous = previousLayoutRef.current
+    if (
+      previous
+      && previous.firstGroupId !== undefined
+      && groupCount > previous.count
+      && firstGroupId !== previous.firstGroupId
+      && !previous.isAtBottom
+    ) {
+      const heightDelta = element.scrollHeight - previous.scrollHeight
+      if (heightDelta > 0) element.scrollTop += heightDelta
+    }
+
+    previousLayoutRef.current = {
+      count: groupCount,
+      firstGroupId,
+      scrollHeight: element.scrollHeight,
+      isAtBottom,
+    }
+  }, [firstGroupId, groupCount, isAtBottom, scrollRef])
+
+  const firstLiveIndex = groups.findIndex((group) => liveGroupSet.has(group))
+  const historyEnd = firstLiveIndex >= 0 ? firstLiveIndex : groups.length
+  const stableHistoryGroupsRef = React.useRef<MessageGroup[]>([])
+  const historyGroups = React.useMemo(() => {
+    const previous = stableHistoryGroupsRef.current
+    if (
+      previous.length === historyEnd
+      && previous.every((group, index) => group === groups[index])
+    ) {
+      return previous
+    }
+    const next = groups.slice(0, historyEnd)
+    stableHistoryGroupsRef.current = next
+    return next
+  }, [groups, historyEnd])
+  const liveGroups = historyEnd < groups.length ? groups.slice(historyEnd) : EMPTY_MESSAGE_GROUPS
+
+  React.useImperativeHandle(ref, () => ({
+    scrollToMessage: (messageId, onMounted) => {
+      const target = Array.from(scrollRef.current?.querySelectorAll<HTMLElement>('[data-message-id]') ?? [])
+        .find((element) => element.dataset.messageId === messageId)
+      if (!target) return
+
+      stopScroll()
+      if (onMounted) {
+        onMounted(target)
+        return
+      }
+      target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+    },
+  }), [scrollRef, stopScroll])
+
+  return (
+    <div className="w-full shrink-0">
+      <AgentTranscriptRows
+        groups={historyGroups}
+        liveGroupSet={EMPTY_LIVE_GROUP_SET}
+        allMessages={allMessages}
+        taskNotificationSignature={taskNotificationSignature}
+        sessionPath={sessionPath}
+        sessionModelId={sessionModelId}
+        groupHistoryTurns={groupHistoryTurns}
+        streaming={false}
+        stoppedByUser={liveGroups.length === 0 ? stoppedByUser : undefined}
+        onFork={onFork}
+        onRewind={onRewind}
+        onAgentHistoryQuoteClick={onAgentHistoryQuoteClick}
+        onCreateTodo={onCreateTodo}
+        onRetry={onRetry}
+        onRetryInNewSession={onRetryInNewSession}
+        onRelinkProjectRoot={onRelinkProjectRoot}
+        onRestoreProjectRoot={onRestoreProjectRoot}
+        onCompact={onCompact}
+      />
+      {liveGroups.length > 0 && (
+        <AgentTranscriptRows
+          groups={liveGroups}
+          liveGroupSet={liveGroupSet}
+          allMessages={allMessages}
+          taskNotificationSignature={taskNotificationSignature}
+          sessionPath={sessionPath}
+          sessionModelId={sessionModelId}
+          groupHistoryTurns={groupHistoryTurns}
+          streaming={streaming}
+          stoppedByUser={stoppedByUser}
+          onFork={onFork}
+          onRewind={onRewind}
+          onAgentHistoryQuoteClick={onAgentHistoryQuoteClick}
+          onCreateTodo={onCreateTodo}
+          onRetry={onRetry}
+          onRetryInNewSession={onRetryInNewSession}
+          onRelinkProjectRoot={onRelinkProjectRoot}
+          onRestoreProjectRoot={onRestoreProjectRoot}
+          onCompact={onCompact}
+        />
+      )}
     </div>
   )
 })

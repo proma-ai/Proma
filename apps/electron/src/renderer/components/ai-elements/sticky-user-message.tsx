@@ -152,12 +152,10 @@ export function StickyUserMessage({
       }
       if (entries.some((entry) => entry.target !== el)) scheduleMeasure()
     })
-    const contentRoot = el.firstElementChild
-    if (contentRoot && contentRoot !== el) resizeObserver.observe(contentRoot)
+    // 只观察滚动容器尺寸和用户消息节点：assistant 流式内容位于最后一个用户消息之后，
+    // 它的高度变化不会改变已记录的用户消息位置。
+    resizeObserver.observe(el)
 
-    // 只有最后一条用户消息及其之前的内容会改变用户消息的绝对位置。
-    // 当前流式 assistant 位于它之后，不需要监听每个子树 mutation；内容根节点的高度变化
-    // 已由 ResizeObserver 捕获，并会在下一帧重新收集用户消息位置。
     const messageElements = Array.from(el.querySelectorAll<HTMLElement>('[data-message-id]'))
     const lastUserMessageIndex = messageElements.findLastIndex(
       (message) => message.dataset.messageRole === 'user',
