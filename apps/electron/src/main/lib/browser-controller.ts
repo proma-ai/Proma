@@ -54,6 +54,8 @@ type BrowserTabRecord = {
   lastActivityAt: number
   highlightTimer?: ReturnType<typeof setTimeout>
   lastBounds?: BrowserViewLayout['bounds']
+  /** 仅记录当前实际挂载的 owner；隐藏时 detach，但保留 WebContents 及页面状态。 */
+  attachedOwner: BrowserWindow | null
 }
 type BrowserTabOptions = {
   isLocalPreview?: boolean
@@ -557,8 +559,8 @@ export class BrowserController {
       popupInitialUrl,
       popupInitialNavigationPending: popupInitialUrl !== null && isTransientBrowserPopupUrl(popupInitialUrl),
       lastActivityAt: Date.now(),
+      attachedOwner: null,
     }
-    this.owner.contentView.addChildView(view)
     view.setVisible(false)
     view.webContents.setWindowOpenHandler(({ url }) => {
       if (!isSupportedBrowserPopupUrl(url)) {
@@ -613,7 +615,7 @@ export class BrowserController {
       this.disposePopupChildren(browserSession, tab.tabId)
       browserSession.tabs.delete(tab.tabId)
       this.clearAgentTargetHighlight(tab)
-      try { this.owner?.contentView.removeChildView(tab.view) } catch { /* owner 已销毁 */ }
+      this.detachTabView(tab)
       this.repairTabSelection(browserSession, tab.tabId)
       if (browserSession.tabs.size === 0) {
         this.sessions.delete(browserSession.sessionId)
@@ -726,11 +728,7 @@ export class BrowserController {
     for (const browserSession of this.sessions.values()) {
       for (const tab of browserSession.tabs.values()) {
         if (browserSession.sessionId === targetSessionId && tab.tabId === targetTabId) continue
-        tab.view.setVisible(false)
-        if (tab.state.visible) {
-          tab.state.visible = false
-          changedSessions.add(browserSession)
-        }
+        if (this.hideTabView(tab)) changedSessions.add(browserSession)
       }
     }
     return changedSessions
@@ -738,6 +736,50 @@ export class BrowserController {
 
   private emitChangedSessions(changedSessions: Set<BrowserSessionRecord>): void {
     for (const browserSession of changedSessions) this.emit(browserSession)
+  }
+
+  /** 隐藏时从原生 View 树移除，避免 Chromium 继续按前台 WebContentsView 调度。 */
+  private detachTabView(tab: BrowserTabRecord): void {
+    try { tab.view.setVisible(false) } catch { /* WebContents/View 已销毁 */ }
+    const attachedOwner = tab.attachedOwner
+    if (!attachedOwner) return
+    tab.attachedOwner = null
+    try {
+      if (!attachedOwner.isDestroyed()) attachedOwner.contentView.removeChildView(tab.view)
+    } catch { /* owner 或 View 已销毁/已被 Electron 移除 */ }
+  }
+
+  /** 重新展示时只恢复原生挂载、bounds 和 visible，不重建 WebContents。 */
+  private attachTabView(tab: BrowserTabRecord): boolean {
+    const owner = this.owner
+    if (!owner || owner.isDestroyed() || tab.view.webContents.isDestroyed()) {
+      this.detachTabView(tab)
+      return false
+    }
+    if (tab.attachedOwner !== owner) {
+      this.detachTabView(tab)
+      try {
+        owner.contentView.addChildView(tab.view)
+        tab.attachedOwner = owner
+      } catch {
+        return false
+      }
+    }
+    try {
+      if (tab.lastBounds) tab.view.setBounds(tab.lastBounds)
+      tab.view.setVisible(true)
+      return true
+    } catch {
+      this.detachTabView(tab)
+      return false
+    }
+  }
+
+  private hideTabView(tab: BrowserTabRecord): boolean {
+    this.detachTabView(tab)
+    if (!tab.state.visible) return false
+    tab.state.visible = false
+    return true
   }
 
   setLayout(layout: BrowserViewLayout): void {
@@ -753,12 +795,9 @@ export class BrowserController {
     const bounds = layout.bounds
     const visible = layout.visible && bounds.width > 4 && bounds.height > 4 && !!this.owner && !this.owner.isDestroyed() && this.owner.isVisible()
     if (!visible) {
-      tab.view.setVisible(false)
+      this.latestPresentationRevision = Math.max(this.latestPresentationRevision, layout.revision)
       const changedSessions = new Set<BrowserSessionRecord>()
-      if (tab.state.visible) {
-        tab.state.visible = false
-        changedSessions.add(browserSession)
-      }
+      if (this.hideTabView(tab)) changedSessions.add(browserSession)
       if (this.presentation?.sessionId === browserSession.sessionId && this.presentation.tabId === tab.tabId) {
         this.presentation = null
       }
@@ -779,15 +818,14 @@ export class BrowserController {
     }
     const changedSessions = this.hideAllViewsExcept(browserSession.sessionId, tab.tabId)
     if (!tab.lastBounds || Object.entries(adjustedBounds).some(([key, value]) => tab.lastBounds?.[key as keyof typeof adjustedBounds] !== value)) {
-      tab.view.setBounds(adjustedBounds)
       tab.lastBounds = { ...adjustedBounds }
     }
-    tab.view.setVisible(true)
-    if (!tab.state.visible) {
-      tab.state.visible = true
+    const shown = this.attachTabView(tab)
+    if (tab.state.visible !== shown) {
+      tab.state.visible = shown
       changedSessions.add(browserSession)
     }
-    this.presentation = { sessionId: browserSession.sessionId, tabId: tab.tabId, revision: layout.revision }
+    this.presentation = shown ? { sessionId: browserSession.sessionId, tabId: tab.tabId, revision: layout.revision } : null
     this.latestPresentationRevision = layout.revision
     this.emitChangedSessions(changedSessions)
   }
@@ -801,22 +839,24 @@ export class BrowserController {
     tab.lastActivityAt = Date.now()
     browserSession.activeTabId = tab.tabId
     if (this.presentation?.sessionId !== browserSession.sessionId) {
+      // 后台 Session 的 tab 切换只更新逻辑状态，所有原生 View 都保持 detach。
+      for (const candidate of browserSession.tabs.values()) this.hideTabView(candidate)
       this.emit(browserSession)
       return
     }
 
     if (!tab.lastBounds && previous?.lastBounds) {
-      tab.view.setBounds(previous.lastBounds)
       tab.lastBounds = { ...previous.lastBounds }
     }
     const changedSessions = this.hideAllViewsExcept(browserSession.sessionId, tab.tabId)
-    const visible = !!tab.lastBounds && !!this.owner && !this.owner.isDestroyed() && this.owner.isVisible()
-    tab.view.setVisible(visible)
+    const shouldShow = !!tab.lastBounds && !!this.owner && !this.owner.isDestroyed() && this.owner.isVisible()
+    const visible = shouldShow && this.attachTabView(tab)
+    if (!visible) this.detachTabView(tab)
     if (tab.state.visible !== visible) {
       tab.state.visible = visible
       changedSessions.add(browserSession)
     }
-    this.presentation = { ...this.presentation, tabId: tab.tabId }
+    this.presentation = visible ? { ...this.presentation, tabId: tab.tabId } : null
     this.emitChangedSessions(changedSessions)
   }
 
@@ -842,7 +882,7 @@ export class BrowserController {
     browserSession.tabs.delete(tab.tabId)
     this.clearAgentTargetHighlight(tab)
     try { if (tab.view.webContents.debugger.isAttached()) tab.view.webContents.debugger.detach() } catch { /* 已销毁 */ }
-    try { this.owner?.contentView.removeChildView(tab.view) } catch { /* owner 已销毁 */ }
+    this.detachTabView(tab)
     if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close()
   }
 
@@ -1307,10 +1347,11 @@ export class BrowserController {
     const browserSession = this.sessions.get(sessionId)
     if (!browserSession) return
     this.sessions.delete(sessionId)
+    if (this.presentation?.sessionId === sessionId) this.presentation = null
     for (const tab of browserSession.tabs.values()) {
       this.clearAgentTargetHighlight(tab)
       try { if (tab.view.webContents.debugger.isAttached()) tab.view.webContents.debugger.detach() } catch { /* 已销毁 */ }
-      try { this.owner?.contentView.removeChildView(tab.view) } catch { /* owner 已销毁 */ }
+      this.detachTabView(tab)
       if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close()
     }
     browserSession.tabs.clear()
@@ -1319,6 +1360,8 @@ export class BrowserController {
   dispose(): void {
     for (const sessionId of [...this.sessions.keys()]) void this.close(sessionId)
     this.configurations.clear()
+    this.presentation = null
+    this.latestPresentationRevision = 0
     this.owner = null
   }
 }
