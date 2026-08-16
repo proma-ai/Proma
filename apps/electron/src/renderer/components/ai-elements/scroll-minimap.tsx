@@ -352,14 +352,16 @@ export function ScrollMinimap({ items, onScrollToMessage }: ScrollMinimapProps):
   const scrollToMessage = React.useCallback((id: string) => {
     const el = scrollRef.current
     if (!el) return
-    const target = Array.from(el.querySelectorAll<HTMLElement>('[data-message-id]')).find(
-      (node) => node.getAttribute('data-message-id') === id
-    )
-    if (!target) {
-      onScrollToMessage?.(id)
+    if (onScrollToMessage) {
+      onScrollToMessage(id)
       setHovered(false)
       return
     }
+
+    const target = Array.from(el.querySelectorAll<HTMLElement>('[data-message-id]')).find(
+      (node) => node.getAttribute('data-message-id') === id
+    )
+    if (!target) return
 
     stopScroll()
     stickyState.animation = undefined
