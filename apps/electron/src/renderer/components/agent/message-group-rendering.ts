@@ -57,64 +57,6 @@ export function stabilizeMessageGroups(previous: MessageGroup[], next: MessageGr
   return changed ? stable : previous
 }
 
-function longestSuffixToPrefixOverlap(text: string[], pattern: string[]): number {
-  if (text.length === 0 || pattern.length === 0) return 0
-
-  const prefixTable = new Array<number>(pattern.length).fill(0)
-  for (let index = 1, matched = 0; index < pattern.length; index += 1) {
-    while (matched > 0 && pattern[index] !== pattern[matched]) {
-      matched = prefixTable[matched - 1]!
-    }
-    if (pattern[index] === pattern[matched]) matched += 1
-    prefixTable[index] = matched
-  }
-
-  let matched = 0
-  for (const value of text) {
-    if (matched === pattern.length) matched = prefixTable[matched - 1]!
-    while (matched > 0 && value !== pattern[matched]) {
-      matched = prefixTable[matched - 1]!
-    }
-    if (value === pattern[matched]) matched += 1
-  }
-  return matched
-}
-
-function longestCommonSuffix(left: string[], right: string[]): number {
-  let overlap = 0
-  while (
-    overlap < left.length
-    && overlap < right.length
-    && left[left.length - overlap - 1] === right[right.length - overlap - 1]
-  ) {
-    overlap += 1
-  }
-  return overlap
-}
-
-export function mergeOverlappingMessageSnapshots(
-  persisted: SDKMessage[],
-  live: SDKMessage[],
-  getStableKey: (message: SDKMessage) => string,
-): SDKMessage[] {
-  if (persisted.length === 0) return live
-  if (live.length === 0) return persisted
-
-  // 将 key 计算限制为每条消息一次；重叠匹配使用线性算法，避免在 live 热路径上反复嵌套扫描。
-  const persistedKeys = persisted.map(getStableKey)
-  const liveKeys = live.map(getStableKey)
-  const prefixOverlap = longestSuffixToPrefixOverlap(persistedKeys, liveKeys)
-  const suffixOverlap = longestCommonSuffix(persistedKeys, liveKeys)
-  const overlap = Math.max(prefixOverlap, suffixOverlap)
-
-  if (overlap === 0) return [...persisted, ...live]
-  const liveOverlapStart = prefixOverlap >= suffixOverlap ? 0 : live.length - suffixOverlap
-  return [
-    ...persisted.slice(0, persisted.length - overlap),
-    ...live.slice(liveOverlapStart),
-  ]
-}
-
 function findActiveTurnBoundary(messages: SDKMessage[]): number {
   return messages.findLastIndex((message) => (
     message.type === 'user' && isUserInputMessage(message as SDKUserMessage)
