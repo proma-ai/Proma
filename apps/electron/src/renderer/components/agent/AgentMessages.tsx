@@ -592,6 +592,7 @@ interface AgentTranscriptHistoryHandle {
 }
 
 interface AgentTranscriptHistoryProps {
+  sessionId: string
   groups: MessageGroup[]
   liveGroupSet: ReadonlySet<MessageGroup>
   allMessages: SDKMessage[]
@@ -617,6 +618,7 @@ interface AgentTranscriptHistoryProps {
  * 因此 ScrollMinimap、StickyUserMessage 和 ScrollPositionManager 仍然使用同一个 root。
  */
 const AgentTranscriptHistory = React.forwardRef<AgentTranscriptHistoryHandle, AgentTranscriptHistoryProps>(function AgentTranscriptHistory({
+  sessionId,
   groups,
   liveGroupSet,
   allMessages,
@@ -667,7 +669,7 @@ const AgentTranscriptHistory = React.forwardRef<AgentTranscriptHistoryHandle, Ag
         pendingNavigationFrameRef.current = null
       }
     }
-  }, [groups])
+  }, [sessionId])
 
   React.useLayoutEffect(() => {
     const element = scrollRef.current
@@ -699,20 +701,28 @@ const AgentTranscriptHistory = React.forwardRef<AgentTranscriptHistoryHandle, Ag
     [groups],
   )
 
+  const userGroupIndices = React.useMemo(() => (
+    groups.reduce<number[]>((indices, group, index) => {
+      if (group.type === 'user') indices.push(index)
+      return indices
+    }, [])
+  ), [groups])
+
   React.useImperativeHandle(ref, () => ({
     scrollToMessage: (messageId, onMounted) => {
       const index = groups.findIndex((group) => getGroupId(group) === messageId)
       if (index < 0) return
+      const generation = ++navigationGenerationRef.current
+      if (pendingNavigationFrameRef.current !== null) {
+        window.cancelAnimationFrame(pendingNavigationFrameRef.current)
+        pendingNavigationFrameRef.current = null
+      }
       stopScroll()
       virtualizer.scrollToIndex(index, { align: 'center', behavior: 'auto' })
 
       if (!onMounted) return
 
       // 目标行可能在远距离跳转后才挂载；持续等待挂载而不是依赖固定帧数。
-      const generation = ++navigationGenerationRef.current
-      if (pendingNavigationFrameRef.current !== null) {
-        window.cancelAnimationFrame(pendingNavigationFrameRef.current)
-      }
       let frame = 0
       const waitForMounted = (): void => {
         pendingNavigationFrameRef.current = null
@@ -732,18 +742,37 @@ const AgentTranscriptHistory = React.forwardRef<AgentTranscriptHistoryHandle, Ag
     },
     getStickyUserMessageId: (scrollTop) => {
       const measurements = virtualizer.measurementsCache
-      for (let index = measurements.length - 1; index >= 0; index -= 1) {
-        const measurement = measurements[index]
-        const group = measurement ? groups[measurement.index] : undefined
-        if (group?.type === 'user' && measurement && measurement.end < scrollTop) {
-          // 未测量行只含 estimateSize，不能据此决定 Sticky 的真实用户消息。
-          if (!virtualizer.itemSizeCache.has(measurement.key)) return null
-          return getGroupId(group)
+      const scrollElement = scrollRef.current
+      const firstRow = scrollElement?.querySelector<HTMLElement>('[data-index]')
+      const virtualContent = firstRow?.parentElement
+      const contentOffset = scrollElement && virtualContent
+        ? virtualContent.getBoundingClientRect().top
+          - scrollElement.getBoundingClientRect().top
+          + scrollElement.scrollTop
+        : 0
+      let low = 0
+      let high = userGroupIndices.length - 1
+      let candidate = -1
+      while (low <= high) {
+        const middle = Math.floor((low + high) / 2)
+        const groupIndex = userGroupIndices[middle]!
+        const measurement = measurements[groupIndex]
+        if (measurement && measurement.end + contentOffset < scrollTop) {
+          candidate = middle
+          low = middle + 1
+        } else {
+          high = middle - 1
         }
       }
-      return null
+      if (candidate < 0) return null
+
+      const groupIndex = userGroupIndices[candidate]!
+      const measurement = measurements[groupIndex]
+      const group = groups[groupIndex]
+      if (!measurement || !group || !virtualizer.itemSizeCache.has(measurement.key)) return null
+      return getGroupId(group)
     },
-  }), [groups, scrollRef, stopScroll, virtualizer])
+  }), [groups, scrollRef, stopScroll, userGroupIndices, virtualizer])
 
   return (
     <div
@@ -1170,6 +1199,7 @@ export const AgentMessages = React.memo(function AgentMessages({
               {/* 统一消息渲染（持久化 + 实时合并为一个列表，确保 system 消息位置正确） */}
               <AgentTranscriptHistory
                 ref={historyVirtualizerRef}
+                sessionId={sessionId}
                 groups={visibleGroups}
                 liveGroupSet={liveGroupSet}
                 allMessages={allSDKMessages}
