@@ -52,8 +52,8 @@ const ONE_MILLION_CONTEXT_RULES = {
   ],
   // DeepSeek
   deepseek: ['deepseek-v4'],
-  // 智谱 GLM
-  glm: ['glm-5.2'],
+  // 智谱 GLM（GLM-5.2 起支持 1M；GLM-5.3 官方文档同样标注 1M，#1658 已进预设但缺此白名单）
+  glm: ['glm-5.2', 'glm-5.3'],
   // 小米 MiMo
   mimo: ['mimo-v2.5'],
   // MiniMax
