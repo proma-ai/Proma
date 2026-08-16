@@ -587,7 +587,8 @@ function AgentRunningIndicator({ startedAt }: { startedAt?: number }): React.Rea
 }
 
 interface AgentTranscriptHistoryHandle {
-  scrollToMessage: (messageId: string, onMounted: (target: HTMLElement) => void) => void
+  scrollToMessage: (messageId: string, onMounted?: (target: HTMLElement) => void) => void
+  getStickyUserMessageId: (scrollTop: number) => string | null
 }
 
 interface AgentTranscriptHistoryProps {
@@ -635,7 +636,7 @@ const AgentTranscriptHistory = React.forwardRef<AgentTranscriptHistoryHandle, Ag
   onRestoreProjectRoot,
   onCompact,
 }, ref): React.ReactElement {
-  const { scrollRef, isAtBottom } = useStickToBottomContext()
+  const { scrollRef, isAtBottom, stopScroll } = useStickToBottomContext()
   const virtualizer = useVirtualizer({
     count: groups.length,
     getScrollElement: () => scrollRef.current,
@@ -690,23 +691,37 @@ const AgentTranscriptHistory = React.forwardRef<AgentTranscriptHistoryHandle, Ag
     scrollToMessage: (messageId, onMounted) => {
       const index = groups.findIndex((group) => getGroupId(group) === messageId)
       if (index < 0) return
-      virtualizer.scrollToIndex(index, { align: 'center', behavior: 'smooth' })
+      stopScroll()
+      virtualizer.scrollToIndex(index, { align: 'center', behavior: 'auto' })
 
-      // TanStack virtualizer 提交挂载行后再计算 Range；两帧也覆盖了平滑滚动的首帧布局。
+      if (!onMounted) return
+
+      // 目标行可能在远距离跳转后才挂载；持续等待挂载而不是依赖固定帧数。
       let frame = 0
       const waitForMounted = (): void => {
         frame += 1
         const target = Array.from(scrollRef.current?.querySelectorAll<HTMLElement>('[data-message-id]') ?? [])
           .find((element) => element.dataset.messageId === messageId)
-        if (target || frame >= 3) {
-          if (target) onMounted(target)
+        if (target) {
+          onMounted(target)
           return
         }
-        window.requestAnimationFrame(waitForMounted)
+        if (frame < 120) window.requestAnimationFrame(waitForMounted)
       }
       window.requestAnimationFrame(waitForMounted)
     },
-  }), [groups, scrollRef, virtualizer])
+    getStickyUserMessageId: (scrollTop) => {
+      const measurements = virtualizer.measurementsCache
+      for (let index = measurements.length - 1; index >= 0; index -= 1) {
+        const measurement = measurements[index]
+        const group = measurement ? groups[measurement.index] : undefined
+        if (group?.type === 'user' && measurement && measurement.end < scrollTop) {
+          return getGroupId(group)
+        }
+      }
+      return null
+    },
+  }), [groups, scrollRef, stopScroll, virtualizer])
 
   return (
     <div
@@ -1106,6 +1121,13 @@ export const AgentMessages = React.memo(function AgentMessages({
     return turns
   }, [visibleGroups])
 
+  const scrollToTranscriptMessage = React.useCallback((messageId: string): void => {
+    historyVirtualizerRef.current?.scrollToMessage(messageId)
+  }, [])
+  const getStickyTranscriptMessageId = React.useCallback((scrollTop: number): string | null => (
+    historyVirtualizerRef.current?.getStickyUserMessageId(scrollTop) ?? null
+  ), [])
+
   return (
     <BasePathsProvider basePaths={messageBasePaths}>
       <AgentBrowserLinkProvider sessionId={sessionId}>
@@ -1195,7 +1217,7 @@ export const AgentMessages = React.memo(function AgentMessages({
             </>
           )}
         </ConversationContent>
-        <ScrollMinimap items={minimapItems} />
+        <ScrollMinimap items={minimapItems} onScrollToMessage={scrollToTranscriptMessage} />
         <TaskProgressOverlay
           key={sessionId}
           activities={liveTaskActivities}
@@ -1203,7 +1225,11 @@ export const AgentMessages = React.memo(function AgentMessages({
           contextCompaction={contextCompaction}
         />
         {allUserMessagesData.length > 0 && (
-          <StickyUserMessage userMessages={allUserMessagesData} />
+          <StickyUserMessage
+            userMessages={allUserMessagesData}
+            getStickyMessageId={getStickyTranscriptMessageId}
+            onScrollToMessage={scrollToTranscriptMessage}
+          />
         )}
           </Conversation>
           <AgentHistorySelectionLayer

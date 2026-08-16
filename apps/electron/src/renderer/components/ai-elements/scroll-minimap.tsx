@@ -30,6 +30,7 @@ export interface MinimapItem {
 
 interface ScrollMinimapProps {
   items: MinimapItem[]
+  onScrollToMessage?: (id: string) => void
 }
 
 /** 最少消息数才显示迷你地图 */
@@ -74,7 +75,7 @@ function escapeRegExp(str: string): string {
 
 // ── 主组件 ──
 
-export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement | null {
+export function ScrollMinimap({ items, onScrollToMessage }: ScrollMinimapProps): React.ReactElement | null {
   const { scrollRef, stopScroll, state: stickyState } = useStickToBottomContext()
   const [hovered, setHovered] = React.useState(false)
   const [isLeaving, setIsLeaving] = React.useState(false)
@@ -323,7 +324,11 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
     const target = Array.from(el.querySelectorAll<HTMLElement>('[data-message-id]')).find(
       (node) => node.getAttribute('data-message-id') === id
     )
-    if (!target) return
+    if (!target) {
+      onScrollToMessage?.(id)
+      setHovered(false)
+      return
+    }
 
     stopScroll()
     stickyState.animation = undefined
@@ -339,7 +344,7 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
     el.scrollTo({ top: Math.max(0, scrollTarget), behavior: 'smooth' })
 
     setHovered(false)
-  }, [scrollRef, stopScroll, stickyState])
+  }, [onScrollToMessage, scrollRef, stopScroll, stickyState])
 
   // ── 搜索过滤 ──
 
