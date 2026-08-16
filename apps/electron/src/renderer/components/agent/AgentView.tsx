@@ -129,7 +129,6 @@ import {
   parseQueuedMessageMentions,
   queuedTextToParagraphHtml,
   removeQueuedMessage,
-  restoreQueuedMessageToFront,
 } from '@/lib/agent-message-queue'
 import type { AgentQueuedAttachment, AgentQueuedMessage, QueueDropPlacement } from '@/lib/agent-message-queue'
 
@@ -2735,59 +2734,66 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
     queuedSendInFlightRef.current = true
     sendingQueuedMessageIdsRef.current.add(messageId)
-    void window.electronAPI.cancelAgentQueuedMessage({ sessionId, messageId })
-      .then((cancelled) => {
-        if (!cancelled) return
+    clearStoppedByUser()
+    void window.electronAPI.promoteAgentQueuedMessage({
+      sessionId,
+      messageId,
+      interrupt: streaming,
+    })
+      .then((promoted) => {
+        if (!promoted) return
         setQueuedMessages((prev) => removeQueuedMessage(prev, messageId))
-        return sendPlainTextAgentMessage(message).catch((error) => {
-          console.error('[AgentView] 队列消息发送失败:', error)
-          toast.error('队列消息发送失败', { description: String(error) })
-          setQueuedMessages((prev) => restoreQueuedMessageToFront(prev, message))
-        })
       })
       .catch((error) => {
-        console.error('[AgentView] 取消主进程队列失败:', error)
-        toast.error('队列消息操作失败', { description: String(error) })
+        console.error('[AgentView] 立即发送队列消息失败:', error)
+        toast.error('队列消息发送失败', { description: String(error) })
       })
       .finally(() => {
         sendingQueuedMessageIdsRef.current.delete(messageId)
         queuedSendInFlightRef.current = false
       })
-  }, [canSendQueuedNow, queuedMessages, sendPlainTextAgentMessage, sessionId, setQueuedMessages, streaming])
+  }, [canSendQueuedNow, clearStoppedByUser, queuedMessages, sessionId, setQueuedMessages, streaming])
 
   const handleRecallQueuedMessage = React.useCallback((messageId: string): void => {
     const message = queuedMessages.find((item) => item.id === messageId)
     if (!message) return
 
-    setQueuedMessages((prev) => removeQueuedMessage(prev, messageId))
-    const recalledQuotedSelection = message.quotedSelection
-    if (recalledQuotedSelection) {
-      setQuotedSelectionMap((prev) => {
-        const map = new Map(prev)
-        map.set(sessionId, recalledQuotedSelection)
-        return map
+    void window.electronAPI.cancelAgentQueuedMessage({ sessionId, messageId })
+      .then((cancelled) => {
+        if (!cancelled) return
+        setQueuedMessages((prev) => removeQueuedMessage(prev, messageId))
+        const recalledQuotedSelection = message.quotedSelection
+        if (recalledQuotedSelection) {
+          setQuotedSelectionMap((prev) => {
+            const map = new Map(prev)
+            map.set(sessionId, recalledQuotedSelection)
+            return map
+          })
+        }
+        restoreQueuedAttachmentsToPending(message.attachments)
+
+        const currentDraft = store.get(agentSessionDraftsAtom).get(sessionId) ?? ''
+        const currentDraftHtml = store.get(agentSessionDraftHtmlAtom).get(sessionId) ?? ''
+        const hasDraft = currentDraft.trim().length > 0
+        const nextDraft = hasDraft
+          ? `${currentDraft.trimEnd()}\n\n${message.text}`
+          : message.text
+        setInputContent(nextDraft)
+
+        // 已有草稿时，用「原草稿 HTML + 队列文本段落 HTML」合并，保留原草稿的 mention 等富文本节点；
+        // 空草稿时留空 HTML，交给编辑器按纯文本重建（与正常输入渲染一致）。
+        if (hasDraft) {
+          const draftHtml = currentDraftHtml.trim().length > 0
+            ? currentDraftHtml
+            : queuedTextToParagraphHtml(currentDraft)
+          setInputHtmlContent(`${draftHtml}${queuedTextToParagraphHtml(message.text)}`)
+        } else {
+          setInputHtmlContent('')
+        }
       })
-    }
-    restoreQueuedAttachmentsToPending(message.attachments)
-
-    const currentDraft = store.get(agentSessionDraftsAtom).get(sessionId) ?? ''
-    const currentDraftHtml = store.get(agentSessionDraftHtmlAtom).get(sessionId) ?? ''
-    const hasDraft = currentDraft.trim().length > 0
-    const nextDraft = hasDraft
-      ? `${currentDraft.trimEnd()}\n\n${message.text}`
-      : message.text
-    setInputContent(nextDraft)
-
-    // 已有草稿时，用「原草稿 HTML + 队列文本段落 HTML」合并，保留原草稿的 mention 等富文本节点；
-    // 空草稿时留空 HTML，交给编辑器按纯文本重建（与正常输入渲染一致）。
-    if (hasDraft) {
-      const draftHtml = currentDraftHtml.trim().length > 0
-        ? currentDraftHtml
-        : queuedTextToParagraphHtml(currentDraft)
-      setInputHtmlContent(`${draftHtml}${queuedTextToParagraphHtml(message.text)}`)
-    } else {
-      setInputHtmlContent('')
-    }
+      .catch((error) => {
+        console.warn('[AgentView] 撤回主进程队列消息失败:', error)
+      })
   }, [queuedMessages, restoreQueuedAttachmentsToPending, sessionId, setInputContent, setInputHtmlContent, setQueuedMessages, setQuotedSelectionMap, store])
 
   const handleRemoveQueuedMessage = React.useCallback((messageId: string): void => {

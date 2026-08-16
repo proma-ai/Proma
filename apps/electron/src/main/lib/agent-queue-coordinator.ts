@@ -10,7 +10,7 @@ import type {
 
 interface DeferredQueueEntry {
   input: AgentDeferredQueueMessageInput
-  webContents: WebContents
+  webContents: WebContents | null
 }
 
 export interface AgentQueueCoordinatorOptions {
@@ -20,6 +20,7 @@ export interface AgentQueueCoordinatorOptions {
     input: AgentQueueMessageInput,
     webContents: WebContents,
   ) => Promise<string>
+  canDispatch?: (sessionId: string) => boolean
   sendStatus: (webContents: WebContents, status: AgentQueuedMessageStatus) => void
 }
 
@@ -31,11 +32,35 @@ export interface AgentQueueCoordinatorOptions {
  */
 export class AgentQueueCoordinator {
   private readonly queues = new Map<string, DeferredQueueEntry[]>()
-  private readonly dispatching = new Set<string>()
+  private readonly dispatching = new Map<string, string>()
+  private readonly inFlight = new Map<string, DeferredQueueEntry>()
+  private readonly backgroundWaiting = new Set<string>()
+  private readonly stopped = new Set<string>()
+  private readonly failed = new Set<string>()
   private readonly options: AgentQueueCoordinatorOptions
 
   constructor(options: AgentQueueCoordinatorOptions) {
     this.options = options
+  }
+
+  bindWebContents(sessionId: string, webContents: WebContents): void {
+    for (const entry of this.queues.get(sessionId) ?? []) {
+      entry.webContents = webContents
+    }
+    const inFlight = this.inFlight.get(sessionId)
+    if (inFlight) inFlight.webContents = webContents
+    this.tryDispatch(sessionId)
+  }
+
+  detachWebContents(webContents: WebContents): void {
+    for (const queue of this.queues.values()) {
+      for (const entry of queue) {
+        if (entry.webContents === webContents) entry.webContents = null
+      }
+    }
+    for (const entry of this.inFlight.values()) {
+      if (entry.webContents === webContents) entry.webContents = null
+    }
   }
 
   enqueue(input: AgentDeferredQueueMessageInput, webContents: WebContents): void {
@@ -58,7 +83,9 @@ export class AgentQueueCoordinator {
     if (!entry) return false
     queue.splice(index, 1)
     this.deleteEmptyQueue(input.sessionId)
+    this.failed.delete(input.sessionId)
     this.emit(entry.webContents, entry.input, 'cancelled')
+    this.tryDispatch(input.sessionId)
     return true
   }
 
@@ -91,7 +118,12 @@ export class AgentQueueCoordinator {
     if (this.dispatching.has(input.sessionId)) return false
     const entry = this.removeEntry(input)
     if (!entry) return false
+    if (!entry.webContents) {
+      this.restoreEntry(input.sessionId, entry)
+      return false
+    }
 
+    this.failed.delete(input.sessionId)
     this.emit(entry.webContents, entry.input, 'started')
     if (this.options.isActive(input.sessionId)) {
       const queueInput: AgentQueueMessageInput = {
@@ -110,29 +142,64 @@ export class AgentQueueCoordinator {
         await this.options.injectMessage(queueInput, entry.webContents)
       } catch (error) {
         this.restoreEntry(input.sessionId, entry)
+        this.failed.add(input.sessionId)
         this.emit(entry.webContents, entry.input, 'failed', error)
       }
       return true
     }
 
-    this.dispatching.add(input.sessionId)
+    this.dispatching.set(input.sessionId, entry.input.queueMessageId)
+    this.inFlight.set(input.sessionId, entry)
     void this.options.startRun({
       ...entry.input,
       startedAt: Date.now(),
     }, entry.webContents)
       .catch((error) => {
-        this.restoreEntry(input.sessionId, entry)
-        this.emit(entry.webContents, entry.input, 'failed', error)
+        this.failDispatch(input.sessionId, entry, error)
       })
       .finally(() => {
-        this.dispatching.delete(input.sessionId)
+        this.releaseDispatch(input.sessionId, entry.input.queueMessageId)
       })
     return true
   }
 
-  onRunComplete(sessionId: string, backgroundTasksPending: boolean): void {
-    this.dispatching.delete(sessionId)
-    if (backgroundTasksPending) return
+  onRunError(sessionId: string, messageId: string, error: unknown): void {
+    if (this.dispatching.get(sessionId) !== messageId) return
+    const entry = this.inFlight.get(sessionId)
+    if (!entry || entry.input.queueMessageId !== messageId) return
+    this.releaseDispatch(sessionId, messageId)
+    this.restoreEntry(sessionId, entry)
+    this.failed.add(sessionId)
+    this.emit(entry.webContents, entry.input, 'failed', error)
+  }
+
+  onRunComplete(
+    sessionId: string,
+    options: {
+      queueMessageId?: string
+      backgroundTasksPending: boolean
+      stoppedByUser: boolean
+    },
+  ): void {
+    if (options.queueMessageId) {
+      this.releaseDispatch(sessionId, options.queueMessageId)
+    }
+    if (options.stoppedByUser) {
+      this.stopped.add(sessionId)
+      return
+    }
+    this.stopped.delete(sessionId)
+    if (this.failed.has(sessionId)) return
+    if (options.backgroundTasksPending) {
+      this.backgroundWaiting.add(sessionId)
+      return
+    }
+    this.backgroundWaiting.delete(sessionId)
+    this.tryDispatch(sessionId)
+  }
+
+  onBackgroundTaskComplete(sessionId: string): void {
+    this.backgroundWaiting.delete(sessionId)
     this.tryDispatch(sessionId)
   }
 
@@ -146,29 +213,55 @@ export class AgentQueueCoordinator {
   clear(sessionId: string): void {
     this.queues.delete(sessionId)
     this.dispatching.delete(sessionId)
+    this.inFlight.delete(sessionId)
+    this.backgroundWaiting.delete(sessionId)
+    this.stopped.delete(sessionId)
+    this.failed.delete(sessionId)
   }
 
   private tryDispatch(sessionId: string): void {
-    if (this.dispatching.has(sessionId) || this.options.isActive(sessionId)) return
+    if (
+      this.dispatching.has(sessionId)
+      || this.options.isActive(sessionId)
+      || this.backgroundWaiting.has(sessionId)
+      || this.stopped.has(sessionId)
+      || this.failed.has(sessionId)
+      || this.options.canDispatch?.(sessionId) === false
+    ) return
     const queue = this.queues.get(sessionId)
     const entry = queue?.[0]
-    if (!entry) return
+    if (!entry || !entry.webContents) return
 
     queue!.shift()
     this.deleteEmptyQueue(sessionId)
-    this.dispatching.add(sessionId)
+    this.dispatching.set(sessionId, entry.input.queueMessageId)
+    this.inFlight.set(sessionId, entry)
     this.emit(entry.webContents, entry.input, 'started')
     void this.options.startRun({
       ...entry.input,
       startedAt: Date.now(),
     }, entry.webContents)
       .catch((error) => {
-        this.restoreEntry(sessionId, entry)
-        this.emit(entry.webContents, entry.input, 'failed', error)
+        this.failDispatch(sessionId, entry, error)
       })
       .finally(() => {
-        this.dispatching.delete(sessionId)
+        this.releaseDispatch(sessionId, entry.input.queueMessageId)
       })
+  }
+
+  private failDispatch(sessionId: string, entry: DeferredQueueEntry, error: unknown): void {
+    if (this.dispatching.get(sessionId) !== entry.input.queueMessageId) return
+    this.releaseDispatch(sessionId, entry.input.queueMessageId)
+    this.restoreEntry(sessionId, entry)
+    this.failed.add(sessionId)
+    this.emit(entry.webContents, entry.input, 'failed', error)
+  }
+
+  private releaseDispatch(sessionId: string, messageId: string): void {
+    if (this.dispatching.get(sessionId) !== messageId) return
+    this.dispatching.delete(sessionId)
+    const entry = this.inFlight.get(sessionId)
+    if (entry?.input.queueMessageId === messageId) this.inFlight.delete(sessionId)
   }
 
   private removeEntry(input: AgentQueuedMessageControlInput): DeferredQueueEntry | undefined {
@@ -197,11 +290,12 @@ export class AgentQueueCoordinator {
   }
 
   private emit(
-    webContents: WebContents,
+    webContents: WebContents | null,
     input: AgentDeferredQueueMessageInput,
     status: AgentQueuedMessageStatus['status'],
     error?: unknown,
   ): void {
+    if (!webContents || webContents.isDestroyed()) return
     this.options.sendStatus(webContents, {
       sessionId: input.sessionId,
       messageId: input.queueMessageId,
