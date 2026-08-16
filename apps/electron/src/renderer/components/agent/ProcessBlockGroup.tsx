@@ -13,13 +13,15 @@ import type {
 interface ProcessBlockGroupProps {
   blocks: SDKContentBlock[]
   isStreaming?: boolean
+  /** 按当前显示模式惰性生成过程项，避免流式中提前构造完整历史。 */
+  renderChildren: (mode: 'preview' | 'full') => React.ReactNode
   // 该过程组是否为整条消息的末尾项：是则流式中保留最后一段为正常显示，
   // 否则（最终答案已作为后续兄弟块外置）整组统一弱化。
   isMessageTail?: boolean
-  children: React.ReactNode
 }
 
 const MAX_PROCESS_GROUP_ICONS = 4
+export const MAX_EXPANDED_PROCESS_BLOCKS = 10
 const PROCESS_GROUP_COLLAPSE_DURATION_MS = 500
 const PROCESS_GROUP_AUTO_COLLAPSE_SOUND_DELAY_MS = 900
 const PROCESS_GROUP_AUTO_COLLAPSE_COUNTDOWN_SECONDS = 3
@@ -31,7 +33,10 @@ interface IndexedContentBlock {
 
 export type AssistantTurnRenderItem =
   | { type: 'block'; item: IndexedContentBlock }
-  | { type: 'process-group'; items: IndexedContentBlock[] }
+  | {
+      type: 'process-group'
+      items: IndexedContentBlock[]
+    }
 
 interface BuildAssistantTurnRenderItemsOptions {
   isStreaming?: boolean
@@ -103,25 +108,18 @@ export function buildAssistantTurnRenderItems(
     && areToolsBeforeIndexCompleted(blocks, trailingTextStartIndex, options.completedToolResultIds)
 
   if (options.isStreaming && hasProcessBlock && !canSplitStreamingFinalOutput) {
-    return [{
-      type: 'process-group',
-      items: blocks.map((block, index) => ({ block, index })),
-    }]
+    return buildProcessGroupItems(blocks)
   }
 
   if (trailingTextStartIndex === null) {
-    return [{
-      type: 'process-group',
-      items: blocks.map((block, index) => ({ block, index })),
-    }]
+    return buildProcessGroupItems(blocks)
   }
 
   const items: AssistantTurnRenderItem[] = []
   if (trailingTextStartIndex > 0) {
-    items.push({
-      type: 'process-group',
-      items: blocks.slice(0, trailingTextStartIndex).map((block, index) => ({ block, index })),
-    })
+    items.push(...buildProcessGroupItems(
+      blocks.slice(0, trailingTextStartIndex),
+    ))
   }
 
   for (let index = trailingTextStartIndex; index < blocks.length; index++) {
@@ -131,6 +129,13 @@ export function buildAssistantTurnRenderItems(
   }
 
   return items
+}
+
+function buildProcessGroupItems(blocks: SDKContentBlock[]): AssistantTurnRenderItem[] {
+  return [{
+    type: 'process-group',
+    items: blocks.map((block, index) => ({ block, index })),
+  }]
 }
 
 function buildProcessGroupSummary(blocks: SDKContentBlock[]): string {
@@ -167,16 +172,35 @@ export function buildProcessGroupToolNames(blocks: SDKContentBlock[]): string[] 
   return toolNames
 }
 
-export function ProcessBlockGroup({ blocks, isStreaming, isMessageTail = false, children }: ProcessBlockGroupProps): React.ReactElement {
-  const shouldExpandByDefault = !!isStreaming
-  const [expanded, setExpanded] = React.useState(shouldExpandByDefault)
-  const [shouldRenderContent, setShouldRenderContent] = React.useState(shouldExpandByDefault)
+type ProcessGroupDisplayMode = 'collapsed' | 'partial' | 'expanded'
+
+export function ProcessBlockGroup({ blocks, isStreaming, renderChildren, isMessageTail = false }: ProcessBlockGroupProps): React.ReactElement {
+  const hasStreamingPreview = !!isStreaming && blocks.length > MAX_EXPANDED_PROCESS_BLOCKS
+  const initialDisplayMode: ProcessGroupDisplayMode = !isStreaming
+    ? 'collapsed'
+    : hasStreamingPreview
+      ? 'partial'
+      : 'expanded'
+  const [displayMode, setDisplayMode] = React.useState<ProcessGroupDisplayMode>(initialDisplayMode)
+  const [shouldRenderContent, setShouldRenderContent] = React.useState(initialDisplayMode !== 'collapsed')
   const [collapseCountdown, setCollapseCountdown] = React.useState<number | null>(null)
   const userToggledRef = React.useRef(false)
   const wasStreamingRef = React.useRef(!!isStreaming)
   const autoCollapseTimersRef = React.useRef<number[]>([])
   const contentRef = React.useRef<HTMLDivElement>(null)
   const [measuredHeight, setMeasuredHeight] = React.useState<number | undefined>(undefined)
+
+  const isPreviewMode = displayMode === 'partial' && !!isStreaming && hasStreamingPreview
+  const isContentExpanded = displayMode !== 'collapsed'
+  const renderMode = isPreviewMode ? 'preview' : 'full'
+  const collapsingRenderModeRef = React.useRef<'preview' | 'full'>(renderMode)
+  if (isContentExpanded) {
+    collapsingRenderModeRef.current = renderMode
+  }
+  const shouldShowContent = isContentExpanded || shouldRenderContent
+  const visibleChildren = shouldShowContent
+    ? renderChildren(isContentExpanded ? renderMode : collapsingRenderModeRef.current)
+    : null
 
   const clearAutoCollapseTimers = React.useCallback(() => {
     for (const timer of autoCollapseTimersRef.current) window.clearTimeout(timer)
@@ -192,7 +216,7 @@ export function ProcessBlockGroup({ blocks, isStreaming, isMessageTail = false, 
         userToggledRef.current = false
       }
       if (!userToggledRef.current) {
-        setExpanded(true)
+        setDisplayMode(hasStreamingPreview ? 'partial' : 'expanded')
       }
       wasStreamingRef.current = !!isStreaming
       return
@@ -203,7 +227,7 @@ export function ProcessBlockGroup({ blocks, isStreaming, isMessageTail = false, 
 
     if (!shouldAutoCollapseAfterCompletion) {
       if (!userToggledRef.current) {
-        setExpanded(false)
+        setDisplayMode('collapsed')
       }
       return
     }
@@ -218,17 +242,17 @@ export function ProcessBlockGroup({ blocks, isStreaming, isMessageTail = false, 
 
       autoCollapseTimersRef.current.push(window.setTimeout(() => {
         setCollapseCountdown(null)
-        setExpanded(false)
+        setDisplayMode('collapsed')
       }, PROCESS_GROUP_AUTO_COLLAPSE_COUNTDOWN_SECONDS * 1000))
     }, PROCESS_GROUP_AUTO_COLLAPSE_SOUND_DELAY_MS)
     autoCollapseTimersRef.current.push(soundDelayTimer)
 
     return clearAutoCollapseTimers
-  }, [clearAutoCollapseTimers, isStreaming])
+  }, [clearAutoCollapseTimers, hasStreamingPreview, isStreaming])
 
   // 折叠前测量实际高度，用于丝滑的 height 过渡（子元素不 reflow，只裁剪边界）
   React.useEffect(() => {
-    if (expanded) {
+    if (isContentExpanded) {
       setShouldRenderContent(true)
       setMeasuredHeight(undefined)
       return
@@ -245,7 +269,7 @@ export function ProcessBlockGroup({ blocks, isStreaming, isMessageTail = false, 
 
     const timer = window.setTimeout(() => setShouldRenderContent(false), PROCESS_GROUP_COLLAPSE_DURATION_MS)
     return () => window.clearTimeout(timer)
-  }, [expanded])
+  }, [isContentExpanded])
 
   const summary = React.useMemo(
     () => buildProcessGroupSummary(blocks),
@@ -259,9 +283,9 @@ export function ProcessBlockGroup({ blocks, isStreaming, isMessageTail = false, 
   // - 流式中：每个新块有入场动画，最新一段（消息末尾过程组的最后一个 child）保持正常显示，
   //   其余步骤轻微弱化以引导视觉重心到最下方。
   // - 流式结束后用户展开：所有内容以正常颜色显示，无动画。
-  const childArray = React.Children.toArray(children)
-  const renderContentChildren = (): React.ReactNode =>
-    childArray.map((child, i) => {
+  const renderContentChildren = (): React.ReactNode => {
+    const childArray = React.Children.toArray(visibleChildren)
+    return childArray.map((child, i) => {
       const isLast = i === childArray.length - 1
       const dimmed = isStreaming && !(isMessageTail && isLast)
       return (
@@ -276,6 +300,7 @@ export function ProcessBlockGroup({ blocks, isStreaming, isMessageTail = false, 
         </div>
       )
     })
+  }
 
   return (
     <div className="space-y-1.5">
@@ -289,13 +314,20 @@ export function ProcessBlockGroup({ blocks, isStreaming, isMessageTail = false, 
           userToggledRef.current = true
           clearAutoCollapseTimers()
           setCollapseCountdown(null)
-          setExpanded((prev) => !prev)
+          setDisplayMode((previous) => {
+            if (hasStreamingPreview) {
+              if (previous === 'partial') return 'collapsed'
+              if (previous === 'collapsed') return 'expanded'
+              return 'collapsed'
+            }
+            return previous === 'collapsed' ? 'expanded' : 'collapsed'
+          })
         }}
       >
         <ChevronRight
           className={cn(
             'size-3 shrink-0 text-muted-foreground/40 transition-transform duration-150',
-            expanded && 'rotate-90',
+            isContentExpanded && 'rotate-90',
           )}
         />
         <span className="min-w-0 truncate text-[14px] text-muted-foreground">{summary}</span>
@@ -328,11 +360,11 @@ export function ProcessBlockGroup({ blocks, isStreaming, isMessageTail = false, 
       {shouldRenderContent && (
         <div
           ref={contentRef}
-          data-agent-history-selection-excluded={expanded ? undefined : 'true'}
+          data-agent-history-selection-excluded={isContentExpanded ? undefined : 'true'}
           className="overflow-hidden"
           style={{
             height: measuredHeight !== undefined ? `${measuredHeight}px` : 'auto',
-            opacity: expanded ? 1 : 0,
+            opacity: isContentExpanded ? 1 : 0,
             transition: measuredHeight !== undefined
               ? `height ${PROCESS_GROUP_COLLAPSE_DURATION_MS}ms ease-in-out, opacity ${PROCESS_GROUP_COLLAPSE_DURATION_MS}ms ease-in-out`
               : `opacity ${PROCESS_GROUP_COLLAPSE_DURATION_MS}ms ease-in-out`,
@@ -340,22 +372,9 @@ export function ProcessBlockGroup({ blocks, isStreaming, isMessageTail = false, 
         >
           <div className="space-y-2">
             {renderContentChildren()}
-            <button
-                type="button"
-                className="flex items-center gap-1 text-xs text-foreground/40 hover:text-foreground/70 transition-colors"
-                onClick={() => {
-                  userToggledRef.current = true
-                  clearAutoCollapseTimers()
-                  setCollapseCountdown(null)
-                  setExpanded(false)
-                }}
-              >
-                <ChevronRight className="size-3 -rotate-90" />
-                <span>收起</span>
-              </button>
-            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+    </div>
   )
 }
