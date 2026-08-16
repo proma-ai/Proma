@@ -23,7 +23,6 @@ import { ScrollMinimap } from '@/components/ai-elements/scroll-minimap'
 import type { MinimapItem } from '@/components/ai-elements/scroll-minimap'
 import { StickyUserMessage } from '@/components/ai-elements/sticky-user-message'
 import { useStickToBottomContext } from 'use-stick-to-bottom'
-import { useVirtualizer } from '@tanstack/react-virtual'
 import { formatMessageTime } from '@/components/chat/ChatMessageItem'
 import { resolveModelDisplayName } from '@/lib/model-logo'
 import { userProfileAtom } from '@/atoms/user-profile'
@@ -567,11 +566,9 @@ function AgentRunningIndicator({ startedAt }: { startedAt?: number }): React.Rea
 
 interface AgentTranscriptHistoryHandle {
   scrollToMessage: (messageId: string, onMounted?: (target: HTMLElement) => void) => void
-  getStickyUserMessageId: (scrollTop: number) => string | null
 }
 
 interface AgentTranscriptHistoryProps {
-  sessionId: string
   groups: MessageGroup[]
   liveGroupSet: ReadonlySet<MessageGroup>
   allMessages: SDKMessage[]
@@ -593,11 +590,10 @@ interface AgentTranscriptHistoryProps {
 }
 
 /**
- * 历史消息只挂载视口附近的 group；虚拟列表外保留当前 Conversation 的滚动容器，
- * 因此 ScrollMinimap、StickyUserMessage 和 ScrollPositionManager 仍然使用同一个 root。
+ * Agent 历史消息使用普通 DOM 列表，避免滚动期间反复挂载和测量重型消息组件。
+ * 历史 group 仍通过 message-group-rendering 缓存和 MessageGroupRenderer.memo 隔离更新。
  */
 const AgentTranscriptHistory = React.forwardRef<AgentTranscriptHistoryHandle, AgentTranscriptHistoryProps>(function AgentTranscriptHistory({
-  sessionId,
   groups,
   liveGroupSet,
   allMessages,
@@ -618,37 +614,12 @@ const AgentTranscriptHistory = React.forwardRef<AgentTranscriptHistoryHandle, Ag
   onCompact,
 }, ref): React.ReactElement {
   const { scrollRef, isAtBottom, stopScroll } = useStickToBottomContext()
-  const virtualizer = useVirtualizer({
-    count: groups.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => 160,
-    getItemKey: (index) => {
-      const group = groups[index]
-      return group ? getGroupId(group) : index
-    },
-    overscan: 6,
-    // measureElement 可能在 React commit 期间回调；避免默认 flushSync 触发 React 警告。
-    useFlushSync: false,
-  })
-  const virtualItems = virtualizer.getVirtualItems()
   const previousLayoutRef = React.useRef<{
     count: number
     firstGroupId: string | undefined
     scrollHeight: number
     isAtBottom: boolean
   } | null>(null)
-  const pendingNavigationFrameRef = React.useRef<number | null>(null)
-  const navigationGenerationRef = React.useRef(0)
-
-  React.useEffect(() => {
-    return () => {
-      navigationGenerationRef.current += 1
-      if (pendingNavigationFrameRef.current !== null) {
-        window.cancelAnimationFrame(pendingNavigationFrameRef.current)
-        pendingNavigationFrameRef.current = null
-      }
-    }
-  }, [sessionId])
 
   React.useLayoutEffect(() => {
     const element = scrollRef.current
@@ -680,110 +651,34 @@ const AgentTranscriptHistory = React.forwardRef<AgentTranscriptHistoryHandle, Ag
     [groups],
   )
 
-  const userGroupIndices = React.useMemo(() => (
-    groups.reduce<number[]>((indices, group, index) => {
-      if (group.type === 'user') indices.push(index)
-      return indices
-    }, [])
-  ), [groups])
-
   React.useImperativeHandle(ref, () => ({
     scrollToMessage: (messageId, onMounted) => {
-      const index = groups.findIndex((group) => getGroupId(group) === messageId)
-      if (index < 0) return
-      const generation = ++navigationGenerationRef.current
-      if (pendingNavigationFrameRef.current !== null) {
-        window.cancelAnimationFrame(pendingNavigationFrameRef.current)
-        pendingNavigationFrameRef.current = null
-      }
+      const target = Array.from(scrollRef.current?.querySelectorAll<HTMLElement>('[data-message-id]') ?? [])
+        .find((element) => element.dataset.messageId === messageId)
+      if (!target) return
+
       stopScroll()
-      virtualizer.scrollToIndex(index, { align: 'center', behavior: 'auto' })
-
-      if (!onMounted) return
-
-      // 目标行可能在远距离跳转后才挂载；持续等待挂载而不是依赖固定帧数。
-      let frame = 0
-      const waitForMounted = (): void => {
-        pendingNavigationFrameRef.current = null
-        if (navigationGenerationRef.current !== generation) return
-        frame += 1
-        const target = Array.from(scrollRef.current?.querySelectorAll<HTMLElement>('[data-message-id]') ?? [])
-          .find((element) => element.dataset.messageId === messageId)
-        if (target) {
-          onMounted(target)
-          return
-        }
-        if (frame < 120) {
-          pendingNavigationFrameRef.current = window.requestAnimationFrame(waitForMounted)
-        }
+      if (onMounted) {
+        onMounted(target)
+        return
       }
-      pendingNavigationFrameRef.current = window.requestAnimationFrame(waitForMounted)
+      target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
     },
-    getStickyUserMessageId: (scrollTop) => {
-      const measurements = virtualizer.measurementsCache
-      const scrollElement = scrollRef.current
-      const firstRow = scrollElement?.querySelector<HTMLElement>('[data-index]')
-      const virtualContent = firstRow?.parentElement
-      const contentOffset = scrollElement && virtualContent
-        ? virtualContent.getBoundingClientRect().top
-          - scrollElement.getBoundingClientRect().top
-          + scrollElement.scrollTop
-        : 0
-      let low = 0
-      let high = userGroupIndices.length - 1
-      let candidate = -1
-      while (low <= high) {
-        const middle = Math.floor((low + high) / 2)
-        const groupIndex = userGroupIndices[middle]!
-        const measurement = measurements[groupIndex]
-        if (measurement && measurement.end + contentOffset < scrollTop) {
-          candidate = middle
-          low = middle + 1
-        } else {
-          high = middle - 1
-        }
-      }
-      if (candidate < 0) return null
-
-      const groupIndex = userGroupIndices[candidate]!
-      let measurement = measurements[groupIndex]
-      let group = groups[groupIndex]
-      while (candidate >= 0 && (!measurement || !virtualizer.itemSizeCache.has(measurement.key))) {
-        candidate -= 1
-        if (candidate < 0) return null
-        const fallbackGroupIndex = userGroupIndices[candidate]!
-        measurement = measurements[fallbackGroupIndex]
-        group = groups[fallbackGroupIndex]
-      }
-      if (!measurement || !group) return null
-      return getGroupId(group)
-    },
-  }), [groups, scrollRef, stopScroll, userGroupIndices, virtualizer])
+  }), [scrollRef, stopScroll])
 
   return (
-    <div
-      className="relative w-full shrink-0"
-      style={{ height: virtualizer.getTotalSize() }}
-    >
-      {virtualItems.map((item) => {
-        const group = groups[item.index]
-        if (!group) return null
+    <div className="w-full shrink-0">
+      {groups.map((group, index) => {
         const isLive = liveGroupSet.has(group)
         const isErrorGroup = group.type === 'assistant-turn'
           && group.assistantMessages.some((message) => !!message.error)
         const shouldDisableActions = isLive && !isErrorGroup
         const isLastAssistantTurn = !streaming && stoppedByUser
           && group.type === 'assistant-turn'
-          && item.index === lastAssistantTurnIndex
+          && index === lastAssistantTurnIndex
 
         return (
-          <div
-            key={item.key}
-            ref={virtualizer.measureElement}
-            data-index={item.index}
-            className="absolute left-0 top-0 w-full pb-1"
-            style={{ transform: `translateY(${item.start}px)` }}
-          >
+          <div key={getGroupId(group)} className="w-full pb-1">
             <MessageGroupRenderer
               group={group}
               allMessages={group.type === 'assistant-turn' ? allMessages : EMPTY_SDK_MESSAGES}
@@ -838,7 +733,7 @@ export const AgentMessages = React.memo(function AgentMessages({
   const channels = useAtomValue(channelsAtom)
   const setMinimapCache = useSetAtom(tabMinimapCacheAtom)
   const historySelectionRootRef = React.useRef<HTMLDivElement>(null)
-  const historyVirtualizerRef = React.useRef<AgentTranscriptHistoryHandle>(null)
+  const historyRef = React.useRef<AgentTranscriptHistoryHandle>(null)
   const visibleGroupsRef = React.useRef<MessageGroup[]>([])
   const selectionHighlightUsesBrowserSelectionRef = React.useRef(false)
   const clearHistoryQuoteHighlight = React.useCallback((): void => {
@@ -904,7 +799,7 @@ export const AgentMessages = React.memo(function AgentMessages({
 
       const targetIndex = visibleGroupsRef.current.findIndex((group) => getGroupId(group) === messageId)
       if (targetIndex >= 0) {
-        historyVirtualizerRef.current?.scrollToMessage(messageId, applyNavigation)
+        historyRef.current?.scrollToMessage(messageId, applyNavigation)
         return
       }
 
@@ -1139,13 +1034,6 @@ export const AgentMessages = React.memo(function AgentMessages({
     return turns
   }, [visibleGroups])
 
-  const scrollToTranscriptMessage = React.useCallback((messageId: string): void => {
-    historyVirtualizerRef.current?.scrollToMessage(messageId)
-  }, [])
-  const getStickyTranscriptMessageId = React.useCallback((scrollTop: number): string | null => (
-    historyVirtualizerRef.current?.getStickyUserMessageId(scrollTop) ?? null
-  ), [])
-
   return (
     <BasePathsProvider basePaths={messageBasePaths}>
       <AgentBrowserLinkProvider sessionId={sessionId}>
@@ -1165,8 +1053,7 @@ export const AgentMessages = React.memo(function AgentMessages({
             <>
               {/* 统一消息渲染（持久化 + 实时合并为一个列表，确保 system 消息位置正确） */}
               <AgentTranscriptHistory
-                ref={historyVirtualizerRef}
-                sessionId={sessionId}
+                ref={historyRef}
                 groups={visibleGroups}
                 liveGroupSet={liveGroupSet}
                 allMessages={allSDKMessages}
@@ -1215,7 +1102,7 @@ export const AgentMessages = React.memo(function AgentMessages({
             </>
           )}
         </ConversationContent>
-        <ScrollMinimap items={minimapItems} onScrollToMessage={scrollToTranscriptMessage} />
+        <ScrollMinimap items={minimapItems} />
         <TaskProgressOverlay
           key={sessionId}
           activities={liveTaskActivities}
@@ -1225,8 +1112,6 @@ export const AgentMessages = React.memo(function AgentMessages({
         {allUserMessagesData.length > 0 && (
           <StickyUserMessage
             userMessages={allUserMessagesData}
-            getStickyMessageId={getStickyTranscriptMessageId}
-            onScrollToMessage={scrollToTranscriptMessage}
           />
         )}
           </Conversation>
