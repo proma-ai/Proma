@@ -53,6 +53,9 @@ export function MainArea(): React.ReactElement {
   // DiffTabContent → ProseMirror editor mount + Shiki tokenize）让出主线程，避免点击 tab
   // 后必须等主区域渲染完才能看到 tab 切换效果
   const deferredActiveTabId = React.useDeferredValue(activeTabId)
+  // Agent 历史当前是完整 DOM，切换时使用当前 active tab，避免 deferred value 让旧会话继续占屏。
+  // Chat/Preview 仍保留 deferred 渲染，避免它们的重型编辑器阻塞 TabBar 响应。
+  const contentTabId = activeTab?.type === 'agent' ? activeTabId : deferredActiveTabId
 
   const previewOpenMap = useAtomValue(previewPanelOpenMapAtom)
   const [browserOpenMap, setBrowserOpenMap] = useAtom(browserPanelOpenMapAtom)
@@ -275,9 +278,9 @@ export function MainArea(): React.ReactElement {
                   <AutomationFormView />
                 ) : tabs.length === 0 ? (
                   <WelcomeView />
-                ) : deferredActiveTabId ? (
+                ) : contentTabId ? (
                   <div className="flex-1 min-h-0 titlebar-no-drag">
-                    <TabContent tabId={deferredActiveTabId} />
+                    <TabContent tabId={contentTabId} />
                   </div>
                 ) : null}
               </>

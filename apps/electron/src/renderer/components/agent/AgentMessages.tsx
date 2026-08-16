@@ -860,19 +860,17 @@ export const AgentMessages = React.memo(function AgentMessages({
       selectionHighlightUsesBrowserSelectionRef.current = false
     }
   }, [])
-  /** 淡入控制：切换会话时先隐藏，等布局完成后再显示。 */
-  const [ready, setReady] = React.useState(false)
-  // 空会话无需淡入过渡（无消息则无滚动位置问题）
-  const [skipFadeIn, setSkipFadeIn] = React.useState(false)
-  const prevSessionIdRef = React.useRef<string | null>(null)
-
+  // 消息和布局恢复完成后才显示会话。隐藏期间不让用户看到 StickToBottom 初始化时
+  // 可能出现的临时底部位置；显示前 ScrollPositionManager 已经直接设置了 scrollTop。
+  const [readySessionId, setReadySessionId] = React.useState<string | null>(null)
   React.useEffect(() => {
-    if (sessionId !== prevSessionIdRef.current) {
-      prevSessionIdRef.current = sessionId
-      setReady(false)
-      setSkipFadeIn(false)
+    if (messagesLoaded === false) {
+      setReadySessionId(null)
+      return
     }
-  }, [sessionId])
+    setReadySessionId(sessionId)
+  }, [messagesLoaded, sessionId])
+  const ready = messagesLoaded !== false && readySessionId === sessionId
 
   React.useEffect(() => {
     const root = historySelectionRootRef.current
@@ -929,30 +927,6 @@ export const AgentMessages = React.memo(function AgentMessages({
     return () => window.cancelAnimationFrame(frame)
   }, [clearHistoryQuoteHighlight, historyQuoteNavigation, sessionId])
 
-  React.useEffect(() => {
-    if (ready) return
-
-    // 必须等消息加载完成，否则空 SDK 消息会被误判为空对话
-    if (messagesLoaded === false) return
-
-    // 流式进行中且有实时内容 → 跳过 fade 直接显示
-    if (streaming && liveMessages && liveMessages.length > 0) {
-      setReady(true)
-      return
-    }
-
-    if ((!persistedSDKMessages || persistedSDKMessages.length === 0) && !streaming) {
-      setSkipFadeIn(true)
-      setReady(true)
-      return
-    }
-    let cancelled = false
-    requestAnimationFrame(() => {
-      if (!cancelled) setReady(true)
-    })
-    return () => { cancelled = true }
-  }, [streaming, liveMessages, persistedSDKMessages, messagesLoaded])
-
   // 实时文本仅从 liveMessages 读取。AgentStreamState 只保留运行/控制状态，
   // 避免每个 sdk_delta 同时更新 transcript 和 legacy content 两条路径。
   const retrying = streamState?.retrying
@@ -963,38 +937,8 @@ export const AgentMessages = React.memo(function AgentMessages({
     : undefined
   const optimisticTime = startedAt ? formatMessageTime(startedAt) : undefined
 
-  /**
-   * 流式完成过渡：streaming 结束到持久化消息加载完成之间，
-   * 强制 resize="instant" 避免中间高度变化触发平滑滚动动画。
-   *
-   * 使用 render-phase 计算避免 useEffect 延迟一帧的问题：
-   * - streaming 变 false 的第一帧就能立即切到 instant，防止闪动
-   * - 后续通过 ref+timeout 延迟 150ms 才允许切回 smooth
-   */
-  const [transitioningCooldown, setTransitioningCooldown] = React.useState(false)
-  const wasStreamingRef = React.useRef(streaming)
-
-  // render-phase 判断：是否处于需要 instant resize 的过渡期
-  // liveMessages 非空说明持久化消息还没加载完（加载完后会清空 liveMessages）
-  const needsInstant = !streaming && liveMessages != null && liveMessages.length > 0
-
-  React.useEffect(() => {
-    // 刚从 streaming → not-streaming：启动 cooldown
-    if (wasStreamingRef.current && !streaming) {
-      setTransitioningCooldown(true)
-    }
-    wasStreamingRef.current = streaming
-  }, [streaming])
-
-  React.useEffect(() => {
-    if (needsInstant) return
-    // 过渡完成后延迟 150ms 才关闭 cooldown，给 StickToBottom 时间稳定
-    const timer = setTimeout(() => setTransitioningCooldown(false), 150)
-    return () => clearTimeout(timer)
-  }, [needsInstant])
-
-  const transitioning = needsInstant || transitioningCooldown
-
+  // Agent 消息区不使用 StickToBottom 的 smooth resize。切换会话、虚拟列表测量和
+  // 历史消息加载都必须立即定位，避免 ResizeObserver 触发滚动 spring 动画。
   // 合并持久化 + 实时 SDKMessage：同一 UUID 的 live 消息替换历史快照，避免
   // 历史会话快速续跑时 live atom 尚未清空而把同一 assistant 渲染两次。
   const allSDKMessages = React.useMemo(() => {
@@ -1166,7 +1110,7 @@ export const AgentMessages = React.memo(function AgentMessages({
           color: inherit;
         }
       `}</style>
-          <Conversation resize={ready && !transitioning ? 'smooth' : 'instant'} className={ready ? (skipFadeIn ? 'opacity-100' : 'opacity-100 transition-opacity duration-200') : 'opacity-0'}>
+          <Conversation resize="instant" className={ready ? 'opacity-100' : 'opacity-0'}>
         <ScrollPositionManager id={sessionId} ready={ready} />
         <ConversationContent>
           {!hasContent && !streaming ? (

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { createStore } from 'jotai/vanilla'
 import {
   agentSessionInputStreamStateAtomFamily,
+  agentSessionStreamingStateAtomFamily,
   agentStreamingStatesAtom,
   applyAgentEvent,
   clearAgentStreamError,
@@ -12,7 +13,6 @@ import {
 function createStreamState(overrides: Partial<AgentStreamState> = {}): AgentStreamState {
   return {
     running: true,
-    toolActivities: [],
     inputTokens: 180_000,
     outputTokens: 2_000,
     cacheReadTokens: 160_000,
@@ -148,10 +148,7 @@ describe('Agent 上下文压缩状态', () => {
     })
     expect(resumed.contextCompaction).toBeUndefined()
     expect(resumed.compactInFlight).toBe(false)
-    expect(resumed.toolActivities).toContainEqual(expect.objectContaining({
-      toolUseId: 'resume-task',
-      done: false,
-    }))
+    expect('toolActivities' in resumed).toBe(false)
   })
 
   test('given 压缩成功 when 当前流直接结束 then 保留终态反馈给短时完成提示', () => {
@@ -305,6 +302,41 @@ describe('Agent 流式错误状态', () => {
     expect(clearAgentStreamError(errors, 'retried-session')).toBe(errors)
   })
 })
+
+describe('Agent per-session 流式状态 family', () => {
+  test('given another session changes when the active family is subscribed then it does not notify', () => {
+    const store = createStore()
+    const activeAtom = agentSessionStreamingStateAtomFamily('active-session')
+    const otherAtom = agentSessionStreamingStateAtomFamily('other-session')
+    const activeState = createStreamState()
+    const otherState = createStreamState({ inputTokens: 20_000 })
+
+    store.set(activeAtom, activeState)
+    store.set(otherAtom, otherState)
+    store.get(activeAtom)
+
+    let notifications = 0
+    const unsubscribe = store.sub(activeAtom, () => {
+      notifications += 1
+    })
+
+    store.set(otherAtom, { ...otherState, inputTokens: 21_000 })
+
+    expect(notifications).toBe(0)
+    expect(store.get(agentStreamingStatesAtom).get('active-session')).toBe(activeState)
+    expect(store.get(agentStreamingStatesAtom).get('other-session')?.inputTokens).toBe(21_000)
+    unsubscribe()
+  })
+
+  test('given a session family update when the aggregate compatibility atom is read then it reflects the same state reference', () => {
+    const store = createStore()
+    const state = createStreamState({ running: true })
+    store.set(agentSessionStreamingStateAtomFamily('active-session'), state)
+
+    expect(store.get(agentStreamingStatesAtom)).toEqual(new Map([['active-session', state]]))
+  })
+})
+
 
 describe('Agent 输入流状态订阅隔离', () => {
   test('given usage changes in the active session when the input selector is subscribed then it does not notify', () => {

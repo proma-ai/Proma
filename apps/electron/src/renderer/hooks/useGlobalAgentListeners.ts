@@ -37,7 +37,6 @@ import {
   agentDefaultPermissionModeAtom,
   stoppedByUserSessionsAtom,
   agentPlanModeSessionsAtom,
-  finalizeStreamingActivities,
   currentAgentSessionIdAtom,
   currentAgentWorkspaceIdAtom,
   agentWorkspacesAtom,
@@ -1110,7 +1109,6 @@ export function useGlobalAgentListeners(): void {
               }
               const current: AgentStreamState = existing ?? {
                 running: true,
-                toolActivities: [],
                 model: undefined,
                 // 无 run 标识的历史事件才允许 fallback；带标识的 retry 必须已在上方匹配。
                 startedAt: undefined,
@@ -1491,7 +1489,6 @@ export function useGlobalAgentListeners(): void {
             // backgroundTasksPending=true → 进入/保持软空闲态（通道仍开着，handleSend 走注入路径）；
             // false → 真正结束，清除软空闲态，新消息回到新建 run 路径。
             backgroundWaiting: backgroundTasksPending,
-            ...finalizeStreamingActivities(current.toolActivities),
           })
           return map
         })
