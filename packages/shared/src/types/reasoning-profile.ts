@@ -40,8 +40,6 @@ export type ReasoningEncodingKind =
   | 'deepseek-output-effort'
   | 'openai-reasoning-effort'
   | 'zai-thinking-effort'
-  | 'zai-toggle'
-  | 'anthropic-manual'
 
 /** 每个产品等级映射为目标协议可接受的 effort 值。 */
 export type ReasoningEffortMap = Partial<Record<AgentThinkingLevel, string | null>>
@@ -89,14 +87,33 @@ export interface ResolveReasoningProfileInput {
 const DEEPSEEK_V4_LEVELS = ['off', 'low', 'high', 'xhigh', 'max'] as const satisfies readonly AgentThinkingLevel[]
 const K3_LEVELS = ['off', 'low', 'high', 'max'] as const satisfies readonly AgentThinkingLevel[]
 const GLM_52_LEVELS = ['off', 'high', 'max'] as const satisfies readonly AgentThinkingLevel[]
-const GLM_53_LEVELS = ['off', 'high'] as const satisfies readonly AgentThinkingLevel[]
-/** GLM-5.3 官方端点只支持思考开关，不接受 reasoning_effort；其余档位必须从 UI 隐藏。 */
-const GLM_53_THINKING_LEVEL_MAP: ReasoningEffortMap = {
+const GLM_53_LEVELS = ['off', 'low', 'medium', 'high', 'max'] as const satisfies readonly AgentThinkingLevel[]
+// Verified against open.bigmodel.cn 2026-08-17: /api/anthropic accepts adaptive
+// effort low/medium/high/max; /api/v1 (OpenAI Responses) accepts all five natively;
+// /api/paas/v4 only accepts low/high/max, so medium degrades to high there.
+const GLM_53_ANTHROPIC_EFFORT_MAP: ReasoningEffortMap = {
   minimal: null,
-  low: null,
-  medium: null,
-  xhigh: null,
-  max: null,
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'max',
+  max: 'max',
+}
+const GLM_53_OPENAI_EFFORT_MAP: ReasoningEffortMap = {
+  minimal: null,
+  low: 'low',
+  medium: 'high',
+  high: 'high',
+  xhigh: 'max',
+  max: 'max',
+}
+const GLM_53_RESPONSES_EFFORT_MAP: ReasoningEffortMap = {
+  minimal: 'minimal',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'max',
+  max: 'max',
 }
 const OPENAI_STANDARD_LEVELS = ['off', 'low', 'medium', 'high', 'xhigh'] as const satisfies readonly AgentThinkingLevel[]
 const OPENAI_MAX_LEVELS = [...OPENAI_STANDARD_LEVELS, 'max'] as const satisfies readonly AgentThinkingLevel[]
@@ -203,7 +220,10 @@ function normalizeGlm52Level(level: AgentThinkingLevel | undefined): AgentThinki
 }
 
 function normalizeGlm53Level(level: AgentThinkingLevel | undefined): AgentThinkingLevel {
-  return level === 'off' ? 'off' : 'high'
+  if (level === 'off') return 'off'
+  if (level === 'xhigh' || level === 'max') return 'max'
+  if (level === 'minimal') return 'low'
+  return level ?? 'high'
 }
 
 function normalizeOpenAIStandardLevel(level: AgentThinkingLevel | undefined): AgentThinkingLevel {
@@ -255,8 +275,9 @@ const GLM_53_PROFILE: ReasoningProfile = {
   defaultLevel: 'high',
   normalize: normalizeGlm53Level,
   encodings: {
-    'anthropic-messages': { kind: 'anthropic-manual', effortMap: GLM_53_THINKING_LEVEL_MAP },
-    'openai-completions': { kind: 'zai-toggle', effortMap: GLM_53_THINKING_LEVEL_MAP },
+    'anthropic-messages': { kind: 'adaptive-effort', effortMap: GLM_53_ANTHROPIC_EFFORT_MAP },
+    'openai-completions': { kind: 'zai-thinking-effort', effortMap: GLM_53_OPENAI_EFFORT_MAP },
+    'openai-responses': { kind: 'openai-reasoning-effort', effortMap: GLM_53_RESPONSES_EFFORT_MAP },
   },
 }
 
