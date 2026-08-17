@@ -50,7 +50,7 @@ import {
   agentDiffPanelTabAtom,
   agentNonGitFileChangesAtom,
   agentFileChangesCurrentRunAtom,
-  agentSidePanelOpenAtom,
+  agentSidePanelOpenAtomFamily,
   askUserDraftsAtom,
 } from '@/atoms/agent-atoms'
 import {
@@ -885,7 +885,7 @@ export function useGlobalAgentListeners(): void {
               && autoActivatedChangeTurns.get(sessionId) !== runId
             ) {
               autoActivatedChangeTurns.set(sessionId, runId)
-              store.set(agentSidePanelOpenAtom, true)
+              store.set(agentSidePanelOpenAtomFamily(sessionId), true)
               store.set(agentDiffPanelTabAtom, (prev) => {
                 const map = new Map(prev)
                 map.set(sessionId, 'changes')
@@ -1285,7 +1285,7 @@ export function useGlobalAgentListeners(): void {
                       && autoActivatedChangeTurns.get(sessionId) !== entry.runId
                     ) {
                       autoActivatedChangeTurns.set(sessionId, entry.runId)
-                      store.set(agentSidePanelOpenAtom, true)
+                      store.set(agentSidePanelOpenAtomFamily(sessionId), true)
                       store.set(agentDiffPanelTabAtom, (prev) => {
                         const m = new Map(prev)
                         m.set(sessionId, 'changes')
