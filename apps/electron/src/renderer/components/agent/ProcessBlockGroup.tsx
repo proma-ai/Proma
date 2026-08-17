@@ -28,6 +28,7 @@ const PROCESS_GROUP_LIVE_CHILD_WINDOW = 4
 const PROCESS_GROUP_COLLAPSE_DURATION_MS = 500
 const PROCESS_GROUP_AUTO_COLLAPSE_SOUND_DELAY_MS = 900
 const PROCESS_GROUP_AUTO_COLLAPSE_COUNTDOWN_SECONDS = 3
+const PROCESS_GROUP_FOLLOW_BOTTOM_THRESHOLD = 24
 const PROGRESS_SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '])
 
 interface IndexedContentBlock {
@@ -177,6 +178,14 @@ export function buildProcessGroupToolNames(blocks: SDKContentBlock[]): string[] 
 }
 
 type ProcessGroupDisplayMode = 'collapsed' | 'expanded'
+
+export function isProgressViewportAtBottom({
+  clientHeight,
+  scrollHeight,
+  scrollTop,
+}: Pick<HTMLElement, 'clientHeight' | 'scrollHeight' | 'scrollTop'>): boolean {
+  return scrollHeight - scrollTop - clientHeight <= PROCESS_GROUP_FOLLOW_BOTTOM_THRESHOLD
+}
 
 function getProcessChildKey(child: React.ReactNode, index: number): string {
   if (React.isValidElement(child) && child.key != null) return String(child.key)
@@ -347,12 +356,10 @@ export function ProcessBlockGroup({ blocks, isStreaming, renderChildren, isMessa
   }, [blocks, isStreaming, keepProgressViewport, scrollToLatest])
 
   const handleProgressScroll = React.useCallback((event: React.UIEvent<HTMLDivElement>): void => {
-    if (scrollFrameRef.current !== null) return
-    const { clientHeight, scrollHeight, scrollTop } = event.currentTarget
-    if (scrollHeight - scrollTop - clientHeight <= 24) {
-      followLatestRef.current = true
-    }
-  }, [])
+    if (!isProgressViewportAtBottom(event.currentTarget)) return
+    followLatestRef.current = true
+    scrollToLatest()
+  }, [scrollToLatest])
 
   const handleProgressScrollIntent = React.useCallback((): void => {
     smoothScrollTargetRef.current = null

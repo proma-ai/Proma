@@ -38,7 +38,7 @@ import { AgentBrowserLinkProvider } from '@/components/browser/AgentBrowserLinkP
 import { AgentHistorySelectionLayer } from './AgentHistorySelectionLayer'
 import { TaskProgressOverlay, type ContextCompactionProgress } from './TaskProgressOverlay'
 import { createMessageGroupRenderCache, groupMessagesForRendering } from './message-group-rendering'
-import type { AgentEventUsage, RetryAttempt, SDKMessage, SDKSystemMessage } from '@proma/shared'
+import type { AgentEventUsage, RetryAttempt, SDKAssistantMessage, SDKMessage, SDKSystemMessage } from '@proma/shared'
 import { getSDKCompactStatus } from '@proma/shared'
 import { agentLiveMessagesAtomFamily, agentSessionStreamingStateAtomFamily, type AgentStreamState } from '@/atoms/agent-atoms'
 import type { QuotedSelection } from '@/atoms/preview-atoms'
@@ -94,6 +94,14 @@ function getSDKMessageStableKey(message: SDKMessage): string {
 export function isCompactionControlHistoryGroup(group: MessageGroup): boolean {
   if (group.type === 'system') return getSDKCompactStatus(group.message) != null
   return group.type === 'user' && (extractUserText(group.message) ?? '').trim() === '/compact'
+}
+
+function hasRenderableAssistantMessage(message: SDKAssistantMessage): boolean {
+  return message.error != null || message.message.content.length > 0
+}
+
+export function hasRenderableAssistantTurnContent(group: MessageGroup): boolean {
+  return group.type === 'assistant-turn' && group.assistantMessages.some(hasRenderableAssistantMessage)
 }
 
 export function getContextCompactionProgress(
@@ -1112,13 +1120,14 @@ export const AgentMessages = React.memo(function AgentMessages({
       })
   }, [structuralGroups])
 
-  // 实时消息中是否已有可渲染的助手内容
-  // 流式中：通过 liveGroupSet 精确判断（只有 streaming 时 liveGroupSet 才非空）
-  // 流式结束后：直接检查 liveMessages 中是否有助手消息，
-  // 防止 streaming→false 到 liveMessages 被清除之间的过渡帧中 fallback 气泡重复渲染
+  // 只有 assistant turn 产生实际内容后，才把计时器从乐观消息壳迁移到历史区。
+  // Pi 会先推送空 assistant snapshot；若立即迁移，空消息头会把计时器下推，
+  // 直到首个过程/文本块到达才填补空白。
   const hasLiveAssistantContent = streaming
-    ? allGroups.some((g) => g.type === 'assistant-turn' && liveGroupSet.has(g))
-    : (liveMessages != null && liveMessages.some((m) => (m as { type: string }).type === 'assistant'))
+    ? allGroups.some((group) => liveGroupSet.has(group) && hasRenderableAssistantTurnContent(group))
+    : (liveMessages != null && liveMessages.some((message) => (
+      message.type === 'assistant' && hasRenderableAssistantMessage(message as SDKAssistantMessage)
+    )))
 
   const messageBasePaths = React.useMemo(
     () => [sessionPath, ...(attachedDirs ?? [])].filter((path): path is string => Boolean(path)),

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { SDKMessage } from '@proma/shared'
-import { getContextCompactionProgress, isCompactionControlHistoryGroup } from './AgentMessages'
+import { getContextCompactionProgress, hasRenderableAssistantTurnContent, isCompactionControlHistoryGroup } from './AgentMessages'
 import { shouldClearRetainedCompactionForResumedStream, shouldRestoreCompactionProgress } from './TaskProgressOverlay'
 
 function systemMessage(fields: Record<string, unknown>): SDKMessage {
@@ -12,6 +12,29 @@ function assistantMessage(): SDKMessage {
 }
 
 describe('context compaction progress overlay state', () => {
+  test('keeps the optimistic timer shell until a live assistant turn has visible content', () => {
+    const emptyTurn = {
+      type: 'assistant-turn',
+      assistantMessages: [{
+        type: 'assistant',
+        message: { content: [] },
+        parent_tool_use_id: null,
+      }],
+      turnMessages: [],
+    } as Parameters<typeof hasRenderableAssistantTurnContent>[0]
+    const contentTurn = {
+      ...emptyTurn,
+      assistantMessages: [{
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: '开始执行' }] },
+        parent_tool_use_id: null,
+      }],
+    } as Parameters<typeof hasRenderableAssistantTurnContent>[0]
+
+    expect(hasRenderableAssistantTurnContent(emptyTurn)).toBe(false)
+    expect(hasRenderableAssistantTurnContent(contentTurn)).toBe(true)
+  })
+
   test('hides /compact control messages from conversation history', () => {
     expect(isCompactionControlHistoryGroup({
       type: 'user',
