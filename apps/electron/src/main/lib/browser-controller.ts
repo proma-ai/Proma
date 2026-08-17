@@ -1,6 +1,6 @@
 import { app, BrowserWindow, WebContentsView, session as electronSession, type DownloadItem, type Session, type WebContents } from 'electron'
 import path from 'node:path'
-import type { BrowserExecutionSource, BrowserOperationStatus, BrowserTraceAction, BrowserTraceItem, BrowserViewLayout, BrowserViewState, BrowserTabState } from '@proma/shared'
+import type { BrowserExecutionSource, BrowserOperationStatus, BrowserSessionClosed, BrowserTraceAction, BrowserTraceItem, BrowserViewLayout, BrowserViewState, BrowserTabState } from '@proma/shared'
 import { AGENT_IPC_CHANNELS } from '@proma/shared'
 import { assertSafeBrowserDestination, assertSafeBrowserDownloadUrl, assertSafeBrowserUrl, isSupportedBrowserPopupUrl, isTransientBrowserPopupUrl } from './browser-policy'
 import { createAuthorizedPreviewUrl, isAuthorizedPreviewProtocol } from './browser-preview-service'
@@ -241,6 +241,12 @@ export class BrowserController {
     if (this.sessions.get(browserSession.sessionId) !== browserSession) return
     if (browserSession.tabs.size === 0 || !browserSession.tabs.has(browserSession.activeTabId)) return
     this.owner.webContents.send(AGENT_IPC_CHANNELS.BROWSER_STATE_CHANGED, this.buildState(browserSession))
+  }
+
+  private emitClosed(sessionId: string): void {
+    if (!this.owner || this.owner.isDestroyed()) return
+    const change: BrowserSessionClosed = { sessionId, closed: true }
+    this.owner.webContents.send(AGENT_IPC_CHANNELS.BROWSER_STATE_CHANGED, change)
   }
 
   private buildState(browserSession: BrowserSessionRecord): BrowserViewState {
@@ -959,6 +965,8 @@ export class BrowserController {
     this.disposeTab(browserSession, tab)
     if (browserSession.tabs.size === 0) {
       this.sessions.delete(sessionId)
+      if (this.presentation?.sessionId === sessionId) this.presentation = null
+      this.emitClosed(sessionId)
       return null
     }
     this.repairTabSelection(browserSession, tab.tabId)
@@ -1345,7 +1353,10 @@ export class BrowserController {
 
   async close(sessionId: string): Promise<void> {
     const browserSession = this.sessions.get(sessionId)
-    if (!browserSession) return
+    if (!browserSession) {
+      this.emitClosed(sessionId)
+      return
+    }
     this.sessions.delete(sessionId)
     if (this.presentation?.sessionId === sessionId) this.presentation = null
     for (const tab of browserSession.tabs.values()) {
@@ -1355,6 +1366,7 @@ export class BrowserController {
       if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close()
     }
     browserSession.tabs.clear()
+    this.emitClosed(sessionId)
   }
 
   dispose(): void {

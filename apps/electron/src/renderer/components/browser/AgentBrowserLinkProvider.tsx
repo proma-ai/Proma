@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useSetAtom } from 'jotai'
-import type { BrowserViewState } from '@proma/shared'
+import type { BrowserStateChange, BrowserViewState } from '@proma/shared'
 import { BROWSER_RISK_DISCLAIMER_VERSION } from '@/types/settings'
 import {
   browserPanelOpenMapAtom,
@@ -34,7 +34,13 @@ export function AgentBrowserLinkProvider({
   const setBrowserStateMap = useSetAtom(browserStateMapAtom)
   const setPendingNavigationMap = useSetAtom(browserPendingNavigationMapAtom)
 
-  const publishBrowserState = React.useCallback((state: BrowserViewState) => {
+  const publishBrowserState = React.useCallback((state: BrowserStateChange) => {
+    if ('closed' in state) {
+      setBrowserOpenMap((previous) => { const next = new Map(previous); next.set(state.sessionId, false); return next })
+      setBrowserStateMap((previous) => { const next = new Map(previous); next.delete(state.sessionId); return next })
+      setPendingNavigationMap((previous) => { const next = new Map(previous); next.delete(state.sessionId); return next })
+      return
+    }
     setBrowserStateMap((previous) => {
       const next = new Map(previous)
       next.set(state.sessionId, state)
@@ -45,7 +51,7 @@ export function AgentBrowserLinkProvider({
       next.set(state.sessionId, true)
       return next
     })
-  }, [setBrowserOpenMap, setBrowserStateMap])
+  }, [setBrowserOpenMap, setBrowserStateMap, setPendingNavigationMap])
 
   const openLink = React.useCallback((url: string) => {
     const openBrowser = (window.electronAPI as Partial<typeof window.electronAPI>).openAgentBrowser

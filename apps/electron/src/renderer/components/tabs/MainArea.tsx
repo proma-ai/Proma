@@ -7,7 +7,7 @@
  */
 
 import * as React from 'react'
-import type { BrowserViewState } from '@proma/shared'
+import type { BrowserStateChange, BrowserViewState } from '@proma/shared'
 import { useAtomValue, useSetAtom, useAtom, useStore } from 'jotai'
 import {
   tabsAtom,
@@ -67,10 +67,16 @@ export function MainArea(): React.ReactElement {
   const rightWorkspaceDragging = React.useRef(false)
   const browserSessionId = activeTab?.type === 'agent' ? activeTab.sessionId : null
 
-  const publishBrowserState = React.useCallback((state: BrowserViewState) => {
+  const publishBrowserState = React.useCallback((state: BrowserStateChange) => {
+    if ('closed' in state) {
+      setBrowserOpenMap((previous) => { const next = new Map(previous); next.set(state.sessionId, false); return next })
+      setBrowserStateMap((previous) => { const next = new Map(previous); next.delete(state.sessionId); return next })
+      setPendingNavigationMap((previous) => { const next = new Map(previous); next.delete(state.sessionId); return next })
+      return
+    }
     setBrowserStateMap((previous) => { const next = new Map(previous); next.set(state.sessionId, state); return next })
     setBrowserOpenMap((previous) => { const next = new Map(previous); next.set(state.sessionId, true); return next })
-  }, [setBrowserOpenMap, setBrowserStateMap])
+  }, [setBrowserOpenMap, setBrowserStateMap, setPendingNavigationMap])
 
   React.useEffect(() => {
     // Vite renderer 可在 preload 热重载前先更新；旧 bridge 时浏览器功能不可用，
