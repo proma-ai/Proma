@@ -1084,7 +1084,7 @@ function buildBrowserTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefiniti
     sdk.defineTool({
       name: 'BrowserClose',
       label: '关闭受管浏览器',
-      description: 'Close every tab in the current in-app browser session and hide its browser panel. Use only when the user explicitly asks to close the browser interface.',
+      description: 'Close every tab in the current in-app browser session and hide its browser panel.',
       parameters: Type.Object({}),
       async execute() {
         await browserController.close(ctx.sessionId)

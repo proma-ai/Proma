@@ -62,7 +62,6 @@ import { buildReferencedPlanningPrompt } from './planning-reference-context'
 import { permissionService } from './agent-permission-service'
 import type { PermissionResult, CanUseToolOptions } from './agent-permission-service'
 import { resolvePlanningDeletionPermission } from './planning-permission-policy'
-import { resolveBrowserClosePermission } from './browser-close-permission-policy'
 import { askUserService } from './agent-ask-user-service'
 import { exitPlanService, type ExitPlanPermissionResult } from './agent-exit-plan-service'
 import { validateToolInput } from './agent-tool-input-validator'
@@ -1287,15 +1286,6 @@ export class AgentOrchestrator {
             return PLAN_MODE_READ_ONLY_BROWSER_TOOLS.has(toolName)
               ? { behavior: 'allow' as const, updatedInput: input }
               : { behavior: 'deny' as const, message: '计划模式下只能观察受管浏览器，请在计划获批后再进行网页交互。' }
-          }
-          const browserClosePermission = resolveBrowserClosePermission(toolName, runTriggeredBy)
-          if (browserClosePermission === 'deny-unattended') {
-            return { behavior: 'deny' as const, message: '自动任务和协作子 Agent 不能关闭受管浏览器，请由用户主会话发起并确认。' }
-          }
-          if (browserClosePermission === 'require-single-approval') {
-            return permissionService.requestSingleApproval(sessionId, toolName, input, options, (request) => {
-              this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'permission_request', request } })
-            })
           }
           return { behavior: 'allow' as const, updatedInput: input }
         }
