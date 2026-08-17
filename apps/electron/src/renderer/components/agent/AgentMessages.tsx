@@ -110,6 +110,10 @@ export function hasRenderableAssistantTurnContent(group: MessageGroup): boolean 
   return group.type === 'assistant-turn' && group.assistantMessages.some(hasRenderableAssistantMessage)
 }
 
+export function shouldRenderLiveAssistantTurn(group: MessageGroup, isLive: boolean): boolean {
+  return !isLive || group.type !== 'assistant-turn' || hasRenderableAssistantTurnContent(group)
+}
+
 export function getContextCompactionProgress(
   messages: SDKMessage[],
   isCompacting: boolean | undefined,
@@ -1051,10 +1055,26 @@ export const AgentMessages = React.memo(function AgentMessages({
     messageGroupCacheRef.current = result.cache
     return result.groups
   }, [allSDKMessages, sessionModelId, streaming])
+  // 标记哪些 group 属于实时流式消息（用于 isStreaming / onFork 差异化渲染）。
+  // 该集合必须先于 visibleGroups 计算，让空 assistant snapshot 能在真正渲染前被过滤。
+  const liveGroupSet = React.useMemo(() => {
+    return buildLiveGroupSet({
+      allGroups,
+      liveMessages,
+      streaming,
+      activeRunStartedAt: streamState?.startedAt,
+    })
+  }, [allGroups, liveMessages, streaming, streamState?.startedAt])
+
   // 压缩过程由底部 Progress Overlay 独立承载，不占用对话历史、迷你地图或用户锚点。
+  // Pi 的 text_start/thinking_start 会产生没有可见 DOM 的空内容块；过滤掉对应的 live turn，
+  // 直到有实际内容时再交给 transcript 渲染，避免与乐观计时器壳重复显示 assistant header。
   const visibleGroups = React.useMemo(
-    () => allGroups.filter((group) => !isCompactionControlHistoryGroup(group)),
-    [allGroups],
+    () => allGroups.filter((group) => (
+      !isCompactionControlHistoryGroup(group)
+      && shouldRenderLiveAssistantTurn(group, liveGroupSet.has(group))
+    )),
+    [allGroups, liveGroupSet],
   )
   visibleGroupsRef.current = visibleGroups
 
@@ -1074,16 +1094,6 @@ export const AgentMessages = React.memo(function AgentMessages({
     structuralGroupsRef.current = visibleGroups
   }
   const structuralGroups = structuralGroupsRef.current
-
-  // 标记哪些 group 属于实时流式消息（用于 isStreaming / onFork 差异化渲染）
-  const liveGroupSet = React.useMemo(() => {
-    return buildLiveGroupSet({
-      allGroups,
-      liveMessages,
-      streaming,
-      activeRunStartedAt: streamState?.startedAt,
-    })
-  }, [allGroups, liveMessages, streaming, streamState?.startedAt])
 
   // 迷你地图数据 — 只依赖结构快照，流式 token 不触发 getGroupPreview 正则
   const minimapItems: MinimapItem[] = React.useMemo(
