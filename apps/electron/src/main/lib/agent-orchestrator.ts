@@ -663,6 +663,18 @@ export class AgentOrchestrator {
     let initialUserMessageUuid: string | undefined
     let sessionMeta = getAgentSessionMeta(sessionId)
 
+    const completeBeforeRun = (options: {
+      stoppedByUser?: boolean
+      startedAt?: number
+    } = {}): void => {
+      const stoppedByUser = this.stoppedBeforeRunSessions.delete(sessionId)
+      callbacks.onComplete([], {
+        ...options,
+        startedAt: options.startedAt ?? streamStartedAt,
+        stoppedByUser: options.stoppedByUser === true || stoppedByUser,
+      })
+    }
+
     const persistInitialUserMessage = (): void => {
       if (userMessagePersisted) return
       // rawUserMessage 保留展示/持久化用的原始文本（@file 编码原文，remarkMentions 解码显示）；
@@ -706,7 +718,7 @@ export class AgentOrchestrator {
         const message = error instanceof Error ? error.message : String(error)
         console.error('[Agent 编排] 持久化用户消息失败:', error)
         callbacks.onError(`消息保存失败：${message}`)
-        callbacks.onComplete([], { startedAt: streamStartedAt })
+        completeBeforeRun()
         return
       }
     }
@@ -738,7 +750,7 @@ export class AgentOrchestrator {
         console.error('[Agent 编排] 持久化 preflight error 失败:', e)
       }
       callbacks.onError(errorContent)
-      callbacks.onComplete([], { startedAt: streamStartedAt })
+      completeBeforeRun()
     }
 
     // 会话元数据是运行项目的权威来源。渲染端的当前项目只是导航状态，不能
@@ -862,8 +874,8 @@ export class AgentOrchestrator {
     // 2.1 立即抢占会话槽位（在所有同步检查通过后、第一个 await 之前）
     // 防止 buildSdkEnv 等 await 期间并发调用绕过上方的检查，导致多条重复消息写入 JSONL
     // finally 块会通过 generation 匹配来安全清理，不影响正常流程
-    if (this.stoppedBeforeRunSessions.delete(sessionId)) {
-      callbacks.onComplete([], { stoppedByUser: true, startedAt: streamStartedAt })
+    if (this.stoppedBeforeRunSessions.has(sessionId)) {
+      completeBeforeRun({ stoppedByUser: true })
       return
     }
     const runGeneration = ++this.nextRunGeneration
