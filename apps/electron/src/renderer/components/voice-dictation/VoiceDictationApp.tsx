@@ -187,21 +187,22 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
     const outputContextId = dictationOutputContextRef.current
     discardCurrentTranscript()
     if (!text) {
-      setStatus('idle')
       setMessage('没有识别到语音内容')
-      setDictationSource(null)
-      setDictationTarget(null)
-      setDictationOutputContext(null)
       cleanupAudio()
       if (asrSessionId) {
-        window.electronAPI.cancelVoiceDictation({
+        await window.electronAPI.cancelVoiceDictation({
           sessionId: asrSessionId,
           previewSessionId: dictationSessionId ?? undefined,
           targetInputId,
           outputContextId: outputContextId ?? undefined,
         }).catch(console.error)
       }
-      setTimeout(() => window.electronAPI.hideVoiceDictation().catch(console.error), 180)
+      // 主进程复位完成后再让按钮恢复 idle，避免下一次点击被旧会话吞掉。
+      await window.electronAPI.hideVoiceDictation().catch(console.error)
+      setStatus('idle')
+      setDictationSource(null)
+      setDictationTarget(null)
+      setDictationOutputContext(null)
       return
     }
 
@@ -214,6 +215,8 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
         targetInputId,
         outputContextId: outputContextId ?? undefined,
       })
+      // 先让主进程释放旧会话，再把按钮恢复为可开始状态。
+      await window.electronAPI.hideVoiceDictation().catch(console.error)
       setCommitResult(result)
       setStatus('completed')
       setMessage(result.message)
@@ -225,7 +228,6 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
       setDictationTarget(null)
       setDictationOutputContext(null)
       cleanupAudio()
-      setTimeout(() => window.electronAPI.hideVoiceDictation().catch(console.error), 280)
     } catch (error) {
       commitInFlightRef.current = false
       const textMessage = error instanceof Error ? error.message : '未知错误'

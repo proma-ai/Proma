@@ -23,6 +23,7 @@ export const SAFE_TOOLS: readonly string[] = [
   'BrowserNewTab',
   'BrowserSelectTab',
   'BrowserCloseTab',
+  'BrowserClose',
   'BrowserPreviewOpen',
   'TodoRead',        // Todo 列表读取
 

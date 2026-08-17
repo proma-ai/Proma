@@ -38,7 +38,7 @@ import { AgentBrowserLinkProvider } from '@/components/browser/AgentBrowserLinkP
 import { AgentHistorySelectionLayer } from './AgentHistorySelectionLayer'
 import { TaskProgressOverlay, type ContextCompactionProgress } from './TaskProgressOverlay'
 import { createMessageGroupRenderCache, groupMessagesForRendering } from './message-group-rendering'
-import type { AgentEventUsage, RetryAttempt, SDKMessage, SDKSystemMessage } from '@proma/shared'
+import type { AgentEventUsage, RetryAttempt, SDKAssistantMessage, SDKMessage, SDKSystemMessage, SDKTextBlock, SDKThinkingBlock } from '@proma/shared'
 import { getSDKCompactStatus } from '@proma/shared'
 import { agentLiveMessagesAtomFamily, agentSessionChannelMapAtom, agentSessionStreamingStateAtomFamily, type AgentStreamState } from '@/atoms/agent-atoms'
 import type { QuotedSelection } from '@/atoms/preview-atoms'
@@ -94,6 +94,24 @@ function getSDKMessageStableKey(message: SDKMessage): string {
 export function isCompactionControlHistoryGroup(group: MessageGroup): boolean {
   if (group.type === 'system') return getSDKCompactStatus(group.message) != null
   return group.type === 'user' && (extractUserText(group.message) ?? '').trim() === '/compact'
+}
+
+function hasRenderableAssistantMessage(message: SDKAssistantMessage): boolean {
+  if (message.error != null) return true
+
+  return message.message.content.some((block) => {
+    if (block.type === 'text') return Boolean((block as SDKTextBlock).text)
+    if (block.type === 'thinking') return Boolean((block as SDKThinkingBlock).thinking)
+    return true
+  })
+}
+
+export function hasRenderableAssistantTurnContent(group: MessageGroup): boolean {
+  return group.type === 'assistant-turn' && group.assistantMessages.some(hasRenderableAssistantMessage)
+}
+
+export function shouldRenderLiveAssistantTurn(group: MessageGroup, isLive: boolean): boolean {
+  return !isLive || group.type !== 'assistant-turn' || hasRenderableAssistantTurnContent(group)
 }
 
 export function getContextCompactionProgress(
@@ -1054,10 +1072,26 @@ export const AgentMessages = React.memo(function AgentMessages({
     messageGroupCacheRef.current = result.cache
     return result.groups
   }, [allSDKMessages, sessionModelId, streaming])
+  // 标记哪些 group 属于实时流式消息（用于 isStreaming / onFork 差异化渲染）。
+  // 该集合必须先于 visibleGroups 计算，让空 assistant snapshot 能在真正渲染前被过滤。
+  const liveGroupSet = React.useMemo(() => {
+    return buildLiveGroupSet({
+      allGroups,
+      liveMessages,
+      streaming,
+      activeRunStartedAt: streamState?.startedAt,
+    })
+  }, [allGroups, liveMessages, streaming, streamState?.startedAt])
+
   // 压缩过程由底部 Progress Overlay 独立承载，不占用对话历史、迷你地图或用户锚点。
+  // Pi 的 text_start/thinking_start 会产生没有可见 DOM 的空内容块；过滤掉对应的 live turn，
+  // 直到有实际内容时再交给 transcript 渲染，避免与乐观计时器壳重复显示 assistant header。
   const visibleGroups = React.useMemo(
-    () => allGroups.filter((group) => !isCompactionControlHistoryGroup(group)),
-    [allGroups],
+    () => allGroups.filter((group) => (
+      !isCompactionControlHistoryGroup(group)
+      && shouldRenderLiveAssistantTurn(group, liveGroupSet.has(group))
+    )),
+    [allGroups, liveGroupSet],
   )
   visibleGroupsRef.current = visibleGroups
 
@@ -1077,16 +1111,6 @@ export const AgentMessages = React.memo(function AgentMessages({
     structuralGroupsRef.current = visibleGroups
   }
   const structuralGroups = structuralGroupsRef.current
-
-  // 标记哪些 group 属于实时流式消息（用于 isStreaming / onFork 差异化渲染）
-  const liveGroupSet = React.useMemo(() => {
-    return buildLiveGroupSet({
-      allGroups,
-      liveMessages,
-      streaming,
-      activeRunStartedAt: streamState?.startedAt,
-    })
-  }, [allGroups, liveMessages, streaming, streamState?.startedAt])
 
   // 迷你地图数据 — 只依赖结构快照，流式 token 不触发 getGroupPreview 正则
   const minimapItems: MinimapItem[] = React.useMemo(
@@ -1129,13 +1153,14 @@ export const AgentMessages = React.memo(function AgentMessages({
       })
   }, [structuralGroups])
 
-  // 实时消息中是否已有可渲染的助手内容
-  // 流式中：通过 liveGroupSet 精确判断（只有 streaming 时 liveGroupSet 才非空）
-  // 流式结束后：直接检查 liveMessages 中是否有助手消息，
-  // 防止 streaming→false 到 liveMessages 被清除之间的过渡帧中 fallback 气泡重复渲染
+  // 只有 assistant turn 产生实际内容后，才把计时器从乐观消息壳迁移到历史区。
+  // Pi 会先推送空 assistant snapshot；若立即迁移，空消息头会把计时器下推，
+  // 直到首个过程/文本块到达才填补空白。
   const hasLiveAssistantContent = streaming
-    ? allGroups.some((g) => g.type === 'assistant-turn' && liveGroupSet.has(g))
-    : (liveMessages != null && liveMessages.some((m) => (m as { type: string }).type === 'assistant'))
+    ? allGroups.some((group) => liveGroupSet.has(group) && hasRenderableAssistantTurnContent(group))
+    : (liveMessages != null && liveMessages.some((message) => (
+      message.type === 'assistant' && hasRenderableAssistantMessage(message as SDKAssistantMessage)
+    )))
 
   const messageBasePaths = React.useMemo(
     () => [sessionPath, ...(attachedDirs ?? [])].filter((path): path is string => Boolean(path)),
