@@ -24,7 +24,6 @@ import {
   allPendingAskUserRequestsAtom,
   agentStreamingStatesAtom,
   askUserDraftsAtom,
-  finalizeStreamingActivities,
   type AskUserQuestionDraft,
   type AskUserRequestDraft,
 } from '@/atoms/agent-atoms'
@@ -152,7 +151,6 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
       map.set(sessionId, {
         ...current,
         running: false,
-        ...finalizeStreamingActivities(current.toolActivities),
       })
       return map
     })

@@ -235,7 +235,11 @@ export interface SDKAssistantMessage {
   isReplay?: boolean
   /** 渠道配置的模型 ID，持久化/流式期间注入，用于正确匹配模型显示名 */
   _channelModelId?: string
-  /** 产生此消息的渠道 ID；用于在同名模型跨渠道时恢复精确展示信息。 */
+  /**
+   * 产生该消息的渠道 ID，持久化/流式期间注入。
+   * 多渠道同名模型时，显示名与 Logo 必须靠它归属到正确渠道，
+   * 否则官方渠道的模型别名/折扣文案会被错配到第三方渠道的同名模型上。
+   */
   _channelId?: string
   /** 渠道 provider，用于按 Agent SDK 实际运行窗口计算压缩阈值 */
   _channelProvider?: ProviderType
@@ -300,8 +304,6 @@ export interface SDKResultMessage {
   skill_activations?: SkillActivation[]
   /** 渠道配置的模型 ID，用于缺失 modelUsage.contextWindow 时按 Agent SDK 运行窗口兜底 */
   _channelModelId?: string
-  /** 产生此消息的渠道 ID；用于在同名模型跨渠道时恢复精确展示信息。 */
-  _channelId?: string
   /** 渠道 provider，用于按 Agent SDK 实际运行窗口计算压缩阈值 */
   _channelProvider?: ProviderType
 }
@@ -641,7 +643,7 @@ export type PromaEvent =
   | { type: 'context_window'; contextWindow: number }
   | { type: 'permission_mode_changed'; mode: PromaPermissionMode }
   | { type: 'title_updated'; title: string }
-  | { type: 'external_run_started'; source: AgentExternalRunSource; sessionId: string; title?: string; workspaceId?: string; modelId?: string; channelId?: string; startedAt: number; session?: AgentSessionMeta }
+  | { type: 'external_run_started'; source: AgentExternalRunSource; sessionId: string; title?: string; workspaceId?: string; modelId?: string; startedAt: number; session?: AgentSessionMeta }
   /** 普通桌面会话已开始执行；startedAt 用于区分同一会话的连续运行。 */
   | { type: 'run_started'; startedAt: number }
   | { type: 'run_resumed'; sessionId: string }
@@ -655,9 +657,38 @@ export type PromaEvent =
 /** 外部入口触发 Agent 运行的来源 */
 export type AgentExternalRunSource = 'feishu' | 'dingtalk' | 'wechat' | 'bridge' | 'delegation'
 
-/** IPC 传输的统一 payload（替代 AgentEvent） */
+/** Pi AssistantMessageEvent 的可序列化增量；不携带累计 partial，避免跨进程复制整段输出。 */
+export type AgentAssistantDelta =
+  | { type: 'start' }
+  | { type: 'text_start'; contentIndex: number }
+  | { type: 'text_delta'; contentIndex: number; delta: string }
+  | { type: 'text_end'; contentIndex: number; content: string }
+  | { type: 'thinking_start'; contentIndex: number }
+  | { type: 'thinking_delta'; contentIndex: number; delta: string }
+  | { type: 'thinking_end'; contentIndex: number; content: string }
+  | { type: 'toolcall_start'; contentIndex: number; toolCall?: AgentToolCallDelta }
+  | { type: 'toolcall_delta'; contentIndex: number; delta: string; toolCall?: AgentToolCallDelta }
+  | { type: 'toolcall_end'; contentIndex: number; toolCall: AgentToolCallDelta }
+
+export interface AgentToolCallDelta {
+  id: string
+  name: string
+  arguments?: Record<string, unknown>
+}
+
+export interface AgentAssistantDeltaPayload {
+  uuid: string
+  deltas: AgentAssistantDelta[]
+  session_id?: string
+  /** 产生该 Delta 的 Agent run 起始时间；仅存在于运行时 payload，不写入 JSONL。 */
+  runStartedAt?: number
+  _channelModelId?: string
+}
+
+/** SDK 消息与 AgentAssistantDeltaPayload 分离，Delta 只存在于运行时，不写入 JSONL。 */
 export type AgentStreamPayload =
   | { kind: 'sdk_message'; message: SDKMessage }
+  | { kind: 'sdk_delta'; delta: AgentAssistantDeltaPayload }
   | { kind: 'proma_event'; event: PromaEvent }
 
 // ===== Agent 会话管理 =====
@@ -1229,6 +1260,8 @@ export interface AgentSendInput {
   userMessage: string
   /** 仅用于持久化/展示的原始用户输入（保留 @file 编码原文，省略时回退到 userMessage） */
   rawUserMessage?: string
+  /** 预分配的用户消息 UUID，用于将主进程持久化消息与渲染端乐观消息去重。 */
+  userMessageUuid?: string
   /** 渠道 ID（用于获取 API Key） */
   channelId: string
   /** 模型 ID */
@@ -1261,6 +1294,11 @@ export interface AgentSendInput {
 
 // ===== Agent 队列消息 =====
 
+/** 等待当前 run 结束后由主进程启动的消息。 */
+export interface AgentDeferredQueueMessageInput extends AgentSendInput {
+  queueMessageId: string
+}
+
 /** 流式追加消息的输入参数（Agent 流式中发送新消息） */
 export interface AgentQueueMessageInput {
   /** 会话 ID */
@@ -1287,6 +1325,27 @@ export interface AgentQueueMessageInput {
   mentionedTodoIds?: string[]
   /** 用户通过 &calendar_event:xxx 引用的日程 ID 列表 */
   mentionedCalendarEventIds?: string[]
+}
+
+export interface AgentQueuedMessageControlInput {
+  sessionId: string
+  messageId: string
+}
+
+export interface AgentMoveQueuedMessageInput {
+  sessionId: string
+  sourceId: string
+  targetId: string
+  placement: 'before' | 'after'
+}
+
+export interface AgentQueuedMessageStatus {
+  sessionId: string
+  messageId: string
+  status: 'started'
+  userMessage: string
+  rawUserMessage?: string
+  startedAt: number
 }
 
 // ===== 会话迁移输入 =====
@@ -1382,13 +1441,15 @@ export interface AgentStreamEvent {
 }
 
 /**
- * Agent 流式完成事件载荷（主进程 → 渲染进程）。
- * 消息已在主进程落盘；renderer 收到完成事件后自行按页刷新，避免传输整段历史。
+ * Agent 流式完成事件载荷（主进程 → 渲染进程）
+ * 包含已持久化的消息列表，避免异步重新加载的竞态窗口。
  */
 export interface AgentStreamCompletePayload {
   sessionId: string
   /** 触发来源：用于区分顶层会话与父 Agent 委派的子会话完成 */
   triggeredBy?: AgentSendInput['triggeredBy']
+  /** 已持久化的完整消息列表 */
+  messages?: AgentMessage[]
   /** 是否由用户手动中止 */
   stoppedByUser?: boolean
   /** 本轮流式开始时间戳（用于区分新旧流，防止旧流的 complete 事件重置新流状态） */
@@ -1698,16 +1759,16 @@ export const AGENT_IPC_CHANNELS = {
   // 会话管理
   /** 获取会话列表 */
   LIST_SESSIONS: 'agent:list-sessions',
-  /** 按 ID 获取单条会话元数据（启动恢复归档 Tab 时使用） */
-  GET_SESSION_META: 'agent:get-session-meta',
-  /** 获取活跃/归档会话的数量，不传输完整元数据 */
-  GET_SESSION_COUNTS: 'agent:get-session-counts',
+  /** 获取未归档会话列表，供左侧 active 视图使用 */
+  LIST_ACTIVE_SESSIONS: 'agent:list-active-sessions',
+  /** 获取归档会话列表，进入归档视图时按需调用 */
+  LIST_ARCHIVED_SESSIONS: 'agent:list-archived-sessions',
+  /** 获取归档会话数量，不返回归档元数据 */
+  COUNT_ARCHIVED_SESSIONS: 'agent:count-archived-sessions',
   /** 创建会话 */
   CREATE_SESSION: 'agent:create-session',
   /** 获取会话 SDKMessage（Phase 4 新格式） */
   GET_SDK_MESSAGES: 'agent:get-sdk-messages',
-  /** 分页获取会话尾部 SDKMessage，避免长历史一次性进入 renderer */
-  GET_SDK_MESSAGES_PAGE: 'agent:get-sdk-messages-page',
   /** 更新会话标题 */
   UPDATE_TITLE: 'agent:update-title',
   /** 更新会话模型选择 */
@@ -1974,10 +2035,14 @@ export const AGENT_IPC_CHANNELS = {
   EXIT_PLAN_MODE_RESPOND: 'agent:exit-plan-mode:respond',
 
   // 队列消息（Agent 运行中排队发送）
-  /** 排队发送消息 */
+  /** 流式追加发送消息 */
   QUEUE_MESSAGE: 'agent:queue-message',
+  /** 排队发送消息（主进程 deferred queue） */
+  ENQUEUE_QUEUED_MESSAGE: 'agent:enqueue-queued-message',
   /** 取消队列消息 */
   CANCEL_QUEUED_MESSAGE: 'agent:cancel-queued-message',
+  /** 调整队列顺序 */
+  MOVE_QUEUED_MESSAGE: 'agent:move-queued-message',
   /** 提升队列消息为立即发送 */
   PROMOTE_QUEUED_MESSAGE: 'agent:promote-queued-message',
   /** 队列消息状态变更通知（主进程 → 渲染进程推送） */

@@ -39,11 +39,21 @@ export function VirtualSidebarList({
     overscan,
   })
   const items = virtualizer.getVirtualItems()
+  const lastAutoScrolledRowIdRef = React.useRef<string | null>(null)
 
   React.useEffect(() => {
-    if (!activeRowId) return
+    if (!activeRowId) {
+      lastAutoScrolledRowIdRef.current = null
+      return
+    }
+    // 列表行会因状态更新或归档加载重建；这些变化不应打断用户手动滚动。
+    if (lastAutoScrolledRowIdRef.current === activeRowId) return
+
     const index = rows.findIndex((row) => row.id === activeRowId)
-    if (index >= 0) virtualizer.scrollToIndex(index, { align: 'auto', behavior: 'smooth' })
+    if (index < 0) return
+
+    lastAutoScrolledRowIdRef.current = activeRowId
+    virtualizer.scrollToIndex(index, { align: 'auto', behavior: 'auto' })
   }, [activeRowId, rows, virtualizer])
 
   return (

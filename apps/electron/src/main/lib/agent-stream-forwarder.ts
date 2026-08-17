@@ -18,15 +18,16 @@ export interface AgentStreamForwarderOptions {
 }
 
 function isPartialAssistantPayload(payload: AgentStreamPayload): boolean {
+  if (payload.kind === 'sdk_delta') return true
   return payload.kind === 'sdk_message'
     && (payload.message as SDKMessage & { _partial?: unknown })._partial === true
 }
 
 /**
- * 在 main → renderer 边界合并 Pi 的累计 partial 消息。
+ * 在 main → renderer 边界合并 Pi 的原生 Delta。
  *
- * 前台会话保持 20fps，后台会话降为 4fps；终态消息直接发送并丢弃旧 partial，
- * 从而不会在 final 后倒灌一个过期快照。
+ * 前台会话保持 20fps，后台会话降为 4fps；终态消息直接发送，并在发送前 flush
+ * 尚未交付的 Delta，保证高频增量不会被中间状态事件覆盖。
  */
 export class AgentStreamForwarder {
   private readonly pending = new Map<string, PendingPartial>()
@@ -48,6 +49,8 @@ export class AgentStreamForwarder {
   ): void {
     const { sessionId, payload } = event
     if (!isPartialAssistantPayload(payload)) {
+      // 保持 Delta 与紧随其后的终态/状态事件顺序，避免 permission 或 result 抢掉待发送 Delta。
+      if (this.pending.has(sessionId)) this.emit(sessionId)
       this.clear(sessionId)
       send(event)
       return
@@ -55,9 +58,33 @@ export class AgentStreamForwarder {
 
     const existing = this.pending.get(sessionId)
     if (existing) {
-      existing.event = event
-      existing.send = send
-      return
+      if (
+        existing.event.payload.kind === 'sdk_delta'
+        && payload.kind === 'sdk_delta'
+        && existing.event.payload.delta.uuid === payload.delta.uuid
+        && existing.event.payload.delta.runStartedAt === payload.delta.runStartedAt
+      ) {
+        const current = existing.event.payload.delta
+        existing.event = {
+          ...event,
+          payload: {
+            kind: 'sdk_delta',
+            delta: {
+              ...payload.delta,
+              deltas: [...current.deltas, ...payload.delta.deltas],
+            },
+          },
+        }
+        existing.send = send
+        return
+      }
+      if (existing.event.payload.kind === 'sdk_delta') {
+        this.emit(sessionId)
+      } else {
+        existing.event = event
+        existing.send = send
+        return
+      }
     }
 
     const pending: PendingPartial = { event, send }

@@ -178,7 +178,7 @@ export function WorkspaceSelector(): React.ReactElement {
       await window.electronAPI.deleteAgentWorkspace(deleteTargetId)
       const [remaining, sessions] = await Promise.all([
         window.electronAPI.listAgentWorkspaces(),
-        window.electronAPI.listAgentSessions(),
+        window.electronAPI.listActiveAgentSessions(),
       ])
       setWorkspaces(remaining)
       setAgentSessions(sessions)

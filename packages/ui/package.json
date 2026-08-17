@@ -1,6 +1,6 @@
 {
   "name": "@proma/ui",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "license": "AGPL-3.0-only",
   "description": "Shared UI components for proma",
   "type": "module",

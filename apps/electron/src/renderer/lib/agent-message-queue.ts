@@ -1,3 +1,4 @@
+import type { AgentStreamState } from '@/atoms/agent-atoms'
 import type { QuotedSelection } from '@/atoms/preview-atoms'
 import {
   buildAgentHistoryQuoteLabel,
@@ -67,6 +68,20 @@ export function createAgentQueuedMessage(
   if (options?.attachments && options.attachments.length > 0) message.attachments = options.attachments
   if (options?.additionalDirectories && options.additionalDirectories.length > 0) message.additionalDirectories = options.additionalDirectories
   return message
+}
+
+export function createQueuedAgentStreamState(
+  previous: Pick<AgentStreamState, 'model' | 'inputTokens' | 'contextWindow'> | undefined,
+  startedAt: number,
+): AgentStreamState {
+  return {
+    running: true,
+    backgroundWaiting: false,
+    model: previous?.model,
+    startedAt,
+    inputTokens: previous?.inputTokens,
+    contextWindow: previous?.contextWindow,
+  }
 }
 
 export function removeQueuedMessage(

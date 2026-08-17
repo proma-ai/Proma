@@ -28,6 +28,7 @@ function stateWithTools(tools: ToolEntry[], terminal: RunState['terminal']): Run
     blocks: tools.map((entry) => ({ kind: 'tool', tool: entry })),
     reasoning: { content: '', active: false },
     partialAssistantSnapshots: {},
+    deltaAssistantUuids: {},
     footer: terminal === 'running' ? 'tool_running' : null,
     terminal,
     startedAt: Date.now(),

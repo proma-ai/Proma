@@ -7,13 +7,30 @@ export interface AgentStreamEventBatcherOptions {
 }
 
 function isPartialAssistantEvent(event: AgentStreamEvent): boolean {
-  return event.payload.kind === 'sdk_message'
-    && (event.payload.message as Record<string, unknown>)._partial === true
+  return event.payload.kind === 'sdk_delta'
+    || (event.payload.kind === 'sdk_message'
+      && (event.payload.message as Record<string, unknown>)._partial === true)
+}
+
+function mergePendingEvents(current: AgentStreamEvent, next: AgentStreamEvent): AgentStreamEvent {
+  if (current.payload.kind !== 'sdk_delta' || next.payload.kind !== 'sdk_delta') return next
+  if (current.payload.delta.uuid !== next.payload.delta.uuid) return next
+  if (current.payload.delta.runStartedAt !== next.payload.delta.runStartedAt) return next
+  return {
+    ...next,
+    payload: {
+      kind: 'sdk_delta',
+      delta: {
+        ...next.payload.delta,
+        deltas: [...current.payload.delta.deltas, ...next.payload.delta.deltas],
+      },
+    },
+  }
 }
 
 /**
- * renderer 每帧最多处理每个会话的一条 partial；非 partial 直接通过并替换等待中的快照。
- * 这样后台流即使抵达同一帧，也不会在主线程重复执行 live/legacy 两套状态归约。
+ * renderer 每帧最多处理每个会话的一组 Delta；非 Delta 会先交付尚未发送的增量。
+ * 这样后台流即使抵达同一帧，也不会丢失 token 或覆盖状态事件顺序。
  */
 export function createAgentStreamEventBatcher(options: AgentStreamEventBatcherOptions) {
   const pending = new Map<string, AgentStreamEvent>()
@@ -31,11 +48,25 @@ export function createAgentStreamEventBatcher(options: AgentStreamEventBatcherOp
   return {
     push(event: AgentStreamEvent): void {
       if (!isPartialAssistantEvent(event)) {
-        pending.delete(event.sessionId)
+        const existing = pending.get(event.sessionId)
+        if (existing) {
+          pending.delete(event.sessionId)
+          options.dispatch(existing)
+        }
         options.dispatch(event)
         return
       }
-      pending.set(event.sessionId, event)
+      const existing = pending.get(event.sessionId)
+      if (
+        existing?.payload.kind === 'sdk_delta'
+        && (event.payload.kind !== 'sdk_delta'
+          || existing.payload.delta.uuid !== event.payload.delta.uuid
+          || existing.payload.delta.runStartedAt !== event.payload.delta.runStartedAt)
+      ) {
+        pending.delete(event.sessionId)
+        options.dispatch(existing)
+      }
+      pending.set(event.sessionId, existing ? mergePendingEvents(existing, event) : event)
       if (frame === null) frame = requestFrame(flush)
     },
     clear(sessionId: string): void {

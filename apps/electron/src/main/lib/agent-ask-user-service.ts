@@ -62,8 +62,6 @@ export class AgentAskUserService {
       toolInput: input,
     }
 
-    sendToRenderer(request)
-
     return new Promise<PermissionResult>((resolve) => {
       this.pendingRequests.set(request.requestId, { resolve, request })
 
@@ -73,6 +71,9 @@ export class AgentAskUserService {
           resolve({ behavior: 'deny', message: '操作已中止' })
         }
       }, { once: true })
+
+      // 先登记再通知，避免事件监听方同步提交答案时找不到 pending request。
+      sendToRenderer(request)
     })
   }
 

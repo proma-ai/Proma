@@ -12,7 +12,7 @@ export const SAFE_TOOLS: readonly string[] = [
   'Grep',            // 内容搜索
   'WebSearch',       // 网络搜索
   'WebFetch',        // 网页获取
-  // Pi 受管浏览器：网页隔离、私网/下载/弹窗/权限已在主进程策略层拦截。
+  // Pi 受管浏览器：网页隔离、下载与弹窗策略已在主进程处理，网页权限默认拒绝。
   'BrowserObserve',
   'BrowserNavigate',
   'BrowserClick',

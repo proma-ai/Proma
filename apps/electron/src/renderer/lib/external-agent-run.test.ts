@@ -20,7 +20,6 @@ describe('外部 Agent 运行激活', () => {
       sessionId: session.id,
       startedAt: 100,
       modelId: 'claude-sonnet-4-6',
-      channelId: 'channel-runtime',
     })
 
     expect(result.tabs).toEqual([
@@ -31,24 +30,16 @@ describe('外部 Agent 运行激活', () => {
     expect(result.streamState).toMatchObject({
       running: true,
       model: 'claude-sonnet-4-6',
-      channelId: 'channel-runtime',
       startedAt: 100,
     })
   })
 
-  test('Given 会话标签已存在 When 再次收到外部运行开始事件 Then 复用原标签并保留已有工具活动', () => {
+  test('Given 会话标签已存在 When 再次收到外部运行开始事件 Then 复用原标签并保留已有流状态', () => {
     const tabs: ExternalAgentRunTab[] = [
       { id: session.id, type: 'agent', sessionId: session.id, title: session.title },
     ]
     const currentStreamState = {
       running: true,
-      content: '已有输出',
-      toolActivities: [{
-        toolUseId: 'tool-1',
-        toolName: 'Bash',
-        input: {},
-        done: false,
-      }],
       model: 'old-model',
     }
 
@@ -62,8 +53,7 @@ describe('外部 Agent 运行激活', () => {
 
     expect(result.tabs).toBe(tabs)
     expect(result.activeTabId).toBe(session.id)
-    expect(result.streamState.toolActivities).toBe(currentStreamState.toolActivities)
-    expect(result.streamState.content).toBe('已有输出')
+    expect(result.streamState.model).toBe('old-model')
     expect(result.streamState.startedAt).toBe(200)
   })
 
@@ -104,8 +94,6 @@ describe('外部 Agent 运行激活', () => {
   test('Given the same run has already completed When a delayed start event arrives Then keep it terminal', () => {
     expect(shouldActivateExternalAgentRun({
       running: false,
-      content: 'completed',
-      toolActivities: [],
       startedAt: 500,
     }, 500)).toBeFalse()
   })
@@ -113,8 +101,6 @@ describe('外部 Agent 运行激活', () => {
   test('Given a newer run is active When an older start event arrives Then ignore the old event', () => {
     expect(shouldActivateExternalAgentRun({
       running: true,
-      content: 'newer run',
-      toolActivities: [],
       startedAt: 700,
     }, 600)).toBeFalse()
   })
@@ -128,8 +114,6 @@ describe('外部 Agent 运行激活', () => {
     })
 
     expect(result.streamState.running).toBe(true)
-    expect(result.streamState.content).toBe('')
-    expect(result.streamState.toolActivities).toEqual([])
     expect(result.streamState.model).toBeUndefined()
     expect(result.streamState.startedAt).toBe(400)
   })

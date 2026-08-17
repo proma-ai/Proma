@@ -22,7 +22,7 @@ import { DiffPanelTabBar } from '@/components/diff/DiffPanelTabBar'
 import { DiffChangesList } from '@/components/diff/DiffChangesList'
 import { ChatView } from '@/components/chat/ChatView'
 import {
-  agentSidePanelOpenAtom,
+  currentSessionSidePanelOpenAtom,
   agentFileSourceFilterMapAtom,
   workspaceFilesVersionAtom,
   currentAgentWorkspaceIdAtom,
@@ -73,8 +73,8 @@ interface SidePanelProps {
 }
 
 export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, width = 280 }: SidePanelProps): React.ReactElement {
-  // per-session 侧面板状态（默认打开）
-  const [isOpen, setIsOpen] = useAtom(agentSidePanelOpenAtom)
+  // 侧面板状态按 sessionId 持久化，切换会话不会互相覆盖。
+  const [isOpen, setIsOpen] = useAtom(currentSessionSidePanelOpenAtom)
   const isWindows = React.useMemo(() => detectIsWindows(), [])
 
   // Tab 系统

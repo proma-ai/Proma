@@ -214,9 +214,8 @@ export function convertPiMessage(
   message: AgentMessage,
   sessionId: string,
   channelModelId?: string,
-  options: { final?: boolean; uuid?: string } = {},
+  options: { uuid?: string } = {},
 ): SDKMessage | null {
-  const final = options.final ?? true
   if (!message || typeof message !== 'object' || !('role' in message)) return null
 
   if (message.role === 'user') {
@@ -228,26 +227,21 @@ export function convertPiMessage(
       },
       parent_tool_use_id: null,
       session_id: sessionId,
-      ...(final && { uuid: options.uuid ?? randomUUID() }),
+      uuid: options.uuid ?? randomUUID(),
     } as unknown as SDKMessage
   }
 
   if (message.role === 'assistant') {
     const assistant = message as AssistantMessage
-    // 只有 stopReason === 'error' 时才把 errorMessage 提升为终态 error 字段。
-    // - 'aborted' 属于用户/系统主动中断，不是失败，弹「服务繁忙 + 重试」在语义上完全错误。
-    // - 'stop' / 'length' / 'toolUse' 即使带 errorMessage 也只是 provider 中途抖动，
-    //   Pi SDK 认定本轮已成功，不应在渲染层误导用户。
-    // 上述非终态情况的 errorMessage 只写主进程 console，供开发排查；用户侧完全无感知。
-    // Pi 可能先用预览帧报告 error，随后通过同一 transcript 原生重试；
-    // 在最终帧到达前不能把它展示成用户可见的终态失败。
-    const isTerminalError = final && assistant.stopReason === 'error'
+    // 只有 stopReason === 'error' 才把 errorMessage 提升为终态 error 字段；
+    // 其它终态即使带 errorMessage 也只记录日志，避免误报失败。
+    const isTerminalError = assistant.stopReason === 'error'
     const errorType = assistant.errorMessage && isMalformedResponseError(assistant.errorMessage)
       ? 'service_error'
       : assistant.errorMessage && isTransientNetworkError(assistant.errorMessage)
         ? 'network_error'
         : 'provider_error'
-    if (assistant.errorMessage && !isTerminalError && final) {
+    if (assistant.errorMessage && !isTerminalError) {
       console.warn(
         `[pi-adapter] 忽略非终态 errorMessage（stopReason=${assistant.stopReason}）: ${assistant.errorMessage}`,
       )
@@ -263,9 +257,7 @@ export function convertPiMessage(
               type: 'tool_use',
               id: block.id,
               name: displayToolName(block.name, block.arguments as Record<string, unknown>),
-              // Pi 的 toolcall_delta 每帧携带累计 arguments。大 Write content 会随每个 token
-              // 反复穿过 IPC、Jotai 和 React；预览帧只需保留工具身份，最终帧再提供完整 input。
-              input: final ? normalizeToolUseInput(block.name, block.arguments as Record<string, unknown>) : {},
+              input: normalizeToolUseInput(block.name, block.arguments as Record<string, unknown>),
             }
           }
           return block as unknown as Record<string, unknown>
@@ -277,7 +269,6 @@ export function convertPiMessage(
       parent_tool_use_id: null,
       session_id: sessionId,
       uuid: options.uuid ?? randomUUID(),
-      ...(!final && { _partial: true }),
       ...(assistant.errorMessage && isTerminalError && {
         error: { message: assistant.errorMessage, errorType },
       }),

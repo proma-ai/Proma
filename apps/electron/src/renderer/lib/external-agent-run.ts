@@ -15,8 +15,6 @@ export interface ExternalAgentRunActivationInput {
   title?: string
   workspaceId?: string
   modelId?: string
-  /** 实际启动本轮的渠道；可能与 session metadata 不同。 */
-  channelId?: string
   startedAt: number
   currentStreamState?: AgentStreamState
 }
@@ -64,10 +62,7 @@ export function buildExternalAgentRunActivation(
     streamState: {
       ...input.currentStreamState,
       running: true,
-      content: input.currentStreamState?.content ?? '',
-      toolActivities: input.currentStreamState?.toolActivities ?? [],
       model: input.modelId ?? input.currentStreamState?.model,
-      channelId: input.channelId ?? input.currentStreamState?.channelId,
       startedAt: input.startedAt,
     },
   }

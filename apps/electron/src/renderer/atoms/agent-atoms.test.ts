@@ -1,11 +1,18 @@
 import { describe, expect, test } from 'bun:test'
-import { applyAgentEvent, clearAgentStreamError, isRetryEventForCurrentStream, type AgentStreamState } from './agent-atoms'
+import { createStore } from 'jotai/vanilla'
+import {
+  agentSessionInputStreamStateAtomFamily,
+  agentSessionStreamingStateAtomFamily,
+  agentStreamingStatesAtom,
+  applyAgentEvent,
+  clearAgentStreamError,
+  isRetryEventForCurrentStream,
+  type AgentStreamState,
+} from './agent-atoms'
 
 function createStreamState(overrides: Partial<AgentStreamState> = {}): AgentStreamState {
   return {
     running: true,
-    content: '',
-    toolActivities: [],
     inputTokens: 180_000,
     outputTokens: 2_000,
     cacheReadTokens: 160_000,
@@ -141,10 +148,7 @@ describe('Agent 上下文压缩状态', () => {
     })
     expect(resumed.contextCompaction).toBeUndefined()
     expect(resumed.compactInFlight).toBe(false)
-    expect(resumed.toolActivities).toContainEqual(expect.objectContaining({
-      toolUseId: 'resume-task',
-      done: false,
-    }))
+    expect('toolActivities' in resumed).toBe(false)
   })
 
   test('given 压缩成功 when 当前流直接结束 then 保留终态反馈给短时完成提示', () => {
@@ -215,7 +219,7 @@ describe('Agent retry 状态机', () => {
     expect(exhausted.retrying?.history[0]).toMatchObject({ attempt: 8, timestamp: 2_000, reason: '最终请求仍然失败' })
   })
 
-  test('given retry 成功 when 后续输出到达 then 成功状态被自然收起', () => {
+  test('given retry 成功 when 后续工具调用到达 then 成功状态被自然收起', () => {
     const running = applyAgentEvent(createStreamState({ startedAt: runStartedAt }), {
       type: 'retry_attempt',
       attemptData: retryAttempt,
@@ -230,7 +234,18 @@ describe('Agent retry 状态机', () => {
     })
 
     expect(succeeded.retrying?.phase).toBe('succeeded')
-    expect(applyAgentEvent(succeeded, { type: 'text_delta', text: '已恢复' }).retrying).toBeUndefined()
+    expect(applyAgentEvent(succeeded, {
+      type: 'tool_start',
+      toolName: 'Read',
+      toolUseId: 'resume-read',
+      input: {},
+    }).retrying).toBeUndefined()
+  })
+
+  test('given legacy text delta when the runtime reducer receives it then it does not duplicate the live transcript', () => {
+    const state = createStreamState()
+
+    expect(applyAgentEvent(state, { type: 'text_delta', text: '只由 live SDKMessage 渲染' })).toBe(state)
   })
 
   test('given 旧 run 的 retry 终态 when 新流已经开始 then 忽略迟到事件', () => {
@@ -285,5 +300,88 @@ describe('Agent 流式错误状态', () => {
     const errors = new Map([['failed-session', '认证失败']])
 
     expect(clearAgentStreamError(errors, 'retried-session')).toBe(errors)
+  })
+})
+
+describe('Agent per-session 流式状态 family', () => {
+  test('given another session changes when the active family is subscribed then it does not notify', () => {
+    const store = createStore()
+    const activeAtom = agentSessionStreamingStateAtomFamily('active-session')
+    const otherAtom = agentSessionStreamingStateAtomFamily('other-session')
+    const activeState = createStreamState()
+    const otherState = createStreamState({ inputTokens: 20_000 })
+
+    store.set(activeAtom, activeState)
+    store.set(otherAtom, otherState)
+    store.get(activeAtom)
+
+    let notifications = 0
+    const unsubscribe = store.sub(activeAtom, () => {
+      notifications += 1
+    })
+
+    store.set(otherAtom, { ...otherState, inputTokens: 21_000 })
+
+    expect(notifications).toBe(0)
+    expect(store.get(agentStreamingStatesAtom).get('active-session')).toBe(activeState)
+    expect(store.get(agentStreamingStatesAtom).get('other-session')?.inputTokens).toBe(21_000)
+    unsubscribe()
+  })
+
+  test('given a session family update when the aggregate compatibility atom is read then it reflects the same state reference', () => {
+    const store = createStore()
+    const state = createStreamState({ running: true })
+    store.set(agentSessionStreamingStateAtomFamily('active-session'), state)
+
+    expect(store.get(agentStreamingStatesAtom)).toEqual(new Map([['active-session', state]]))
+  })
+})
+
+
+describe('Agent 输入流状态订阅隔离', () => {
+  test('given usage changes in the active session when the input selector is subscribed then it does not notify', () => {
+    const store = createStore()
+    const inputStateAtom = agentSessionInputStreamStateAtomFamily('active-session')
+    const runningState = createStreamState({ inputTokens: 10_000 })
+    store.set(agentStreamingStatesAtom, new Map([['active-session', runningState]]))
+    store.get(inputStateAtom)
+
+    let notifications = 0
+    const unsubscribe = store.sub(inputStateAtom, () => {
+      notifications += 1
+    })
+
+    store.set(agentStreamingStatesAtom, new Map([[
+      'active-session',
+      { ...runningState, inputTokens: 12_000, outputTokens: 900 },
+    ]]))
+
+    expect(notifications).toBe(0)
+    unsubscribe()
+  })
+
+  test('given another session changes when the input selector is subscribed then it does not notify', () => {
+    const store = createStore()
+    const inputStateAtom = agentSessionInputStreamStateAtomFamily('active-session')
+    const activeState = createStreamState()
+    const otherState = createStreamState({ inputTokens: 20_000 })
+    store.set(agentStreamingStatesAtom, new Map([
+      ['active-session', activeState],
+      ['other-session', otherState],
+    ]))
+    store.get(inputStateAtom)
+
+    let notifications = 0
+    const unsubscribe = store.sub(inputStateAtom, () => {
+      notifications += 1
+    })
+
+    store.set(agentStreamingStatesAtom, new Map([
+      ['active-session', activeState],
+      ['other-session', { ...otherState, inputTokens: 21_000 }],
+    ]))
+
+    expect(notifications).toBe(0)
+    unsubscribe()
   })
 })

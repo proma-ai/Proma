@@ -13,6 +13,7 @@ const APP_OVERLAY_LIFECYCLE_SELECTOR = [
   '[role="dialog"]',
   '[role="alertdialog"]',
   '[data-sonner-toast]',
+  '[data-sonner-toaster]',
   '[data-radix-popper-content-wrapper]',
 ].join(', ')
 
@@ -28,23 +29,69 @@ function hasBlockingAppOverlay(): boolean {
     })
 }
 
-/** 只跟踪 portal/toast 生命周期，避免 Agent 流式渲染触发无意义的 layout IPC。 */
-function mutationsAffectAppOverlay(mutations: MutationRecord[]): boolean {
-  return mutations.some((mutation) => {
-    if (mutation.type === 'attributes') {
-      const target = mutation.target instanceof Element ? mutation.target : null
-      return !!target?.closest(APP_OVERLAY_LIFECYCLE_SELECTOR)
+function isAppOverlayElement(element: Element): boolean {
+  return element.matches(APP_OVERLAY_LIFECYCLE_SELECTOR)
+}
+
+function findAppOverlayElements(node: Node): Element[] {
+  if (!(node instanceof Element)) return []
+  const elements = isAppOverlayElement(node) ? [node] : []
+  return elements.concat(Array.from(node.querySelectorAll(APP_OVERLAY_LIFECYCLE_SELECTOR)))
+}
+
+/**
+ * 只跟踪 portal/toast 生命周期，避免 Agent 流式渲染触发无意义的 layout IPC。
+ *
+ * body 只监听直接子节点：Radix/Toast portal 都挂在这里，普通消息 DOM 的深层
+ * 更新不会进入 observer。识别出浮层根节点后，再把 attributes/subtree 监听限制
+ * 在该浮层内部，以便捕获 data-state 等开关变化。
+ */
+function observeAppOverlayLifecycle(onChange: () => void): () => void {
+  const overlayRoots = new Set<Element>()
+  const overlayObserver = new MutationObserver((mutations) => {
+    if (mutations.length > 0) onChange()
+  })
+  const bodyObserver = new MutationObserver((mutations) => {
+    let changed = false
+    for (const mutation of mutations) {
+      for (const node of [...mutation.addedNodes, ...mutation.removedNodes]) {
+        const overlayElements = findAppOverlayElements(node)
+        if (overlayElements.length > 0) changed = true
+        for (const element of overlayElements) overlayRoots.add(element)
+      }
+    }
+    syncOverlayRoots()
+    if (changed) onChange()
+  })
+
+  function syncOverlayRoots(): void {
+    for (const root of overlayRoots) {
+      if (!root.isConnected) overlayRoots.delete(root)
     }
 
-    const nodes = [...mutation.addedNodes, ...mutation.removedNodes]
-    if (nodes.some((node) => (
-      node instanceof Element
-      && (node.matches(APP_OVERLAY_LIFECYCLE_SELECTOR) || !!node.querySelector(APP_OVERLAY_LIFECYCLE_SELECTOR))
-    ))) return true
+    for (const root of Array.from(document.body.children)) {
+      for (const element of findAppOverlayElements(root)) overlayRoots.add(element)
+    }
 
-    const parent = mutation.target instanceof Element ? mutation.target : null
-    return !!parent?.closest(APP_OVERLAY_LIFECYCLE_SELECTOR)
-  })
+    overlayObserver.disconnect()
+    for (const root of overlayRoots) {
+      overlayObserver.observe(root, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['data-mounted', 'data-state', 'data-visible', 'role'],
+      })
+    }
+  }
+
+  syncOverlayRoots()
+  bodyObserver.observe(document.body, { childList: true })
+
+  return () => {
+    bodyObserver.disconnect()
+    overlayObserver.disconnect()
+    overlayRoots.clear()
+  }
 }
 
 export function BrowserSlot({ sessionId, tabId }: { sessionId: string; tabId: string }): React.ReactElement {
@@ -73,22 +120,14 @@ export function BrowserSlot({ sessionId, tabId }: { sessionId: string; tabId: st
     }
     const publishCurrentVisibility = () => publish(!hasBlockingAppOverlay())
     const observer = new ResizeObserver(publishCurrentVisibility)
-    const overlayObserver = new MutationObserver((mutations) => {
-      if (mutationsAffectAppOverlay(mutations)) publishCurrentVisibility()
-    })
+    const disconnectOverlayObserver = observeAppOverlayLifecycle(publishCurrentVisibility)
     const publishBounded = () => publishCurrentVisibility()
     observer.observe(element)
-    overlayObserver.observe(document.body, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ['class', 'data-mounted', 'data-state', 'data-visible', 'style'],
-    })
     window.addEventListener('resize', publishBounded)
     publishCurrentVisibility()
     return () => {
       observer.disconnect()
-      overlayObserver.disconnect()
+      disconnectOverlayObserver()
       window.removeEventListener('resize', publishBounded)
       if (frame) cancelAnimationFrame(frame)
       void setLayout({ sessionId, tabId, revision: nextBrowserLayoutRevision(), visible: false, bounds: { x: 0, y: 0, width: 0, height: 0 } })

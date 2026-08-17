@@ -2,7 +2,7 @@
  * Agent Provider 适配器接口
  *
  * 定义 Proma 自己的 Agent 接口层，让底层 SDK 可替换。
- * 当前实现：PiAgentAdapter 单 runtime。
+ * 当前实现：PiAgentAdapter（可选 in-process）与 PiUtilityAdapter（默认 per-session utility runtime）。
  */
 
 import type { SDKMessage } from './agent'

@@ -110,8 +110,6 @@ export interface TabMinimapItem {
   preview: string
   avatar?: string
   model?: string
-  /** Agent 历史消息的来源渠道，用于同名模型解析。 */
-  channelId?: string
 }
 export const tabMinimapCacheAtom = atom<Map<string, TabMinimapItem[]>>(new Map())
 

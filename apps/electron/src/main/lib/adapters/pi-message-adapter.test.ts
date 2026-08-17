@@ -25,21 +25,9 @@ function writeToolCall(content: string): AssistantMessage {
 }
 
 describe('convertPiMessage', () => {
-  test('omits cumulative write content from partial tool-call frames', () => {
-    const message = convertPiMessage(writeToolCall('x'.repeat(10_240)), 'session-1', undefined, {
-      final: false,
-      uuid: 'assistant-1',
-    }) as { _partial?: boolean; message: { content: Array<{ input?: unknown }> } }
-
-    expect(message._partial).toBe(true)
-    expect(message.message.content[0]?.input).toEqual({})
-    expect(JSON.stringify(message).length).toBeLessThan(1_000)
-  })
-
   test('keeps complete write input in the final tool-call frame', () => {
     const content = 'x'.repeat(10_240)
     const message = convertPiMessage(writeToolCall(content), 'session-1', undefined, {
-      final: true,
       uuid: 'assistant-1',
     }) as { message: { content: Array<{ input?: Record<string, unknown> }> } }
 
@@ -51,20 +39,16 @@ describe('convertPiMessage', () => {
     expect(JSON.stringify(message).length).toBeGreaterThan(content.length)
   })
 
-  test('only exposes terminal Pi errors in final frames', () => {
+  test('only exposes terminal Pi errors', () => {
     const providerError = 'Connection error. Failed to fetch'
-    const partialStop = convertPiMessage({
+    const nonTerminal = convertPiMessage({
       role: 'assistant', content: [], stopReason: 'stop', errorMessage: providerError,
     } as unknown as AssistantMessage, 'session-1') as { error?: unknown }
-    const retryPreview = convertPiMessage({
-      role: 'assistant', content: [], stopReason: 'error', errorMessage: providerError,
-    } as unknown as AssistantMessage, 'session-1', undefined, { final: false }) as { error?: unknown }
     const terminalError = convertPiMessage({
       role: 'assistant', content: [], stopReason: 'error', errorMessage: providerError,
     } as unknown as AssistantMessage, 'session-1') as { error?: { message?: string; errorType?: string } }
 
-    expect(partialStop.error).toBeUndefined()
-    expect(retryPreview.error).toBeUndefined()
+    expect(nonTerminal.error).toBeUndefined()
     expect(terminalError.error).toEqual({
       message: providerError,
       errorType: 'network_error',

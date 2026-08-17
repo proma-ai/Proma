@@ -523,7 +523,7 @@ export function AutomationFormView({ standalone = false }: { standalone?: boolea
       if (!automationId) throw new Error('任务尚未创建')
       await window.electronAPI.runAutomationNow(automationId)
       await refreshAutomations()
-      const sessions = await window.electronAPI.listAgentSessions()
+      const sessions = await window.electronAPI.listActiveAgentSessions()
       setAgentSessions(sessions)
     } catch (err) {
       console.error('[定时任务] 立即运行失败:', err)

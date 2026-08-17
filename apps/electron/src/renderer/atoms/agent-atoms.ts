@@ -6,6 +6,7 @@
  */
 
 import { atom } from 'jotai'
+import type { Getter } from 'jotai'
 import { atomFamily, atomWithStorage, selectAtom } from 'jotai/utils'
 import type { AgentSessionMeta, AgentEvent, AgentWorkspace, AgentPendingFile, RetryAttempt, PromaPermissionMode, PermissionRequest, AskUserRequest, ExitPlanModeRequest, ThinkingConfig, AgentEffort, SDKMessage, UnstagedChangesResult } from '@proma/shared'
 import { PROMA_DEFAULT_PERMISSION_MODE } from '@proma/shared'
@@ -39,23 +40,6 @@ export interface ToolActivity {
 export interface ActivityGroup {
   parent: ToolActivity
   children: ToolActivity[]
-}
-
-/**
- * 将流式状态中未完成的 toolActivities 标记为终态。
- * 用于 complete、handleStop、STREAM_COMPLETE 等多个终态入口的兜底清理。
- * 当所有项已处于终态时返回原引用，避免不必要的 React 重渲染。
- */
-export function finalizeStreamingActivities(
-  toolActivities: ToolActivity[],
-): { toolActivities: ToolActivity[] } {
-  const hasUnfinishedTools = toolActivities.some((ta) => !ta.done)
-
-  return {
-    toolActivities: hasUnfinishedTools
-      ? toolActivities.map((ta) => (ta.done ? ta : { ...ta, done: true }))
-      : toolActivities,
-  }
 }
 
 export interface ContextCompactionState {
@@ -99,11 +83,7 @@ export interface AgentStreamState {
    * 此状态下 running 为 false，但服务端 activeSessions 仍保留，新消息必须走注入通道而非新建 run。
    */
   backgroundWaiting?: boolean
-  content: string
-  toolActivities: ToolActivity[]
   model?: string
-  /** 本次运行启动时的渠道 ID；运行中切换模型只影响下一轮，不能覆盖它。 */
-  channelId?: string
   /** 当前输入 token 数（上下文使用量） */
   inputTokens?: number
   /** 输出 token 数 */
@@ -148,6 +128,11 @@ function clearFinishedCompactionForResumedWork(prev: AgentStreamState): AgentStr
     compactInFlight: false,
     contextCompaction: undefined,
   }
+}
+
+export function resumeAgentStreamState(prev: AgentStreamState): AgentStreamState {
+  const resumed = clearFinishedCompactionForResumedWork(prev)
+  return resumed.retrying === undefined ? resumed : { ...resumed, retrying: undefined }
 }
 
 /** 从 ToolActivity 派生状态 */
@@ -288,21 +273,76 @@ export const agentSessionChannelMapAtom = atom<Map<string, string>>(new Map())
 /** Per-session 模型 ID Map — sessionId → modelId */
 export const agentSessionModelMapAtom = atom<Map<string, string>>(new Map())
 export const currentAgentSessionIdAtom = atom<string | null>(null)
-export const agentStreamingStatesAtom = atom<Map<string, AgentStreamState>>(new Map())
 
 /**
- * 单个 session 的 streaming state 派生 atomFamily — 按 sessionId 切片订阅。
+ * Agent 流式状态的 session 索引与实际存储。
  *
- * 直接订阅 agentStreamingStatesAtom 会让任意 session 的流式更新都触发 AgentView
- * 整树重渲染（10–30fps）。本 family 让订阅者只在本 session 的 state 引用变化时
- * 重渲染——其他 session 的更新虽然让 base atom 变化，但派生 atom 输出引用未变，
- * jotai 自动跳过通知。
+ * 高频事件直接写入 family，避免每次 token/tool 状态更新都复制完整的 session Map。
+ * 聚合 atom 仅作为低频汇总和旧调用方兼容入口保留。
  */
-export const agentSessionStreamingStateAtomFamily = atomFamily((sessionId: string) =>
-  atom((get) => get(agentStreamingStatesAtom).get(sessionId)),
+const agentStreamingStateIdsAtom = atom<Set<string>>(new Set<string>())
+const agentStreamingStateStorageAtomFamily = atomFamily((sessionId: string) =>
+  atom<AgentStreamState | undefined>(undefined),
 )
 
-/** AgentView 输入区/工具栏需要的低频流状态；排除逐 token 变化的 content/toolActivities。 */
+export const agentSessionStreamingStateAtomFamily = atomFamily((sessionId: string) =>
+  atom(
+    (get) => get(agentStreamingStateStorageAtomFamily(sessionId)),
+    (
+      get,
+      set,
+      update: AgentStreamState | undefined | ((prev: AgentStreamState | undefined) => AgentStreamState | undefined),
+    ) => {
+      const previous = get(agentStreamingStateStorageAtomFamily(sessionId))
+      const next = typeof update === 'function' ? update(previous) : update
+      if (Object.is(previous, next)) return
+
+      set(agentStreamingStateStorageAtomFamily(sessionId), next)
+      set(agentStreamingStateIdsAtom, (prev: Set<string>) => {
+        if (next !== undefined) {
+          if (prev.has(sessionId)) return prev
+          const ids = new Set(prev)
+          ids.add(sessionId)
+          return ids
+        }
+        if (!prev.has(sessionId)) return prev
+        const ids = new Set(prev)
+        ids.delete(sessionId)
+        return ids
+      })
+    },
+  ),
+)
+
+function readAgentStreamingStates(get: Getter): Map<string, AgentStreamState> {
+  const states = new Map<string, AgentStreamState>()
+  for (const sessionId of get(agentStreamingStateIdsAtom)) {
+    const state = get(agentSessionStreamingStateAtomFamily(sessionId))
+    if (state) states.set(sessionId, state)
+  }
+  return states
+}
+
+/**
+ * 兼容旧调用方的聚合视图。高频路径不要写入此 atom，请使用
+ * agentSessionStreamingStateAtomFamily(sessionId)。
+ */
+export const agentStreamingStatesAtom = atom<Map<string, AgentStreamState>, [Map<string, AgentStreamState> | ((prev: Map<string, AgentStreamState>) => Map<string, AgentStreamState>)], void>(
+  (get) => readAgentStreamingStates(get),
+  (get, set, update) => {
+    const previous = readAgentStreamingStates(get)
+    const next = typeof update === 'function' ? update(previous) : update
+    const sessionIds = new Set([...previous.keys(), ...next.keys()])
+    for (const sessionId of sessionIds) {
+      const previousState = previous.get(sessionId)
+      const nextState = next.get(sessionId)
+      if (Object.is(previousState, nextState)) continue
+      set(agentSessionStreamingStateAtomFamily(sessionId), nextState)
+    }
+  },
+)
+
+/** AgentView 输入区/工具栏需要的低频流状态。 */
 export type AgentViewStreamState = Pick<
   AgentStreamState,
   | 'running'
@@ -333,15 +373,35 @@ export function areAgentViewStreamStatesEqual(
     && previous.isCompacting === next.isCompacting
 }
 
-/**
- * AgentView 不订阅逐 token content；完整状态只由 AgentMessages 消费。
- * selectAtom 的 equalityFn 保证纯文本流式更新不会重渲染输入框和工具栏。
- */
 export const agentSessionViewStreamStateAtomFamily = atomFamily((sessionId: string) =>
   selectAtom(
     agentSessionStreamingStateAtomFamily(sessionId),
     (state): AgentViewStreamState => state ?? EMPTY_AGENT_VIEW_STREAM_STATE,
     areAgentViewStreamStatesEqual,
+  ),
+)
+
+/**
+ * AgentView 输入区/工具栏只订阅运行生命周期，usage 数据由 ContextUsageBadge 独立消费。
+ */
+export type AgentInputStreamState = Pick<AgentStreamState, 'running' | 'backgroundWaiting'>
+
+const EMPTY_AGENT_INPUT_STREAM_STATE: AgentInputStreamState = { running: false }
+
+export function areAgentInputStreamStatesEqual(
+  previous: AgentInputStreamState,
+  next: AgentInputStreamState,
+): boolean {
+  return previous.running === next.running
+    && previous.backgroundWaiting === next.backgroundWaiting
+}
+
+/** 输入区只订阅发送/排队需要的生命周期状态，避免 usage_update 触发整页重渲染。 */
+export const agentSessionInputStreamStateAtomFamily = atomFamily((sessionId: string) =>
+  selectAtom(
+    agentSessionStreamingStateAtomFamily(sessionId),
+    (state): AgentInputStreamState => state ?? EMPTY_AGENT_INPUT_STREAM_STATE,
+    areAgentInputStreamStatesEqual,
   ),
 )
 
@@ -432,8 +492,21 @@ export const workspaceGitDiffRefreshVersionAtom = atom(0)
 
 // ===== 侧面板 Atoms =====
 
-/** 侧面板是否打开（全局共享，所有会话共用一个状态） */
-export const agentSidePanelOpenAtom = atomWithStorage<boolean>('proma-agent-sidepanel-open', true)
+/** 侧面板是否打开：按 Agent 会话持久化，未存储的会话默认打开。 */
+export const agentSidePanelOpenMapAtom = atomWithStorage<Record<string, boolean>>(
+  'proma-agent-sidepanel-open-by-session',
+  {},
+  undefined,
+  { getOnInit: true },
+)
+
+/** 指定 Agent 会话的侧面板开关。 */
+export const agentSidePanelOpenAtomFamily = atomFamily((sessionId: string) => atom(
+  (get) => get(agentSidePanelOpenMapAtom)[sessionId] ?? true,
+  (_get, set, isOpen: boolean) => {
+    set(agentSidePanelOpenMapAtom, (previous) => ({ ...previous, [sessionId]: isOpen }))
+  },
+))
 
 /** 侧面板宽度（全局共享，用户拖拽后持久化） */
 export const agentSidePanelWidthAtom = atomWithStorage<number>('proma-agent-sidepanel-width', 280)
@@ -447,10 +520,19 @@ export const agentFileSourceFilterMapAtom = atomWithStorage<Record<string, Agent
   { getOnInit: true },
 )
 
-/** @deprecated 保留以兼容旧代码，但实际所有 session 都读全局 atom */
-export const agentSidePanelOpenMapAtom = atom<Map<string, boolean>>(new Map())
-
 export type AgentSidePanelTab = 'files' | 'changes' | 'chat'
+
+/** 当前会话的侧面板是否打开，并将写入定向到当前会话。 */
+export const currentSessionSidePanelOpenAtom = atom(
+  (get) => {
+    const currentId = get(currentAgentSessionIdAtom)
+    return currentId ? get(agentSidePanelOpenAtomFamily(currentId)) : false
+  },
+  (get, set, isOpen: boolean) => {
+    const currentId = get(currentAgentSessionIdAtom)
+    if (currentId) set(agentSidePanelOpenAtomFamily(currentId), isOpen)
+  },
+)
 
 /** 侧面板当前 Tab：Files / 文件改动 / Chat（per-session Map） */
 export const agentDiffPanelTabAtom = atom<Map<string, AgentSidePanelTab>>(new Map())
@@ -487,13 +569,6 @@ export const agentFileChangesCurrentRunAtom = atom<Map<string, string>>(new Map(
  * 数据新鲜度由 [[agentDiffRefreshVersionAtom]] 触发的后台 fetch 维护，无 TTL。
  */
 export const agentDiffDataAtom = atom(new Map<string, UnstagedChangesResult>())
-
-/** 当前会话的侧面板是否打开（派生只读：全局共享，但仅在有当前会话且为 Agent 模式时显示） */
-export const currentSessionSidePanelOpenAtom = atom<boolean>((get) => {
-  const currentId = get(currentAgentSessionIdAtom)
-  if (!currentId) return false
-  return get(agentSidePanelOpenAtom)
-})
 
 /** 当前会话的工作路径 Map — sessionId → path */
 export const agentSessionPathMapAtom = atom<Map<string, string>>(new Map())
@@ -647,45 +722,39 @@ export const currentAgentSessionAtom = atom<AgentSessionMeta | null>((get) => {
 export const agentStreamingAtom = atom<boolean>((get) => {
   const currentId = get(currentAgentSessionIdAtom)
   if (!currentId) return false
-  return get(agentStreamingStatesAtom).get(currentId)?.running ?? false
-})
-
-export const agentStreamingContentAtom = atom<string>((get) => {
-  const currentId = get(currentAgentSessionIdAtom)
-  if (!currentId) return ''
-  return get(agentStreamingStatesAtom).get(currentId)?.content ?? ''
-})
-
-export const agentToolActivitiesAtom = atom<ToolActivity[]>((get) => {
-  const currentId = get(currentAgentSessionIdAtom)
-  if (!currentId) return []
-  return get(agentStreamingStatesAtom).get(currentId)?.toolActivities ?? []
+  return get(agentSessionStreamingStateAtomFamily(currentId))?.running ?? false
 })
 
 export const agentStreamingModelAtom = atom<string | undefined>((get) => {
   const currentId = get(currentAgentSessionIdAtom)
   if (!currentId) return undefined
-  return get(agentStreamingStatesAtom).get(currentId)?.model
+  return get(agentSessionStreamingStateAtomFamily(currentId))?.model
 })
 
 export const agentRetryingAtom = atom<AgentStreamState['retrying'] | undefined>((get) => {
   const currentId = get(currentAgentSessionIdAtom)
   if (!currentId) return undefined
-  return get(agentStreamingStatesAtom).get(currentId)?.retrying
+  return get(agentSessionStreamingStateAtomFamily(currentId))?.retrying
 })
 
 export const agentStartedAtAtom = atom<number | undefined>((get) => {
   const currentId = get(currentAgentSessionIdAtom)
   if (!currentId) return undefined
-  return get(agentStreamingStatesAtom).get(currentId)?.startedAt
+  return get(agentSessionStreamingStateAtomFamily(currentId))?.startedAt
 })
 
+let lastRunningSessionSignature = ''
+let lastRunningSessionIds = new Set<string>()
+
 export const agentRunningSessionIdsAtom = atom<Set<string>>((get) => {
-  const states = get(agentStreamingStatesAtom)
   const ids = new Set<string>()
-  for (const [id, state] of states) {
-    if (state.running) ids.add(id)
+  for (const sessionId of get(agentStreamingStateIdsAtom)) {
+    if (get(agentSessionStreamingStateAtomFamily(sessionId))?.running) ids.add(sessionId)
   }
+  const signature = [...ids].sort().join('|')
+  if (signature === lastRunningSessionSignature) return lastRunningSessionIds
+  lastRunningSessionSignature = signature
+  lastRunningSessionIds = ids
   return ids
 })
 
@@ -755,120 +824,16 @@ export function applyAgentEvent(
   event: AgentEvent,
 ): AgentStreamState {
   switch (event.type) {
-    case 'text_delta': {
-      // 开始接收文本 - 清除重试状态（重试成功）
-      const resumed = clearFinishedCompactionForResumedWork(prev)
-      return { ...resumed, content: resumed.content + event.text, retrying: undefined }
-    }
+    case 'tool_start':
+      // 工具开始只负责收束 retry/compaction 控制状态；工具展示由 live SDK message 驱动。
+      return { ...clearFinishedCompactionForResumedWork(prev), retrying: undefined }
 
-    case 'text_complete': {
-      // 用完整文本替换增量累积的文本（用于回放场景：只需 text_complete 即可重建文本状态）
-      const resumed = clearFinishedCompactionForResumedWork(prev)
-      return { ...resumed, content: event.text }
-    }
-
-    case 'tool_start': {
-      const resumed = clearFinishedCompactionForResumedWork(prev)
-      const existing = resumed.toolActivities.find((t) => t.toolUseId === event.toolUseId)
-      if (existing) {
-        return {
-          ...resumed,
-          toolActivities: resumed.toolActivities.map((t) =>
-            t.toolUseId === event.toolUseId
-              ? { ...t, input: event.input, intent: event.intent || t.intent, displayName: event.displayName || t.displayName }
-              : t
-          ),
-          // 开始工具调用 - 清除重试状态（重试成功）
-          retrying: undefined,
-        }
-      }
-      return {
-        ...resumed,
-        toolActivities: [...resumed.toolActivities, {
-          toolUseId: event.toolUseId,
-          toolName: event.toolName,
-          input: event.input,
-          intent: event.intent,
-          displayName: event.displayName,
-          done: false,
-          parentToolUseId: event.parentToolUseId,
-        }],
-        // 开始工具调用 - 清除重试状态（重试成功）
-        retrying: undefined,
-      }
-    }
-
-    case 'tool_result': {
-      const resumed = clearFinishedCompactionForResumedWork(prev)
-      return {
-        ...resumed,
-        toolActivities: resumed.toolActivities.map((t) =>
-          t.toolUseId === event.toolUseId
-            ? { ...t, result: event.result, isError: event.isError, done: true, imageAttachments: event.imageAttachments }
-            : t
-        ),
-      }
-    }
-
-    case 'task_backgrounded': {
-      const resumed = clearFinishedCompactionForResumedWork(prev)
-      return {
-        ...resumed,
-        toolActivities: resumed.toolActivities.map((t) =>
-          t.toolUseId === event.toolUseId
-            ? { ...t, isBackground: true, taskId: event.taskId, done: true }
-            : t
-        ),
-      }
-    }
-
-    case 'task_progress': {
-      const resumed = clearFinishedCompactionForResumedWork(prev)
-      // 普通 tool 计时语义（仅当有真实 elapsedSeconds 时更新）
-      if (event.elapsedSeconds != null) {
-        return {
-          ...resumed,
-          toolActivities: resumed.toolActivities.map((t) =>
-            t.toolUseId === event.toolUseId
-              ? { ...t, elapsedSeconds: event.elapsedSeconds! }
-              : t
-          ),
-        }
-      }
-      return resumed
-    }
-
-    case 'task_started': {
-      const resumed = clearFinishedCompactionForResumedWork(prev)
-      // 查找匹配 toolUseId 的 ToolActivity，更新 intent 和 taskId
-      let nextActivities = resumed.toolActivities
-      if (event.toolUseId) {
-        if (resumed.toolActivities.some((t) => t.toolUseId === event.toolUseId)) {
-          nextActivities = resumed.toolActivities.map((t) =>
-            t.toolUseId === event.toolUseId
-              ? { ...t, intent: event.description, taskId: event.taskId }
-              : t
-          )
-        }
-      }
-      return { ...resumed, toolActivities: nextActivities }
-    }
-
-    case 'shell_backgrounded': {
-      const resumed = clearFinishedCompactionForResumedWork(prev)
-      return {
-        ...resumed,
-        toolActivities: resumed.toolActivities.map((t) =>
-          t.toolUseId === event.toolUseId
-            ? { ...t, isBackground: true, shellId: event.shellId, done: true }
-            : t
-        ),
-      }
-    }
-
+    case 'tool_result':
+    case 'task_backgrounded':
+    case 'task_progress':
+    case 'task_started':
+    case 'shell_backgrounded':
     case 'shell_killed':
-      return clearFinishedCompactionForResumedWork(prev)
-
     case 'task_notification':
       return clearFinishedCompactionForResumedWork(prev)
 
@@ -926,7 +891,6 @@ export function applyAgentEvent(
           }),
         } : {}),
         retrying: undefined,
-        ...finalizeStreamingActivities(prev.toolActivities),
       }
     }
 
@@ -1151,7 +1115,7 @@ export interface AgentContextStatus {
 export const agentContextStatusAtom = atom<AgentContextStatus>((get) => {
   const currentId = get(currentAgentSessionIdAtom)
   if (!currentId) return { isCompacting: false }
-  const state = get(agentStreamingStatesAtom).get(currentId)
+  const state = get(agentSessionStreamingStateAtomFamily(currentId))
   return {
     isCompacting: state?.isCompacting ?? false,
     inputTokens: state?.inputTokens,

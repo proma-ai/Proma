@@ -8,7 +8,7 @@
  * 照搬 conversation-manager.ts 的模式。
  */
 
-import { readFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, readdirSync, createReadStream, createWriteStream, statSync, openSync, closeSync, readSync, type WriteStream } from 'node:fs'
+import { readFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, readdirSync, createReadStream, createWriteStream, statSync, type WriteStream } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { writeJsonFileAtomic, writeTextFileAtomic, readJsonFileSafe } from './safe-file'
 import { randomUUID } from 'node:crypto'
@@ -206,10 +206,42 @@ function migrateRetiredClaudeRuntime(index: AgentSessionsIndex): boolean {
 }
 
 /**
+ * 会话索引的内存缓存。
+ *
+ * 重度使用后索引可达数 MB（实测 3600 个会话约 6.4MB），单次 JSON.parse 约 11ms。
+ * 一轮 Agent 会多次读写索引，累计上百毫秒全部同步阻塞主进程，而键盘事件需要经主进程
+ * IPC 转发到 renderer，因此表现为“renderer 内无长任务但输入延迟尖尖”。
+ * 用 mtime+size 校验缓存：既避免重复解析，也允许测试与外部直接改写索引文件后被正确感知。
+ */
+let indexCache: { data: AgentSessionsIndex; mtimeMs: number; size: number } | null = null
+
+/** 按当前索引文件状态记录缓存；stat 失败时丢弃缓存而不是保留可疑数据。 */
+function cacheIndex(data: AgentSessionsIndex): void {
+  try {
+    const stat = statSync(getAgentSessionsIndexPath())
+    indexCache = { data, mtimeMs: stat.mtimeMs, size: stat.size }
+  } catch {
+    indexCache = null
+  }
+}
+
+/**
  * 读取会话索引文件
  */
 function readIndex(): AgentSessionsIndex {
   const indexPath = getAgentSessionsIndexPath()
+
+  if (indexCache) {
+    try {
+      const stat = statSync(indexPath)
+      if (indexCache.mtimeMs === stat.mtimeMs && indexCache.size === stat.size) {
+        return indexCache.data
+      }
+    } catch {
+      indexCache = null
+    }
+  }
+
   const data = readJsonFileSafe<AgentSessionsIndex>(indexPath)
   if (data) {
     const permissionModeMigrated = migrateLegacyPermissionMode(data)
@@ -217,6 +249,7 @@ function readIndex(): AgentSessionsIndex {
     const retiredClaudeRuntimeMigrated = migrateRetiredClaudeRuntime(data)
     if (permissionModeMigrated || thinkingDefaultMigrated || retiredClaudeRuntimeMigrated || data.version < INDEX_VERSION) {
       data.version = INDEX_VERSION
+      // writeIndex 会按写入后的文件状态刷新缓存。
       writeIndex(data)
       if (permissionModeMigrated) {
         console.log('[Agent 会话] 已迁移历史权限模式 auto → bypassPermissions')
@@ -227,6 +260,8 @@ function readIndex(): AgentSessionsIndex {
       if (retiredClaudeRuntimeMigrated) {
         console.log('[Agent 会话] 已将历史 Claude 会话迁移为 Pi transcript-only 会话')
       }
+    } else {
+      cacheIndex(data)
     }
     return data
   }
@@ -245,35 +280,40 @@ function writeIndex(index: AgentSessionsIndex): void {
 
   try {
     writeJsonFileAtomic(indexPath, index)
+    cacheIndex(index)
   } catch (error) {
     console.error('[Agent 会话] 写入索引文件失败:', error)
     throw new Error('写入 Agent 会话索引失败')
   }
 }
 
-export type AgentSessionListScope = 'active' | 'archived' | 'all'
-
-/**
- * 获取会话（按 updatedAt 降序）。主进程内部默认 all；renderer 应显式请求 active，
- * 归档列表仅在用户打开归档视图时按需读取。
- */
-export function listAgentSessions(scope: AgentSessionListScope = 'all'): AgentSessionMeta[] {
-  const index = readIndex()
-  return index.sessions
-    .filter((session) => scope === 'all' || (scope === 'archived' ? !!session.archived : !session.archived))
-    .sort((a, b) => b.updatedAt - a.updatedAt)
+/** 按最近更新时间排序会话副本，避免修改索引数组本身。 */
+function sortSessionsByUpdatedAtDesc(sessions: AgentSessionMeta[]): AgentSessionMeta[] {
+  return [...sessions].sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
-/** 仅返回列表标识数量，避免为归档入口 IPC 传输完整历史元数据。 */
-export function getAgentSessionCounts(): { active: number; archived: number } {
-  return readIndex().sessions.reduce(
-    (counts, session) => {
-      if (session.archived) counts.archived++
-      else counts.active++
-      return counts
-    },
-    { active: 0, archived: 0 },
-  )
+/** 获取所有会话（按 updatedAt 降序） */
+export function listAgentSessions(): AgentSessionMeta[] {
+  const index = readIndex()
+  return sortSessionsByUpdatedAtDesc(index.sessions)
+}
+
+/** 获取未归档会话，供侧栏 active 视图按需读取。 */
+export function listActiveAgentSessions(): AgentSessionMeta[] {
+  const index = readIndex()
+  return sortSessionsByUpdatedAtDesc(index.sessions.filter((session) => !session.archived))
+}
+
+/** 获取归档会话，只有用户进入归档视图时才调用。 */
+export function listArchivedAgentSessions(): AgentSessionMeta[] {
+  const index = readIndex()
+  return sortSessionsByUpdatedAtDesc(index.sessions.filter((session) => session.archived))
+}
+
+/** 获取归档数量，不把归档会话元数据传到 renderer。 */
+export function countArchivedAgentSessions(): number {
+  const index = readIndex()
+  return index.sessions.reduce((count, session) => count + (session.archived ? 1 : 0), 0)
 }
 
 /**
@@ -456,9 +496,14 @@ export function appendSDKMessages(id: string, messages: SDKMessage[]): void {
   const filePath = getAgentSessionMessagesPath(id)
 
   try {
+    // 整批只做一次同步追写：逐条 appendFileSync 会为每条消息各做一次 open/write/close，
+    // 一轮输出常见几十条消息，在多 Agent 并发下会持续阶段性阻塞主进程，
+    // 进而延迟键盘事件的 IPC 转发（表现为 renderer 内无长任务但输入延迟高）。
+    let payload = ''
     for (const message of messages) {
-      appendFileSync(filePath, serializeSDKMessageForStorage(message) + '\n', 'utf-8')
+      payload += serializeSDKMessageForStorage(message) + '\n'
     }
+    appendFileSync(filePath, payload, 'utf-8')
   } catch (error) {
     console.error(`[Agent 会话] 追加 SDKMessage 失败 (${id}):`, error)
     throw new Error('追加 SDKMessage 失败')
@@ -533,106 +578,6 @@ export function getAgentSessionSDKMessages(id: string): SDKMessage[] {
   } catch (error) {
     console.error(`[Agent 会话] 读取 SDKMessage 失败 (${id}):`, error)
     return []
-  }
-}
-
-/** 渲染器首次展示的历史消息上限；更早历史由用户按需向前加载。 */
-const AGENT_SESSION_MESSAGE_PAGE_SIZE = 400
-const AGENT_SESSION_MESSAGE_PAGE_MAX_SIZE = 500
-const AGENT_SESSION_MESSAGE_READ_CHUNK_SIZE = 64 * 1024
-
-export interface AgentSessionSDKMessagesPage {
-  messages: SDKMessage[]
-  /** 下一页的文件字节上界；缺失表示已经到达文件开头。 */
-  nextBefore?: number
-}
-
-interface JsonlTailLine {
-  line: string
-  start: number
-}
-
-/**
- * 从 JSONL 尾部按行读取，避免打开长会话时把整份 transcript 读入主进程和 IPC。
- *
- * 返回的行按文件原始顺序排列；`nextBefore` 可直接作为下一次请求的 before。
- */
-function readJsonlTailLines(filePath: string, before: number | undefined, limit: number): {
-  lines: JsonlTailLine[]
-  hasMore: boolean
-} {
-  const fileSize = statSync(filePath).size
-  let position = Math.min(Math.max(before ?? fileSize, 0), fileSize)
-  let trailing = Buffer.alloc(0)
-  const newestFirst: JsonlTailLine[] = []
-  const fileDescriptor = openSync(filePath, 'r')
-
-  try {
-    while (position > 0 && newestFirst.length <= limit) {
-      const chunkSize = Math.min(AGENT_SESSION_MESSAGE_READ_CHUNK_SIZE, position)
-      position -= chunkSize
-      const chunk = Buffer.allocUnsafe(chunkSize)
-      readSync(fileDescriptor, chunk, 0, chunkSize, position)
-
-      const combined = Buffer.concat([chunk, trailing])
-      let lineEnd = combined.length
-      for (let index = combined.length - 1; index >= 0 && newestFirst.length <= limit; index--) {
-        if (combined[index] !== 0x0a) continue
-        const lineBuffer = combined.subarray(index + 1, lineEnd)
-        if (lineBuffer.toString('utf-8').trim()) {
-          newestFirst.push({
-            line: lineBuffer.toString('utf-8'),
-            start: position + index + 1,
-          })
-        }
-        lineEnd = index
-      }
-      trailing = combined.subarray(0, lineEnd)
-    }
-
-    if (newestFirst.length <= limit && position === 0 && trailing.toString('utf-8').trim()) {
-      newestFirst.push({ line: trailing.toString('utf-8'), start: 0 })
-    }
-  } finally {
-    closeSync(fileDescriptor)
-  }
-
-  const pageNewestFirst = newestFirst.slice(0, limit)
-  return {
-    lines: pageNewestFirst.reverse(),
-    hasMore: newestFirst.length > limit,
-  }
-}
-
-/**
- * 分页读取会话历史。默认只读取最后 400 条 JSONL 记录，避免长会话阻塞主进程与 renderer。
- */
-export function getAgentSessionSDKMessagesPage(
-  id: string,
-  input: { before?: number; limit?: number } = {},
-): AgentSessionSDKMessagesPage {
-  const filePath = getAgentSessionMessagesPath(id)
-  if (!existsSync(filePath)) return { messages: [] }
-
-  const limit = Math.min(
-    Math.max(Math.floor(input.limit ?? AGENT_SESSION_MESSAGE_PAGE_SIZE), 1),
-    AGENT_SESSION_MESSAGE_PAGE_MAX_SIZE,
-  )
-
-  try {
-    const { lines, hasMore } = readJsonlTailLines(filePath, input.before, limit)
-    const messages = parseJsonlLenient<unknown>(
-      lines.map((item) => item.line),
-      `分页读取 SDKMessage (${id})`,
-    ).map(normalizePersistedSDKMessage)
-    const earliestLine = lines[0]
-    return {
-      messages,
-      nextBefore: hasMore && earliestLine ? earliestLine.start : undefined,
-    }
-  } catch (error) {
-    console.error(`[Agent 会话] 分页读取 SDKMessage 失败 (${id}):`, error)
-    return { messages: [] }
   }
 }
 

@@ -61,6 +61,7 @@ export function useSmoothStream({
   minDelay = 10,
 }: UseSmoothStreamOptions): UseSmoothStreamReturn {
   const [displayedContent, setDisplayedContent] = useState(content)
+  const [queueVersion, setQueueVersion] = useState(0)
 
   // 字符队列（待渲染的字符）
   const chunkQueueRef = useRef<string[]>([])
@@ -94,6 +95,7 @@ export function useSmoothStream({
       if (delta) {
         const chars = segmentText(delta)
         chunkQueueRef.current.push(...chars)
+        setQueueVersion((version) => version + 1)
       }
     } else {
       // 内容重置（用户重新发送等场景）
@@ -138,8 +140,8 @@ export function useSmoothStream({
         rafRef.current = null
         return
       }
-      // 流未结束但队列空 → 等下一帧
-      rafRef.current = requestAnimationFrame(renderLoop)
+      // 流未结束但暂无增量：停止空转，下一次内容入队时再唤醒。
+      rafRef.current = null
       return
     }
 
@@ -160,32 +162,34 @@ export function useSmoothStream({
     displayedRef.current += chars.join('')
     setDisplayedContent(displayedRef.current)
 
-    // 队列未空或流未结束 → 继续
-    if (queue.length > 0 || !streamDoneRef.current) {
+    // 队列未空 → 继续；流未结束但队列排空时休眠，等待下一段 delta 唤醒。
+    if (queue.length > 0) {
       rafRef.current = requestAnimationFrame(renderLoop)
-    } else {
+    } else if (streamDoneRef.current) {
       // 队列刚排空 + 流已结束 → 同步最终内容并停止
       if (displayedRef.current !== prevContentRef.current) {
         displayedRef.current = prevContentRef.current
         setDisplayedContent(displayedRef.current)
       }
       rafRef.current = null
+    } else {
+      rafRef.current = null
     }
   }, [minDelay])
 
-  // 启动/重启渲染循环（流结束后也继续运行直到队列排空）
+  // 内容入队或流结束时启动循环；空队列的流式空档不保留 rAF。
   useEffect(() => {
-    if ((isStreaming || chunkQueueRef.current.length > 0) && !rafRef.current) {
+    if (chunkQueueRef.current.length > 0 && !rafRef.current) {
       rafRef.current = requestAnimationFrame(renderLoop)
     }
+  }, [isStreaming, queueVersion, renderLoop])
 
-    return () => {
-      if (rafRef.current) {
-        cancelAnimationFrame(rafRef.current)
-        rafRef.current = null
-      }
+  useEffect(() => () => {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
     }
-  }, [isStreaming, renderLoop])
+  }, [])
 
   return { displayedContent }
 }

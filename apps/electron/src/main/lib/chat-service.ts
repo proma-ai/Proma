@@ -16,7 +16,7 @@ import { randomUUID } from 'node:crypto'
 import { BrowserWindow } from 'electron'
 import type { WebContents } from 'electron'
 import { CHAT_IPC_CHANNELS, CLOUD_IPC_CHANNELS } from '@proma/shared'
-import type { ChatSendInput, ChatMessage, GenerateTitleInput, FileAttachment, ChatToolActivity } from '@proma/shared'
+import type { ChatSendInput, ChatMessage, GenerateTitleInput, FileAttachment, ChatToolActivity, ProviderType } from '@proma/shared'
 import {
   getAdapter,
   streamSSE,
@@ -637,6 +637,17 @@ export function stopAllGenerations(): void {
 
 /** Proma 官方渠道标题生成专用模型（轻量、快速、低成本） */
 const PROMA_TITLE_MODEL = 'openai/gpt-oss-120b'
+
+/**
+ * 标题生成失败时仍需本地兜底重命名的渠道。
+ *
+ * OpenCode Go 与历史遗留的自定义渠道服务端会偶发返回空标题/解密失败，
+ * 不兜底会让对话长期停在默认标题。商业版不再允许新建 `custom` 渠道，
+ * 但历史配置里可能仍存在，因此保留判断而不恢复其创建入口。
+ */
+function isFallbackTitleProvider(provider: ProviderType): boolean {
+  return provider === 'opencode-go-openai' || provider === 'custom'
+}
 /**
  * 调用 AI 生成对话标题
  */
@@ -679,7 +690,8 @@ export async function generateTitle(input: GenerateTitleInput): Promise<string |
       apiKey = await resolveChannelRuntimeApiKey(channelId)
     } catch {
       console.warn('[标题生成] 解密 API Key 失败')
-      return channel.provider === 'opencode-go-openai' ? createFallbackTitle(userMessage) : null
+      // OpenCode Go / 历史自定义渠道无法解密也仍要完成重命名，避免对话长期停在默认标题。
+      return isFallbackTitleProvider(channel.provider) ? createFallbackTitle(userMessage) : null
     }
     baseUrl = channel.baseUrl
   }
@@ -706,13 +718,15 @@ export async function generateTitle(input: GenerateTitleInput): Promise<string |
     const result = title ? sanitizeGeneratedTitle(title) : null
     if (!result) {
       console.warn('[标题生成] API 未返回可用标题')
-      return channel.provider === 'opencode-go-openai' ? createFallbackTitle(userMessage) : null
+      // OpenCode Go / 历史自定义渠道的服务端偶发返回空标题时，仍要完成重命名，避免对话长期停在默认标题。
+      return isFallbackTitleProvider(channel.provider) ? createFallbackTitle(userMessage) : null
     }
 
     console.log('[标题生成] 成功生成标题:', result)
     return result
   } catch (error) {
     console.warn('[标题生成] 请求失败:', error)
-    return channel.provider === 'opencode-go-openai' ? createFallbackTitle(userMessage) : null
+    // OpenCode Go / 历史自定义渠道的服务端偶发返回空标题/异常响应/超时，异常路径同样要完成重命名。
+    return isFallbackTitleProvider(channel.provider) ? createFallbackTitle(userMessage) : null
   }
 }
