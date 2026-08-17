@@ -324,6 +324,7 @@ function normalizePiApi(provider: ProviderType): Api {
     case 'doubao':
     case 'qwen':
     case 'custom':
+    case 'orcarouter':
       return 'openai-completions'
     case 'openai-responses':
       return 'openai-responses'

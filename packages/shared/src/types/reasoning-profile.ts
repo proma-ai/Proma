@@ -22,6 +22,7 @@ export function inferReasoningTransport(provider: ProviderType | undefined): Rea
     case 'doubao':
     case 'qwen':
     case 'custom':
+    case 'orcarouter':
       return 'openai-completions'
     case 'openai-codex':
     case 'openai-responses':

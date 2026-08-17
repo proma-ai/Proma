@@ -32,6 +32,13 @@ export type ProviderType =
   | 'openai-codex'
   | 'xai'
   /**
+   * OpenAI Chat Completions 兼容网关（OrcaRouter）。
+   *
+   * 与 `custom` 一样走 OpenAI 兼容协议，但带命名品牌与默认 Base URL，
+   * 用户无需手填地址即可直接选用。
+   */
+  | 'orcarouter'
+  /**
    * OpenAI Chat Completions 的自定义请求地址。
    *
    * Chat 会原样请求 `baseUrl`；`openai` 则将其视为协议根地址并自动补
@@ -67,6 +74,8 @@ export const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
   // 订阅登录渠道的 baseUrl 由 Pi SDK 内部管理，无需用户填写。
   'openai-codex': '',
   xai: '',
+  // OrcaRouter 模型路由网关，OpenAI 兼容协议。
+  orcarouter: 'https://api.orcarouter.ai/v1',
   custom: '',
 }
 
@@ -96,6 +105,7 @@ export const PROVIDER_LABELS: Record<ProviderType, string> = {
   'xiaomi-token-plan': '小米 MiMo Token Plan',
   'openai-codex': 'ChatGPT 订阅 (Codex)',
   xai: 'xAI 订阅 (Grok)',
+  orcarouter: 'OrcaRouter',
   custom: 'OpenAI Chat Completions（自定义地址）',
 }
 

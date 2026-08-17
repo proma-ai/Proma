@@ -1529,7 +1529,7 @@ export class AgentOrchestrator {
             persistXaiOAuthCredentials(channelId, credentials)
           },
         }),
-        ...((channel.provider === 'openai-codex' || channel.provider === 'xai' || channel.provider === 'openai-responses' || channel.provider === 'openai' || channel.provider === 'custom')
+        ...((channel.provider === 'openai-codex' || channel.provider === 'xai' || channel.provider === 'openai-responses' || channel.provider === 'openai' || channel.provider === 'custom' || channel.provider === 'orcarouter')
           && resolveReasoningProfile({
             modelId: selectedModelId,
             transport: inferReasoningTransport(channel.provider),
