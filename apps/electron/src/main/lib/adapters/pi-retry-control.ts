@@ -25,19 +25,14 @@ export type PiRetryUpdate =
 
 type PiNativeRetryDetails = {
   attempt: number
-  maxAttempts: number
-  totalAttempt?: number
-  maxTotalAttempts?: number
-  delayMs: number
-  totalDelayMs?: number
-  maxTotalDelayMs?: number
+  maxAttempts?: number
+  delayMs?: number
   errorMessage?: string
 }
 
 type PiNativeRetryEvent =
   | ({ type: 'auto_retry_start' } & PiNativeRetryDetails)
-  | ({ type: 'auto_retry_attempt_start' } & PiNativeRetryDetails)
-  | ({ type: 'auto_retry_end'; success: boolean; outcome?: 'succeeded' | 'exhausted' | 'cancelled'; finalError?: string } & PiNativeRetryDetails)
+  | ({ type: 'auto_retry_end'; success: boolean; finalError?: string } & PiNativeRetryDetails)
 
 /**
  * Pi native retry 的终态事件门控。
@@ -70,9 +65,9 @@ export function createPiRetryTerminalGate<T>(): {
 function retryMetadata(event: PiNativeRetryDetails, context: PiRetryEventContext): PiRetryMetadata {
   return {
     attempt: event.attempt,
-    maxAttempts: event.maxAttempts,
-    totalAttempt: event.totalAttempt ?? event.attempt,
-    maxTotalAttempts: event.maxTotalAttempts ?? event.maxAttempts,
+    maxAttempts: event.maxAttempts ?? event.attempt,
+    totalAttempt: event.attempt,
+    maxTotalAttempts: event.maxAttempts ?? event.attempt,
     runStartedAt: context.runStartedAt,
   }
 }
@@ -80,22 +75,19 @@ function retryMetadata(event: PiNativeRetryDetails, context: PiRetryEventContext
 function retryAttempt(event: PiNativeRetryDetails, timestamp: number, errorMessage: string): RetryAttempt {
   return {
     attempt: event.attempt,
-    totalAttempt: event.totalAttempt ?? event.attempt,
-    maxTotalAttempts: event.maxTotalAttempts ?? event.maxAttempts,
+    totalAttempt: event.attempt,
+    maxTotalAttempts: event.maxAttempts ?? event.attempt,
     timestamp,
     reason: errorMessage,
     errorMessage,
     // 这里记录的是本次 retry 实际开始前已经等待的退避时间。
-    delaySeconds: event.delayMs / 1_000,
+    delaySeconds: (event.delayMs ?? 0) / 1_000,
   }
 }
 
-/**
- * Pi 的连续错误计数会在一段成功回答后归零，totalAttempt 才是单次顶层 run 的累计次数。
- * 因此可见性必须基于 totalAttempt，避免多工具回合时反复静默超过五次。
- */
+/** Pi 0.84 只暴露连续失败段的 attempt；超过前五次才向 UI 展示重试生命周期。 */
 function shouldExposePiRetry(event: PiNativeRetryDetails): boolean {
-  return (event.totalAttempt ?? event.attempt) > PI_RETRY_VISIBILITY_THRESHOLD
+  return event.attempt > PI_RETRY_VISIBILITY_THRESHOLD
 }
 
 /**
@@ -116,29 +108,16 @@ export function mapPiNativeRetryEvent(
       status: 'starting',
       ...metadata,
       scheduledAt: timestamp,
-      delaySeconds: event.delayMs / 1_000,
+      delaySeconds: (event.delayMs ?? 0) / 1_000,
       reason: event.errorMessage ?? '未知错误',
     }]
   }
 
-  if (event.type === 'auto_retry_attempt_start') {
-    const errorMessage = event.errorMessage ?? '未知错误'
-    return [{
-      status: 'attempt',
-      ...metadata,
-      attemptData: retryAttempt(event, timestamp, errorMessage),
-    }]
-  }
-
-  if (event.success || event.outcome === 'succeeded') {
+  if (event.type === 'auto_retry_end' && event.success) {
     return [{ status: 'cleared', ...metadata }]
   }
 
-  const error = event.finalError ?? '未知错误'
-  if (event.outcome === 'cancelled' || error === 'Retry cancelled') {
-    return [{ status: 'cancelled', ...metadata, reason: error }]
-  }
-
+  const error = event.type === 'auto_retry_end' ? event.finalError ?? '未知错误' : 'Retry cancelled'
   return [{
     status: 'failed',
     ...metadata,

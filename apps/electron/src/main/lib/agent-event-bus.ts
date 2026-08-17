@@ -1,87 +1,43 @@
 /**
- * AgentEventBus — run-scoped canonical 事件总线
+ * AgentEventBus — Agent 事件总线
  *
- * Producer 仍只提交 payload；EventBus 是 runId/sequence 的唯一分配者，并把同一
- * AgentRunEvent 同时交给 renderer、Bridge、协作与 Agent Island。旧消费者可继续
- * 忽略第三个 envelope 参数，避免兼容投影重新进入实时热路径。
+ * 统一的事件分发中心，支持中间件链扩展。
+ *
+ * 核心方法：
+ * - emit(sessionId, payload): 发射事件，经过中间件链后分发给所有监听器
+ * - on(handler): 注册事件监听器，返回取消函数
+ * - use(middleware): 注册中间件（事件经过中间件链后再分发）
  */
 
-import type { AgentRunEvent, AgentStreamPayload } from '@proma/shared'
+import type { AgentStreamPayload } from '@proma/shared'
 
 /** 事件监听器 */
-export type AgentEventHandler = (
-  sessionId: string,
-  payload: AgentStreamPayload,
-  runEvent: AgentRunEvent,
-) => void
+export type AgentEventHandler = (sessionId: string, payload: AgentStreamPayload) => void
 
-/** 中间件：可执行副作用，调用 next() 继续链路。 */
+/** 中间件：可修改事件或执行副作用，调用 next() 继续链路 */
 export type AgentEventMiddleware = (
   sessionId: string,
   payload: AgentStreamPayload,
   next: () => void,
-  runEvent: AgentRunEvent,
 ) => void
-
-interface RunSequenceState {
-  runId: string
-  startedAt: number
-  sequence: number
-}
 
 export class AgentEventBus {
   private handlers: Set<AgentEventHandler> = new Set()
   private middlewares: AgentEventMiddleware[] = []
-  private runStates = new Map<string, RunSequenceState>()
-  private endedRunKeys = new Set<string>()
-  private static readonly MAX_ENDED_RUN_TOMBSTONES = 256
 
+  /**
+   * 发射事件
+   *
+   * 事件依次经过中间件链，最终分发给所有监听器。
+   * 中间件可以通过不调用 next() 来拦截事件。
+   */
   emit(sessionId: string, payload: AgentStreamPayload): void {
-    const explicitRunId = getExplicitRunId(payload)
-    const runStart = payload.kind === 'proma_event'
-      && (payload.event.type === 'run_started' || payload.event.type === 'external_run_started')
-      ? payload.event
-      : undefined
-    let state = this.runStates.get(sessionId)
-
-    // 只有显式 run start 能建立/替换 scope。迟到 delta/run_stopped 不得劫持后续
-    // permission、AskUser、Plan 等无显式 runId 的产品事件。
-    if (runStart) {
-      const runKey = `${sessionId}\u0000${runStart.runId}`
-      if (this.endedRunKeys.has(runKey) || state?.runId === runStart.runId) {
-        console.warn(`[AgentEventBus] 丢弃重复 run start: session=${sessionId}, run=${runStart.runId}`)
-        return
-      }
-      // 不允许不同 run 抢占 active scope；正常新 run 必须先由完成路径 endRun。
-      const canStart = !state
-      if (!canStart) {
-        console.warn(`[AgentEventBus] 丢弃迟到 run start: session=${sessionId}, active=${state?.runId}, incoming=${runStart.runId}`)
-        return
-      }
-      if (state?.runId !== runStart.runId) {
-        state = { runId: runStart.runId, startedAt: runStart.startedAt, sequence: 0 }
-        this.runStates.set(sessionId, state)
-      }
-    } else if (explicitRunId && (!state || state.runId !== explicitRunId)) {
-      console.warn(`[AgentEventBus] 丢弃不匹配 run 事件: session=${sessionId}, active=${state?.runId}, incoming=${explicitRunId}`)
-      return
-    }
-
-    const runId = explicitRunId ?? state?.runId
-    const runEvent: AgentRunEvent = {
-      sessionId,
-      ...(runId ? { runId } : {}),
-      ...(state && runId === state.runId ? { sequence: ++state.sequence } : {}),
-      occurredAt: Date.now(),
-      payload,
-    }
-
     const dispatch = (): void => {
       for (const handler of this.handlers) {
         try {
-          handler(sessionId, payload, runEvent)
+          handler(sessionId, payload)
         } catch (error) {
-          console.error('[AgentEventBus] 事件处理器错误:', error)
+          console.error(`[AgentEventBus] 事件处理器错误:`, error)
         }
       }
     }
@@ -91,61 +47,47 @@ export class AgentEventBus {
       return
     }
 
+    // 构建中间件链：从最后一个中间件开始，逐层包装
     let index = this.middlewares.length - 1
     let chain = dispatch
+
     while (index >= 0) {
-      const middleware = this.middlewares[index]!
+      const mw = this.middlewares[index]!
       const next = chain
       chain = () => {
         try {
-          middleware(sessionId, payload, next, runEvent)
+          mw(sessionId, payload, next)
         } catch (error) {
-          console.error('[AgentEventBus] 中间件错误:', error)
+          console.error(`[AgentEventBus] 中间件错误:`, error)
           next()
         }
       }
       index--
     }
 
-    chain()
-  }
-
-  /** 只结束精确匹配的 run；被拒绝的并发请求不能清掉当前 sequence scope。 */
-  endRun(sessionId: string, runId: string): void {
-    if (this.runStates.get(sessionId)?.runId !== runId) return
-    this.runStates.delete(sessionId)
-    const runKey = `${sessionId}\u0000${runId}`
-    this.endedRunKeys.add(runKey)
-    if (this.endedRunKeys.size > AgentEventBus.MAX_ENDED_RUN_TOMBSTONES) {
-      const oldest = this.endedRunKeys.values().next().value
-      if (oldest) this.endedRunKeys.delete(oldest)
+    try {
+      chain()
+    } catch (error) {
+      console.error(`[AgentEventBus] 事件分发错误:`, error)
     }
   }
 
+  /** 注册事件监听器，返回取消注册函数 */
   on(handler: AgentEventHandler): () => void {
     this.handlers.add(handler)
-    return () => this.handlers.delete(handler)
+    return () => {
+      this.handlers.delete(handler)
+    }
   }
 
+  /** 注册中间件（按注册顺序执行） */
   use(middleware: AgentEventMiddleware): void {
     this.middlewares.push(middleware)
   }
 
+  /** 移除所有监听器和中间件 */
   dispose(): void {
     this.handlers.clear()
     this.middlewares = []
-    this.runStates.clear()
-    this.endedRunKeys.clear()
   }
-}
-
-function getExplicitRunId(payload: AgentStreamPayload): string | undefined {
-  if (payload.kind === 'assistant_message_delta') return payload.runId
-  if (payload.kind === 'proma_event'
-    && (payload.event.type === 'run_started'
-      || payload.event.type === 'external_run_started'
-      || payload.event.type === 'run_stopped')) {
-    return payload.event.runId
-  }
-  return undefined
 }

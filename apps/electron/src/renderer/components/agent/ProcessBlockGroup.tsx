@@ -8,21 +8,28 @@ import type {
   SDKToolResultBlock,
   SDKToolUseBlock,
   SDKUserMessage,
+  SDKTextBlock,
+  SDKThinkingBlock,
 } from '@proma/shared'
 
 interface ProcessBlockGroupProps {
   blocks: SDKContentBlock[]
   isStreaming?: boolean
+  /** 惰性生成过程项；流式与历史态均渲染完整内容。 */
+  renderChildren: () => React.ReactNode
   // 该过程组是否为整条消息的末尾项：是则流式中保留最后一段为正常显示，
   // 否则（最终答案已作为后续兄弟块外置）整组统一弱化。
   isMessageTail?: boolean
-  children: React.ReactNode
 }
 
 const MAX_PROCESS_GROUP_ICONS = 4
+const PROCESS_GROUP_VIEWPORT_HEIGHT = 320
+const PROCESS_GROUP_LIVE_CHILD_WINDOW = 4
 const PROCESS_GROUP_COLLAPSE_DURATION_MS = 500
 const PROCESS_GROUP_AUTO_COLLAPSE_SOUND_DELAY_MS = 900
 const PROCESS_GROUP_AUTO_COLLAPSE_COUNTDOWN_SECONDS = 3
+const PROCESS_GROUP_FOLLOW_BOTTOM_THRESHOLD = 24
+const PROGRESS_SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '])
 
 interface IndexedContentBlock {
   block: SDKContentBlock
@@ -31,7 +38,10 @@ interface IndexedContentBlock {
 
 export type AssistantTurnRenderItem =
   | { type: 'block'; item: IndexedContentBlock }
-  | { type: 'process-group'; items: IndexedContentBlock[] }
+  | {
+      type: 'process-group'
+      items: IndexedContentBlock[]
+    }
 
 interface BuildAssistantTurnRenderItemsOptions {
   isStreaming?: boolean
@@ -103,25 +113,18 @@ export function buildAssistantTurnRenderItems(
     && areToolsBeforeIndexCompleted(blocks, trailingTextStartIndex, options.completedToolResultIds)
 
   if (options.isStreaming && hasProcessBlock && !canSplitStreamingFinalOutput) {
-    return [{
-      type: 'process-group',
-      items: blocks.map((block, index) => ({ block, index })),
-    }]
+    return buildProcessGroupItems(blocks)
   }
 
   if (trailingTextStartIndex === null) {
-    return [{
-      type: 'process-group',
-      items: blocks.map((block, index) => ({ block, index })),
-    }]
+    return buildProcessGroupItems(blocks)
   }
 
   const items: AssistantTurnRenderItem[] = []
   if (trailingTextStartIndex > 0) {
-    items.push({
-      type: 'process-group',
-      items: blocks.slice(0, trailingTextStartIndex).map((block, index) => ({ block, index })),
-    })
+    items.push(...buildProcessGroupItems(
+      blocks.slice(0, trailingTextStartIndex),
+    ))
   }
 
   for (let index = trailingTextStartIndex; index < blocks.length; index++) {
@@ -131,6 +134,13 @@ export function buildAssistantTurnRenderItems(
   }
 
   return items
+}
+
+function buildProcessGroupItems(blocks: SDKContentBlock[]): AssistantTurnRenderItem[] {
+  return [{
+    type: 'process-group',
+    items: blocks.map((block, index) => ({ block, index })),
+  }]
 }
 
 function buildProcessGroupSummary(blocks: SDKContentBlock[]): string {
@@ -167,16 +177,70 @@ export function buildProcessGroupToolNames(blocks: SDKContentBlock[]): string[] 
   return toolNames
 }
 
-export function ProcessBlockGroup({ blocks, isStreaming, isMessageTail = false, children }: ProcessBlockGroupProps): React.ReactElement {
-  const shouldExpandByDefault = !!isStreaming
-  const [expanded, setExpanded] = React.useState(shouldExpandByDefault)
-  const [shouldRenderContent, setShouldRenderContent] = React.useState(shouldExpandByDefault)
+type ProcessGroupDisplayMode = 'collapsed' | 'expanded'
+
+export function isProgressViewportAtBottom({
+  clientHeight,
+  scrollHeight,
+  scrollTop,
+}: Pick<HTMLElement, 'clientHeight' | 'scrollHeight' | 'scrollTop'>): boolean {
+  return scrollHeight - scrollTop - clientHeight <= PROCESS_GROUP_FOLLOW_BOTTOM_THRESHOLD
+}
+
+function getProcessChildKey(child: React.ReactNode, index: number): string {
+  if (React.isValidElement(child) && child.key != null) return String(child.key)
+  return `process-child-${index}`
+}
+
+interface StableProcessChildCacheEntry {
+  child: React.ReactNode
+  snapshot: string
+}
+
+function getProcessChildSnapshot(child: React.ReactNode): string | null {
+  if (!React.isValidElement(child) || child.type !== React.Fragment) return null
+  const fragmentProps = child.props as { children?: React.ReactNode }
+  const content = fragmentProps.children
+  if (!React.isValidElement(content)) return null
+  const contentProps = content.props as { block?: SDKContentBlock }
+  const block = contentProps.block
+  if (!block || (block.type !== 'text' && block.type !== 'thinking')) return null
+  const text = block.type === 'text'
+    ? (block as SDKTextBlock).text
+    : (block as SDKThinkingBlock).thinking
+  return `${block.type}:${text}`
+}
+
+const StableProcessChild = React.memo(
+  function StableProcessChild({ child }: { child: React.ReactNode }): React.ReactElement {
+    return <>{child}</>
+  },
+  (previous, next) => previous.child === next.child,
+)
+
+export function ProcessBlockGroup({ blocks, isStreaming, renderChildren, isMessageTail = false }: ProcessBlockGroupProps): React.ReactElement {
+  const initialDisplayMode: ProcessGroupDisplayMode = !isStreaming
+    ? 'collapsed'
+    : 'expanded'
+  const [displayMode, setDisplayMode] = React.useState<ProcessGroupDisplayMode>(initialDisplayMode)
+  const [shouldRenderContent, setShouldRenderContent] = React.useState(initialDisplayMode !== 'collapsed')
+  const [keepProgressViewport, setKeepProgressViewport] = React.useState(!!isStreaming)
   const [collapseCountdown, setCollapseCountdown] = React.useState<number | null>(null)
   const userToggledRef = React.useRef(false)
+  const followLatestRef = React.useRef(true)
+  const smoothScrollTargetRef = React.useRef<number | null>(null)
+  const scrollFrameRef = React.useRef<number | null>(null)
   const wasStreamingRef = React.useRef(!!isStreaming)
   const autoCollapseTimersRef = React.useRef<number[]>([])
   const contentRef = React.useRef<HTMLDivElement>(null)
+  const contentInnerRef = React.useRef<HTMLDivElement>(null)
+  const stableChildrenRef = React.useRef(new Map<string, StableProcessChildCacheEntry>())
+  const collapseFrameRef = React.useRef<number | null>(null)
   const [measuredHeight, setMeasuredHeight] = React.useState<number | undefined>(undefined)
+
+  const isContentExpanded = displayMode === 'expanded'
+  const shouldShowContent = isContentExpanded || shouldRenderContent
+  const visibleChildren = shouldShowContent ? renderChildren() : null
 
   const clearAutoCollapseTimers = React.useCallback(() => {
     for (const timer of autoCollapseTimersRef.current) window.clearTimeout(timer)
@@ -188,13 +252,18 @@ export function ProcessBlockGroup({ blocks, isStreaming, isMessageTail = false, 
 
     if (isStreaming) {
       setCollapseCountdown(null)
-      if (isStreaming && !wasStreamingRef.current) {
+      setKeepProgressViewport(true)
+      if (!wasStreamingRef.current) {
         userToggledRef.current = false
+        followLatestRef.current = true
+        smoothScrollTargetRef.current = null
+        if (scrollFrameRef.current !== null) {
+          cancelAnimationFrame(scrollFrameRef.current)
+          scrollFrameRef.current = null
+        }
       }
-      if (!userToggledRef.current) {
-        setExpanded(true)
-      }
-      wasStreamingRef.current = !!isStreaming
+      if (!userToggledRef.current) setDisplayMode('expanded')
+      wasStreamingRef.current = true
       return
     }
 
@@ -202,9 +271,8 @@ export function ProcessBlockGroup({ blocks, isStreaming, isMessageTail = false, 
     wasStreamingRef.current = false
 
     if (!shouldAutoCollapseAfterCompletion) {
-      if (!userToggledRef.current) {
-        setExpanded(false)
-      }
+      setKeepProgressViewport(false)
+      if (!userToggledRef.current) setDisplayMode('collapsed')
       return
     }
 
@@ -218,7 +286,11 @@ export function ProcessBlockGroup({ blocks, isStreaming, isMessageTail = false, 
 
       autoCollapseTimersRef.current.push(window.setTimeout(() => {
         setCollapseCountdown(null)
-        setExpanded(false)
+        setDisplayMode('collapsed')
+        autoCollapseTimersRef.current.push(window.setTimeout(
+          () => setKeepProgressViewport(false),
+          PROCESS_GROUP_COLLAPSE_DURATION_MS,
+        ))
       }, PROCESS_GROUP_AUTO_COLLAPSE_COUNTDOWN_SECONDS * 1000))
     }, PROCESS_GROUP_AUTO_COLLAPSE_SOUND_DELAY_MS)
     autoCollapseTimersRef.current.push(soundDelayTimer)
@@ -226,9 +298,89 @@ export function ProcessBlockGroup({ blocks, isStreaming, isMessageTail = false, 
     return clearAutoCollapseTimers
   }, [clearAutoCollapseTimers, isStreaming])
 
+  const scrollToLatest = React.useCallback(() => {
+    if (!followLatestRef.current) return
+    const viewport = contentRef.current
+    if (!viewport) return
+
+    smoothScrollTargetRef.current = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
+    if (scrollFrameRef.current !== null) return
+
+    const advanceScroll = (): void => {
+      const target = smoothScrollTargetRef.current
+      const activeViewport = contentRef.current
+      if (!followLatestRef.current || target == null || !activeViewport) {
+        scrollFrameRef.current = null
+        return
+      }
+
+      const distance = target - activeViewport.scrollTop
+      if (Math.abs(distance) <= 1) {
+        activeViewport.scrollTop = target
+        smoothScrollTargetRef.current = null
+        scrollFrameRef.current = null
+        return
+      }
+
+      // 内容突增时快速追近，正常增量则保持低成本的连续插值。
+      const nextTop = distance > 72
+        ? target - 48
+        : activeViewport.scrollTop + distance * 0.32
+      activeViewport.scrollTop = nextTop
+      scrollFrameRef.current = requestAnimationFrame(advanceScroll)
+    }
+
+    scrollFrameRef.current = requestAnimationFrame(advanceScroll)
+  }, [])
+
+  React.useLayoutEffect(() => {
+    if (!isStreaming || !keepProgressViewport) return
+    const content = contentInnerRef.current
+    if (!content) return
+
+    const frame = requestAnimationFrame(scrollToLatest)
+    const observer = new ResizeObserver(scrollToLatest)
+    observer.observe(content)
+    return () => {
+      cancelAnimationFrame(frame)
+      if (scrollFrameRef.current !== null) {
+        cancelAnimationFrame(scrollFrameRef.current)
+        scrollFrameRef.current = null
+      }
+      observer.disconnect()
+    }
+  }, [isStreaming, keepProgressViewport, scrollToLatest])
+
+  React.useLayoutEffect(() => {
+    if (isStreaming && keepProgressViewport) scrollToLatest()
+  }, [blocks, isStreaming, keepProgressViewport, scrollToLatest])
+
+  const handleProgressScroll = React.useCallback((event: React.UIEvent<HTMLDivElement>): void => {
+    if (!isProgressViewportAtBottom(event.currentTarget)) return
+    followLatestRef.current = true
+    scrollToLatest()
+  }, [scrollToLatest])
+
+  const handleProgressScrollIntent = React.useCallback((): void => {
+    smoothScrollTargetRef.current = null
+    followLatestRef.current = false
+    if (scrollFrameRef.current !== null) {
+      cancelAnimationFrame(scrollFrameRef.current)
+      scrollFrameRef.current = null
+    }
+  }, [])
+
+  const handleProgressKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (PROGRESS_SCROLL_KEYS.has(event.key)) handleProgressScrollIntent()
+  }, [handleProgressScrollIntent])
+
   // 折叠前测量实际高度，用于丝滑的 height 过渡（子元素不 reflow，只裁剪边界）
   React.useEffect(() => {
-    if (expanded) {
+    if (isContentExpanded) {
+      if (collapseFrameRef.current !== null) {
+        cancelAnimationFrame(collapseFrameRef.current)
+        collapseFrameRef.current = null
+      }
       setShouldRenderContent(true)
       setMeasuredHeight(undefined)
       return
@@ -237,15 +389,23 @@ export function ProcessBlockGroup({ blocks, isStreaming, isMessageTail = false, 
     // 折叠时：先测量当前高度，触发 height 过渡动画，动画结束后卸载 DOM
     const el = contentRef.current
     if (el) {
-      const h = el.scrollHeight
+      const h = el.clientHeight
       setMeasuredHeight(h)
-      // 强制浏览器在下一帧开始从 h → 0 的过渡
-      requestAnimationFrame(() => setMeasuredHeight(0))
+      collapseFrameRef.current = requestAnimationFrame(() => {
+        collapseFrameRef.current = null
+        setMeasuredHeight(0)
+      })
     }
 
     const timer = window.setTimeout(() => setShouldRenderContent(false), PROCESS_GROUP_COLLAPSE_DURATION_MS)
-    return () => window.clearTimeout(timer)
-  }, [expanded])
+    return () => {
+      window.clearTimeout(timer)
+      if (collapseFrameRef.current !== null) {
+        cancelAnimationFrame(collapseFrameRef.current)
+        collapseFrameRef.current = null
+      }
+    }
+  }, [isContentExpanded])
 
   const summary = React.useMemo(
     () => buildProcessGroupSummary(blocks),
@@ -255,19 +415,39 @@ export function ProcessBlockGroup({ blocks, isStreaming, isMessageTail = false, 
   const visibleToolNames = toolNames.slice(0, MAX_PROCESS_GROUP_ICONS)
   const hiddenToolCount = Math.max(0, toolNames.length - visibleToolNames.length)
 
-  // 过程组会在工具完成时因结果状态更新而重渲染。这里不为已挂载的步骤附加入场动画，
-  // 否则相邻的 thinking 块会随工具状态一起重复淡入，形成闪烁。
-  const childArray = React.Children.toArray(children)
-  const renderContentChildren = (): React.ReactNode =>
-    childArray.map((child, i) => {
+  // 只让最近几项参与高频更新；旧项保留在 DOM 中供用户滚动查看，但冻结其 React 子树。
+  const renderContentChildren = (): React.ReactNode => {
+    const childArray = React.Children.toArray(visibleChildren)
+    const liveStart = Math.max(0, childArray.length - PROCESS_GROUP_LIVE_CHILD_WINDOW)
+    const activeKeys = new Set<string>()
+
+    const rendered = childArray.map((child, i) => {
+      const key = getProcessChildKey(child, i)
+      activeKeys.add(key)
+      const cachedEntry = stableChildrenRef.current.get(key)
+      const snapshot = getProcessChildSnapshot(child)
+      const shouldFreeze = !!isStreaming && i < liveStart && snapshot !== null
+      const stableChild = shouldFreeze && cachedEntry?.snapshot === snapshot
+        ? cachedEntry.child
+        : child
+      if (!shouldFreeze || !cachedEntry || cachedEntry.snapshot !== snapshot) {
+        stableChildrenRef.current.set(key, { child, snapshot: snapshot ?? '' })
+      }
+
       const isLast = i === childArray.length - 1
       const dimmed = isStreaming && !(isMessageTail && isLast)
       return (
-        <div key={i} className={cn(dimmed && 'opacity-80')}>
-          {child}
+        <div key={key} className={cn(dimmed && 'opacity-80')}>
+          <StableProcessChild child={stableChild} />
         </div>
       )
     })
+
+    for (const key of stableChildrenRef.current.keys()) {
+      if (!activeKeys.has(key)) stableChildrenRef.current.delete(key)
+    }
+    return rendered
+  }
 
   return (
     <div className="space-y-1.5">
@@ -281,13 +461,14 @@ export function ProcessBlockGroup({ blocks, isStreaming, isMessageTail = false, 
           userToggledRef.current = true
           clearAutoCollapseTimers()
           setCollapseCountdown(null)
-          setExpanded((prev) => !prev)
+          if (!isStreaming) setKeepProgressViewport(false)
+          setDisplayMode((previous) => previous === 'collapsed' ? 'expanded' : 'collapsed')
         }}
       >
         <ChevronRight
           className={cn(
             'size-3 shrink-0 text-muted-foreground/40 transition-transform duration-150',
-            expanded && 'rotate-90',
+            isContentExpanded && 'rotate-90',
           )}
         />
         <span className="min-w-0 truncate text-[14px] text-muted-foreground">{summary}</span>
@@ -320,34 +501,31 @@ export function ProcessBlockGroup({ blocks, isStreaming, isMessageTail = false, 
       {shouldRenderContent && (
         <div
           ref={contentRef}
-          data-agent-history-selection-excluded={expanded ? undefined : 'true'}
-          className="overflow-hidden"
+          data-agent-history-selection-excluded={isContentExpanded ? undefined : 'true'}
+          className={cn(
+            'overflow-hidden focus:outline-none',
+            keepProgressViewport && 'overflow-y-auto overscroll-contain scrollbar-none',
+          )}
+          tabIndex={keepProgressViewport ? 0 : undefined}
+          onScroll={keepProgressViewport ? handleProgressScroll : undefined}
+          onPointerDown={keepProgressViewport ? handleProgressScrollIntent : undefined}
+          onWheel={keepProgressViewport ? handleProgressScrollIntent : undefined}
+          onTouchStart={keepProgressViewport ? handleProgressScrollIntent : undefined}
+          onKeyDown={keepProgressViewport ? handleProgressKeyDown : undefined}
           style={{
+            maxHeight: keepProgressViewport ? `${PROCESS_GROUP_VIEWPORT_HEIGHT}px` : undefined,
             height: measuredHeight !== undefined ? `${measuredHeight}px` : 'auto',
-            opacity: expanded ? 1 : 0,
+            opacity: isContentExpanded ? 1 : 0,
             transition: measuredHeight !== undefined
               ? `height ${PROCESS_GROUP_COLLAPSE_DURATION_MS}ms ease-in-out, opacity ${PROCESS_GROUP_COLLAPSE_DURATION_MS}ms ease-in-out`
               : `opacity ${PROCESS_GROUP_COLLAPSE_DURATION_MS}ms ease-in-out`,
           }}
         >
-          <div className="space-y-2">
+          <div ref={contentInnerRef} className="space-y-2">
             {renderContentChildren()}
-            <button
-                type="button"
-                className="flex items-center gap-1 text-xs text-foreground/40 hover:text-foreground/70 transition-colors"
-                onClick={() => {
-                  userToggledRef.current = true
-                  clearAutoCollapseTimers()
-                  setCollapseCountdown(null)
-                  setExpanded(false)
-                }}
-              >
-                <ChevronRight className="size-3 -rotate-90" />
-                <span>收起</span>
-              </button>
-            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+    </div>
   )
 }

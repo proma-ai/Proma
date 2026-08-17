@@ -1,14 +1,16 @@
 import type {
   AgentStreamPayload,
+  AgentAssistantDelta,
   SDKAssistantMessage,
   SDKResultMessage,
   SDKUserMessage,
 } from '@proma/shared'
+import { isPartialSDKMessage } from '../bridge-agent-message-utils'
 
 /**
  * 飞书流式卡片的运行时状态机。
  *
- * 把 AgentStreamPayload（Pi assistant delta + stable sdk_message + proma_event）累积成一个结构化的
+ * 把 AgentStreamPayload（sdk_message + sdk_delta + proma_event）累积成一个结构化的
  * RunState，便于渲染层无时序地把状态转成 CardKit 2.0 JSON。设计参考
  * zara/feishu-claude-code-bridge `src/card/run-state.ts`，但消费的是
  * Proma 的 SDKMessage 形态而非 claude CLI 的 stream-json。
@@ -24,11 +26,13 @@ export interface ToolEntry {
   input: unknown
   status: ToolStatus
   output?: string
+  assistantUuid?: string
+  contentIndex?: number
 }
 
 export type Block =
-  | { kind: 'text'; content: string; streaming: boolean; messageId?: string; contentIndex?: number }
-  | { kind: 'tool'; tool: ToolEntry; messageId?: string; contentIndex?: number }
+  | { kind: 'text'; content: string; streaming: boolean; assistantUuid?: string; contentIndex?: number }
+  | { kind: 'tool'; tool: ToolEntry }
 
 export type FooterStatus = 'thinking' | 'tool_running' | 'streaming' | null
 
@@ -40,12 +44,13 @@ interface PartialAssistantSnapshot {
 
 export interface RunState {
   blocks: Block[]
-  reasoning: { content: string; active: boolean; messageId?: string; contentIndex?: number }
-  /** Pi-native delta 按 assistant messageId 保存的已归约内容，用于 final 缺口校正。 */
+  reasoning: { content: string; active: boolean }
+  /** Pi partial 帧按 assistant UUID 保存的累计快照，用于计算增量。 */
   partialAssistantSnapshots: Record<string, PartialAssistantSnapshot>
-  /** thinking 按 messageId/contentIndex 保存，并按 assistant 消息顺序合成单一 reasoning panel。 */
-  thinkingBlocks: Record<string, Record<number, string>>
-  thinkingMessageOrder: string[]
+  /** Direct Pi Delta 已经在 blocks/reasoning 中消费过的 assistant UUID。 */
+  deltaAssistantUuids: Record<string, true>
+  /** Direct Pi thinking blocks，按 assistant UUID 与 contentIndex 保存。 */
+  deltaAssistantThinking?: Record<string, Record<number, string>>
   footer: FooterStatus
   terminal: Terminal
   errorMsg?: string
@@ -67,8 +72,7 @@ export function createInitialState(): RunState {
     blocks: [],
     reasoning: { content: '', active: false },
     partialAssistantSnapshots: {},
-    thinkingBlocks: {},
-    thinkingMessageOrder: [],
+    deltaAssistantUuids: {},
     footer: 'thinking',
     terminal: 'running',
     startedAt: Date.now(),
@@ -82,10 +86,16 @@ function closeStreamingText(blocks: Block[]): Block[] {
   )
 }
 
-function appendText(state: RunState, delta: string): RunState {
+function appendText(state: RunState, delta: string, assistantUuid?: string, contentIndex?: number): RunState {
   const last = state.blocks[state.blocks.length - 1]
-  if (last && last.kind === 'text' && last.streaming) {
-    const next: Block = { ...last, content: last.content + delta }
+  if (
+    last
+    && last.kind === 'text'
+    && last.streaming
+    && (!assistantUuid || last.assistantUuid === assistantUuid)
+    && (contentIndex == null || last.contentIndex === contentIndex)
+  ) {
+    const next: Block = { ...last, content: last.content + delta, assistantUuid, contentIndex }
     return {
       ...state,
       blocks: [...state.blocks.slice(0, -1), next],
@@ -95,9 +105,110 @@ function appendText(state: RunState, delta: string): RunState {
   }
   return {
     ...state,
-    blocks: [...state.blocks, { kind: 'text', content: delta, streaming: true }],
+    blocks: [...state.blocks, { kind: 'text', content: delta, streaming: true, assistantUuid, contentIndex }],
     reasoning: { ...state.reasoning, active: false },
     footer: 'streaming',
+  }
+}
+
+function insertAssistantBlock(state: RunState, block: Block, assistantUuid: string, contentIndex: number): RunState {
+  const blocks = [...state.blocks]
+  let insertAt = blocks.length
+  let lastAssistantBlock = -1
+  for (const [index, current] of blocks.entries()) {
+    const currentUuid = current.kind === 'text' ? current.assistantUuid : current.tool.assistantUuid
+    const currentIndex = current.kind === 'text' ? current.contentIndex : current.tool.contentIndex
+    if (currentUuid !== assistantUuid) continue
+    lastAssistantBlock = index
+    if (currentIndex != null && currentIndex > contentIndex) {
+      insertAt = index
+      break
+    }
+  }
+  if (insertAt === blocks.length && lastAssistantBlock >= 0) insertAt = lastAssistantBlock + 1
+  blocks.splice(insertAt, 0, block)
+  return { ...state, blocks }
+}
+
+function appendAssistantText(state: RunState, assistantUuid: string, contentIndex: number, delta: string): RunState {
+  const existing = state.blocks.find((block) =>
+    block.kind === 'text'
+    && block.assistantUuid === assistantUuid
+    && block.contentIndex === contentIndex,
+  )
+  if (existing?.kind === 'text') {
+    return setAssistantTextBlock(state, assistantUuid, contentIndex, existing.content + delta, true)
+  }
+  return setAssistantTextBlock(state, assistantUuid, contentIndex, delta, true)
+}
+
+function setAssistantTextBlock(
+  state: RunState,
+  assistantUuid: string,
+  contentIndex: number,
+  content: string,
+  streaming: boolean,
+): RunState {
+  const index = state.blocks.findIndex((block) =>
+    block.kind === 'text'
+    && block.assistantUuid === assistantUuid
+    && block.contentIndex === contentIndex,
+  )
+  if (index >= 0) {
+    const block = state.blocks[index]
+    if (!block || block.kind !== 'text') return state
+    const blocks = [...state.blocks]
+    blocks[index] = { ...block, content, streaming }
+    return { ...state, blocks, footer: streaming ? 'streaming' : state.footer }
+  }
+  return insertAssistantBlock(
+    state,
+    { kind: 'text', content, streaming, assistantUuid, contentIndex },
+    assistantUuid,
+    contentIndex,
+  )
+}
+
+function setAssistantThinking(
+  state: RunState,
+  assistantUuid: string,
+  contentIndex: number,
+  content: string,
+  active: boolean,
+): RunState {
+  const thinking = {
+    ...(state.deltaAssistantThinking ?? {}),
+    [assistantUuid]: {
+      ...(state.deltaAssistantThinking?.[assistantUuid] ?? {}),
+      [contentIndex]: content,
+    },
+  }
+  const contentForAssistant = Object.entries(thinking[assistantUuid] ?? {})
+    .sort(([a], [b]) => Number(a) - Number(b))
+    .map(([, value]) => value)
+    .join('')
+  return {
+    ...state,
+    deltaAssistantThinking: thinking,
+    reasoning: { content: contentForAssistant, active },
+    footer: active ? 'thinking' : state.footer,
+  }
+}
+
+function resetActiveAssistantText(state: RunState, assistantUuid: string): RunState {
+  const blocks = state.blocks.filter((block) => {
+    const blockUuid = block.kind === 'text' ? block.assistantUuid : block.tool.assistantUuid
+    if (blockUuid !== assistantUuid) return true
+    if (block.kind === 'text') return false
+    return block.tool.status !== 'running'
+  })
+  if (!state.deltaAssistantThinking?.[assistantUuid]) return { ...state, blocks, reasoning: { content: '', active: false } }
+  const { [assistantUuid]: _, ...deltaAssistantThinking } = state.deltaAssistantThinking
+  return {
+    ...state,
+    blocks,
+    deltaAssistantThinking,
+    reasoning: { content: '', active: false },
   }
 }
 
@@ -109,158 +220,58 @@ function appendThinking(state: RunState, delta: string): RunState {
   }
 }
 
-function startTool(state: RunState, id: string, name: string, input: unknown): RunState {
+function startTool(
+  state: RunState,
+  id: string,
+  name: string,
+  input: unknown,
+  assistantUuid?: string,
+  contentIndex?: number,
+): RunState {
   const existing = state.blocks.find((block) => block.kind === 'tool' && block.tool.id === id)
   if (existing?.kind === 'tool') {
     return {
       ...state,
       blocks: state.blocks.map((block) => block.kind === 'tool' && block.tool.id === id
-        ? { ...block, tool: { ...block.tool, name, input } }
+        ? {
+            ...block,
+            tool: {
+              ...block.tool,
+              name,
+              input,
+              ...(assistantUuid && { assistantUuid }),
+              ...(contentIndex != null && { contentIndex }),
+            },
+          }
         : block),
       reasoning: { ...state.reasoning, active: false },
       footer: existing.tool.status === 'running' ? 'tool_running' : state.footer,
     }
   }
 
-  const tool: ToolEntry = { id, name, input, status: 'running' }
-  return {
-    ...state,
-    blocks: [...closeStreamingText(state.blocks), { kind: 'tool', tool }],
-    reasoning: { ...state.reasoning, active: false },
-    footer: 'tool_running',
+  const tool: ToolEntry = {
+    id,
+    name,
+    input,
+    status: 'running',
+    ...(assistantUuid && { assistantUuid }),
+    ...(contentIndex != null && { contentIndex }),
   }
-}
-
-function insertOwnedBlock(
-  blocks: Block[],
-  block: Block,
-  messageId: string,
-  contentIndex: number,
-): Block[] {
-  const next = [...blocks]
-  const firstGreater = next.findIndex((candidate) =>
-    candidate.messageId === messageId
-      && candidate.contentIndex != null
-      && candidate.contentIndex > contentIndex
-  )
-  if (firstGreater >= 0) {
-    next.splice(firstGreater, 0, block)
-    return next
-  }
-  let lastOwned = -1
-  for (let index = next.length - 1; index >= 0; index--) {
-    if (next[index]?.messageId === messageId) {
-      lastOwned = index
-      break
-    }
-  }
-  next.splice(lastOwned >= 0 ? lastOwned + 1 : next.length, 0, block)
-  return next
-}
-
-function appendTextAt(
-  state: RunState,
-  messageId: string,
-  contentIndex: number,
-  delta: string,
-): RunState {
-  const existingIndex = state.blocks.findIndex((block) =>
-    block.kind === 'text'
-      && block.messageId === messageId
-      && block.contentIndex === contentIndex
-  )
-  const blocks = existingIndex >= 0
-    ? state.blocks.map((block, index) => index === existingIndex && block.kind === 'text'
-      ? { ...block, content: block.content + delta, streaming: true }
-      : block)
-    : insertOwnedBlock(
-      state.blocks,
-      { kind: 'text', content: delta, streaming: true, messageId, contentIndex },
-      messageId,
-      contentIndex,
-    )
-  return {
-    ...state,
-    blocks,
-    reasoning: { ...state.reasoning, active: false },
-    footer: 'streaming',
-  }
-}
-
-function composeThinking(
-  thinkingBlocks: RunState['thinkingBlocks'],
-  messageOrder: string[],
-): string {
-  return messageOrder
-    .flatMap((messageId) => Object.entries(thinkingBlocks[messageId] ?? {})
-      .sort(([left], [right]) => Number(left) - Number(right))
-      .map(([, value]) => value))
-    .join('')
-}
-
-function appendThinkingAt(
-  state: RunState,
-  messageId: string,
-  contentIndex: number,
-  delta: string,
-): RunState {
-  const messageBlocks = state.thinkingBlocks[messageId] ?? {}
-  const thinkingBlocks = {
-    ...state.thinkingBlocks,
-    [messageId]: {
-      ...messageBlocks,
-      [contentIndex]: (messageBlocks[contentIndex] ?? '') + delta,
-    },
-  }
-  const thinkingMessageOrder = state.thinkingMessageOrder.includes(messageId)
-    ? state.thinkingMessageOrder
-    : [...state.thinkingMessageOrder, messageId]
-  return {
-    ...state,
-    thinkingBlocks,
-    thinkingMessageOrder,
-    reasoning: {
-      content: composeThinking(thinkingBlocks, thinkingMessageOrder),
-      active: true,
-      messageId,
-      contentIndex,
-    },
-    footer: 'thinking',
-  }
-}
-
-function startToolAt(
-  state: RunState,
-  messageId: string,
-  contentIndex: number,
-  id: string,
-  name: string,
-  input: unknown,
-): RunState {
-  const existingIndex = state.blocks.findIndex((block) =>
-    block.kind === 'tool'
-      && (block.tool.id === id
-        || (block.messageId === messageId && block.contentIndex === contentIndex))
-  )
-  if (existingIndex >= 0) {
+  const next: RunState = { ...state, blocks: [...closeStreamingText(state.blocks), { kind: 'tool', tool }] }
+  if (assistantUuid && contentIndex != null) {
     return {
-      ...state,
-      blocks: state.blocks.map((block, index) => index === existingIndex && block.kind === 'tool'
-        ? { ...block, messageId, contentIndex, tool: { ...block.tool, id, name, input } }
-        : block),
+      ...insertAssistantBlock(
+        { ...state, blocks: closeStreamingText(state.blocks) },
+        { kind: 'tool', tool },
+        assistantUuid,
+        contentIndex,
+      ),
       reasoning: { ...state.reasoning, active: false },
       footer: 'tool_running',
     }
   }
-  const tool: ToolEntry = { id, name, input, status: 'running' }
   return {
-    ...state,
-    blocks: insertOwnedBlock(
-      closeStreamingText(state.blocks),
-      { kind: 'tool', tool, messageId, contentIndex },
-      messageId,
-      contentIndex,
-    ),
+    ...next,
     reasoning: { ...state.reasoning, active: false },
     footer: 'tool_running',
   }
@@ -306,91 +317,47 @@ function stringifyToolResult(content: unknown): string {
 }
 
 export function reduce(state: RunState, payload: AgentStreamPayload): RunState {
-  if (payload.kind === 'assistant_message_delta') {
-    const previousAttempt = state.partialAssistantSnapshots[payload.messageId]
-    let next = state
-    if (payload.reset) {
-      // Native retry 复用 messageId；删除该 attempt 拥有的全部 text/tool/thinking block。
-      const blocks = previousAttempt
-        ? state.blocks.filter((block) => block.messageId !== payload.messageId)
-        : state.blocks
-      const resetReasoning = previousAttempt && state.reasoning.messageId === payload.messageId
-      const thinkingBlocks = {
-        ...state.thinkingBlocks,
-        [payload.messageId]: {},
+  if (payload.kind === 'sdk_delta') {
+    const { uuid, deltas } = payload.delta
+    const next = deltas.reduce<RunState>((current, delta) => {
+      switch (delta.type) {
+        case 'start':
+          return resetActiveAssistantText(current, uuid)
+        case 'text_start': {
+          const blocks = current.blocks.filter((block) => !(
+            block.kind === 'text'
+            && block.assistantUuid === uuid
+            && block.contentIndex === delta.contentIndex
+          ))
+          return { ...current, blocks, footer: 'streaming' as const }
+        }
+        case 'text_delta':
+          return delta.delta ? appendAssistantText(current, uuid, delta.contentIndex, delta.delta) : current
+        case 'text_end':
+          return setAssistantTextBlock(current, uuid, delta.contentIndex, delta.content, false)
+        case 'thinking_start':
+          return setAssistantThinking(current, uuid, delta.contentIndex, '', true)
+        case 'thinking_delta': {
+          const previous = current.deltaAssistantThinking?.[uuid]?.[delta.contentIndex] ?? ''
+          return delta.delta ? setAssistantThinking(current, uuid, delta.contentIndex, previous + delta.delta, true) : current
+        }
+        case 'thinking_end':
+          return setAssistantThinking(current, uuid, delta.contentIndex, delta.content, false)
+        case 'toolcall_start':
+        case 'toolcall_end': {
+          const toolCall = delta.toolCall
+          return toolCall
+            ? startTool(current, toolCall.id, toolCall.name, toolCall.arguments ?? {}, uuid, delta.contentIndex)
+            : current
+        }
+        default:
+          return current
       }
-      next = {
-        ...state,
-        blocks,
-        reasoning: resetReasoning
-          ? { content: composeThinking(thinkingBlocks, state.thinkingMessageOrder), active: false }
-          : state.reasoning,
-        partialAssistantSnapshots: {
-          ...state.partialAssistantSnapshots,
-          [payload.messageId]: { blocks: {} },
-        },
-        thinkingBlocks,
-        ...(payload.metadata?.model && !state.meta.model
-          ? { meta: { ...state.meta, model: payload.metadata.model } }
-          : {}),
-      }
+    }, state)
+    return {
+      ...next,
+      deltaAssistantUuids: { ...next.deltaAssistantUuids, [uuid]: true },
     }
-    for (const operation of payload.operations) {
-      if (operation.type === 'append_text') {
-        next = appendTextAt(next, payload.messageId, operation.blockIndex, operation.text)
-        const snapshot = next.partialAssistantSnapshots[payload.messageId] ?? { blocks: {} }
-        const previous = snapshot.blocks[operation.blockIndex]
-        next = {
-          ...next,
-          partialAssistantSnapshots: {
-            ...next.partialAssistantSnapshots,
-            [payload.messageId]: {
-              blocks: {
-                ...snapshot.blocks,
-                [operation.blockIndex]: {
-                  type: 'text',
-                  content: (previous?.type === 'text' ? previous.content : '') + operation.text,
-                },
-              },
-            },
-          },
-        }
-      } else if (operation.type === 'append_thinking') {
-        next = appendThinkingAt(next, payload.messageId, operation.blockIndex, operation.thinking)
-        const snapshot = next.partialAssistantSnapshots[payload.messageId] ?? { blocks: {} }
-        const previous = snapshot.blocks[operation.blockIndex]
-        next = {
-          ...next,
-          partialAssistantSnapshots: {
-            ...next.partialAssistantSnapshots,
-            [payload.messageId]: {
-              blocks: {
-                ...snapshot.blocks,
-                [operation.blockIndex]: {
-                  type: 'thinking',
-                  content: (previous?.type === 'thinking' ? previous.content : '') + operation.thinking,
-                },
-              },
-            },
-          },
-        }
-      } else if (operation.type === 'append_block' || operation.type === 'replace_block') {
-        const block = operation.block
-        if (block.type === 'tool_use'
-          && typeof block.id === 'string'
-          && typeof block.name === 'string') {
-          next = startToolAt(
-            next,
-            payload.messageId,
-            operation.blockIndex,
-            block.id,
-            block.name,
-            block.input,
-          )
-        }
-      }
-    }
-    return next
   }
 
   if (payload.kind === 'sdk_message') {
@@ -398,11 +365,17 @@ export function reduce(state: RunState, payload: AgentStreamPayload): RunState {
 
     if (msg.type === 'assistant') {
       const am = msg as SDKAssistantMessage
+      const isPartial = isPartialSDKMessage(msg)
       const assistantId = typeof (msg as { uuid?: unknown }).uuid === 'string'
         ? (msg as { uuid: string }).uuid
         : undefined
+      // 没有稳定 UUID 时无法从累计快照推导增量，等待终态帧可避免重复文本。
+      if (isPartial && !assistantId) return state
+
       const previousSnapshot = assistantId ? state.partialAssistantSnapshots[assistantId] : undefined
-      const useCumulativeSnapshot = previousSnapshot != null
+      const consumedByDelta = assistantId ? state.deltaAssistantUuids[assistantId] === true : false
+      const useCumulativeSnapshot = isPartial || previousSnapshot != null
+      const partialBlocks: PartialAssistantSnapshot['blocks'] = {}
       let next = state
       if (am.message?.model && !next.meta.model) {
         next = { ...next, meta: { ...next.meta, model: am.message.model } }
@@ -417,42 +390,59 @@ export function reduce(state: RunState, payload: AgentStreamPayload): RunState {
         if (block.type === 'text') {
           const text = (block as { text?: unknown }).text
           if (typeof text === 'string') {
+            if (consumedByDelta && assistantId) {
+              next = setAssistantTextBlock(next, assistantId, index, text, false)
+              continue
+            }
             const previous = previousSnapshot?.blocks[index]
             const delta = useCumulativeSnapshot && previous?.type === 'text'
               ? cumulativeDelta(text, previous.content)
               : text
-            if (delta) {
-              next = previousSnapshot && assistantId
-                ? appendTextAt(next, assistantId, index, delta)
-                : appendText(next, delta)
-            }
+            if (delta) next = appendText(next, delta)
+            if (isPartial) partialBlocks[index] = { type: 'text', content: text }
           }
         } else if (block.type === 'thinking') {
           const thinking = (block as { thinking?: unknown }).thinking
           if (typeof thinking === 'string') {
+            if (consumedByDelta && assistantId) {
+              next = setAssistantThinking(next, assistantId, index, thinking, false)
+              continue
+            }
             const previous = previousSnapshot?.blocks[index]
             const delta = useCumulativeSnapshot && previous?.type === 'thinking'
               ? cumulativeDelta(thinking, previous.content)
               : thinking
-            if (delta) {
-              next = previousSnapshot && assistantId
-                ? appendThinkingAt(next, assistantId, index, delta)
-                : appendThinking(next, delta)
-            }
+            if (delta) next = appendThinking(next, delta)
+            if (isPartial) partialBlocks[index] = { type: 'thinking', content: thinking }
           }
         } else if (block.type === 'tool_use') {
           const tb = block as { id?: unknown; name?: unknown; input?: unknown }
           if (typeof tb.id === 'string' && typeof tb.name === 'string') {
-            next = previousSnapshot && assistantId
-              ? startToolAt(next, assistantId, index, tb.id, tb.name, tb.input)
-              : startTool(next, tb.id, tb.name, tb.input)
+            next = startTool(next, tb.id, tb.name, tb.input, consumedByDelta ? assistantId : undefined, consumedByDelta ? index : undefined)
           }
         }
       }
 
+      if (assistantId && isPartial) {
+        return {
+          ...next,
+          partialAssistantSnapshots: { ...next.partialAssistantSnapshots, [assistantId]: { blocks: partialBlocks } },
+        }
+      }
       if (assistantId && previousSnapshot) {
         const { [assistantId]: _, ...partialAssistantSnapshots } = next.partialAssistantSnapshots
-        return { ...next, partialAssistantSnapshots }
+        const { [assistantId]: _delta, ...deltaAssistantUuids } = next.deltaAssistantUuids
+        const deltaAssistantThinking = next.deltaAssistantThinking
+          ? Object.fromEntries(Object.entries(next.deltaAssistantThinking).filter(([uuid]) => uuid !== assistantId))
+          : next.deltaAssistantThinking
+        return { ...next, partialAssistantSnapshots, deltaAssistantUuids, deltaAssistantThinking }
+      }
+      if (assistantId && consumedByDelta) {
+        const { [assistantId]: _, ...deltaAssistantUuids } = next.deltaAssistantUuids
+        const deltaAssistantThinking = next.deltaAssistantThinking
+          ? Object.fromEntries(Object.entries(next.deltaAssistantThinking).filter(([uuid]) => uuid !== assistantId))
+          : next.deltaAssistantThinking
+        return { ...next, deltaAssistantUuids, deltaAssistantThinking }
       }
       return next
     }

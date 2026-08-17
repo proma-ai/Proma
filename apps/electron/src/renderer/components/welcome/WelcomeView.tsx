@@ -104,7 +104,7 @@ export function WelcomeView(): React.ReactElement {
         currentCreateChat({ draft: true })
       }).catch(console.error)
     } else {
-      window.electronAPI.listAgentSessions().then((freshSessions) => {
+      window.electronAPI.listActiveAgentSessions().then((freshSessions) => {
         // 如果 mode 已切换，丢弃过期回调
         if (initRef.current !== currentMode) return
         const {

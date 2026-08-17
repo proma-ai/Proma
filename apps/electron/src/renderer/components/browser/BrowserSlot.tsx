@@ -13,6 +13,7 @@ const APP_OVERLAY_LIFECYCLE_SELECTOR = [
   '[role="dialog"]',
   '[role="alertdialog"]',
   '[data-sonner-toast]',
+  '[data-sonner-toaster]',
   '[data-radix-popper-content-wrapper]',
 ].join(', ')
 
@@ -93,7 +94,7 @@ function observeAppOverlayLifecycle(onChange: () => void): () => void {
   }
 }
 
-export function BrowserSlot({ sessionId, tabId, nativeViewEnabled = true }: { sessionId: string; tabId: string; nativeViewEnabled?: boolean }): React.ReactElement {
+export function BrowserSlot({ sessionId, tabId }: { sessionId: string; tabId: string }): React.ReactElement {
   const ref = React.useRef<HTMLDivElement>(null)
 
   React.useLayoutEffect(() => {
@@ -117,7 +118,7 @@ export function BrowserSlot({ sessionId, tabId, nativeViewEnabled = true }: { se
         })
       })
     }
-    const publishCurrentVisibility = () => publish(nativeViewEnabled && !hasBlockingAppOverlay())
+    const publishCurrentVisibility = () => publish(!hasBlockingAppOverlay())
     const observer = new ResizeObserver(publishCurrentVisibility)
     const disconnectOverlayObserver = observeAppOverlayLifecycle(publishCurrentVisibility)
     const publishBounded = () => publishCurrentVisibility()
@@ -131,7 +132,7 @@ export function BrowserSlot({ sessionId, tabId, nativeViewEnabled = true }: { se
       if (frame) cancelAnimationFrame(frame)
       void setLayout({ sessionId, tabId, revision: nextBrowserLayoutRevision(), visible: false, bounds: { x: 0, y: 0, width: 0, height: 0 } })
     }
-  }, [sessionId, tabId, nativeViewEnabled])
+  }, [sessionId, tabId])
 
   return <div ref={ref} className="flex-1 min-h-0 bg-muted/15 titlebar-no-drag" aria-label="受管浏览器页面" />
 }

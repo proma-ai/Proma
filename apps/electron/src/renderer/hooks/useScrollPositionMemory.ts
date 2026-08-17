@@ -27,12 +27,6 @@ export function ScrollPositionManager({ id, ready }: { id: string; ready: boolea
   const restoredRef = useRef(false)
   const prevIdRef = useRef(id)
 
-  // 在 layout effect 之前同步重置，避免 sessionId 变化但 ready 仍为 true 时错过恢复。
-  if (id !== prevIdRef.current) {
-    prevIdRef.current = id
-    restoredRef.current = false
-  }
-
   // 持续保存滚动位置（距底部距离）
   // 关键：仅在恢复完成后才注册监听，防止初始化/恢复前的自动滚动污染缓存
   useEffect(() => {
@@ -47,6 +41,14 @@ export function ScrollPositionManager({ id, ready }: { id: string; ready: boolea
     el.addEventListener('scroll', savePosition, { passive: true })
     return () => el.removeEventListener('scroll', savePosition)
   }, [scrollRef, id, ready])  // ready 作为依赖：确保 ready->true 后重新运行
+
+  // id 变化时重置恢复标记
+  useEffect(() => {
+    if (id !== prevIdRef.current) {
+      prevIdRef.current = id
+      restoredRef.current = false
+    }
+  }, [id])
 
   // ready 后恢复位置 — useLayoutEffect 在浏览器绘制前执行，配合 opacity=0 无闪烁
   useLayoutEffect(() => {

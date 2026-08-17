@@ -32,7 +32,7 @@ const HOVER_CLOSE_DELAY = 150
 const CONFIRM_RESET_DELAY = 3000
 const UNSUPPORTED_PLAN_QUOTA_MESSAGE = '当前渠道不支持订阅 Plan 额度查询'
 
-export interface ContextUsageBadgeProps {
+interface ContextUsageBadgeProps {
   inputTokens?: number
   outputTokens?: number
   cacheReadTokens?: number

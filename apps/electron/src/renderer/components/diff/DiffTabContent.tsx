@@ -16,7 +16,7 @@ import {
   agentDiffPanelTabAtom,
   agentDiffViewModeAtom,
   agentDiffRefreshVersionAtom,
-  agentSidePanelOpenAtom,
+  agentSidePanelOpenAtomFamily,
 } from '@/atoms/agent-atoms'
 import { resolvedThemeAtom } from '@/atoms/theme'
 import { previewCodeWrapAtom, quotedSelectionMapAtom } from '@/atoms/preview-atoms'
@@ -411,7 +411,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   const setConversations = useSetAtom(conversationsAtom)
   const setConversationDrafts = useSetAtom(conversationDraftsAtom)
   const setSideChatMap = useSetAtom(agentSideChatMapAtom)
-  const setSidePanelOpen = useSetAtom(agentSidePanelOpenAtom)
+  const setSidePanelOpen = useSetAtom(agentSidePanelOpenAtomFamily(sessionId))
   const setSidePanelTabMap = useSetAtom(agentDiffPanelTabAtom)
   const focusAgentSessionInput = useFocusAgentSessionInput()
   const [previewSelection, setPreviewSelection] = React.useState<PreviewTextSelection | null>(null)

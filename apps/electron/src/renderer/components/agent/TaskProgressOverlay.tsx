@@ -196,7 +196,7 @@ export function TaskProgressOverlay({ activities, streaming, contextCompaction }
   if (!showTaskProgress) {
     return (
       <Button
-        className="absolute bottom-[26px] left-1/2 size-10 -translate-x-1/2 rounded-md border border-border/60 bg-background/95 shadow-sm transition-[background-color,transform] duration-200 hover:bg-accent/80 active:scale-[0.96]"
+        className="absolute bottom-[26px] left-1/2 size-10 -translate-x-1/2 rounded-md border border-border/60 bg-background/85 shadow-sm backdrop-blur-sm transition-[background-color,transform] duration-200 hover:bg-accent/80 active:scale-[0.96]"
         onClick={() => scrollToBottom()}
         type="button"
         variant="ghost"
@@ -216,7 +216,7 @@ export function TaskProgressOverlay({ activities, streaming, contextCompaction }
           <button
             type="button"
             className={cn(
-              'pointer-events-auto flex min-h-10 max-w-[min(460px,calc(100vw-9rem))] items-center gap-2 rounded-md border border-border/60 bg-background/95 py-2 pr-3 pl-2.5 text-left shadow-sm',
+              'pointer-events-auto flex min-h-10 max-w-[min(460px,calc(100vw-9rem))] items-center gap-2 rounded-md border border-border/60 bg-background/85 py-2 pr-3 pl-2.5 text-left shadow-sm backdrop-blur-sm',
               'transition-[background-color,transform] duration-200 hover:bg-accent/80 active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
             )}
           >
@@ -243,7 +243,7 @@ export function TaskProgressOverlay({ activities, streaming, contextCompaction }
             )}
           </button>
         </PopoverTrigger>
-        <PopoverContent className="w-[min(420px,calc(100vw-2rem))] rounded-md border-border/60 bg-background p-2" side="top" align="center">
+        <PopoverContent className="w-[min(420px,calc(100vw-2rem))] rounded-md border-border/60 bg-background/95 p-2 backdrop-blur-sm" side="top" align="center">
           {displayCompaction
             ? <CompactionProgressDetails progress={displayCompaction} />
             : <TaskProgressCard activities={displayActivities} alwaysExpanded />}
@@ -253,7 +253,7 @@ export function TaskProgressOverlay({ activities, streaming, contextCompaction }
       {!isAtBottom && (
         <Button
           aria-label="回到最下方"
-          className="pointer-events-auto size-10 rounded-md border border-border/60 bg-background/95 shadow-sm transition-[background-color,transform] duration-200 hover:bg-accent/80 active:scale-[0.96]"
+          className="pointer-events-auto size-10 rounded-md border border-border/60 bg-background/85 shadow-sm backdrop-blur-sm transition-[background-color,transform] duration-200 hover:bg-accent/80 active:scale-[0.96]"
           onClick={() => scrollToBottom()}
           type="button"
           variant="ghost"

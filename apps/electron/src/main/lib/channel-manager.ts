@@ -6,7 +6,7 @@
  * 数据持久化到 ~/.proma/channels.json。
  */
 
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { safeStorage } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { getChannelsPath } from './config-paths'
@@ -53,6 +53,7 @@ import {
   resolveOpenAIModelsUrl,
 } from '@proma/core'
 import { normalizeHttpResponse, normalizeRequestError } from './channel-test-error'
+import { writeJsonFileAtomic } from './safe-file'
 import pkg from '../../../package.json' with { type: 'json' }
 
 /** 当前配置版本 */
@@ -84,8 +85,6 @@ const QWEN_TOKEN_PLAN_PRESET_MODELS: ChannelModel[] = [
   { id: 'qwen3.6-flash', name: 'Qwen3.6 Flash', enabled: true },
 ]
 const ARK_CODING_PLAN_MODELS: ChannelModel[] = [
-  { id: 'doubao-seed-2.1-pro', name: 'Doubao Seed 2.1 Pro', enabled: true },
-  { id: 'doubao-seed-2.1-turbo', name: 'Doubao Seed 2.1 Turbo', enabled: true },
   { id: 'doubao-seed-2.0-code', name: 'Doubao Seed 2.0 Code', enabled: true },
   { id: 'doubao-seed-2.0-pro', name: 'Doubao Seed 2.0 Pro', enabled: true },
   { id: 'doubao-seed-2.0-lite', name: 'Doubao Seed 2.0 Lite', enabled: true },
@@ -97,6 +96,36 @@ const ARK_CODING_PLAN_MODELS: ChannelModel[] = [
   { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true },
   { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', enabled: true },
 ]
+
+/**
+ * 一次性预设更新 ID。独立于配置 schema 版本，保证高版本配置也能收到新增候选模型。
+ */
+const GLM_53_PRESET_MODEL_UPDATE_ID = 'glm-5.3-candidates-v1'
+
+/**
+ * 本次预设更新向存量渠道追加的候选模型，默认禁用。
+ * 不在每次启动时按完整预设列表补齐，以尊重用户主动删除过的模型。
+ */
+const GLM_53_PRESET_MODEL_CANDIDATES: Partial<Record<ProviderType, readonly ChannelModel[]>> = {
+  'ark-coding-plan': [
+    { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
+  ],
+  doubao: [
+    { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
+  ],
+  'opencode-go-openai': [
+    { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
+  ],
+  zhipu: [
+    { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
+  ],
+  'zhipu-coding': [
+    { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
+  ],
+  'zhipu-coding-team': [
+    { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
+  ],
+}
 
 /**
  * 为连接测试 / 模型拉取请求统一附加超时信号。
@@ -177,7 +206,7 @@ function inferProviderFromBaseUrl(provider: ProviderType, baseUrl: string): Prov
 }
 
 /**
- * 将渠道配置迁移到最新版本。
+ * 将渠道配置迁移到最新 schema 版本。
  *
  * v1 → v2：custom / anthropic-compatible 两类通用兼容渠道的 baseUrl 语义从「Base URL（运行时
  * 自动补端点后缀）」改为「完整请求地址（原样使用）」。把存量 baseUrl 一次性补全为旧版本实际
@@ -191,7 +220,6 @@ function migrateConfig(config: ChannelsConfig): { config: ChannelsConfig; change
     return { config, changed: false }
   }
 
-  let mutated = false
   const channels = config.channels.map((channel) => {
     if (channel.provider !== 'custom' && channel.provider !== 'anthropic-compatible') {
       return channel
@@ -200,14 +228,50 @@ function migrateConfig(config: ChannelsConfig): { config: ChannelsConfig; change
     if (migratedUrl === channel.baseUrl) {
       return channel
     }
-    mutated = true
     console.log(
       `[渠道管理] v${version}→v${CONFIG_VERSION} 迁移渠道 ${channel.name} (${channel.provider}) Base URL: ${channel.baseUrl} → ${migratedUrl}`,
     )
     return { ...channel, baseUrl: migratedUrl }
   })
 
-  return { config: { version: CONFIG_VERSION, channels }, changed: true }
+  return { config: { ...config, version: CONFIG_VERSION, channels }, changed: true }
+}
+
+/**
+ * 应用一次性预设模型更新。更新 ID 不依赖 schema version，以兼容由其他版本写入的更高配置版本。
+ */
+function applyPresetModelCandidateUpdates(config: ChannelsConfig): { config: ChannelsConfig; changed: boolean } {
+  const appliedUpdates = new Set(config.appliedPresetModelUpdates ?? [])
+  if (appliedUpdates.has(GLM_53_PRESET_MODEL_UPDATE_ID)) {
+    return { config, changed: false }
+  }
+
+  const channels = config.channels.map((channel) => {
+    const candidates = GLM_53_PRESET_MODEL_CANDIDATES[channel.provider]
+    if (!candidates) return channel
+
+    const existingModelIds = new Set(channel.models.map((model) => model.id))
+    const missingCandidates = candidates.filter((model) => !existingModelIds.has(model.id))
+    if (missingCandidates.length === 0) return channel
+
+    console.log(
+      `[渠道管理] 预设更新 ${GLM_53_PRESET_MODEL_UPDATE_ID} 为渠道 ${channel.name} (${channel.provider}) 添加 ${missingCandidates.length} 个候选模型`,
+    )
+    return {
+      ...channel,
+      models: [...channel.models, ...cloneModels(missingCandidates)],
+    }
+  })
+
+  appliedUpdates.add(GLM_53_PRESET_MODEL_UPDATE_ID)
+  return {
+    config: {
+      ...config,
+      channels,
+      appliedPresetModelUpdates: [...appliedUpdates],
+    },
+    changed: true,
+  }
 }
 
 /**
@@ -225,8 +289,10 @@ function readConfig(): ChannelsConfig {
   try {
     const raw = readFileSync(configPath, 'utf-8')
     const parsed = JSON.parse(raw) as ChannelsConfig
-    const { config, changed } = migrateConfig(parsed)
-    if (changed) {
+    const schemaMigration = migrateConfig(parsed)
+    const presetModelUpdate = applyPresetModelCandidateUpdates(schemaMigration.config)
+    const config = presetModelUpdate.config
+    if (schemaMigration.changed || presetModelUpdate.changed) {
       writeConfig(config)
       console.log('[渠道管理] 渠道配置已迁移并持久化')
     }
@@ -244,7 +310,7 @@ function writeConfig(config: ChannelsConfig): void {
   const configPath = getChannelsPath()
 
   try {
-    writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
+    writeJsonFileAtomic(configPath, config)
   } catch (error) {
     console.error('[渠道管理] 写入配置文件失败:', error)
     throw new Error('写入渠道配置失败')

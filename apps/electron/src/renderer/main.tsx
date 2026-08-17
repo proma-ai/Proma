@@ -63,7 +63,6 @@ import {
   initializeMarkdownFontSize,
 } from './atoms/markdown-font-size'
 import { useGlobalAgentListeners } from './hooks/useGlobalAgentListeners'
-import { mergeActiveAgentSessions } from './lib/agent-session-list'
 import { useGlobalChatListeners } from './hooks/useGlobalChatListeners'
 import { tabsAtom, activeTabIdAtom, ensureScratchPadTab, getPersistableTabState, scratchPadContentAtom, scratchPadLoadedAtom, SCRATCH_PAD_ID } from './atoms/tab-atoms'
 import type { TabItem } from './atoms/tab-atoms'
@@ -72,7 +71,7 @@ import { feishuBotStatesAtom } from './atoms/feishu-atoms'
 import { dingtalkBotStatesAtom } from './atoms/dingtalk-atoms'
 import { currentConversationIdAtom, channelsAtom, channelsLoadedAtom, selectedModelAtom } from './atoms/chat-atoms'
 import { appModeAtom } from './atoms/app-mode'
-import type { AgentSessionMeta, FeishuBotBridgeState, FeishuBridgeState, DingTalkBotBridgeState, DingTalkBridgeState } from '@proma/shared'
+import type { FeishuBotBridgeState, FeishuBridgeState, DingTalkBotBridgeState, DingTalkBridgeState } from '@proma/shared'
 import { Toaster } from './components/ui/sonner'
 import { toast } from 'sonner'
 import { ArrowUpRight } from 'lucide-react'
@@ -524,24 +523,17 @@ function PlanningInitializer(): null {
 
 function AutomationInitializer(): null {
   const setAutomations = useSetAtom(automationsAtom)
-  const store = useStore()
+  const setAgentSessions = useSetAtom(agentSessionsAtom)
 
   useEffect(() => {
     const load = (): void => {
       window.electronAPI.listAutomations().then(setAutomations).catch(console.error)
-      window.electronAPI.listAgentSessions('active').then((active) => {
-        const openSessionIds = new Set(
-          store.get(tabsAtom)
-            .filter((tab) => tab.type === 'agent' || tab.type === 'preview')
-            .map((tab) => tab.sessionId),
-        )
-        store.set(agentSessionsAtom, (previous) => mergeActiveAgentSessions(previous, active, openSessionIds))
-      }).catch(console.error)
+      window.electronAPI.listActiveAgentSessions().then(setAgentSessions).catch(console.error)
     }
     load()
     const unsub = window.electronAPI.onAutomationChanged(load)
     return unsub
-  }, [setAutomations, store])
+  }, [setAutomations, setAgentSessions])
 
   return null
 }
@@ -843,26 +835,24 @@ function TabStatePersistenceInitializer(): null {
 
   // 启动恢复：读取 settings.tabState + 校验会话有效性
   useEffect(() => {
-    Promise.all([
-      window.electronAPI.getSettings(),
-      window.electronAPI.listConversations(),
-      window.electronAPI.listAgentSessions('active'),
-    ]).then(async ([settings, conversations, activeAgentSessions]) => {
+    const restore = async (): Promise<void> => {
+      const [settings, conversations, activeAgentSessions] = await Promise.all([
+        window.electronAPI.getSettings(),
+        window.electronAPI.listConversations(),
+        window.electronAPI.listActiveAgentSessions(),
+      ])
       const tabState = settings.tabState
-      const persistedAgentSessionIds = [...new Set(
-        (tabState?.tabs ?? [])
-          .filter((tab): tab is TabItem => typeof tab === 'object' && tab !== null && 'type' in tab && 'sessionId' in tab && tab.type === 'agent' && typeof tab.sessionId === 'string')
-          .map((tab) => tab.sessionId),
-      )]
-      // 启动恢复只读取持久化 Tab 对应的少量归档 metadata，避免重引入全量归档 IPC。
-      const restoredAgentSessions = (await Promise.all(
-        persistedAgentSessionIds.map((id) => window.electronAPI.getAgentSessionMeta(id)),
-      )).filter((session): session is AgentSessionMeta => session !== undefined)
-      const agentSessions = [...activeAgentSessions, ...restoredAgentSessions.filter((session) => session.archived)]
-      if (!tabState?.tabs?.length) {
-        restoredRef.current = true
-        return
-      }
+      if (!tabState?.tabs?.length) return
+
+      // 已归档会话仅在上次打开的标签引用它时才读取，以兼容恢复该标签。
+      const activeAgentSessionIds = new Set(activeAgentSessions.map((session) => session.id))
+      const hasArchivedAgentTab = tabState.tabs.some(
+        (tab) => tab.type === 'agent' && !activeAgentSessionIds.has(tab.sessionId),
+      )
+      const archivedAgentSessions = hasArchivedAgentTab
+        ? await window.electronAPI.listArchivedAgentSessions()
+        : []
+      const agentSessions = [...activeAgentSessions, ...archivedAgentSessions]
 
       // 构建有效 sessionId 集合
       const validSessionIds = new Set([
@@ -882,10 +872,7 @@ function TabStatePersistenceInitializer(): null {
           (t.type === 'chat' || t.type === 'agent') &&
           validSessionIds.has(t.sessionId),
       )
-      if (validTabs.length === 0) {
-        restoredRef.current = true
-        return
-      }
+      if (validTabs.length === 0) return
 
       const validTabIds = new Set(validTabs.map((t) => t.id))
 
@@ -907,20 +894,6 @@ function TabStatePersistenceInitializer(): null {
       store.set(tabsAtom, ensureScratchPadTab(activeTab ? [activeTab] : []))
       store.set(activeTabIdAtom, restoredActiveTabId)
 
-      // 常规侧栏只持有 active metadata；恢复中的归档 Tab 仍需要会话级
-      // workspace/model/settings，故只合并这些少量已打开会话，不能丢回整份归档列表。
-      const restoredAgentSessionIds = new Set(
-        validTabs.filter((tab) => tab.type === 'agent').map((tab) => tab.sessionId),
-      )
-      if (restoredAgentSessionIds.size > 0) {
-        const restoredAgentSessions = agentSessions.filter((session) => restoredAgentSessionIds.has(session.id))
-        store.set(agentSessionsAtom, (prev) => {
-          const byId = new Map(prev.map((session) => [session.id, session]))
-          for (const session of restoredAgentSessions) byId.set(session.id, session)
-          return [...byId.values()].sort((a, b) => b.updatedAt - a.updatedAt)
-        })
-      }
-
       // 同步 appMode 和 currentSessionId
       if (activeTab) {
         if (activeTab.type === 'chat') {
@@ -933,7 +906,9 @@ function TabStatePersistenceInitializer(): null {
       }
 
       console.log(`[TabRestore] 已恢复当前会话入口，历史标签 ${validTabs.length} 个已收敛到左侧列表`)
-    }).catch((err) => console.error('[TabRestore] 恢复标签页失败:', err))
+    }
+
+    restore().catch((err) => console.error('[TabRestore] 恢复标签页失败:', err))
       .finally(() => { restoredRef.current = true })
   }, [store])
 

@@ -70,8 +70,6 @@ export interface AssistantTurn {
   inputMessage?: SDKUserMessage
   /** 模型名称（取首条 assistant 消息的 model） */
   model?: string
-  /** 产生此 turn 的渠道 ID；与 model 共同构成历史展示身份。 */
-  channelId?: string
   /** 创建时间（取首条 assistant 消息的时间） */
   createdAt?: number
   /**
@@ -147,7 +145,6 @@ export function groupIntoTurns(messages: SDKMessage[], sessionModelId?: string):
           turnMessages: [msg],
           inputMessage: pendingInputMessage,
           model: aMsg._channelModelId || aMsg.message?.model || sessionModelId,
-          channelId: aMsg._channelId,
           createdAt: meta.createdAt,
           // 紧跟在后台任务唤醒之后的新 turn：阻断与上一轮的合并
           startsAfterWake: pendingWakeBoundary || undefined,
@@ -243,7 +240,7 @@ function mergeAdjacentSameModelTurns(groups: MessageGroup[]): MessageGroup[] {
       if (prev.type === 'user') break // 真正的用户输入阻断合并
       if (prev.type === 'system' && isPersistableSDKSystemMessage(prev.message as SDKSystemMessage)) break
       if (prev.type === 'assistant-turn') {
-        if (prev.model === group.model && prev.channelId === group.channelId) {
+        if (prev.model === group.model) {
           mergeTargetIdx = i
         }
         break // 遇到第一个 assistant-turn 就停止（不跨越不同模型的 turn）

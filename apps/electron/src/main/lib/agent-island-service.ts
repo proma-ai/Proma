@@ -165,17 +165,10 @@ function setToolDetail(session: InternalSessionSnapshot, toolName: string): void
 function handleAgentEvent(sessionId: string, payload: AgentStreamPayload): void {
   if (payload.kind === 'proma_event') {
     handlePromaEvent(sessionId, payload.event)
-  } else if (payload.kind === 'assistant_message_delta') {
-    const session = ensureSession(sessionId)
-    session.phase = 'running'
-    session.lastActivityAt = Date.now()
-    for (const operation of payload.operations) {
-      if (operation.type === 'append_text' && operation.text.trim()) {
-        session.detail = truncate(operation.text, 60)
-      }
-    }
-  } else {
+  } else if (payload.kind === 'sdk_message') {
     handleSdkMessage(sessionId, payload.message)
+  } else {
+    // Delta 仅用于 renderer 的实时内容；灵动岛等待终态 SDK message 更新。
   }
 }
 
@@ -772,7 +765,7 @@ function requiresImmediateAgentIslandPush(payload: AgentStreamPayload): boolean 
   if (payload.kind === 'proma_event') {
     return ['permission_request', 'ask_user_request', 'exit_plan_mode_request', 'run_stopped'].includes(payload.event.type)
   }
-  if (payload.kind === 'assistant_message_delta') return false
+  if (payload.kind !== 'sdk_message') return false
   const message = payload.message
   return message.type === 'result' || (message.type === 'assistant' && Boolean((message as import('@proma/shared').SDKAssistantMessage).error))
 }

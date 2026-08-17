@@ -73,7 +73,7 @@ export function AgentRecommendBanner(): React.ReactElement | null {
       await window.electronAPI.migrateChatToAgent(conversationId, session.id)
 
       // 3. 刷新会话列表
-      const sessions = await window.electronAPI.listAgentSessions()
+      const sessions = await window.electronAPI.listActiveAgentSessions()
       store.set(agentSessionsAtom, sessions)
 
       // 4. 切换到默认工作区（确保 AgentView 能正确显示新会话）

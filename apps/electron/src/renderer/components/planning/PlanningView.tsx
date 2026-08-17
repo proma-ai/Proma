@@ -17,6 +17,7 @@ import { useOpenSession } from '@/hooks/useOpenSession'
 import { useShortcut } from '@/hooks/useShortcut'
 import { buildTodoAgentPrompt } from '@/lib/todo-agent-prompt'
 import { getVisibleTodoNotesSaveState, type TodoNotesSaveState } from '@/lib/todo-notes-save-state'
+import { selectVisibleTodos, type TodoListView } from '@/lib/todo-view'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
@@ -24,7 +25,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
-import { TodoDatePicker, formatTodoDueDate } from '@/components/ui/todo-date-picker'
+import { TodoDatePicker } from '@/components/ui/todo-date-picker'
 import { ShortcutKeycaps } from '@/components/shortcuts/ShortcutKeycaps'
 import { detectIsWindows, WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
 
@@ -48,6 +49,10 @@ function CreateShortcutHint(): React.ReactElement | null {
 export function PlanningView({ standalone = false }: { standalone?: boolean } = {}): React.ReactElement {
   const [tab, setTab] = useAtom(planningTabAtom)
   const isWindows = React.useMemo(() => detectIsWindows(), [])
+  React.useEffect(() => {
+    // Todo 是规划中心的默认落点；用户仍可在当前窗口切换到其他规划视图。
+    setTab('todos')
+  }, [setTab])
   const automations = useAtomValue(automationsAtom)
   const setAutomationForm = useSetAtom(automationFormAtom)
   const requestTodoCreate = useSetAtom(planningTodoCreateRequestAtom)
@@ -82,11 +87,11 @@ export function PlanningView({ standalone = false }: { standalone?: boolean } = 
   }, [createAutomation, tab, triggerCalendarCreate, triggerTodoCreate]), true, { exclusive: true })
   return (
     <div className="flex h-full flex-col overflow-hidden bg-content-area">
-      <header className={cn('relative flex w-full items-center justify-between titlebar-no-drag', standalone ? 'px-5 pb-4 pt-8' : 'px-6 pb-5 pt-8 sm:px-8 xl:px-10')}>
+      <header className={cn('relative flex w-full items-center justify-between titlebar-no-drag', tab === 'todos' ? (standalone ? 'px-5 pb-3 pt-7' : 'px-6 pb-3 pt-6 sm:px-8 xl:px-10') : (standalone ? 'px-5 pb-4 pt-8' : 'px-6 pb-5 pt-8 sm:px-8 xl:px-10'))}>
         <div className={cn('absolute inset-y-0 left-0 z-0 titlebar-drag-region', isWindows ? WINDOW_CONTROLS_INSET_RIGHT : 'right-0')} />
         <div className="relative z-[1]">
-          <h1 className="text-2xl font-semibold tracking-tight text-wrap-balance">任务/日程</h1>
-          <p className="mt-1 text-sm text-muted-foreground">安排待办、日程与定时任务</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-wrap-balance">{tab === 'todos' ? 'Todo' : '任务/日程'}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{tab === 'todos' ? '今天要完成什么？' : '安排待办、日程与定时任务'}</p>
         </div>
         <div className="relative z-[1] titlebar-no-drag flex items-center gap-2">
           {!standalone && (
@@ -135,7 +140,7 @@ export function PlanningView({ standalone = false }: { standalone?: boolean } = 
           {TABS.map((item) => <button key={item.id} type="button" onClick={() => setTab(item.id)} className={cn('min-h-9 rounded-lg px-3 text-sm transition-colors', tab === item.id ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{item.label}</button>)}
         </nav>
       </div>
-      <main className={cn('min-h-0 flex-1 titlebar-no-drag', standalone ? 'px-5 pb-5 pt-4' : 'px-6 pb-8 pt-6 sm:px-8 xl:px-10', tab === 'calendar' || tab === 'todos' ? 'overflow-hidden' : 'overflow-y-auto')}>
+      <main className={cn('min-h-0 flex-1 titlebar-no-drag', tab === 'todos' ? (standalone ? 'px-5 pb-4 pt-3' : 'px-6 pb-5 pt-4 sm:px-8 xl:px-10') : (standalone ? 'px-5 pb-5 pt-4' : 'px-6 pb-8 pt-6 sm:px-8 xl:px-10'), tab === 'calendar' || tab === 'todos' ? 'overflow-hidden' : 'overflow-y-auto')}>
         <div className={cn('w-full', (tab === 'calendar' || tab === 'todos') && 'h-full')}>
           {tab === 'todos' && <TodoWorkspace standalone={standalone} />}
           {tab === 'calendar' && <CalendarWorkspace />}
@@ -145,8 +150,6 @@ export function PlanningView({ standalone = false }: { standalone?: boolean } = 
     </div>
   )
 }
-
-type TodoListView = 'all' | 'today' | 'upcoming' | 'completed' | `group:${string}`
 
 function endOfToday(value: number | Date = Date.now()): number {
   const date = new Date(value)
@@ -185,11 +188,6 @@ function useLocalDayVersion(): number {
   return dayStart
 }
 
-/** Todo 默认以“当天”为计划单位；只有用户主动选时间时才显示精确时分。 */
-function dateTimeLabel(timestamp: number): string {
-  return formatTodoDueDate(timestamp)
-}
-
 function TodoWorkspace({ standalone = false }: { standalone?: boolean } = {}): React.ReactElement {
   const todos = useAtomValue(todosAtom)
   const groups = useAtomValue(todoPlanningGroupsAtom)
@@ -205,7 +203,7 @@ function TodoWorkspace({ standalone = false }: { standalone?: boolean } = {}): R
   const setCurrentWorkspaceId = useSetAtom(currentAgentWorkspaceIdAtom)
   const setPendingPrompt = useSetAtom(agentPendingPromptAtom)
   const setGroups = useSetAtom(todoPlanningGroupsAtom)
-  const [view, setView] = React.useState<TodoListView>('all')
+  const [view, setView] = React.useState<TodoListView>('today')
   const [selectedId, setSelectedId] = useAtom(planningSelectedTodoIdAtom)
   const [createOpen, setCreateOpen] = React.useState(false)
   const [quickTitle, setQuickTitle] = React.useState('')
@@ -227,6 +225,15 @@ function TodoWorkspace({ standalone = false }: { standalone?: boolean } = {}): R
   const [startingTodoId, setStartingTodoId] = React.useState<string | null>(null)
   const [assigningTodoId, setAssigningTodoId] = React.useState<string | null>(null)
   const [projectPickerOpen, setProjectPickerOpen] = React.useState(false)
+  const [recentlyCompletedIds, setRecentlyCompletedIds] = React.useState<Set<string>>(() => new Set())
+  const completionTimersRef = React.useRef(new Map<string, ReturnType<typeof setTimeout>>())
+
+  React.useEffect(() => {
+    return () => {
+      for (const timer of completionTimersRef.current.values()) clearTimeout(timer)
+      completionTimersRef.current.clear()
+    }
+  }, [])
 
   const applyTodoDetailDraft = React.useCallback((todo: Todo): void => {
     const title = todo.title
@@ -451,7 +458,6 @@ function TodoWorkspace({ standalone = false }: { standalone?: boolean } = {}): R
       setQuickTitle('')
       setQuickPriority('medium')
       setQuickDueAt(endOfToday())
-      setCreateOpen(false)
     } catch (error) {
       console.error('[任务/日程] 创建 Todo 失败:', error)
       toast.error('创建 Todo 失败')
@@ -506,7 +512,39 @@ function TodoWorkspace({ standalone = false }: { standalone?: boolean } = {}): R
 
   const completeTodo = async (todo: Todo): Promise<void> => {
     const updated = await updateTodo(todo.id, { status: todo.status === 'completed' ? 'open' : 'completed', expectedUpdatedAt: todo.updatedAt })
-    if (updated?.status === 'completed' && selectedId === todo.id && view !== 'completed') setSelectedId(null)
+    if (!updated) return
+    if (updated.status === 'completed') {
+      setRecentlyCompletedIds((current) => new Set(current).add(todo.id))
+      const previousTimer = completionTimersRef.current.get(todo.id)
+      if (previousTimer) clearTimeout(previousTimer)
+      const timer = setTimeout(() => {
+        setRecentlyCompletedIds((current) => {
+          const next = new Set(current)
+          next.delete(todo.id)
+          return next
+        })
+        completionTimersRef.current.delete(todo.id)
+      }, 420)
+      completionTimersRef.current.set(todo.id, timer)
+      toast.success('已完成', {
+        description: todo.title,
+        action: {
+          label: '撤销',
+          onClick: () => {
+            const activeTimer = completionTimersRef.current.get(todo.id)
+            if (activeTimer) clearTimeout(activeTimer)
+            completionTimersRef.current.delete(todo.id)
+            setRecentlyCompletedIds((current) => {
+              const next = new Set(current)
+              next.delete(todo.id)
+              return next
+            })
+            void updateTodo(todo.id, { status: 'open', expectedUpdatedAt: updated.updatedAt })
+          },
+        },
+      })
+    }
+    if (updated.status === 'completed' && selectedId === todo.id && view !== 'completed') setSelectedId(null)
   }
 
   const deleteTodo = async (): Promise<void> => {
@@ -605,11 +643,8 @@ function TodoWorkspace({ standalone = false }: { standalone?: boolean } = {}): R
   const todoGroupHasAssociatedItems = React.useMemo(() => new Set(todos.flatMap((todo) => todo.groupId ? [todo.groupId] : [])), [todos])
   const todayEnd = React.useMemo(() => endOfToday(dayVersion), [dayVersion])
   const weekEnd = React.useMemo(() => endOfToday(addLocalDays(dayVersion, 7)), [dayVersion])
-  const visibleTodos = view === 'all' ? openTodos
-    : view === 'today' ? openTodos.filter((todo) => todo.dueAt !== undefined && todo.dueAt <= todayEnd)
-      : view === 'upcoming' ? openTodos.filter((todo) => todo.dueAt !== undefined && todo.dueAt > todayEnd && todo.dueAt <= weekEnd)
-        : view === 'completed' ? todos.filter((todo) => todo.status === 'completed')
-          : openTodos.filter((todo) => todo.groupId === view.slice('group:'.length))
+  const isRecentlyCompleted = (todo: Todo): boolean => recentlyCompletedIds.has(todo.id)
+  const visibleTodos = selectVisibleTodos(todos, view, todayEnd, weekEnd, recentlyCompletedIds)
   const viewTitle = view === 'all' ? '全部任务' : view === 'today' ? '今天' : view === 'upcoming' ? '未来 7 天' : view === 'completed' ? '已完成' : groups.find((group) => `group:${group.id}` === view)?.name ?? '分组'
   const count = (predicate: (todo: Todo) => boolean): number => openTodos.filter(predicate).length
 
@@ -622,9 +657,9 @@ function TodoWorkspace({ standalone = false }: { standalone?: boolean } = {}): R
   const visibleNotesSaveState = getVisibleTodoNotesSaveState(notesSaveState, notesSaveStateTodoIdRef.current, selected?.id)
 
   return (
-    <section className="relative h-full min-h-[580px] overflow-hidden rounded-none border border-foreground/20 bg-card">
-      <div className="grid h-full min-h-0 w-full grid-cols-[minmax(10rem,13rem)_minmax(0,1fr)] overflow-hidden">
-        <aside className="flex min-h-0 flex-col overflow-y-auto border-r border-foreground/20 bg-muted/15 p-3 scrollbar-thin">
+    <section className="relative h-full min-h-[500px] overflow-hidden rounded-none border border-foreground/20 bg-card">
+      <div className={cn('grid h-full min-h-0 w-full overflow-hidden', selected ? 'grid-cols-[minmax(9rem,11rem)_minmax(0,1fr)_minmax(18rem,23rem)]' : 'grid-cols-[minmax(9rem,11rem)_minmax(0,1fr)]')}>
+        <aside className="flex min-h-0 flex-col overflow-y-auto border-r border-foreground/20 bg-muted/15 p-2 scrollbar-thin">
           <div className="px-2 pb-3 pt-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Todo</div>
           <nav className="space-y-1" aria-label="Todo 清单">
             {navItems.map((item) => <button key={item.id} type="button" onClick={() => { setView(item.id); setSelectedId(null) }} className={cn('flex h-9 w-full items-center gap-2 rounded-md px-2 text-sm transition-colors', view === item.id ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground')}><span className="text-muted-foreground">{item.icon}</span><span className="flex-1 text-left">{item.label}</span>{item.count !== undefined && <span className="text-xs tabular-nums text-muted-foreground">{item.count}</span>}</button>)}
@@ -633,15 +668,15 @@ function TodoWorkspace({ standalone = false }: { standalone?: boolean } = {}): R
         </aside>
 
         <div className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-foreground/20">
-          <div className="border-b border-foreground/20 px-5 py-4">
-            <div className="flex items-center justify-between gap-3"><h2 className="text-base font-semibold">{viewTitle}</h2><div className="flex items-center gap-3"><PlanningNativeSyncControl entity="reminder" />{view !== 'completed' && <span className="text-xs tabular-nums text-muted-foreground">{visibleTodos.length} 项</span>}</div></div>
+          <div className="border-b border-foreground/20 px-4 py-3">
+            <div className="flex items-center justify-between gap-3"><h2 className="text-sm font-semibold">{viewTitle}</h2><div className="flex items-center gap-2"><PlanningNativeSyncControl entity="reminder" />{view !== 'completed' && <span className="text-xs tabular-nums text-muted-foreground">{visibleTodos.length} 项</span>}</div></div>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto">{visibleTodos.length ? visibleTodos.map((todo) => <TodoListItem key={todo.id} todo={todo} selected={selectedId === todo.id} todayEnd={todayEnd} onSelect={() => setSelectedId(todo.id)} onToggle={() => void completeTodo(todo)} onDelete={() => setTodoPendingDeletion(todo)} />) : <div className="flex h-full min-h-56 items-center justify-center px-8 text-center text-sm text-muted-foreground">这里还没有任务。点击右上角“新建 Todo”或按 ⌘N 即可添加。</div>}</div>
+          <div className="min-h-0 flex-1 overflow-y-auto">{visibleTodos.length ? visibleTodos.map((todo) => <TodoListItem key={todo.id} todo={todo} selected={selectedId === todo.id} todayEnd={todayEnd} recentlyCompleted={isRecentlyCompleted(todo)} onSelect={() => setSelectedId(todo.id)} onToggle={() => void completeTodo(todo)} onDelete={() => setTodoPendingDeletion(todo)} onUpdateDueAt={(dueAt) => void updateTodo(todo.id, { dueAt: dueAt ?? null, expectedUpdatedAt: todo.updatedAt })} />) : <div className="flex h-full min-h-56 flex-col items-center justify-center gap-3 px-8 text-center text-sm text-muted-foreground"><span>{view === 'today' ? '今天还没有安排的任务。' : '这里还没有任务。'}</span>{view !== 'all' && view !== 'completed' && <button type="button" onClick={() => setView('all')} className="text-xs font-medium text-primary underline-offset-4 hover:underline">查看全部任务</button>}</div>}</div>
         </div>
 
-        {selected && <PlanningFloatingInspector label="Todo 详情" onClose={() => { saveDetailNotes(); saveDetailTitle(); setSelectedId(null) }}><div className="space-y-7 p-5">
+        {selected && <PlanningFloatingInspector inline label="Todo 详情" onClose={() => { saveDetailNotes(); saveDetailTitle(); setSelectedId(null) }}><div className="space-y-4 p-4">
           {todoConflict && <div className="flex items-center justify-between gap-3 rounded-md border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-100"><span>此 Todo 已在其他窗口更新，请重新加载后再编辑。</span><Button type="button" variant="link" size="sm" className="h-auto shrink-0 px-0 text-xs" onClick={reloadTodoDetail}>重新加载</Button></div>}
-          <div className="pr-12"><label className="sr-only" htmlFor="todo-title">任务标题</label><Input id="todo-title" value={detailTitle} onChange={(event) => { detailTitleRef.current = event.target.value; setDetailTitle(event.target.value) }} onBlur={saveDetailTitle} disabled={todoConflict} className="h-auto border-0 bg-transparent px-0 text-lg font-semibold shadow-none focus-visible:ring-0" /></div><div><label className="mb-2 flex items-center justify-between text-xs font-medium text-muted-foreground"><span>描述</span><span aria-live="polite" className={cn('text-[11px] font-normal text-muted-foreground transition-opacity duration-300', visibleNotesSaveState ? 'opacity-100' : 'opacity-0')}>{visibleNotesSaveState === 'saving' ? '保存中…' : visibleNotesSaveState === 'saved' ? '✓ 已保存' : ''}</span></label><Textarea value={detailNotes} onChange={(event) => { detailNotesRef.current = event.target.value; setDetailNotes(event.target.value); scheduleNotesAutoSave() }} onBlur={saveDetailNotes} placeholder="添加描述…" disabled={todoConflict} className="min-h-64 resize-y overflow-y-auto scrollbar-thin border-0 bg-muted/35 shadow-none focus-visible:ring-2" /></div><DetailSection title="时间"><DetailField label="计划完成时间"><TodoDatePicker value={selected.dueAt} onChange={(dueAt) => void updateTodo(selected.id, { dueAt: dueAt ?? null, expectedUpdatedAt: todoBaseUpdatedAtRef.current ?? selected.updatedAt })} className="h-8 w-full justify-start bg-muted/45 text-xs text-foreground hover:bg-muted" /></DetailField></DetailSection><DetailSection title="组织"><DetailField label="优先级"><Select value={selected.priority} onValueChange={(value) => void updateTodo(selected.id, { priority: value as Todo['priority'], expectedUpdatedAt: todoBaseUpdatedAtRef.current ?? selected.updatedAt })}><SelectTrigger className="h-8 border-0 bg-muted/45 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="high">高优先级</SelectItem><SelectItem value="medium">中优先级</SelectItem><SelectItem value="low">低优先级</SelectItem></SelectContent></Select></DetailField><DetailField label="Todo 分组"><Select value={selected.groupId ?? '__none__'} onValueChange={(value) => void updateTodo(selected.id, { groupId: value === '__none__' ? null : value, expectedUpdatedAt: todoBaseUpdatedAtRef.current ?? selected.updatedAt })}><SelectTrigger className="h-8 border-0 bg-muted/45 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__none__">不分组</SelectItem>{groups.map((group) => <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>)}</SelectContent></Select></DetailField><DetailField label="标签"><div className="flex flex-wrap gap-1">{tags.length ? tags.map((tag) => <button key={tag.id} type="button" onClick={() => void updateTodo(selected.id, { tagIds: selected.tags.some((item) => item.id === tag.id) ? selected.tags.filter((item) => item.id !== tag.id).map((item) => item.id) : [...selected.tags.map((item) => item.id), tag.id], expectedUpdatedAt: todoBaseUpdatedAtRef.current ?? selected.updatedAt })} className={cn('rounded-md px-2 py-1 text-xs transition-colors', selected.tags.some((item) => item.id === tag.id) ? 'bg-primary text-primary-foreground' : 'bg-muted/60 text-muted-foreground hover:bg-muted')}>#{tag.name}</button>) : <span className="text-xs text-muted-foreground">暂无标签</span>}</div></DetailField></DetailSection><DetailSection title="项目与 Agent"><DetailField label="执行项目"><Popover open={projectPickerOpen} onOpenChange={setProjectPickerOpen}><PopoverTrigger asChild><button type="button" disabled={startingTodoId === selected.id || assigningTodoId === selected.id || agentWorkspaces.length === 0} className="flex h-9 w-full items-center gap-2 rounded-md bg-muted/45 px-2 text-left text-xs transition-colors hover:bg-muted disabled:cursor-wait disabled:opacity-60"><span className="min-w-0 flex-1 truncate">{selected.workspaceId ? agentWorkspaces.find((workspace) => workspace.id === selected.workspaceId)?.name ?? '关联项目已不可用' : agentWorkspaces.length ? '选择项目' : '暂无可用项目'}</span><ChevronRight size={14} className="shrink-0 text-muted-foreground" /></button></PopoverTrigger><PopoverContent align="start" className="w-72 overflow-hidden p-1"><p className="px-2 py-1.5 text-xs font-medium text-muted-foreground">选择 Todo 的执行项目</p><div className="max-h-60 overflow-y-auto">{agentWorkspaces.map((workspace) => { const isCurrent = selected.workspaceId === workspace.id; const isAssigning = assigningTodoId === selected.id; return <button key={workspace.id} type="button" disabled={isAssigning} onClick={() => void assignTodoWorkspace(selected, workspace.id)} className={cn('flex min-h-10 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors hover:bg-muted disabled:cursor-wait disabled:opacity-60', isCurrent && 'bg-primary/10')}><span className="min-w-0 flex-1 truncate">{workspace.name}</span><span className={cn('shrink-0 text-xs', isCurrent ? 'text-primary' : 'text-muted-foreground')}>{isAssigning ? '选择中…' : isCurrent ? '当前项目' : '选择'}</span></button> })}</div></PopoverContent></Popover></DetailField><Button type="button" size="sm" className="w-full" disabled={!selected.workspaceId || startingTodoId === selected.id || assigningTodoId === selected.id} onClick={() => { if (selected.workspaceId) void startTodoInWorkspace(selected, selected.workspaceId) }}><Bot size={15} />{startingTodoId === selected.id ? '启动中…' : '开始运行 Agent'}</Button><DetailField label="关联会话">{selected.sessionLinks.length ? <div className="space-y-1">{selected.sessionLinks.map((link) => { const session = agentSessions.find((item) => item.id === link.sessionId); return <button key={link.sessionId} type="button" disabled={!session || standalone} title={standalone && session ? '请在主窗口查看关联会话' : undefined} onClick={() => { if (session && !standalone) openSession('agent', session.id, session.title) }} className={cn('flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors', session && !standalone ? 'bg-muted/45 hover:bg-muted' : 'cursor-not-allowed bg-muted/25 text-muted-foreground/60')}><span className="min-w-0 flex-1 truncate">{session?.title ?? '会话不可用'}</span><time className="shrink-0 tabular-nums text-[11px] text-muted-foreground">{new Date(link.lastTouchedAt).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })}</time></button> })}</div> : <span className="text-xs text-muted-foreground">尚未由 Agent Session 操作</span>}</DetailField></DetailSection><div className="flex items-center justify-between border-t border-foreground/20 pt-4"><Button size="sm" variant="ghost" onClick={() => void updateTodo(selected.id, { status: selected.status === 'completed' ? 'open' : 'completed', expectedUpdatedAt: todoBaseUpdatedAtRef.current ?? selected.updatedAt })}>{selected.status === 'completed' ? '恢复任务' : '标记完成'}</Button><Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setTodoPendingDeletion(selected)}><Trash2 size={14} />删除</Button></div></div></PlanningFloatingInspector>}
+          <div className="pr-12"><label className="sr-only" htmlFor="todo-title">任务标题</label><Input id="todo-title" value={detailTitle} onChange={(event) => { detailTitleRef.current = event.target.value; setDetailTitle(event.target.value) }} onBlur={saveDetailTitle} disabled={todoConflict} className="h-auto border-0 bg-transparent px-0 text-base font-semibold shadow-none focus-visible:ring-0" /></div><div><label className="mb-1.5 flex items-center justify-between text-xs font-medium text-muted-foreground"><span>描述</span><span aria-live="polite" className={cn('text-[11px] font-normal text-muted-foreground transition-opacity duration-300', visibleNotesSaveState ? 'opacity-100' : 'opacity-0')}>{visibleNotesSaveState === 'saving' ? '保存中…' : visibleNotesSaveState === 'saved' ? '✓ 已保存' : ''}</span></label><Textarea value={detailNotes} onChange={(event) => { detailNotesRef.current = event.target.value; setDetailNotes(event.target.value); scheduleNotesAutoSave() }} onBlur={saveDetailNotes} placeholder="添加描述…" disabled={todoConflict} className="min-h-36 resize-y overflow-y-auto scrollbar-thin border-0 bg-muted/35 text-sm shadow-none focus-visible:ring-2" /></div><DetailSection title="时间"><DetailField label="计划完成时间"><TodoDatePicker value={selected.dueAt} onChange={(dueAt) => void updateTodo(selected.id, { dueAt: dueAt ?? null, expectedUpdatedAt: todoBaseUpdatedAtRef.current ?? selected.updatedAt })} className="h-8 w-full justify-start bg-muted/45 text-xs text-foreground hover:bg-muted" /></DetailField></DetailSection><DetailSection title="组织"><DetailField label="优先级"><Select value={selected.priority} onValueChange={(value) => void updateTodo(selected.id, { priority: value as Todo['priority'], expectedUpdatedAt: todoBaseUpdatedAtRef.current ?? selected.updatedAt })}><SelectTrigger className="h-8 border-0 bg-muted/45 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="high">高优先级</SelectItem><SelectItem value="medium">中优先级</SelectItem><SelectItem value="low">低优先级</SelectItem></SelectContent></Select></DetailField><DetailField label="Todo 分组"><Select value={selected.groupId ?? '__none__'} onValueChange={(value) => void updateTodo(selected.id, { groupId: value === '__none__' ? null : value, expectedUpdatedAt: todoBaseUpdatedAtRef.current ?? selected.updatedAt })}><SelectTrigger className="h-8 border-0 bg-muted/45 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__none__">不分组</SelectItem>{groups.map((group) => <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>)}</SelectContent></Select></DetailField><DetailField label="标签"><div className="flex flex-wrap gap-1">{tags.length ? tags.map((tag) => <button key={tag.id} type="button" onClick={() => void updateTodo(selected.id, { tagIds: selected.tags.some((item) => item.id === tag.id) ? selected.tags.filter((item) => item.id !== tag.id).map((item) => item.id) : [...selected.tags.map((item) => item.id), tag.id], expectedUpdatedAt: todoBaseUpdatedAtRef.current ?? selected.updatedAt })} className={cn('rounded-md px-2 py-1 text-xs transition-colors', selected.tags.some((item) => item.id === tag.id) ? 'bg-primary text-primary-foreground' : 'bg-muted/60 text-muted-foreground hover:bg-muted')}>#{tag.name}</button>) : <span className="text-xs text-muted-foreground">暂无标签</span>}</div></DetailField></DetailSection><DetailSection title="项目与 Agent"><DetailField label="执行项目"><Popover open={projectPickerOpen} onOpenChange={setProjectPickerOpen}><PopoverTrigger asChild><button type="button" disabled={startingTodoId === selected.id || assigningTodoId === selected.id || agentWorkspaces.length === 0} className="flex h-9 w-full items-center gap-2 rounded-md bg-muted/45 px-2 text-left text-xs transition-colors hover:bg-muted disabled:cursor-wait disabled:opacity-60"><span className="min-w-0 flex-1 truncate">{selected.workspaceId ? agentWorkspaces.find((workspace) => workspace.id === selected.workspaceId)?.name ?? '关联项目已不可用' : agentWorkspaces.length ? '选择项目' : '暂无可用项目'}</span><ChevronRight size={14} className="shrink-0 text-muted-foreground" /></button></PopoverTrigger><PopoverContent align="start" className="w-72 overflow-hidden p-1"><p className="px-2 py-1.5 text-xs font-medium text-muted-foreground">选择 Todo 的执行项目</p><div className="max-h-60 overflow-y-auto">{agentWorkspaces.map((workspace) => { const isCurrent = selected.workspaceId === workspace.id; const isAssigning = assigningTodoId === selected.id; return <button key={workspace.id} type="button" disabled={isAssigning} onClick={() => void assignTodoWorkspace(selected, workspace.id)} className={cn('flex min-h-10 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors hover:bg-muted disabled:cursor-wait disabled:opacity-60', isCurrent && 'bg-primary/10')}><span className="min-w-0 flex-1 truncate">{workspace.name}</span><span className={cn('shrink-0 text-xs', isCurrent ? 'text-primary' : 'text-muted-foreground')}>{isAssigning ? '选择中…' : isCurrent ? '当前项目' : '选择'}</span></button> })}</div></PopoverContent></Popover></DetailField><Button type="button" size="sm" className="w-full" disabled={!selected.workspaceId || startingTodoId === selected.id || assigningTodoId === selected.id} onClick={() => { if (selected.workspaceId) void startTodoInWorkspace(selected, selected.workspaceId) }}><Bot size={15} />{startingTodoId === selected.id ? '启动中…' : '开始运行 Agent'}</Button><DetailField label="关联会话">{selected.sessionLinks.length ? <div className="space-y-1">{selected.sessionLinks.map((link) => { const session = agentSessions.find((item) => item.id === link.sessionId); return <button key={link.sessionId} type="button" disabled={!session} title={!session ? '会话不可用' : undefined} onClick={() => { if (!session) return; if (standalone) void window.electronAPI.openAgentIslandSession(session.id, session.title); else openSession('agent', session.id, session.title) }} className={cn('flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors', session ? 'bg-muted/45 hover:bg-muted' : 'cursor-not-allowed bg-muted/25 text-muted-foreground/60')}><span className="min-w-0 flex-1 truncate">{session?.title ?? '会话不可用'}</span><time className="shrink-0 tabular-nums text-[11px] text-muted-foreground">{new Date(link.lastTouchedAt).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })}</time></button> })}</div> : <span className="text-xs text-muted-foreground">尚未由 Agent Session 操作</span>}</DetailField></DetailSection><div className="flex items-center justify-between border-t border-foreground/20 pt-4"><Button size="sm" variant="ghost" onClick={() => void updateTodo(selected.id, { status: selected.status === 'completed' ? 'open' : 'completed', expectedUpdatedAt: todoBaseUpdatedAtRef.current ?? selected.updatedAt })}>{selected.status === 'completed' ? '恢复任务' : '标记完成'}</Button><Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setTodoPendingDeletion(selected)}><Trash2 size={14} />删除</Button></div></div></PlanningFloatingInspector>}
       </div>
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="top-[34%] max-w-xl gap-0 p-3" hideClose>
@@ -673,45 +708,51 @@ function DetailField({ label, children }: { label: string; children: React.React
 }
 
 function DetailSection({ title, children }: { title: string; children: React.ReactNode }): React.ReactElement {
-  return <section className="space-y-4"><h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</h3>{children}</section>
+  return <section className="space-y-3"><h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{title}</h3>{children}</section>
 }
 
 function TodoListItem({
   todo,
   selected,
   todayEnd,
+  recentlyCompleted,
   onSelect,
   onToggle,
   onDelete,
+  onUpdateDueAt,
 }: {
   todo: Todo
   selected: boolean
   todayEnd: number
+  recentlyCompleted: boolean
   onSelect: () => void
   onToggle: () => void
   onDelete: () => void
+  onUpdateDueAt: (dueAt?: number) => void
 }): React.ReactElement {
-  const pendingReminders = todo.reminders.filter((reminder) => reminder.status === 'pending').length
   const priorityLabel = todo.priority === 'high' ? '高优先级' : todo.priority === 'low' ? '低优先级' : '中优先级'
+  const isOverdue = todo.dueAt !== undefined && todo.dueAt < Date.now() && todo.status === 'open'
+  const dueTone = isOverdue ? 'text-rose-700 dark:text-rose-300' : todo.dueAt !== undefined && todo.dueAt <= todayEnd ? 'text-amber-800 dark:text-amber-200' : 'text-muted-foreground'
+
   return (
     <div
       role="button"
       tabIndex={0}
       onClick={onSelect}
       onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect() } }}
-      className={cn('group flex min-h-[68px] w-full items-center gap-3 border-b border-foreground/20 px-5 py-2 text-left transition-colors focus:outline-none', selected ? 'bg-primary/8' : 'hover:bg-muted/45 focus-visible:bg-muted/45')}
+      className={cn('group flex min-h-[56px] w-full items-center gap-3 border-b border-foreground/20 px-4 py-1.5 text-left transition-colors focus:outline-none motion-reduce:animate-none', selected ? 'bg-primary/8' : 'hover:bg-muted/45 focus-visible:bg-muted/45', recentlyCompleted && 'animate-[todo-complete_420ms_ease-out]')}
     >
       <button type="button" aria-label={`${todo.status === 'completed' ? '恢复' : '完成'} ${todo.title}`} onClick={(event) => { event.stopPropagation(); onToggle() }} className={cn('mt-0.5 flex size-5 shrink-0 self-start items-center justify-center rounded-sm border transition-colors', todo.status === 'completed' ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-transparent hover:border-primary hover:bg-primary hover:text-primary-foreground')}><Check size={12} /></button>
       <span className="min-w-0 flex-1">
-        <span className={cn('block truncate text-sm font-medium', todo.status === 'completed' && 'text-muted-foreground line-through')}>{todo.title}</span>
-        <span className="mt-2 flex flex-wrap items-center gap-1.5">
-          {todo.dueAt && <TodoMetaBadge tone={todo.dueAt < Date.now() && todo.status === 'open' ? 'overdue' : todo.dueAt <= todayEnd ? 'today' : 'neutral'}>{todo.dueAt < Date.now() && todo.status === 'open' ? `已逾期 · ${dateTimeLabel(todo.dueAt)}` : `计划 ${dateTimeLabel(todo.dueAt)}`}</TodoMetaBadge>}
+        <span className={cn('block min-w-0 truncate text-sm font-medium', todo.status === 'completed' && 'text-muted-foreground line-through')}>{todo.title}</span>
+        <span className="mt-1.5 flex flex-wrap items-center gap-1">
+          <span onClick={(event) => event.stopPropagation()}>
+            <TodoDatePicker value={todo.dueAt} onChange={onUpdateDueAt} label={`设置 ${todo.title} 的计划日期`} className={cn('h-6 max-w-40 rounded-md px-1.5 text-[11px] font-medium', dueTone)} />
+          </span>
           <TodoMetaBadge tone={todo.priority === 'high' ? 'high' : todo.priority === 'low' ? 'low' : 'medium'}>{priorityLabel}</TodoMetaBadge>
           {todo.group && <TodoMetaBadge>{todo.group.name}</TodoMetaBadge>}
           {todo.nativeOrigin && <TodoMetaBadge>{todo.nativeOrigin.sourceTitle ? `${todo.nativeOrigin.sourceTitle} · 系统` : '已连接系统'}</TodoMetaBadge>}
           {todo.tags.map((tag) => <TodoMetaBadge key={tag.id}>#{tag.name}</TodoMetaBadge>)}
-          {pendingReminders > 0 && <TodoMetaBadge>提醒 {pendingReminders}</TodoMetaBadge>}
-          {todo.sessionLinks.length > 0 && <TodoMetaBadge>会话 {todo.sessionLinks.length}</TodoMetaBadge>}
         </span>
       </span>
       <button type="button" aria-label={`删除 ${todo.title}`} onClick={(event) => { event.stopPropagation(); onDelete() }} onKeyDown={(event) => event.stopPropagation()} className="flex size-10 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive focus-visible:outline-none"><Trash2 size={16} /></button>

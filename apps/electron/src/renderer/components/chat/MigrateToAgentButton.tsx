@@ -60,7 +60,7 @@ export function MigrateToAgentButton({ conversationId }: MigrateToAgentButtonPro
       await window.electronAPI.migrateChatToAgent(conversationId, session.id)
 
       // 3. 刷新会话列表
-      const sessions = await window.electronAPI.listAgentSessions()
+      const sessions = await window.electronAPI.listActiveAgentSessions()
       store.set(agentSessionsAtom, sessions)
 
       // 4. 切换到默认工作区

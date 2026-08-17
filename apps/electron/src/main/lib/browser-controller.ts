@@ -1,6 +1,6 @@
 import { app, BrowserWindow, WebContentsView, session as electronSession, type DownloadItem, type Session, type WebContents } from 'electron'
 import path from 'node:path'
-import type { BrowserExecutionSource, BrowserOperationStatus, BrowserTraceAction, BrowserTraceItem, BrowserViewLayout, BrowserViewState, BrowserTabState } from '@proma/shared'
+import type { BrowserExecutionSource, BrowserOperationStatus, BrowserSessionClosed, BrowserTraceAction, BrowserTraceItem, BrowserViewLayout, BrowserViewState, BrowserTabState } from '@proma/shared'
 import { AGENT_IPC_CHANNELS } from '@proma/shared'
 import { assertSafeBrowserDestination, assertSafeBrowserDownloadUrl, assertSafeBrowserUrl, isSupportedBrowserPopupUrl, isTransientBrowserPopupUrl } from './browser-policy'
 import { createAuthorizedPreviewUrl, isAuthorizedPreviewProtocol } from './browser-preview-service'
@@ -54,6 +54,8 @@ type BrowserTabRecord = {
   lastActivityAt: number
   highlightTimer?: ReturnType<typeof setTimeout>
   lastBounds?: BrowserViewLayout['bounds']
+  /** 仅记录当前实际挂载的 owner；隐藏时 detach，但保留 WebContents 及页面状态。 */
+  attachedOwner: BrowserWindow | null
 }
 type BrowserTabOptions = {
   isLocalPreview?: boolean
@@ -239,6 +241,12 @@ export class BrowserController {
     if (this.sessions.get(browserSession.sessionId) !== browserSession) return
     if (browserSession.tabs.size === 0 || !browserSession.tabs.has(browserSession.activeTabId)) return
     this.owner.webContents.send(AGENT_IPC_CHANNELS.BROWSER_STATE_CHANGED, this.buildState(browserSession))
+  }
+
+  private emitClosed(sessionId: string): void {
+    if (!this.owner || this.owner.isDestroyed()) return
+    const change: BrowserSessionClosed = { sessionId, closed: true }
+    this.owner.webContents.send(AGENT_IPC_CHANNELS.BROWSER_STATE_CHANGED, change)
   }
 
   private buildState(browserSession: BrowserSessionRecord): BrowserViewState {
@@ -557,8 +565,8 @@ export class BrowserController {
       popupInitialUrl,
       popupInitialNavigationPending: popupInitialUrl !== null && isTransientBrowserPopupUrl(popupInitialUrl),
       lastActivityAt: Date.now(),
+      attachedOwner: null,
     }
-    this.owner.contentView.addChildView(view)
     view.setVisible(false)
     view.webContents.setWindowOpenHandler(({ url }) => {
       if (!isSupportedBrowserPopupUrl(url)) {
@@ -613,7 +621,7 @@ export class BrowserController {
       this.disposePopupChildren(browserSession, tab.tabId)
       browserSession.tabs.delete(tab.tabId)
       this.clearAgentTargetHighlight(tab)
-      try { this.owner?.contentView.removeChildView(tab.view) } catch { /* owner 已销毁 */ }
+      this.detachTabView(tab)
       this.repairTabSelection(browserSession, tab.tabId)
       if (browserSession.tabs.size === 0) {
         this.sessions.delete(browserSession.sessionId)
@@ -726,11 +734,7 @@ export class BrowserController {
     for (const browserSession of this.sessions.values()) {
       for (const tab of browserSession.tabs.values()) {
         if (browserSession.sessionId === targetSessionId && tab.tabId === targetTabId) continue
-        tab.view.setVisible(false)
-        if (tab.state.visible) {
-          tab.state.visible = false
-          changedSessions.add(browserSession)
-        }
+        if (this.hideTabView(tab)) changedSessions.add(browserSession)
       }
     }
     return changedSessions
@@ -740,22 +744,48 @@ export class BrowserController {
     for (const browserSession of changedSessions) this.emit(browserSession)
   }
 
-  /** 清空跨 Session 共享的原生浏览器展示槽，避免切换期间旧 view 短暂覆盖新 Session。 */
-  hidePresentation(revision: number): void {
-    if (!Number.isSafeInteger(revision)) return
-    const changedSessions = new Set<BrowserSessionRecord>()
-    for (const browserSession of this.sessions.values()) {
-      for (const tab of browserSession.tabs.values()) {
-        tab.view.setVisible(false)
-        if (tab.state.visible) {
-          tab.state.visible = false
-          changedSessions.add(browserSession)
-        }
+  /** 隐藏时从原生 View 树移除，避免 Chromium 继续按前台 WebContentsView 调度。 */
+  private detachTabView(tab: BrowserTabRecord): void {
+    try { tab.view.setVisible(false) } catch { /* WebContents/View 已销毁 */ }
+    const attachedOwner = tab.attachedOwner
+    if (!attachedOwner) return
+    tab.attachedOwner = null
+    try {
+      if (!attachedOwner.isDestroyed()) attachedOwner.contentView.removeChildView(tab.view)
+    } catch { /* owner 或 View 已销毁/已被 Electron 移除 */ }
+  }
+
+  /** 重新展示时只恢复原生挂载、bounds 和 visible，不重建 WebContents。 */
+  private attachTabView(tab: BrowserTabRecord): boolean {
+    const owner = this.owner
+    if (!owner || owner.isDestroyed() || tab.view.webContents.isDestroyed()) {
+      this.detachTabView(tab)
+      return false
+    }
+    if (tab.attachedOwner !== owner) {
+      this.detachTabView(tab)
+      try {
+        owner.contentView.addChildView(tab.view)
+        tab.attachedOwner = owner
+      } catch {
+        return false
       }
     }
-    this.presentation = null
-    this.latestPresentationRevision = Math.max(this.latestPresentationRevision, revision)
-    this.emitChangedSessions(changedSessions)
+    try {
+      if (tab.lastBounds) tab.view.setBounds(tab.lastBounds)
+      tab.view.setVisible(true)
+      return true
+    } catch {
+      this.detachTabView(tab)
+      return false
+    }
+  }
+
+  private hideTabView(tab: BrowserTabRecord): boolean {
+    this.detachTabView(tab)
+    if (!tab.state.visible) return false
+    tab.state.visible = false
+    return true
   }
 
   setLayout(layout: BrowserViewLayout): void {
@@ -771,12 +801,9 @@ export class BrowserController {
     const bounds = layout.bounds
     const visible = layout.visible && bounds.width > 4 && bounds.height > 4 && !!this.owner && !this.owner.isDestroyed() && this.owner.isVisible()
     if (!visible) {
-      tab.view.setVisible(false)
+      this.latestPresentationRevision = Math.max(this.latestPresentationRevision, layout.revision)
       const changedSessions = new Set<BrowserSessionRecord>()
-      if (tab.state.visible) {
-        tab.state.visible = false
-        changedSessions.add(browserSession)
-      }
+      if (this.hideTabView(tab)) changedSessions.add(browserSession)
       if (this.presentation?.sessionId === browserSession.sessionId && this.presentation.tabId === tab.tabId) {
         this.presentation = null
       }
@@ -797,15 +824,14 @@ export class BrowserController {
     }
     const changedSessions = this.hideAllViewsExcept(browserSession.sessionId, tab.tabId)
     if (!tab.lastBounds || Object.entries(adjustedBounds).some(([key, value]) => tab.lastBounds?.[key as keyof typeof adjustedBounds] !== value)) {
-      tab.view.setBounds(adjustedBounds)
       tab.lastBounds = { ...adjustedBounds }
     }
-    tab.view.setVisible(true)
-    if (!tab.state.visible) {
-      tab.state.visible = true
+    const shown = this.attachTabView(tab)
+    if (tab.state.visible !== shown) {
+      tab.state.visible = shown
       changedSessions.add(browserSession)
     }
-    this.presentation = { sessionId: browserSession.sessionId, tabId: tab.tabId, revision: layout.revision }
+    this.presentation = shown ? { sessionId: browserSession.sessionId, tabId: tab.tabId, revision: layout.revision } : null
     this.latestPresentationRevision = layout.revision
     this.emitChangedSessions(changedSessions)
   }
@@ -819,32 +845,25 @@ export class BrowserController {
     tab.lastActivityAt = Date.now()
     browserSession.activeTabId = tab.tabId
     if (this.presentation?.sessionId !== browserSession.sessionId) {
+      // 后台 Session 的 tab 切换只更新逻辑状态，所有原生 View 都保持 detach。
+      for (const candidate of browserSession.tabs.values()) this.hideTabView(candidate)
       this.emit(browserSession)
       return
     }
 
     if (!tab.lastBounds && previous?.lastBounds) {
-      tab.view.setBounds(previous.lastBounds)
       tab.lastBounds = { ...previous.lastBounds }
     }
     const changedSessions = this.hideAllViewsExcept(browserSession.sessionId, tab.tabId)
-    const visible = !!tab.lastBounds && !!this.owner && !this.owner.isDestroyed() && this.owner.isVisible()
-    tab.view.setVisible(visible)
+    const shouldShow = !!tab.lastBounds && !!this.owner && !this.owner.isDestroyed() && this.owner.isVisible()
+    const visible = shouldShow && this.attachTabView(tab)
+    if (!visible) this.detachTabView(tab)
     if (tab.state.visible !== visible) {
       tab.state.visible = visible
       changedSessions.add(browserSession)
     }
-    this.presentation = { ...this.presentation, tabId: tab.tabId }
+    this.presentation = visible ? { ...this.presentation, tabId: tab.tabId } : null
     this.emitChangedSessions(changedSessions)
-  }
-
-  /**
-   * Agent 通过 tabId 操作另一标签时，面板必须跟随到实际目标，保证用户能看到
-   * 当前读取或操作的页面；但不改变 Agent 的默认工作标签，避免显式 tabId 意外
-   * 改写后续未指定 tabId 的目标。
-   */
-  private activateAgentOperationTab(browserSession: BrowserSessionRecord, tab: BrowserTabRecord): void {
-    this.activateDisplayTab(browserSession, tab)
   }
 
   private disposePopupChildren(browserSession: BrowserSessionRecord, openerTabId: string): void {
@@ -869,7 +888,7 @@ export class BrowserController {
     browserSession.tabs.delete(tab.tabId)
     this.clearAgentTargetHighlight(tab)
     try { if (tab.view.webContents.debugger.isAttached()) tab.view.webContents.debugger.detach() } catch { /* 已销毁 */ }
-    try { this.owner?.contentView.removeChildView(tab.view) } catch { /* owner 已销毁 */ }
+    this.detachTabView(tab)
     if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close()
   }
 
@@ -946,6 +965,8 @@ export class BrowserController {
     this.disposeTab(browserSession, tab)
     if (browserSession.tabs.size === 0) {
       this.sessions.delete(sessionId)
+      if (this.presentation?.sessionId === sessionId) this.presentation = null
+      this.emitClosed(sessionId)
       return null
     }
     this.repairTabSelection(browserSession, tab.tabId)
@@ -986,7 +1007,6 @@ export class BrowserController {
     const browserSession = this.getOrCreateSession(sessionId, [])
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
-    this.activateAgentOperationTab(browserSession, tab)
     const safeUrl = await assertSafeBrowserDestination(url)
     const host = new URL(safeUrl).host
     return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
@@ -1031,7 +1051,6 @@ export class BrowserController {
     const browserSession = this.getOrCreateSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
-    this.activateAgentOperationTab(browserSession, tab)
     if (tab.view.webContents.canGoBack()) tab.view.webContents.goBack()
     this.updateNavigationState(browserSession, tab)
     return structuredClone(this.buildState(browserSession))
@@ -1046,7 +1065,6 @@ export class BrowserController {
     const browserSession = this.getOrCreateSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
-    this.activateAgentOperationTab(browserSession, tab)
     if (tab.view.webContents.canGoForward()) tab.view.webContents.goForward()
     this.updateNavigationState(browserSession, tab)
     return structuredClone(this.buildState(browserSession))
@@ -1061,7 +1079,6 @@ export class BrowserController {
     const browserSession = this.getOrCreateSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
-    this.activateAgentOperationTab(browserSession, tab)
     tab.view.webContents.reload()
     this.updateNavigationState(browserSession, tab)
     return structuredClone(this.buildState(browserSession))
@@ -1076,7 +1093,6 @@ export class BrowserController {
     const browserSession = this.getOrCreateSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
-    this.activateAgentOperationTab(browserSession, tab)
     return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, (operationSignal) => this.observeInternal(browserSession, tab, requestedMaxElements, operationSignal))
   }
 
@@ -1149,7 +1165,6 @@ export class BrowserController {
     const browserSession = this.getOrCreateSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
-    this.activateAgentOperationTab(browserSession, tab)
     return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
       const generation = tab.generation
       const target = this.resolveRef(tab, ref)
@@ -1185,7 +1200,6 @@ export class BrowserController {
     const browserSession = this.getOrCreateSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
-    this.activateAgentOperationTab(browserSession, tab)
     return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
       const generation = tab.generation
       const target = this.resolveRef(tab, ref)
@@ -1213,7 +1227,6 @@ export class BrowserController {
     const browserSession = this.getOrCreateSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
-    this.activateAgentOperationTab(browserSession, tab)
     return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
       if (action.kind === 'key') {
         // rawKeyDown 与 windowsVirtualKeyCode 让 Chromium 识别非字符导航键并触发
@@ -1254,7 +1267,6 @@ export class BrowserController {
     const browserSession = this.getOrCreateSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
-    this.activateAgentOperationTab(browserSession, tab)
     return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
       const startedAt = Date.now()
       const payload = JSON.stringify(condition).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
@@ -1288,7 +1300,6 @@ export class BrowserController {
     const browserSession = this.getOrCreateSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
-    this.activateAgentOperationTab(browserSession, tab)
     return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
       const result = await this.executePageExpression(tab, buildBrowserDomActionExpression(input), operationSignal)
       this.trace(browserSession, tab, 'dom', `DOM ${input.action}：${input.selector.slice(0, 100)}`, 'dispatched')
@@ -1305,7 +1316,6 @@ export class BrowserController {
     const browserSession = this.getOrCreateSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
-    this.activateAgentOperationTab(browserSession, tab)
     return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
       const result = await this.executePageExpression(tab, script, operationSignal)
       this.trace(browserSession, tab, 'script', `执行页面 JavaScript（${script.length} 字符）`, 'dispatched')
@@ -1317,7 +1327,6 @@ export class BrowserController {
     const browserSession = this.getOrCreateSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
-    this.activateAgentOperationTab(browserSession, tab)
     return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
       throwIfBrowserOperationAborted(operationSignal)
       const image = await withBrowserCdpTimeout(() => tab.view.webContents.capturePage(), 'Page.captureScreenshot', BROWSER_OBSERVE_TIMEOUT_MS + 3_000, operationSignal)
@@ -1344,20 +1353,27 @@ export class BrowserController {
 
   async close(sessionId: string): Promise<void> {
     const browserSession = this.sessions.get(sessionId)
-    if (!browserSession) return
+    if (!browserSession) {
+      this.emitClosed(sessionId)
+      return
+    }
     this.sessions.delete(sessionId)
+    if (this.presentation?.sessionId === sessionId) this.presentation = null
     for (const tab of browserSession.tabs.values()) {
       this.clearAgentTargetHighlight(tab)
       try { if (tab.view.webContents.debugger.isAttached()) tab.view.webContents.debugger.detach() } catch { /* 已销毁 */ }
-      try { this.owner?.contentView.removeChildView(tab.view) } catch { /* owner 已销毁 */ }
+      this.detachTabView(tab)
       if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close()
     }
     browserSession.tabs.clear()
+    this.emitClosed(sessionId)
   }
 
   dispose(): void {
     for (const sessionId of [...this.sessions.keys()]) void this.close(sessionId)
     this.configurations.clear()
+    this.presentation = null
+    this.latestPresentationRevision = 0
     this.owner = null
   }
 }

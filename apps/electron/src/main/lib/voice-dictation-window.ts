@@ -21,7 +21,9 @@ const INDICATOR_WIDTH = 360
 const INDICATOR_HEIGHT = 110
 const INDICATOR_BOTTOM_MARGIN = 28
 
-let voiceDictationActive = false
+type VoiceDictationLifecycleState = 'idle' | 'active' | 'stopping'
+
+let voiceDictationState: VoiceDictationLifecycleState = 'idle'
 let usesExternalIndicator = false
 let indicatorState: 'preparing' | 'recording' | 'stopping' = 'preparing'
 let indicatorVolume = 0
@@ -53,7 +55,13 @@ export function toggleVoiceDictationWindow(options: VoiceDictationToggleOptions 
   if (!mainWindow || mainWindow.isDestroyed()) return
   installVoiceDictationMediaPermissions(mainWindow)
 
-  if (voiceDictationActive) {
+  if (voiceDictationState === 'stopping') {
+    // 停止/提交尚未完成时，忽略重复点击，避免旧会话与新会话交叉。
+    return
+  }
+
+  if (voiceDictationState === 'active') {
+    voiceDictationState = 'stopping'
     indicatorState = 'stopping'
     sendIndicatorState()
     mainWindow.webContents.send(VOICE_DICTATION_IPC_CHANNELS.TOGGLE_STOP)
@@ -66,7 +74,7 @@ export function toggleVoiceDictationWindow(options: VoiceDictationToggleOptions 
   const outputContextId = randomUUID()
   beginVoiceDictationOutputContext(outputContextId, { routeToPromaInput, outputMode })
   activeOutputContextId = outputContextId
-  voiceDictationActive = true
+  voiceDictationState = 'active'
   usesExternalIndicator = !targetIsProma
   indicatorState = 'preparing'
   indicatorVolume = 0
@@ -82,7 +90,7 @@ export function toggleVoiceDictationWindow(options: VoiceDictationToggleOptions 
 
 /** 听写完成、取消或失败后关闭所有可见状态。 */
 export function hideVoiceDictationWindow(): void {
-  voiceDictationActive = false
+  voiceDictationState = 'idle'
   usesExternalIndicator = false
   indicatorVolume = 0
   indicatorTranscript = ''

@@ -1,4 +1,4 @@
-import type { SDKMessage } from '@proma/shared'
+import type { AgentStreamState } from '@/atoms/agent-atoms'
 import type { QuotedSelection } from '@/atoms/preview-atoms'
 import {
   buildAgentHistoryQuoteLabel,
@@ -70,28 +70,18 @@ export function createAgentQueuedMessage(
   return message
 }
 
-export function upsertAgentLiveMessageByUuid(
-  messages: SDKMessage[],
-  incoming: SDKMessage,
-): SDKMessage[] {
-  const incomingUuid = (incoming as unknown as Record<string, unknown>).uuid
-  if (typeof incomingUuid !== 'string' || incomingUuid.length === 0) {
-    return [...messages, incoming]
+export function createQueuedAgentStreamState(
+  previous: Pick<AgentStreamState, 'model' | 'inputTokens' | 'contextWindow'> | undefined,
+  startedAt: number,
+): AgentStreamState {
+  return {
+    running: true,
+    backgroundWaiting: false,
+    model: previous?.model,
+    startedAt,
+    inputTokens: previous?.inputTokens,
+    contextWindow: previous?.contextWindow,
   }
-
-  const existingIndex = messages.findIndex((message) => (
-    (message as unknown as Record<string, unknown>).uuid === incomingUuid
-  ))
-  if (existingIndex === -1) return [...messages, incoming]
-
-  const existing = messages[existingIndex]!
-  const merged = {
-    ...(existing as unknown as Record<string, unknown>),
-    ...(incoming as unknown as Record<string, unknown>),
-  } as unknown as SDKMessage
-  const next = [...messages]
-  next[existingIndex] = merged
-  return next
 }
 
 export function removeQueuedMessage(

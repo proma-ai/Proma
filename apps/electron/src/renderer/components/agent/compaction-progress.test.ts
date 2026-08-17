@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { SDKMessage } from '@proma/shared'
-import { getContextCompactionProgress, isCompactionControlHistoryGroup } from './AgentMessages'
+import { getContextCompactionProgress, hasRenderableAssistantTurnContent, isCompactionControlHistoryGroup, shouldRenderLiveAssistantTurn } from './AgentMessages'
 import { shouldClearRetainedCompactionForResumedStream, shouldRestoreCompactionProgress } from './TaskProgressOverlay'
 
 function systemMessage(fields: Record<string, unknown>): SDKMessage {
@@ -12,6 +12,35 @@ function assistantMessage(): SDKMessage {
 }
 
 describe('context compaction progress overlay state', () => {
+  test('keeps the optimistic timer shell until a live assistant turn has visible content', () => {
+    const assistantTurn = (content: unknown[], error?: { message: string }) => ({
+      type: 'assistant-turn',
+      assistantMessages: [{
+        type: 'assistant',
+        message: { content },
+        parent_tool_use_id: null,
+        error,
+      }],
+      turnMessages: [],
+    } as Parameters<typeof hasRenderableAssistantTurnContent>[0])
+
+    const emptyTextTurn = assistantTurn([{ type: 'text', text: '' }])
+    const contentTurn = assistantTurn([{ type: 'text', text: '开始执行' }])
+
+    expect(hasRenderableAssistantTurnContent(assistantTurn([]))).toBe(false)
+    expect(hasRenderableAssistantTurnContent(emptyTextTurn)).toBe(false)
+    expect(hasRenderableAssistantTurnContent(assistantTurn([{ type: 'thinking', thinking: '' }]))).toBe(false)
+    expect(hasRenderableAssistantTurnContent(assistantTurn([{ type: 'tool_use', name: 'TaskUpdate' }]))).toBe(true)
+    expect(hasRenderableAssistantTurnContent(contentTurn)).toBe(true)
+    expect(hasRenderableAssistantTurnContent(assistantTurn([{ type: 'tool_use', name: 'Bash' }]))).toBe(true)
+    expect(hasRenderableAssistantTurnContent(assistantTurn([{ type: 'custom_block' }]))).toBe(true)
+    expect(hasRenderableAssistantTurnContent(assistantTurn([], { message: '请求失败' }))).toBe(true)
+
+    expect(shouldRenderLiveAssistantTurn(emptyTextTurn, true)).toBe(false)
+    expect(shouldRenderLiveAssistantTurn(emptyTextTurn, false)).toBe(true)
+    expect(shouldRenderLiveAssistantTurn(contentTurn, true)).toBe(true)
+  })
+
   test('hides /compact control messages from conversation history', () => {
     expect(isCompactionControlHistoryGroup({
       type: 'user',

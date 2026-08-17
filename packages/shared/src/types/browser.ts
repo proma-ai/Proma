@@ -79,6 +79,14 @@ export interface BrowserViewState {
   activity: BrowserTraceItem | null
 }
 
+/** 通知 renderer 当前会话的受管浏览器已销毁。 */
+export interface BrowserSessionClosed {
+  sessionId: string
+  closed: true
+}
+
+export type BrowserStateChange = BrowserViewState | BrowserSessionClosed
+
 export interface BrowserNavigateInput {
   sessionId: string
   tabId?: string

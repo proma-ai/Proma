@@ -1,8 +1,8 @@
 /**
- * Pi 稳定消息 → Proma legacy transcript projection。
+ * Pi Agent 消息兼容层。
  *
- * 仅在 message_end / run result 等稳定边界生成 SDKMessage，用于现有 JSONL、Bridge
- * 与旧历史 renderer。Pi-native 实时 delta 禁止经过本模块。
+ * 主进程和渲染层仍使用 Claude SDK 兼容的 SDKMessage 协议；本模块集中处理
+ * Pi AgentMessage 与 SDKMessage 之间的形状转换，避免 session 编排代码混入 UI 协议细节。
  */
 
 import { randomUUID } from 'node:crypto'
@@ -73,7 +73,7 @@ export function normalizePermissionInput(piName: string, input: Record<string, u
   }
 }
 
-export function normalizeToolUseInput(piName: string, input: Record<string, unknown>): Record<string, unknown> {
+function normalizeToolUseInput(piName: string, input: Record<string, unknown>): Record<string, unknown> {
   switch (piName) {
     case 'read':
     case 'write':
@@ -210,7 +210,7 @@ function usageFromAssistant(message: AssistantMessage): {
 // 渲染层（SDKMessageRenderer 的 childBlocksMap/agentToolIds 分组）不是死代码：迁移前用旧
 // claude-sdk 持久化的历史会话 JSONL 里子代理消息带非空 parent_tool_use_id，打开老会话时仍
 // 依赖该逻辑正确嵌套显示，不可删除。
-export function projectPiFinalMessage(
+export function convertPiMessage(
   message: AgentMessage,
   sessionId: string,
   channelModelId?: string,
@@ -233,13 +233,8 @@ export function projectPiFinalMessage(
 
   if (message.role === 'assistant') {
     const assistant = message as AssistantMessage
-    // 只有 stopReason === 'error' 时才把 errorMessage 提升为终态 error 字段。
-    // - 'aborted' 属于用户/系统主动中断，不是失败，弹「服务繁忙 + 重试」在语义上完全错误。
-    // - 'stop' / 'length' / 'toolUse' 即使带 errorMessage 也只是 provider 中途抖动，
-    //   Pi SDK 认定本轮已成功，不应在渲染层误导用户。
-    // 上述非终态情况的 errorMessage 只写主进程 console，供开发排查；用户侧完全无感知。
-    // Pi 可能先用预览帧报告 error，随后通过同一 transcript 原生重试；
-    // 在最终帧到达前不能把它展示成用户可见的终态失败。
+    // 只有 stopReason === 'error' 才把 errorMessage 提升为终态 error 字段；
+    // 其它终态即使带 errorMessage 也只记录日志，避免误报失败。
     const isTerminalError = assistant.stopReason === 'error'
     const errorType = assistant.errorMessage && isMalformedResponseError(assistant.errorMessage)
       ? 'service_error'

@@ -54,7 +54,7 @@ export const DEFAULT_CONTEXT_WINDOW = 200_000
 const DEFAULT_MAX_TOKENS = 64_000
 const VOLCENGINE_GLM_MAX_TOKENS = 128_000
 /**
- * GLM-5.3 尚未进入 Pi 模型目录，走 catalog 缺失分支会回落到 64K 默认输出上限。
+ * 当 Pi catalog 尚未包含 GLM-5.3 时，补回其官方最大输出上限，避免落到默认 64K。
  * 智谱官方文档标注 GLM-5.3 最大输出 128K，与目录中 GLM-5.2 的 131072 同一口径。
  */
 const GLM_53_MAX_TOKENS = 131_072
@@ -122,6 +122,18 @@ function compilePiReasoningCapabilities(
         },
         thinkingLevelMap,
       }
+    case 'zai-toggle':
+      return {
+        compat: {
+          supportsDeveloperRole: false,
+          supportsReasoningEffort: false,
+          thinkingFormat: 'zai',
+          zaiToolStream: true,
+        },
+        thinkingLevelMap,
+      }
+    case 'anthropic-manual':
+      return { thinkingLevelMap }
   }
 }
 
@@ -344,6 +356,7 @@ function candidatePiProviders(provider: ProviderType): KnownProvider[] {
     case 'zhipu':
       return ['zai']
     case 'zhipu-coding':
+    case 'zhipu-coding-team':
       return ['zai-coding-cn', 'zai']
     case 'minimax':
       return ['minimax', 'minimax-cn']

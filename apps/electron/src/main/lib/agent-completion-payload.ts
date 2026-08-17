@@ -6,7 +6,7 @@ import type {
 
 export type AgentStreamCompletionDetails = Omit<
   AgentStreamCompletePayload,
-  'sessionId' | 'runId' | 'triggeredBy'
+  'sessionId' | 'triggeredBy'
 >
 
 export interface AgentStreamCompleteTarget {
@@ -14,12 +14,11 @@ export interface AgentStreamCompleteTarget {
 }
 
 export function buildAgentStreamCompletePayload(
-  run: Readonly<Pick<AgentSendInput, 'sessionId' | 'runId' | 'triggeredBy'>>,
+  run: Readonly<Pick<AgentSendInput, 'sessionId' | 'triggeredBy'>>,
   details: AgentStreamCompletionDetails = {},
 ): AgentStreamCompletePayload {
   return {
     sessionId: run.sessionId,
-    runId: run.runId,
     triggeredBy: run.triggeredBy,
     ...details,
   }
@@ -27,7 +26,7 @@ export function buildAgentStreamCompletePayload(
 
 export function sendAgentStreamComplete(
   target: AgentStreamCompleteTarget,
-  run: Readonly<Pick<AgentSendInput, 'sessionId' | 'runId' | 'triggeredBy'>>,
+  run: Readonly<Pick<AgentSendInput, 'sessionId' | 'triggeredBy'>>,
   details: AgentStreamCompletionDetails = {},
 ): void {
   target.send(

@@ -331,6 +331,8 @@ export interface ChannelUpdateInput {
 export interface ChannelsConfig {
   /** 配置版本号 */
   version: number
+  /** 已应用的一次性预设模型更新 ID，避免重复补回用户已删除的候选模型 */
+  appliedPresetModelUpdates?: string[]
   /** 渠道列表 */
   channels: Channel[]
 }

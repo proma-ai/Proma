@@ -61,6 +61,7 @@ export function useSmoothStream({
   minDelay = 10,
 }: UseSmoothStreamOptions): UseSmoothStreamReturn {
   const [displayedContent, setDisplayedContent] = useState(content)
+  const [queueVersion, setQueueVersion] = useState(0)
 
   // 字符队列（待渲染的字符）
   const chunkQueueRef = useRef<string[]>([])
@@ -94,6 +95,7 @@ export function useSmoothStream({
       if (delta) {
         const chars = segmentText(delta)
         chunkQueueRef.current.push(...chars)
+        setQueueVersion((version) => version + 1)
       }
     } else {
       // 内容重置（用户重新发送等场景）
@@ -105,17 +107,21 @@ export function useSmoothStream({
     prevContentRef.current = newContent
   }, [content])
 
-  // 非流式状态的最终一致性安全网。队列非空时绝不同步倾倒：content 与
-  // isStreaming 同帧更新时，后面的启动 effect 会用结束态速度自然排空。
+  // 非流式状态时，确保最终内容一致（安全网，不立即 flush 队列）
   useEffect(() => {
-    if (
-      !isStreaming
-      && !rafRef.current
-      && chunkQueueRef.current.length === 0
-      && displayedRef.current !== content
-    ) {
-      displayedRef.current = content
-      setDisplayedContent(content)
+    if (!isStreaming) {
+      // 如果 rAF 循环仍在运行，让它自然排空队列
+      if (rafRef.current) return
+
+      // rAF 已停止：同步剩余内容
+      if (chunkQueueRef.current.length > 0) {
+        displayedRef.current += chunkQueueRef.current.join('')
+        chunkQueueRef.current = []
+      }
+      if (displayedRef.current !== content) {
+        displayedRef.current = content
+      }
+      setDisplayedContent(displayedRef.current)
     }
   }, [isStreaming, content])
 
@@ -123,14 +129,18 @@ export function useSmoothStream({
   const renderLoop = useCallback((currentTime: number) => {
     const queue = chunkQueueRef.current
 
-    // 队列为空时暂停，而不是在整个流期间维持空转 rAF。下一段 content
-    // 到达后下面的启动 effect 会重新拉起；这允许 Agent 同一 turn 的多个 block
-    // 各自平滑，而不会为已完成 block 永久占用 animation frame。
+    // 队列为空
     if (queue.length === 0) {
-      if (streamDoneRef.current && displayedRef.current !== prevContentRef.current) {
-        displayedRef.current = prevContentRef.current
-        setDisplayedContent(displayedRef.current)
+      if (streamDoneRef.current) {
+        // 流结束 + 队列空 → 同步最终内容并停止
+        if (displayedRef.current !== prevContentRef.current) {
+          displayedRef.current = prevContentRef.current
+          setDisplayedContent(displayedRef.current)
+        }
+        rafRef.current = null
+        return
       }
+      // 流未结束但暂无增量：停止空转，下一次内容入队时再唤醒。
       rafRef.current = null
       return
     }
@@ -152,32 +162,34 @@ export function useSmoothStream({
     displayedRef.current += chars.join('')
     setDisplayedContent(displayedRef.current)
 
-    // 队列未空或流未结束 → 继续
-    if (queue.length > 0 || !streamDoneRef.current) {
+    // 队列未空 → 继续；流未结束但队列排空时休眠，等待下一段 delta 唤醒。
+    if (queue.length > 0) {
       rafRef.current = requestAnimationFrame(renderLoop)
-    } else {
+    } else if (streamDoneRef.current) {
       // 队列刚排空 + 流已结束 → 同步最终内容并停止
       if (displayedRef.current !== prevContentRef.current) {
         displayedRef.current = prevContentRef.current
         setDisplayedContent(displayedRef.current)
       }
       rafRef.current = null
+    } else {
+      rafRef.current = null
     }
   }, [minDelay])
 
-  // 启动/重启渲染循环（流结束后也继续运行直到队列排空）
+  // 内容入队或流结束时启动循环；空队列的流式空档不保留 rAF。
   useEffect(() => {
-    if ((isStreaming || chunkQueueRef.current.length > 0) && !rafRef.current) {
+    if (chunkQueueRef.current.length > 0 && !rafRef.current) {
       rafRef.current = requestAnimationFrame(renderLoop)
     }
+  }, [isStreaming, queueVersion, renderLoop])
 
-    return () => {
-      if (rafRef.current) {
-        cancelAnimationFrame(rafRef.current)
-        rafRef.current = null
-      }
+  useEffect(() => () => {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
     }
-  }, [content, isStreaming, renderLoop])
+  }, [])
 
   return { displayedContent }
 }

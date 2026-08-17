@@ -22,7 +22,7 @@ import type { SessionIndicatorStatus } from '@/atoms/agent-atoms'
 import { currentConversationIdAtom } from '@/atoms/chat-atoms'
 import {
   agentSessionsAtom,
-  agentSidePanelOpenAtom,
+  currentSessionSidePanelOpenAtom,
   agentWorkspacesAtom,
   currentAgentSessionIdAtom,
   currentAgentWorkspaceIdAtom,
@@ -232,11 +232,11 @@ function TabBarInner({
   const fadeTimerRef = React.useRef<ReturnType<typeof setTimeout>>()
   const isWindows = React.useMemo(() => detectIsWindows(), [])
 
-  // 文件面板切换（全局共享）：Agent 会话及其归属的预览 Tab 都可切换面板；
+  // 文件面板按会话独立保存；Agent 会话及其归属的预览 Tab 都可切换面板；
   // 仅 Agent 会话 Tab 在面板关闭时展示右上角"打开"按钮。
   // 该按钮的 absolute 定位与 DiffPanelTabBar.PanelRightClose 的 mr-1 mb-[3px] 坐标耦合，
   // 若右侧关闭按钮样式变化，这里需同步调整。
-  const [isPanelOpen, setSidePanelOpen] = useAtom(agentSidePanelOpenAtom)
+  const [isPanelOpen, setSidePanelOpen] = useAtom(currentSessionSidePanelOpenAtom)
   const setShortcutGuideOpen = useSetAtom(shortcutGuideOpenAtom)
   const setFaqDialogOpen = useSetAtom(faqDialogOpenAtom)
   const activeTab = React.useMemo(() => tabs.find((t) => t.id === activeTabId), [tabs, activeTabId])
