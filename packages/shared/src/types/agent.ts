@@ -1154,6 +1154,8 @@ export interface AgentSendInput {
   userMessage: string
   /** 仅用于持久化/展示的原始用户输入（保留 @file 编码原文，省略时回退到 userMessage） */
   rawUserMessage?: string
+  /** 预分配的用户消息 UUID，用于将主进程持久化消息与渲染端乐观消息去重。 */
+  userMessageUuid?: string
   /** 渠道 ID（用于获取 API Key） */
   channelId: string
   /** 模型 ID */

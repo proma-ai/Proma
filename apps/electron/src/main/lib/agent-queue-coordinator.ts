@@ -73,6 +73,10 @@ export class AgentQueueCoordinator {
     this.tryDispatch(sessionId)
   }
 
+  isDispatching(sessionId: string): boolean {
+    return this.dispatching.has(sessionId)
+  }
+
   clear(sessionId: string): void {
     this.queues.delete(sessionId)
     this.dispatching.delete(sessionId)
@@ -103,7 +107,7 @@ export class AgentQueueCoordinator {
         rawUserMessage: entry.input.rawUserMessage,
         startedAt,
     })
-    void this.options.startRun({ ...entry.input, startedAt }, webContents)
+    void this.options.startRun({ ...entry.input, startedAt, userMessageUuid: messageId }, webContents)
       .finally(() => {
         if (this.dispatching.get(sessionId) === messageId) this.dispatching.delete(sessionId)
       })

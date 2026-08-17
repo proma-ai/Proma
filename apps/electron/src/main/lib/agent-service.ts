@@ -429,7 +429,7 @@ export async function generateAgentTitle(input: AgentGenerateTitleInput): Promis
  * 中止指定会话的 Agent 执行
  */
 export function stopAgent(sessionId: string): void {
-  orchestrator.stop(sessionId)
+  orchestrator.stop(sessionId, agentQueueCoordinator.isDispatching(sessionId))
 }
 
 setHeadlessAgentRunner(runAgentHeadless)

@@ -237,6 +237,8 @@ export class AgentOrchestrator {
 
   /** 被用户手动中止的运行代际（在 stop 中标记，在对应运行的终态路径消费）。 */
   private stoppedBySessions = new Map<string, number>()
+  /** 队列启动投影已显示、但运行槽尚未占用时的停止请求。 */
+  private stoppedBeforeRunSessions = new Set<string>()
 
   /** 运行中会话的当前权限模式（支持运行时动态切换） */
   private sessionPermissionModes = new Map<string, PromaPermissionMode>()
@@ -547,11 +549,16 @@ export class AgentOrchestrator {
     appendSDKMessages(sessionId, withTimestamps)
   }
 
-  private persistUserMessage(sessionId: string, userMessage: string, createdAt = Date.now()): string {
-    const uuid = randomUUID()
+  private persistUserMessage(
+    sessionId: string,
+    userMessage: string,
+    createdAt = Date.now(),
+    uuid?: string,
+  ): string {
+    const persistedUuid = uuid ?? randomUUID()
     const userSDKMsg: SDKMessage = {
       type: 'user',
-      uuid,
+      uuid: persistedUuid,
       message: {
         content: [{ type: 'text', text: userMessage }],
       },
@@ -559,7 +566,7 @@ export class AgentOrchestrator {
       _createdAt: createdAt,
     } as unknown as SDKMessage
     appendSDKMessages(sessionId, [userSDKMsg])
-    return uuid
+    return persistedUuid
   }
 
   private recordUserSkillActivations(
@@ -650,7 +657,7 @@ export class AgentOrchestrator {
     callbacks: SessionCallbacks,
     extensions: { piCustomTools?: ToolDefinition[] } = {},
   ): Promise<void> {
-    const { sessionId, userMessage, rawUserMessage, channelId, modelId, workspaceId: requestedWorkspaceId, additionalDirectories, permissionModeOverride, mentionedSkills, mentionedMcpServers, mentionedSessionIds, mentionedTodoIds, mentionedCalendarEventIds, automationContext, retryOfErrorUuid } = input
+    const { sessionId, userMessage, rawUserMessage, userMessageUuid, channelId, modelId, workspaceId: requestedWorkspaceId, additionalDirectories, permissionModeOverride, mentionedSkills, mentionedMcpServers, mentionedSessionIds, mentionedTodoIds, mentionedCalendarEventIds, automationContext, retryOfErrorUuid } = input
     const streamStartedAt = input.startedAt ?? Date.now()
     let userMessagePersisted = false
     let initialUserMessageUuid: string | undefined
@@ -660,7 +667,12 @@ export class AgentOrchestrator {
       if (userMessagePersisted) return
       // rawUserMessage 保留展示/持久化用的原始文本（@file 编码原文，remarkMentions 解码显示）；
       // userMessage 是传给 Agent 的 SDK 文本（@file 路径已解码为真实路径）。
-      initialUserMessageUuid = this.persistUserMessage(sessionId, rawUserMessage ?? userMessage)
+      initialUserMessageUuid = this.persistUserMessage(
+        sessionId,
+        rawUserMessage ?? userMessage,
+        Date.now(),
+        userMessageUuid,
+      )
       userMessagePersisted = true
     }
 
@@ -850,6 +862,10 @@ export class AgentOrchestrator {
     // 2.1 立即抢占会话槽位（在所有同步检查通过后、第一个 await 之前）
     // 防止 buildSdkEnv 等 await 期间并发调用绕过上方的检查，导致多条重复消息写入 JSONL
     // finally 块会通过 generation 匹配来安全清理，不影响正常流程
+    if (this.stoppedBeforeRunSessions.delete(sessionId)) {
+      callbacks.onComplete([], { stoppedByUser: true, startedAt: streamStartedAt })
+      return
+    }
     const runGeneration = ++this.nextRunGeneration
     this.activeSessions.set(sessionId, runGeneration)
     callbacks.onRunStarted?.({ startedAt: streamStartedAt })
@@ -2081,12 +2097,18 @@ export class AgentOrchestrator {
    * 先从 activeSessions 移除（供 sendMessage catch 块检测用户中止），
    * 再调用 adapter.abort() 中止底层 SDK 进程。
    */
-  stop(sessionId: string): void {
+  stop(sessionId: string, stopBeforeRun = false): void {
     const runGeneration = this.activeSessions.get(sessionId)
     this.activeSessions.delete(sessionId)
     this.sessionPermissionModes.delete(sessionId)
     browserController.cancelSession(sessionId)
-    if (runGeneration != null) this.stoppedBySessions.set(sessionId, runGeneration)
+    if (runGeneration != null) {
+      this.stoppedBySessions.set(sessionId, runGeneration)
+    } else if (stopBeforeRun) {
+      // 队列启动状态已投影给 renderer 后，run 仍可能卡在预检阶段。
+      // 记录这次停止，防止预检完成后错误地创建一个无法终止的新 query。
+      this.stoppedBeforeRunSessions.add(sessionId)
+    }
     this.queuedMessageUuids.delete(sessionId)
     this.adapter.abort(sessionId)
     console.log(`[Agent 编排] 已中止会话: ${sessionId}`)
@@ -2189,6 +2211,7 @@ export class AgentOrchestrator {
     this.adapter.dispose()
     this.activeSessions.clear()
     this.sessionPermissionModes.clear()
+    this.stoppedBeforeRunSessions.clear()
     this.queuedMessageUuids.clear()
     this.pendingUserSkillActivations.clear()
   }

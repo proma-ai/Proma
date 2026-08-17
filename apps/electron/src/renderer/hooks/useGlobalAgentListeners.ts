@@ -582,7 +582,7 @@ export function useGlobalAgentListeners(): void {
         })
         store.set(liveMessagesMapAtom, (prev) => {
           const current = prev.get(status.sessionId) ?? []
-          const uuid = `queued-${status.messageId}`
+          const uuid = status.messageId
           if (current.some((message) => (message as unknown as { uuid?: string }).uuid === uuid)) return prev
           const optimisticMessage: SDKMessage = {
             type: "user",
@@ -926,6 +926,33 @@ export function useGlobalAgentListeners(): void {
 
         if (payload.kind === 'proma_event' && payload.event.type === 'external_run_started') {
           activateExternalAgentRun(payload.event)
+        }
+
+        const runStartedEvent = payload.kind === 'proma_event' && payload.event.type === 'run_started'
+          ? payload.event
+          : null
+        if (runStartedEvent) {
+          // 队列 run 会先通过独立 IPC 发送 started 投影，但该投影可能在窗口
+          // 重载或跨 renderer 路由时丢失。run_started 是同一轮的第二个权威启动信号，
+          // 必须在首个 SDK/tool 事件之前恢复 running、startedAt 和正常的 live UI。
+          store.set(agentStreamingStatesAtom, (prev) => {
+            const current = prev.get(sessionId)
+            // 迟到的旧 run_started 不能重新激活当前更新的一轮运行；同一 run
+            // 已处于 running 时保留已有模型和上下文数据，避免重复初始化。
+            if (current?.startedAt != null && (
+              current.startedAt > runStartedEvent.startedAt
+              || (current.startedAt === runStartedEvent.startedAt && current.running)
+            )) return prev
+            const map = new Map(prev)
+            map.set(sessionId, createQueuedAgentStreamState(current, runStartedEvent.startedAt))
+            return map
+          })
+          store.set(unviewedCompletedSessionIdsAtom, (prev) => {
+            if (!prev.has(sessionId)) return prev
+            const next = new Set(prev)
+            next.delete(sessionId)
+            return next
+          })
         }
 
         // 自动任务会话被用户接管（毕业）：向用户提示，后续定时运行将新建独立会话
