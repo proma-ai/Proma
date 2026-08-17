@@ -27,9 +27,10 @@ describe('context compaction progress overlay state', () => {
     expect(hasRenderableAssistantTurnContent(assistantTurn([]))).toBe(false)
     expect(hasRenderableAssistantTurnContent(assistantTurn([{ type: 'text', text: '' }]))).toBe(false)
     expect(hasRenderableAssistantTurnContent(assistantTurn([{ type: 'thinking', thinking: '' }]))).toBe(false)
-    expect(hasRenderableAssistantTurnContent(assistantTurn([{ type: 'tool_use', name: 'TaskUpdate' }]))).toBe(false)
+    expect(hasRenderableAssistantTurnContent(assistantTurn([{ type: 'tool_use', name: 'TaskUpdate' }]))).toBe(true)
     expect(hasRenderableAssistantTurnContent(assistantTurn([{ type: 'text', text: '开始执行' }]))).toBe(true)
     expect(hasRenderableAssistantTurnContent(assistantTurn([{ type: 'tool_use', name: 'Bash' }]))).toBe(true)
+    expect(hasRenderableAssistantTurnContent(assistantTurn([{ type: 'custom_block' }]))).toBe(true)
     expect(hasRenderableAssistantTurnContent(assistantTurn([], { message: '请求失败' }))).toBe(true)
   })
 
