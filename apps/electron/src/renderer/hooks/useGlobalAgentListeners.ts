@@ -12,6 +12,7 @@ import { unstable_batchedUpdates } from 'react-dom'
 import { useStore } from 'jotai'
 import {
   agentStreamingStatesAtom,
+  agentSessionStreamingStateAtomFamily,
   agentStreamErrorsAtom,
   agentSessionMessageQueueAtom,
   agentSessionsAtom,
@@ -146,63 +147,69 @@ function deltaToLegacyControlEvents(delta: AgentAssistantDelta): AgentEvent[] {
   }]
 }
 
-function applyAssistantDeltaToPreview(
+function applyAssistantDeltasToPreview(
   message: SDKAssistantMessage,
-  delta: AgentAssistantDelta,
+  deltas: readonly AgentAssistantDelta[],
 ): SDKAssistantMessage {
+  if (deltas.length === 0) return message
+  // 整批 delta 共用一份 content 并只产出一个消息对象。
+  // batcher 会把同一帧内的几十个 delta 合并，逐个复制会在一帧内产生几十份
+  // content 数组与消息对象，在多 Agent 并发下形成持续的 GC 压力。
   const content = [...message.message.content] as SDKContentBlock[]
-  const index = 'contentIndex' in delta ? delta.contentIndex : undefined
-  const ensureBlock = (fallback: SDKContentBlock): number => {
-    if (index == null) {
-      content.push(fallback)
-      return content.length - 1
-    }
-    while (content.length <= index) content.push({ type: 'text', text: '' })
-    return index
-  }
-  const existing = index != null ? content[index] : undefined
-  switch (delta.type) {
-    case 'text_start':
-      content[ensureBlock({ type: 'text', text: '' })] = { type: 'text', text: '' }
-      break
-    case 'text_delta': {
-      const blockIndex = ensureBlock({ type: 'text', text: '' })
-      const text = existing?.type === 'text' && 'text' in existing && typeof existing.text === 'string' ? existing.text : ''
-      content[blockIndex] = { type: 'text', text: text + delta.delta }
-      break
-    }
-    case 'text_end':
-      content[ensureBlock({ type: 'text', text: '' })] = { type: 'text', text: delta.content }
-      break
-    case 'thinking_start':
-      content[ensureBlock({ type: 'thinking', thinking: '' })] = { type: 'thinking', thinking: '' }
-      break
-    case 'thinking_delta': {
-      const blockIndex = ensureBlock({ type: 'thinking', thinking: '' })
-      const thinking = existing?.type === 'thinking' && 'thinking' in existing && typeof existing.thinking === 'string' ? existing.thinking : ''
-      content[blockIndex] = { type: 'thinking', thinking: thinking + delta.delta }
-      break
-    }
-    case 'thinking_end':
-      content[ensureBlock({ type: 'thinking', thinking: '' })] = { type: 'thinking', thinking: delta.content }
-      break
-    case 'toolcall_start':
-    case 'toolcall_delta':
-    case 'toolcall_end': {
-      const toolCall = delta.toolCall
-      if (!toolCall) break
-      const blockIndex = ensureBlock({ type: 'tool_use', id: toolCall.id, name: toolCall.name, input: {} })
-      const previous = content[blockIndex]
-      content[blockIndex] = {
-        type: 'tool_use',
-        id: toolCall.id,
-        name: toolCall.name,
-        input: toolCall.arguments ?? (previous?.type === 'tool_use' && 'input' in previous ? previous.input : {}),
+  for (const delta of deltas) {
+    const index = 'contentIndex' in delta ? delta.contentIndex : undefined
+    const ensureBlock = (fallback: SDKContentBlock): number => {
+      if (index == null) {
+        content.push(fallback)
+        return content.length - 1
       }
-      break
+      while (content.length <= index) content.push({ type: 'text', text: '' })
+      return index
     }
-    case 'start':
-      break
+    const existing = index != null ? content[index] : undefined
+    switch (delta.type) {
+      case 'text_start':
+        content[ensureBlock({ type: 'text', text: '' })] = { type: 'text', text: '' }
+        break
+      case 'text_delta': {
+        const blockIndex = ensureBlock({ type: 'text', text: '' })
+        const text = existing?.type === 'text' && 'text' in existing && typeof existing.text === 'string' ? existing.text : ''
+        content[blockIndex] = { type: 'text', text: text + delta.delta }
+        break
+      }
+      case 'text_end':
+        content[ensureBlock({ type: 'text', text: '' })] = { type: 'text', text: delta.content }
+        break
+      case 'thinking_start':
+        content[ensureBlock({ type: 'thinking', thinking: '' })] = { type: 'thinking', thinking: '' }
+        break
+      case 'thinking_delta': {
+        const blockIndex = ensureBlock({ type: 'thinking', thinking: '' })
+        const thinking = existing?.type === 'thinking' && 'thinking' in existing && typeof existing.thinking === 'string' ? existing.thinking : ''
+        content[blockIndex] = { type: 'thinking', thinking: thinking + delta.delta }
+        break
+      }
+      case 'thinking_end':
+        content[ensureBlock({ type: 'thinking', thinking: '' })] = { type: 'thinking', thinking: delta.content }
+        break
+      case 'toolcall_start':
+      case 'toolcall_delta':
+      case 'toolcall_end': {
+        const toolCall = delta.toolCall
+        if (!toolCall) break
+        const blockIndex = ensureBlock({ type: 'tool_use', id: toolCall.id, name: toolCall.name, input: {} })
+        const previous = content[blockIndex]
+        content[blockIndex] = {
+          type: 'tool_use',
+          id: toolCall.id,
+          name: toolCall.name,
+          input: toolCall.arguments ?? (previous?.type === 'tool_use' && 'input' in previous ? previous.input : {}),
+        }
+        break
+      }
+      case 'start':
+        break
+    }
   }
   return { ...message, message: { ...message.message, content }, _partial: true } as SDKAssistantMessage
 }
@@ -908,21 +915,10 @@ export function useGlobalAgentListeners(): void {
     }).catch(console.error)
 
     // ===== 1. 流式事件 =====
-    // [FLASH-DEBUG] 事件频率计数器
-    let eventCount = 0
-    let lastLogTime = Date.now()
     const handleStreamEvent = (streamEvent: AgentStreamEvent): void => {
-        // [FLASH-DEBUG] 每 2 秒输出一次事件频率
-        eventCount++
-        const now = Date.now()
-        if (now - lastLogTime >= 2000) {
-          console.log(`[FLASH-DEBUG] GlobalListener: ${eventCount} events in ${((now - lastLogTime) / 1000).toFixed(1)}s (${(eventCount / ((now - lastLogTime) / 1000)).toFixed(1)} evt/s)`)
-          eventCount = 0
-          lastLogTime = now
-        }
+        const { sessionId, payload } = streamEvent
 
         unstable_batchedUpdates(() => {
-        const { sessionId, payload } = streamEvent
 
         if (payload.kind === 'proma_event' && payload.event.type === 'external_run_started') {
           activateExternalAgentRun(payload.event)
@@ -975,7 +971,7 @@ export function useGlobalAgentListeners(): void {
         // Phase 2: 直接累积 SDKMessage 到 liveMessagesMapAtom（跳过 replay 消息，避免与持久化消息重复）
         if (payload.kind === 'sdk_delta') {
           const deltaPayload = payload.delta
-          const currentRunStartedAt = store.get(agentStreamingStatesAtom).get(sessionId)?.startedAt
+          const currentRunStartedAt = store.get(agentSessionStreamingStateAtomFamily(sessionId))?.startedAt
           // Delta 必须携带产生它的 run 标识。迟到的旧 run Delta 不能借用当前 run，
           // 否则会被 live-group-set 误判为新一轮消息；无标识的旧协议事件也不强行归类。
           if (currentRunStartedAt != null && deltaPayload.runStartedAt !== currentRunStartedAt) return
@@ -1002,7 +998,7 @@ export function useGlobalAgentListeners(): void {
                 ...(provider ? { _channelProvider: provider } : {}),
                 ...(deltaRunStartedAt != null ? { _promaLiveRunStartedAt: deltaRunStartedAt } : {}),
               })
-            const nextMessage = deltaPayload.deltas.reduce(applyAssistantDeltaToPreview, existing)
+            const nextMessage = applyAssistantDeltasToPreview(existing, deltaPayload.deltas)
             // live-group-set 依赖 run 标记区分当前队列轮次；Delta 预览也必须携带它，
             // 否则 transcript 已有 assistant，但会被误判为非 live 并额外渲染 smooth fallback。
             const markedMessage = deltaRunStartedAt != null
@@ -1023,15 +1019,12 @@ export function useGlobalAgentListeners(): void {
           // 不会触碰 AgentStreamState，从而避免重新引入逐 token 的第二次 Map 更新。
           const hasAssistantActivity = deltaPayload.deltas.some((delta) => delta.type !== 'start')
           if (hasAssistantActivity) {
-            store.set(agentStreamingStatesAtom, (prev) => {
-              const current = prev.get(sessionId)
+            store.set(agentSessionStreamingStateAtomFamily(sessionId), (current) => {
               const shouldResume = current?.retrying !== undefined
                 || current?.contextCompaction?.status === 'success'
                 || current?.contextCompaction?.status === 'noop'
-              if (!current || !shouldResume) return prev
-              const map = new Map(prev)
-              map.set(sessionId, resumeAgentStreamState(current))
-              return map
+              if (!current || !shouldResume) return current
+              return resumeAgentStreamState(current)
             })
           }
         }
@@ -1046,7 +1039,7 @@ export function useGlobalAgentListeners(): void {
             // thinking_tokens 是高频进度估算，只更新流式状态，不进入消息转录。
           } else if (!msgRecord.isReplay) {
             // 当前 run 的 assistant 消息沿用 run 起始时间，与首个 Delta 预览和乐观 header 保持一致。
-            const activeRunStartedAt = store.get(agentStreamingStatesAtom).get(sessionId)?.startedAt
+            const activeRunStartedAt = store.get(agentSessionStreamingStateAtomFamily(sessionId))?.startedAt
             // 为实时消息补充 _createdAt 时间戳（与持久化时的逻辑一致），
             // 避免 AssistantTurnRenderer 因缺少时间戳导致 header 时间消失
             if (typeof msgRecord._createdAt !== 'number') {
@@ -1115,7 +1108,7 @@ export function useGlobalAgentListeners(): void {
         for (const event of legacyEvents) {
           // 带 run 标识的 retry 事件必须在所有外围副作用前严格匹配当前流；
           // 否则旧 IPC 事件会复活已结束的 stream，或错误清掉新 run 的完成提醒。
-          const eventStreamState = store.get(agentStreamingStatesAtom).get(sessionId)
+          const eventStreamState = store.get(agentSessionStreamingStateAtomFamily(sessionId))
           if (isRunScopedRetryEvent(event) && event.runStartedAt != null && (
             !eventStreamState || !isRetryEventForCurrentStream(eventStreamState, event)
           )) {
@@ -1124,7 +1117,7 @@ export function useGlobalAgentListeners(): void {
 
           // 会话首次进入 running 时，清除旧的完成提醒状态
           if (event.type !== 'prompt_suggestion') {
-            const prevState = store.get(agentStreamingStatesAtom).get(sessionId)
+            const prevState = store.get(agentSessionStreamingStateAtomFamily(sessionId))
             if (!prevState || !prevState.running) {
               store.set(unviewedCompletedSessionIdsAtom, (prev: Set<string>) => {
                 if (!prev.has(sessionId)) return prev
@@ -1137,13 +1130,12 @@ export function useGlobalAgentListeners(): void {
 
           // 更新流式状态（prompt_suggestion 不影响流式状态，跳过以避免在 session 结束后用默认值 running:true 重新激活）
           if (event.type !== 'prompt_suggestion') {
-            store.set(agentStreamingStatesAtom, (prev) => {
-              const existing = prev.get(sessionId)
+            store.set(agentSessionStreamingStateAtomFamily(sessionId), (existing) => {
               // 再做一次 scope 校验，防止同一 batch 内其它回调更新流状态后旧事件落入。
               if (isRunScopedRetryEvent(event) && event.runStartedAt != null && (
                 !existing || !isRetryEventForCurrentStream(existing, event)
               )) {
-                return prev
+                return existing
               }
               const current: AgentStreamState = existing ?? {
                 running: true,
@@ -1151,14 +1143,11 @@ export function useGlobalAgentListeners(): void {
                 // 无 run 标识的历史事件才允许 fallback；带标识的 retry 必须已在上方匹配。
                 startedAt: undefined,
               }
-              const next = applyAgentEvent(current, event)
-              const map = new Map(prev)
-              map.set(sessionId, next)
-              return map
+              return applyAgentEvent(current, event)
             })
           }
 
-          const activeRunStartedAt = store.get(agentStreamingStatesAtom).get(sessionId)?.startedAt
+          const activeRunStartedAt = store.get(agentSessionStreamingStateAtomFamily(sessionId))?.startedAt
           if (activeRunStartedAt != null) {
             const activeRunId = String(activeRunStartedAt)
             store.set(agentFileChangesCurrentRunAtom, (prev) => {
@@ -1172,7 +1161,7 @@ export function useGlobalAgentListeners(): void {
           // Pi 原生重试成功后仍会沿用同一会话；仅在事件属于当前 stream run 时
           // 清掉过期错误，避免迟到的旧 retry_cleared 掩盖新一轮真实失败。
           if (event.type === 'retry_cleared') {
-            const current = store.get(agentStreamingStatesAtom).get(sessionId)
+            const current = store.get(agentSessionStreamingStateAtomFamily(sessionId))
             if (current && isRetryEventForCurrentStream(current, event)) {
               store.set(agentStreamErrorsAtom, (prev) => clearAgentStreamError(prev, sessionId))
             }
@@ -1188,7 +1177,7 @@ export function useGlobalAgentListeners(): void {
               ?? (input?.path as string | undefined)
               ?? (input?.notebook_path as string | undefined)
             const runId = store.get(agentFileChangesCurrentRunAtom).get(sessionId)
-              ?? String(store.get(agentStreamingStatesAtom).get(sessionId)?.startedAt ?? event.turnId ?? Date.now())
+              ?? String(store.get(agentSessionStreamingStateAtomFamily(sessionId))?.startedAt ?? event.turnId ?? Date.now())
             const entry = {
               path: targetPath || '',
               sessionId,
@@ -1443,12 +1432,9 @@ export function useGlobalAgentListeners(): void {
             )
           } else if (event.type === 'run_resumed') {
             // 后台任务完成自动唤醒：从"空闲可输入"恢复到"运行中"。
-            store.set(agentStreamingStatesAtom, (prev) => {
-              const current = prev.get(sessionId)
-              if (!current || current.running) return prev
-              const map = new Map(prev)
-              map.set(sessionId, { ...current, running: true })
-              return map
+            store.set(agentSessionStreamingStateAtomFamily(sessionId), (current) => {
+              if (!current || current.running) return current
+              return { ...current, running: true }
             })
           }
         }
@@ -1465,7 +1451,6 @@ export function useGlobalAgentListeners(): void {
       (data: AgentStreamCompletePayload) => {
         // 无终态 assistant 的异常路径也不能让等待中的 partial 在完成后倒灌。
         streamEventBatcher.clear(data.sessionId)
-        console.log(`[FLASH-DEBUG] STREAM_COMPLETE for session=${data.sessionId.slice(0, 8)}, stoppedByUser=${data.stoppedByUser}, resultSubtype=${data.resultSubtype}`)
         unstable_batchedUpdates(() => {
         // 后台任务等待态：turn 主体结束但仍有后台任务在飞行，UI 进入"空闲可输入"。
         // 不发"任务已完成"通知（任务并未真正完成）、不清后台任务列表、不重载消息——
@@ -1619,6 +1604,41 @@ export function useGlobalAgentListeners(): void {
 
           // 清理后台任务
           store.set(backgroundTasksAtomFamily(data.sessionId), [])
+
+          // 后台会话没有挂载的 AgentView 来执行收尾清理（MainArea 只渲染活动 Tab）。
+          // 若不在此处回收，liveMessagesMap 与流式状态索引会随运行时长单调增长，
+          // 让每个 delta 的 Map 复制与聚合读取越来越慢（表现为“同样 1 个 Agent 越跑越卡”）。
+          // 可见会话仍由 AgentView 在消息加载完成后清理，以保留防闪烁语义。
+          if (store.get(activeSessionIdAtom) !== data.sessionId) {
+            store.set(liveMessagesMapAtom, (prev) => {
+              if (!prev.has(data.sessionId)) return prev
+              const map = new Map(prev)
+              map.delete(data.sessionId)
+              return map
+            })
+            store.set(agentSessionStreamingStateAtomFamily(data.sessionId), (state) => {
+              if (!state || state.running || state.backgroundWaiting) return state
+              // 上下文用量圆环需要 usage；其余运行态随本轮结束回收。
+              if (state.inputTokens !== undefined) {
+                return {
+                  running: false,
+                  inputTokens: state.inputTokens,
+                  outputTokens: state.outputTokens,
+                  cacheReadTokens: state.cacheReadTokens,
+                  cacheCreationTokens: state.cacheCreationTokens,
+                  contextWindow: state.contextWindow,
+                  contextUsageIsEstimated: state.contextUsageIsEstimated,
+                  model: state.model,
+                  contextCompaction: state.contextCompaction,
+                }
+              }
+              if (state.contextCompaction) {
+                return { running: false, contextCompaction: state.contextCompaction }
+              }
+              // 无需保留的会话彼底移出索引，避免聚合视图无限遍历。
+              return undefined
+            })
+          }
 
           // 清理该 session 关联的未完成写工具记录，防止内存泄漏
           for (const [toolId, entry] of pendingWriteTools) {

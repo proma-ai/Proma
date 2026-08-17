@@ -575,7 +575,7 @@ interface AgentTranscriptHistoryProps {
   taskNotificationSignature: string
   sessionPath?: string | null
   sessionModelId?: string
-  groupHistoryTurns: Map<MessageGroup, number>
+  groupHistoryTurns: Map<string, number>
   streaming: boolean
   stoppedByUser?: boolean
   onFork?: (upToMessageUuid: string) => void
@@ -591,6 +591,25 @@ interface AgentTranscriptHistoryProps {
 
 const EMPTY_LIVE_GROUP_SET: ReadonlySet<MessageGroup> = new Set()
 const EMPTY_MESSAGE_GROUPS: MessageGroup[] = []
+
+/**
+ * 比较两批 group 的“结构身份”是否一致。
+ *
+ * 流式期间只有活跃 turn 的 group 是新引用，历史前缀由 stabilizeMessageGroups 保持原引用。
+ * 因此这里以引用比较为主路径，只对确实变化的位置回退到 type/id 比较，避免每帧构造签名字符串。
+ */
+function haveSameGroupIdentities(previous: MessageGroup[], next: MessageGroup[]): boolean {
+  if (previous.length !== next.length) return false
+  for (let index = 0; index < previous.length; index++) {
+    const previousGroup = previous[index]
+    const nextGroup = next[index]
+    if (previousGroup === nextGroup) continue
+    if (!previousGroup || !nextGroup) return false
+    if (previousGroup.type !== nextGroup.type) return false
+    if (getGroupId(previousGroup) !== getGroupId(nextGroup)) return false
+  }
+  return true
+}
 
 function areTranscriptRowsEqual(
   previous: AgentTranscriptHistoryProps,
@@ -654,9 +673,10 @@ const AgentTranscriptRows = React.memo(function AgentTranscriptRows({
         const isLastAssistantTurn = !streaming && stoppedByUser
           && group.type === 'assistant-turn'
           && index === lastAssistantTurnIndex
+        const groupId = getGroupId(group)
 
         return (
-          <div key={getGroupId(group)} className="w-full pb-1">
+          <div key={groupId} className="w-full pb-1">
             <MessageGroupRenderer
               group={group}
               allMessages={group.type === 'assistant-turn' ? allMessages : EMPTY_SDK_MESSAGES}
@@ -671,7 +691,7 @@ const AgentTranscriptRows = React.memo(function AgentTranscriptRows({
               onRelinkProjectRoot={shouldDisableActions ? undefined : onRelinkProjectRoot}
               onRestoreProjectRoot={shouldDisableActions ? undefined : onRestoreProjectRoot}
               onCompact={shouldDisableActions ? undefined : onCompact}
-              historyTurn={groupHistoryTurns.get(group)}
+              historyTurn={groupHistoryTurns.get(groupId)}
               isStreaming={isLive || undefined}
               stoppedByUser={isLastAssistantTurn || undefined}
               sessionModelId={sessionModelId}
@@ -946,7 +966,10 @@ export const AgentMessages = React.memo(function AgentMessages({
     const live = liveMessages ?? []
     const stampStableKey = (message: SDKMessage): SDKMessage => {
       const key = getSDKMessageStableKey(message)
-      ;(message as Record<string, unknown>)._promaStableKey = key
+      const record = message as Record<string, unknown>
+      // 已标记且未变化时不重写：对老世代消息对象的属性写入会触发 GC 写屏障，
+      // 在数百条历史 × 高频 partial 下形成持续开销。
+      if (record._promaStableKey !== key) record._promaStableKey = key
       return message
     }
     const hasUuid = (message: SDKMessage): boolean => {
@@ -1021,6 +1044,23 @@ export const AgentMessages = React.memo(function AgentMessages({
   )
   visibleGroupsRef.current = visibleGroups
 
+  // 结构派生（迷你地图、用户锚点、turn 编号、sticky 布局）只关心 group 身份，不关心流式 token。
+  // 流式期间活跃 group 每帧都是新引用；若直接依赖 visibleGroups，getGroupPreview 与
+  // parseAttachedFiles 的正则会按 partial 帧率重跑整段历史。此处在身份未变时保持旧数组引用，
+  // 让这些派生只在真正新增/删除消息时重算。
+  const structuralGroupsRef = React.useRef<MessageGroup[]>(visibleGroups)
+  const structuralStreamingRef = React.useRef(streaming)
+  // 流式开始/结束时必须刷新一次：活跃 group 的 id 不变但正文从空到完整，
+  // 否则本轮迷你地图 preview 会永久停留在空值。
+  if (
+    structuralStreamingRef.current !== streaming
+    || !haveSameGroupIdentities(structuralGroupsRef.current, visibleGroups)
+  ) {
+    structuralStreamingRef.current = streaming
+    structuralGroupsRef.current = visibleGroups
+  }
+  const structuralGroups = structuralGroupsRef.current
+
   // 标记哪些 group 属于实时流式消息（用于 isStreaming / onFork 差异化渲染）
   const liveGroupSet = React.useMemo(() => {
     return buildLiveGroupSet({
@@ -1031,9 +1071,9 @@ export const AgentMessages = React.memo(function AgentMessages({
     })
   }, [allGroups, liveMessages, streaming, streamState?.startedAt])
 
-  // 迷你地图数据 — 直接使用统一的 allGroups（无需去重）
+  // 迷你地图数据 — 只依赖结构快照，流式 token 不触发 getGroupPreview 正则
   const minimapItems: MinimapItem[] = React.useMemo(
-    () => visibleGroups.map((group) => ({
+    () => structuralGroups.map((group) => ({
       id: getGroupId(group),
       role: group.type === 'user' ? 'user' as const
         : group.type === 'system' ? 'status' as const
@@ -1042,23 +1082,24 @@ export const AgentMessages = React.memo(function AgentMessages({
       avatar: group.type === 'user' ? userProfile.avatar : undefined,
       model: group.type === 'assistant-turn' ? group.model : undefined,
     })),
-    [visibleGroups, userProfile.avatar]
+    [structuralGroups, userProfile.avatar]
   )
 
-  // 同步 minimap 缓存到 Tab 级别（供 Tab hover 预览使用）
+  // 同步 minimap 缓存到 Tab 级别（供 Tab hover 预览使用）。
+  // 流式期间不写：本轮结束后统一同步一次，避免高频写入全局 atom 唤醒其他订阅者。
   React.useEffect(() => {
-    if (minimapItems.length > 0) {
-      setMinimapCache((prev) => {
-        const next = new Map(prev)
-        next.set(sessionId, minimapItems)
-        return next
-      })
-    }
-  }, [sessionId, minimapItems, setMinimapCache])
+    if (streaming || minimapItems.length === 0) return
+    setMinimapCache((prev) => {
+      const next = new Map(prev)
+      next.set(sessionId, minimapItems)
+      return next
+    })
+  }, [sessionId, minimapItems, streaming, setMinimapCache])
 
-  // 所有用户消息的数据 — 供 StickyUserMessage 使用
+  // 所有用户消息的数据 — 供 StickyUserMessage 使用；只依赖结构快照，
+  // 避免流式期间重复解析已存在用户消息的附件标记。
   const allUserMessagesData = React.useMemo(() => {
-    return visibleGroups
+    return structuralGroups
       .filter((g): g is MessageGroup & { type: 'user' } => g.type === 'user')
       .map((g) => {
         const rawText = extractUserText(g.message) ?? ''
@@ -1069,7 +1110,7 @@ export const AgentMessages = React.memo(function AgentMessages({
           attachments: files.map((f) => ({ filename: f.filename, isImage: sdkIsImageFile(f.filename) })),
         }
       })
-  }, [visibleGroups])
+  }, [structuralGroups])
 
   // 实时消息中是否已有可渲染的助手内容
   // 流式中：通过 liveGroupSet 精确判断（只有 streaming 时 liveGroupSet 才非空）
@@ -1087,18 +1128,18 @@ export const AgentMessages = React.memo(function AgentMessages({
   // turn 在消息渲染时一次性标注到 DOM；历史划选只需读取锚点属性，绝不回扫全部消息。
   const groupHistoryTurns = React.useMemo(() => {
     let turn = 0
-    const turns = new Map<MessageGroup, number>()
-    for (const group of visibleGroups) {
+    const turns = new Map<string, number>()
+    for (const group of structuralGroups) {
       if (group.type === 'user') turn += 1
-      turns.set(group, Math.max(turn, 1))
+      turns.set(getGroupId(group), Math.max(turn, 1))
     }
     return turns
-  }, [visibleGroups])
+  }, [structuralGroups])
 
   const stickyLayoutSignature = React.useMemo(() => {
-    const firstGroup = visibleGroups[0]
-    return `${visibleGroups.length}:${firstGroup ? getGroupId(firstGroup) : ''}`
-  }, [visibleGroups])
+    const firstGroup = structuralGroups[0]
+    return `${structuralGroups.length}:${firstGroup ? getGroupId(firstGroup) : ''}`
+  }, [structuralGroups])
 
   return (
     <BasePathsProvider basePaths={messageBasePaths}>
