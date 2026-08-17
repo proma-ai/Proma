@@ -13,26 +13,24 @@ function assistantMessage(): SDKMessage {
 
 describe('context compaction progress overlay state', () => {
   test('keeps the optimistic timer shell until a live assistant turn has visible content', () => {
-    const emptyTurn = {
+    const assistantTurn = (content: unknown[], error?: { message: string }) => ({
       type: 'assistant-turn',
       assistantMessages: [{
         type: 'assistant',
-        message: { content: [] },
+        message: { content },
         parent_tool_use_id: null,
+        error,
       }],
       turnMessages: [],
-    } as Parameters<typeof hasRenderableAssistantTurnContent>[0]
-    const contentTurn = {
-      ...emptyTurn,
-      assistantMessages: [{
-        type: 'assistant',
-        message: { content: [{ type: 'text', text: '开始执行' }] },
-        parent_tool_use_id: null,
-      }],
-    } as Parameters<typeof hasRenderableAssistantTurnContent>[0]
+    } as Parameters<typeof hasRenderableAssistantTurnContent>[0])
 
-    expect(hasRenderableAssistantTurnContent(emptyTurn)).toBe(false)
-    expect(hasRenderableAssistantTurnContent(contentTurn)).toBe(true)
+    expect(hasRenderableAssistantTurnContent(assistantTurn([]))).toBe(false)
+    expect(hasRenderableAssistantTurnContent(assistantTurn([{ type: 'text', text: '' }]))).toBe(false)
+    expect(hasRenderableAssistantTurnContent(assistantTurn([{ type: 'thinking', thinking: '' }]))).toBe(false)
+    expect(hasRenderableAssistantTurnContent(assistantTurn([{ type: 'tool_use', name: 'TaskUpdate' }]))).toBe(false)
+    expect(hasRenderableAssistantTurnContent(assistantTurn([{ type: 'text', text: '开始执行' }]))).toBe(true)
+    expect(hasRenderableAssistantTurnContent(assistantTurn([{ type: 'tool_use', name: 'Bash' }]))).toBe(true)
+    expect(hasRenderableAssistantTurnContent(assistantTurn([], { message: '请求失败' }))).toBe(true)
   })
 
   test('hides /compact control messages from conversation history', () => {

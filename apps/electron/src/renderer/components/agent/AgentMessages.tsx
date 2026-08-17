@@ -37,8 +37,9 @@ import { buildLiveGroupSet } from './live-group-set'
 import { AgentBrowserLinkProvider } from '@/components/browser/AgentBrowserLinkProvider'
 import { AgentHistorySelectionLayer } from './AgentHistorySelectionLayer'
 import { TaskProgressOverlay, type ContextCompactionProgress } from './TaskProgressOverlay'
+import { TASK_TOOL_NAMES } from './task-progress'
 import { createMessageGroupRenderCache, groupMessagesForRendering } from './message-group-rendering'
-import type { AgentEventUsage, RetryAttempt, SDKAssistantMessage, SDKMessage, SDKSystemMessage } from '@proma/shared'
+import type { AgentEventUsage, RetryAttempt, SDKAssistantMessage, SDKMessage, SDKSystemMessage, SDKTextBlock, SDKThinkingBlock, SDKToolUseBlock } from '@proma/shared'
 import { getSDKCompactStatus } from '@proma/shared'
 import { agentLiveMessagesAtomFamily, agentSessionStreamingStateAtomFamily, type AgentStreamState } from '@/atoms/agent-atoms'
 import type { QuotedSelection } from '@/atoms/preview-atoms'
@@ -97,7 +98,14 @@ export function isCompactionControlHistoryGroup(group: MessageGroup): boolean {
 }
 
 function hasRenderableAssistantMessage(message: SDKAssistantMessage): boolean {
-  return message.error != null || message.message.content.length > 0
+  if (message.error != null) return true
+
+  return message.message.content.some((block) => {
+    if (block.type === 'text') return Boolean((block as SDKTextBlock).text)
+    if (block.type === 'thinking') return Boolean((block as SDKThinkingBlock).thinking)
+    if (block.type === 'tool_use') return !TASK_TOOL_NAMES.has((block as SDKToolUseBlock).name)
+    return false
+  })
 }
 
 export function hasRenderableAssistantTurnContent(group: MessageGroup): boolean {
