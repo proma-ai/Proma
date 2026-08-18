@@ -454,6 +454,9 @@ function createWindow(): void {
     minWidth: 800,
     minHeight: 600,
     icon: iconExists ? iconPath : undefined,
+    // Chromium 在 Windows 隐藏标题栏窗口首帧尚未合成时默认显示黑色；
+    // 使用默认深色主题背景作为稳定兜底，避免登录切换期间出现黑屏闪帧。
+    backgroundColor: '#1a1a1a',
     show: false,
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),

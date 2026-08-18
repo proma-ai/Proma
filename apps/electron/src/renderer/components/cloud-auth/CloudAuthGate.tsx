@@ -16,6 +16,7 @@ import {
   cloudAuthLoadingAtom,
   cloudAuthViewAtom,
 } from '@/atoms/cloud-auth'
+import { agentSettingsReadyAtom } from '@/atoms/agent-atoms'
 import type { CloudAuthView } from '@/atoms/cloud-auth'
 import { LoginPage } from './LoginPage'
 import { RegisterPage } from './RegisterPage'
@@ -62,15 +63,16 @@ export function CloudAuthScreen(): React.ReactElement {
 function CloudAuthGuard({ children }: CloudAuthGateProps): React.ReactElement {
   const user = useAtomValue(cloudUserAtom)
   const loading = useAtomValue(cloudAuthLoadingAtom)
+  const agentSettingsReady = useAtomValue(agentSettingsReadyAtom)
   const isWindows = React.useMemo(() => detectIsWindows(), [])
 
   // 加载中
-  if (loading) {
+  if (loading || (user && !agentSettingsReady)) {
     return (
       <div className="flex h-full items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-3">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-          <p className="text-sm text-muted-foreground">正在验证登录状态...</p>
+          <p className="text-sm text-muted-foreground">{loading ? '正在验证登录状态...' : '正在准备工作空间...'}</p>
         </div>
       </div>
     )

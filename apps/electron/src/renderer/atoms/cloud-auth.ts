@@ -46,22 +46,33 @@ export function initializeCloudAuth(
   setUser: (user: CloudUserInfo | null) => void,
   setLoading: (loading: boolean) => void,
 ): () => void {
+  let disposed = false
+  let receivedChange = false
+
+  // 先订阅再读取快照：登录广播若先到，不能被慢到的旧未登录快照覆盖。
+  const unsubscribe = window.electronAPI.cloudAuth.onAuthStateChanged((state) => {
+    receivedChange = true
+    if (disposed) return
+    setUser(state.user)
+    setLoading(false)
+  })
+
   // 从主进程获取当前认证状态
   window.electronAPI.cloudAuth.getAuthState()
     .then((state) => {
+      if (disposed || receivedChange) return
       setUser(state.user)
       setLoading(false)
     })
     .catch((error) => {
+      if (disposed || receivedChange) return
       console.error('[Cloud Auth] 获取认证状态失败:', error)
       setUser(null)
       setLoading(false)
     })
 
-  // 订阅主进程推送的认证状态变化
-  const unsubscribe = window.electronAPI.cloudAuth.onAuthStateChanged((state) => {
-    setUser(state.user)
-  })
-
-  return unsubscribe
+  return () => {
+    disposed = true
+    unsubscribe()
+  }
 }
