@@ -33,7 +33,7 @@ Proma 的 `Browser*` 工具控制当前会话关联的受管浏览器。网页�
 
 ## 工具速查
 
-- `BrowserNavigate` 支持 HTTP(S) 公网、本机和局域网地址；页面触发的下载会自动保存到系统「下载」目录，popup 会留在受管浏览器标签中。
+- `BrowserNavigate`：打开 URL 或搜索查询；明确 URL、裸域名、localhost 和 IP 直达，普通文本使用 Google 搜索；支持 `about:blank` 作为空白页。页面触发的下载会自动保存到系统「下载」目录，popup 会留在受管浏览器标签中。
 - `BrowserWaitFor`：等待固定的 URL 片段、可见文本或 CSS selector；超时返回 `matched=false`，支持停止，不执行任意 JavaScript。
 - `BrowserObserve`：读取当前页面可访问性结构与最新 ref，并标出 `editable` 字段。默认 `maxElements=240`；仅在长信息流或复杂页面找不到目标时提高到 `400`（此时会读取更深的 AX tree），不要每轮都请求最大值。页面无响应时会在短暂等待后返回错误，可稍后重试或重新加载，不要连续并发 Observe。
 - `BrowserClick`：点击指定 ref；页面会短暂高亮目标，方便用户确认。

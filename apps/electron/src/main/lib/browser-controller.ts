@@ -2,7 +2,7 @@ import { app, BrowserWindow, WebContentsView, session as electronSession, type D
 import path from 'node:path'
 import type { BrowserExecutionSource, BrowserOperationStatus, BrowserSessionClosed, BrowserTraceAction, BrowserTraceItem, BrowserViewLayout, BrowserViewState, BrowserTabState } from '@proma/shared'
 import { AGENT_IPC_CHANNELS } from '@proma/shared'
-import { assertSafeBrowserDestination, assertSafeBrowserDownloadUrl, assertSafeBrowserUrl, isSupportedBrowserPopupUrl, isTransientBrowserPopupUrl } from './browser-policy'
+import { assertSafeBrowserDestination, assertSafeBrowserDownloadUrl, assertSafeBrowserUrl, isSupportedBrowserPopupUrl, isTransientBrowserPopupUrl, USER_NEW_TAB_URL } from './browser-policy'
 import { createAuthorizedPreviewUrl, isAuthorizedPreviewProtocol } from './browser-preview-service'
 import { handlePromaFileRequest } from './local-file-protocol'
 import { BrowserCdpTimeoutError, BrowserOperationAbortedError, BROWSER_OBSERVE_TIMEOUT_MS, resolveBrowserObserveAxDepth, throwIfBrowserOperationAborted, withBrowserCdpTimeout } from './browser-cdp'
@@ -706,10 +706,18 @@ export class BrowserController {
     tab.highlightTimer = undefined
   }
 
-  open(sessionId: string): BrowserViewState {
+  async open(sessionId: string): Promise<BrowserViewState> {
     // 用户从界面手动打开浏览器时，初始标签不应伪装成 Agent 标签。
     const browserSession = this.getOrCreateSession(sessionId, [], false)
     this.markUserBrowserContext(browserSession)
+    const activeTab = this.getDisplayTab(browserSession)
+    // 首次风险告知前不能加载第三方页面；告知已确认后才将用户空白页导航到 Google。
+    if (hasAcknowledgedBrowserRiskDisclaimer(getSettings())
+      && browserSession.agentTabId !== activeTab.tabId
+      && !activeTab.openedByAgent
+      && (activeTab.state.url === '' || activeTab.state.url === 'about:blank')) {
+      return this.navigateDisplay(sessionId, USER_NEW_TAB_URL, activeTab.tabId)
+    }
     this.emit(browserSession)
     return structuredClone(this.buildState(browserSession))
   }
@@ -935,7 +943,7 @@ export class BrowserController {
     const reclaimed = this.reclaimExcessAgentTabs(browserSession)
     if (reclaimed > 0) this.trace(browserSession, tab, 'tab', `标签超过 ${MAX_BROWSER_TABS} 个上限，已回收 ${reclaimed} 个最久未使用的 Agent 标签`)
     if (url?.trim()) return this.navigateDisplay(sessionId, url)
-    return structuredClone(this.buildState(browserSession))
+    return this.navigateDisplay(sessionId, USER_NEW_TAB_URL, tab.tabId)
   }
 
   /** 用户 UI 的 tab 选择只控制显示，不影响 Agent 之后的默认操作目标。 */
