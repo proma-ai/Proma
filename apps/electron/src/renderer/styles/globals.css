@@ -17,6 +17,22 @@
   text-rendering: optimizeLegibility;
 }
 
+/* Electron 首帧和认证切换期间，确保文档不会回落到 Chromium 黑色背景。 */
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+html,
+body {
+  height: 100%;
+}
+
 /* CRT Terminal 主题：全局等宽字体覆盖 */
 .theme-terminal-dark {
   font-family:

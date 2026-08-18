@@ -204,13 +204,29 @@ function AgentSettingsInitializer(): null {
   const prevCapabilitiesRef = useRef<WorkspaceCapabilities | null>(null)
   // 初次加载标记 — 应用启动或切换工作区时不显示 toast
   const suppressToastRef = useRef(true)
+  // Cloud 登录会让官方渠道在主进程落盘；忽略此前未登录状态发起的旧读取，
+  // 避免其在网络较慢时反向覆盖刚同步完成的渠道和默认 Agent 设置。
+  const settingsLoadVersionRef = useRef(0)
 
-  useEffect(() => {
-    // 并行加载渠道列表和设置，确保两者都就绪后再验证渠道有效性
+  React.useLayoutEffect(() => {
+    // 认证用户变化后，先让尚未结束的请求失效；旧的 ready 状态也不代表新账号的
+    // 渠道和工作区已经就绪。放在 layout effect 可保证新用户首帧不会短暂挂载 AppShell。
+    settingsLoadVersionRef.current += 1
+    setAgentSettingsReady(false)
+  }, [cloudUser?.id, setAgentSettingsReady])
+
+  React.useEffect(() => {
+    const loadVersion = ++settingsLoadVersionRef.current
+    const isLatestLoad = (): boolean => settingsLoadVersionRef.current === loadVersion
+
+    // 并行加载渠道列表和设置，确保两者都就绪后再验证渠道有效性。
+    // cloudUser 变化时必须重新运行：首次登录前的读取没有 Proma 官方渠道。
     Promise.all([
       window.electronAPI.listChannels(),
       window.electronAPI.getSettings(),
     ]).then(([channels, settings]) => {
+      if (!isLatestLoad()) return
+
       // 缓存渠道列表
       setChannels(channels)
       setChannelsLoaded(true)
@@ -285,6 +301,8 @@ function AgentSettingsInitializer(): null {
 
       // 加载工作区列表并恢复上次选中的工作区
       window.electronAPI.listAgentWorkspaces().then((workspaces) => {
+        if (!isLatestLoad()) return
+
         setAgentWorkspaces(workspaces)
         if (settings.agentWorkspaceId) {
           // 验证工作区仍然存在
@@ -295,10 +313,12 @@ function AgentSettingsInitializer(): null {
         }
         setAgentSettingsReady(true)
       }).catch((err) => {
+        if (!isLatestLoad()) return
         console.error(err)
         setAgentSettingsReady(true) // 即使出错也标记就绪，避免永远阻塞
       })
     }).catch((err) => {
+      if (!isLatestLoad()) return
       console.error(err)
       setAgentSettingsReady(true) // 即使出错也标记就绪，避免永远阻塞
     })
