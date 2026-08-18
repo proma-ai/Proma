@@ -80,7 +80,7 @@ export const PROVIDER_LABELS: Record<ProviderType, string> = {
   'openai-responses': 'OpenAI Responses 格式',
   deepseek: 'DeepSeek',
   google: 'Google',
-  'kimi-api': 'Kimi API (Anthropic 协议)',
+  'kimi-api': 'Kimi API',
   'kimi-coding': 'Kimi Coding Plan',
   'opencode-go-openai': 'OpenCode Go (OpenAI 协议)',
   zhipu: '智谱 AI',

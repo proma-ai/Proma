@@ -68,7 +68,7 @@ const DEEPSEEK_PRESET_MODELS: ChannelModel[] = [
   { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true },
 ]
 const KIMI_PRESET_MODELS: ChannelModel[] = [
-  { id: 'k3', name: 'Kimi K3', enabled: true },
+  { id: 'kimi-k3', name: 'Kimi K3', enabled: true },
   { id: 'kimi-k2.6', name: 'Kimi K2.6', enabled: true },
 ]
 const XIAOMI_PRESET_MODELS: ChannelModel[] = [
