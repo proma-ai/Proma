@@ -115,13 +115,9 @@ export function BrowserPanel({ sessionId, state, onClose }: BrowserPanelProps): 
   }, [sessionId, state?.executionSource])
 
   const activeTabId = state?.activeTabId ?? ''
-  const agentTabId = state?.agentTabId ?? ''
   const tabs = state?.tabs ?? []
   const riskBlocked = riskAcknowledged !== true
   const isBackgroundRun = state?.executionSource === 'automation' || state?.executionSource === 'delegation'
-  const activity = state?.activity ?? null
-  const activityStatus = activity?.status === 'unknown' ? '结果未知' : activity?.status === 'failed' ? '失败' : activity?.status === 'dispatched' ? '已派发' : '已完成'
-  const activityDomain = activity?.domain ? ` · ${activity.domain}` : ''
 
   const selectTab = React.useCallback(async (tabId: string) => {
     const select = (window.electronAPI as Partial<typeof window.electronAPI>).selectAgentBrowserTab
@@ -191,14 +187,6 @@ export function BrowserPanel({ sessionId, state, onClose }: BrowserPanelProps): 
         ))}
         <Tooltip><TooltipTrigger asChild><Button type="button" variant="ghost" size="icon" className="size-6 shrink-0" disabled={riskBlocked} onClick={() => void createTab()} aria-label="新建浏览器标签"><Plus className="size-3.5" /></Button></TooltipTrigger><TooltipContent>新建标签</TooltipContent></Tooltip>
       </div>
-      {activity && (
-        <div className="flex min-h-7 items-center gap-2 border-b border-border/25 bg-primary/[0.04] px-3 py-1 text-[11px]" role="status" aria-live="polite">
-          <span className="shrink-0 font-medium text-primary">Agent 活动</span>
-          <span className="shrink-0 text-muted-foreground">{activityStatus}</span>
-          <span className="truncate text-foreground/80">{activity.summary}{activityDomain}</span>
-          <span className="ml-auto shrink-0 text-muted-foreground">{activity.tabId === agentTabId ? '工作标签' : `标签 ${activity.tabId}`}</span>
-        </div>
-      )}
       {riskAcknowledged === true ? (
         <BrowserSlot key={activeTabId} sessionId={sessionId} tabId={activeTabId} />
       ) : (
