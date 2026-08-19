@@ -47,4 +47,22 @@ describe('Pi thinking level resolver', () => {
       'openai-responses',
     )).toBe('xhigh')
   })
+
+  test('Given GLM-5.3 and a disabled legacy setting When resolving Then keeps lightweight reasoning enabled', () => {
+    expect(resolvePiThinkingLevel(
+      { agentThinking: { type: 'disabled' }, agentEffort: 'high' },
+      { reasoningLevel: 'off' },
+      'zhipu',
+      'glm-5.3',
+    )).toBe('low')
+  })
+
+  test('Given GLM-5.3 and no override When resolving Then defaults to max reasoning', () => {
+    expect(resolvePiThinkingLevel(
+      { agentThinking: { type: 'adaptive' } },
+      undefined,
+      'zhipu-coding',
+      'glm-5.3',
+    )).toBe('max')
+  })
 })

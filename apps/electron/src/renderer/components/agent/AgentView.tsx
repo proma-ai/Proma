@@ -331,7 +331,8 @@ function AgentThinkingPopover({ agentThinking, onToggle, codexConfig }: AgentThi
     codexConfig?.thinkingLevel,
     thinkingLevels,
   )
-  const isEnabled = isCodex ? normalizedLevel !== 'off' : agentThinking?.type === 'adaptive'
+  const supportsThinkingToggle = thinkingLevels.includes('off')
+  const isEnabled = isCodex ? !supportsThinkingToggle || normalizedLevel !== 'off' : agentThinking?.type === 'adaptive'
   const sliderPosition = thinkingLevels.indexOf(normalizedLevel)
 
   const handleMouseEnter = React.useCallback(() => {
@@ -351,6 +352,7 @@ function AgentThinkingPopover({ agentThinking, onToggle, codexConfig }: AgentThi
 
   const handleButtonClick = (): void => {
     if (codexConfig) {
+      if (!supportsThinkingToggle) return
       codexConfig.onThinkingLevelChange(isEnabled ? 'off' : 'high')
       return
     }
