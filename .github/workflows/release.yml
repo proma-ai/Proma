@@ -77,6 +77,10 @@ jobs:
       - name: 构建 Electron 应用
         run: bun run electron:build
 
+      - name: 同步 Electron 运行时依赖
+        run: bun run sync:runtime-deps
+        working-directory: apps/electron
+
       - name: 打包 (macOS arm64)
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -84,7 +88,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           for i in 1 2 3; do
-            if npx electron-builder --mac --arm64 --publish never; then
+            if bunx electron-builder@25.1.8 --mac --arm64 --publish never; then
               exit 0
             fi
 
@@ -171,6 +175,10 @@ jobs:
       - name: 构建 Electron 应用
         run: bun run electron:build
 
+      - name: 同步 Electron 运行时依赖
+        run: bun run sync:runtime-deps
+        working-directory: apps/electron
+
       - name: 打包 (macOS x64)
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -178,7 +186,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           for i in 1 2 3; do
-            if npx electron-builder --mac --x64 --publish never; then
+            if bunx electron-builder@25.1.8 --mac --x64 --publish never; then
               exit 0
             fi
 
@@ -246,9 +254,37 @@ jobs:
       - name: 构建 Electron 应用
         run: bun run electron:build
 
-      - name: 打包 (Windows x64)
-        run: npx electron-builder --win --x64 --publish never
+      - name: 同步 Electron 运行时依赖
+        run: bun run sync:runtime-deps
         working-directory: apps/electron
+
+      - name: 打包 (Windows x64)
+        run: bunx electron-builder@25.1.8 --win --x64 --publish never
+        working-directory: apps/electron
+
+      - name: 校验 Windows Sharp 原生依赖
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $resources = Join-Path $PWD 'apps/electron/out/win-unpacked/resources'
+          $unpacked = Join-Path $resources 'app.asar.unpacked/node_modules'
+          $img = Join-Path $unpacked '@img'
+          $winSharp = Join-Path $img 'sharp-win32-x64'
+
+          if (!(Test-Path (Join-Path $resources 'app.asar'))) { throw 'Missing resources/app.asar' }
+          if (!(Test-Path (Join-Path $unpacked 'sharp/package.json'))) { throw 'Missing unpacked sharp package' }
+          if (!(Test-Path (Join-Path $winSharp 'package.json'))) { throw 'Missing @img/sharp-win32-x64' }
+
+          $native = Get-ChildItem (Join-Path $winSharp 'lib') -Filter '*.node' -File -ErrorAction SilentlyContinue
+          if ($native.Count -lt 1) { throw 'No Windows sharp native .node binary found' }
+
+          $darwin = Get-ChildItem $img -Directory -Force | Where-Object { $_.Name -match '^sharp(-libvips)?-darwin-' }
+          if ($darwin) { throw "Darwin Sharp packages were bundled: $($darwin.FullName -join ', ')" }
+
+          $env:NODE_PATH = $unpacked
+          node -e "const sharp=require('sharp'); console.log('sharp loaded:', sharp.versions.sharp)"
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged Sharp failed to load on Windows' }
+          Remove-Item Env:NODE_PATH
 
       - name: 上传到 OSS
         env:

@@ -1,0 +1,87 @@
+{
+  "name": "proma",
+  "version": "0.1.1",
+  "description": "The next gen ai software with general agents",
+  "type": "module",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "bun run --filter='@proma/electron' dev",
+    "electron:dev": "bun run --filter='@proma/electron' dev",
+    "electron:build": "bun run --filter='@proma/electron' build",
+    "electron:start": "bun run --filter='@proma/electron' start",
+    "dist:mac": "bun run --filter='@proma/electron' dist:mac",
+    "dist:win": "bun run --filter='@proma/electron' dist:win",
+    "dist:linux": "bun run --filter='@proma/electron' dist:linux",
+    "dist": "bun run --filter='@proma/electron' dist",
+    "build": "bun run --filter='*' build",
+    "typecheck": "bun run --filter='*' typecheck",
+    "test": "bun test --isolate"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/dompurify": "^3.2.0",
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "dompurify": "^3.4.2",
+    "typescript": "^5.0.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "jotai": "^2.17.1"
+  },
+  "overrides": {
+    "@earendil-works/pi-agent-core": "0.84.2",
+    "@earendil-works/pi-ai": "0.84.2",
+    "@earendil-works/pi-coding-agent": "0.84.2",
+    "@earendil-works/pi-tui": "0.84.2",
+    "@tiptap/core": "3.19.0",
+    "@tiptap/extension-blockquote": "3.19.0",
+    "@tiptap/extension-bold": "3.19.0",
+    "@tiptap/extension-bubble-menu": "3.19.0",
+    "@tiptap/extension-bullet-list": "3.19.0",
+    "@tiptap/extension-code": "3.19.0",
+    "@tiptap/extension-code-block": "3.19.0",
+    "@tiptap/extension-code-block-lowlight": "3.19.0",
+    "@tiptap/extension-document": "3.19.0",
+    "@tiptap/extension-dropcursor": "3.19.0",
+    "@tiptap/extension-floating-menu": "3.19.0",
+    "@tiptap/extension-gapcursor": "3.19.0",
+    "@tiptap/extension-hard-break": "3.19.0",
+    "@tiptap/extension-heading": "3.19.0",
+    "@tiptap/extension-horizontal-rule": "3.19.0",
+    "@tiptap/extension-italic": "3.19.0",
+    "@tiptap/extension-link": "3.19.0",
+    "@tiptap/extension-list": "3.19.0",
+    "@tiptap/extension-list-item": "3.19.0",
+    "@tiptap/extension-list-keymap": "3.19.0",
+    "@tiptap/extension-mention": "3.20.0",
+    "@tiptap/extension-ordered-list": "3.19.0",
+    "@tiptap/extension-paragraph": "3.19.0",
+    "@tiptap/extension-placeholder": "3.19.0",
+    "@tiptap/extension-strike": "3.19.0",
+    "@tiptap/extension-table": "3.19.0",
+    "@tiptap/extension-table-cell": "3.19.0",
+    "@tiptap/extension-table-header": "3.19.0",
+    "@tiptap/extension-table-row": "3.19.0",
+    "@tiptap/extension-task-item": "3.19.0",
+    "@tiptap/extension-task-list": "3.19.0",
+    "@tiptap/extension-text": "3.19.0",
+    "@tiptap/extension-underline": "3.19.0",
+    "@tiptap/extensions": "3.19.0",
+    "@tiptap/pm": "3.19.0",
+    "@tiptap/react": "3.19.0",
+    "@tiptap/starter-kit": "3.19.0",
+    "@tiptap/suggestion": "3.20.0",
+    "prosemirror-model": "1.25.9"
+  },
+  "patchedDependencies": {
+    "@earendil-works/pi-ai@0.84.2": "patches/@earendil-works%2Fpi-ai@0.84.2.patch"
+  }
+}
