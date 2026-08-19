@@ -1,5 +1,8 @@
 /** 受管浏览器的 URL 规范化与合法性校验；保持无 Electron 依赖，便于在普通 Bun 测试中验证。 */
 
+const GOOGLE_SEARCH_URL = 'https://www.google.com/search'
+const USER_NEW_TAB_URL = 'https://www.google.com/'
+
 function isLoopbackAddress(hostname: string): boolean {
   const host = hostname.toLowerCase()
   if (host === 'localhost' || host.endsWith('.localhost')) return true
@@ -87,10 +90,40 @@ export async function assertSafeBrowserDownloadUrl(input: string): Promise<strin
   return assertSafeBrowserDestination(value)
 }
 
+function isLikelyUrl(value: string): boolean {
+  if (value.startsWith('//') || /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(value)) return true
+  if (/\s/.test(value)) return false
+
+  try {
+    const candidate = new URL(`http://${value}`)
+    const hostname = candidate.hostname.toLowerCase()
+    return hostname.includes('.') || isLocalNetworkAddress(hostname)
+  } catch {
+    return false
+  }
+}
+
 /**
- * 保持现有调用接口；导航前不再进行 DNS 解析或地址类型过滤。
- * Chromium 是实际加载 URL 的网络栈，并决定各协议是否可用。
+ * 把地址栏/BrowserNavigate 输入解析成 URL 或 Google 搜索地址。
+ * 明确的 URL 和可识别的主机名保持直达，普通文本按搜索词处理。
+ */
+export function resolveBrowserDestination(input: string): string {
+  const value = input.trim()
+  if (!value) throw new Error('浏览器地址或搜索内容不能为空。')
+  if (isLikelyUrl(value)) return normalizeBrowserUrl(value)
+  return `${GOOGLE_SEARCH_URL}?q=${encodeURIComponent(value)}`
+}
+
+/**
+ * 仅拒绝空值或无法被 URL 标准解析的输入；搜索词会先被转换为 Google 搜索 URL。
  */
 export async function assertSafeBrowserDestination(input: string): Promise<string> {
-  return assertSafeBrowserUrl(input)
+  const resolved = resolveBrowserDestination(input)
+  try {
+    return new URL(resolved).toString()
+  } catch {
+    throw new Error('浏览器地址或搜索内容无效。')
+  }
 }
+
+export { GOOGLE_SEARCH_URL, USER_NEW_TAB_URL }

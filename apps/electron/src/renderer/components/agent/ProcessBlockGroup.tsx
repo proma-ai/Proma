@@ -4,10 +4,7 @@ import { cn } from '@/lib/utils'
 import { getToolDisplayName, getToolIcon } from './tool-utils'
 import type {
   SDKContentBlock,
-  SDKMessage,
-  SDKToolResultBlock,
   SDKToolUseBlock,
-  SDKUserMessage,
   SDKTextBlock,
   SDKThinkingBlock,
 } from '@proma/shared'
@@ -45,23 +42,6 @@ export type AssistantTurnRenderItem =
 
 interface BuildAssistantTurnRenderItemsOptions {
   isStreaming?: boolean
-  completedToolResultIds?: Set<string>
-}
-
-export function buildCompletedToolResultIds(turnMessages: SDKMessage[]): Set<string> {
-  const ids = new Set<string>()
-  for (const msg of turnMessages) {
-    if (msg.type !== 'user') continue
-    const userMsg = msg as SDKUserMessage
-    const blocks = userMsg.message?.content
-    if (!Array.isArray(blocks)) continue
-    for (const b of blocks) {
-      if (b.type !== 'tool_result') continue
-      const rb = b as SDKToolResultBlock
-      ids.add(rb.tool_use_id)
-    }
-  }
-  return ids
 }
 
 function getTrailingTextStartIndex(blocks: SDKContentBlock[]): number | null {
@@ -75,42 +55,20 @@ function getTrailingTextStartIndex(blocks: SDKContentBlock[]): number | null {
   return finalStartIndex
 }
 
-function areToolsBeforeIndexCompleted(
-  blocks: SDKContentBlock[],
-  endIndex: number,
-  completedToolResultIds: Set<string> | undefined,
-): boolean {
-  if (!completedToolResultIds) return false
-
-  let hasToolUse = false
-  for (let index = 0; index < endIndex; index++) {
-    const block = blocks[index]
-    if (block?.type !== 'tool_use') continue
-    hasToolUse = true
-    const toolBlock = block as SDKToolUseBlock
-    if (!completedToolResultIds.has(toolBlock.id)) return false
-  }
-
-  // 没有 tool_use 时不认为"工具已完成"——避免流式中只有 thinking + 尾部 text
-  // 时把还可能变成中间过程的 text 提前外置。
-  return hasToolUse
-}
-
 export function buildAssistantTurnRenderItems(
   blocks: SDKContentBlock[],
   options: BuildAssistantTurnRenderItemsOptions = {},
 ): AssistantTurnRenderItem[] {
   if (blocks.length === 0) return []
 
-  // 流式阶段最后的 text 还不稳定，后续工具调用可能会把它变成中间过程。
-  // 只有当前面所有工具都有结果时，才把尾部 text 视作交付输出提前外置，降低完成瞬间的跳动。
+  // 只要流式末尾出现 text，就按常规消息布局直接展示。若 Agent 之后继续调用工具，
+  // text 不再位于末尾，会自动回归过程组，避免把中间状态误认为最终答案。
   const hasProcessBlock = blocks.some((block) => block.type === 'tool_use' || block.type === 'thinking')
   const trailingTextStartIndex = getTrailingTextStartIndex(blocks)
   const canSplitStreamingFinalOutput = options.isStreaming
     && hasProcessBlock
     && trailingTextStartIndex !== null
     && trailingTextStartIndex > 0
-    && areToolsBeforeIndexCompleted(blocks, trailingTextStartIndex, options.completedToolResultIds)
 
   if (options.isStreaming && hasProcessBlock && !canSplitStreamingFinalOutput) {
     return buildProcessGroupItems(blocks)
@@ -141,6 +99,22 @@ function buildProcessGroupItems(blocks: SDKContentBlock[]): AssistantTurnRenderI
     type: 'process-group',
     items: blocks.map((block, index) => ({ block, index })),
   }]
+}
+
+/**
+ * Reuse the previous array when streaming only changes a sibling block, such as
+ * an already-externalized final text block. Delta updates replace changed block
+ * objects immutably, so reference identity is enough to detect process changes.
+ */
+export function stabilizeProcessBlockReferences(
+  previous: SDKContentBlock[],
+  next: SDKContentBlock[],
+): SDKContentBlock[] {
+  if (previous.length !== next.length) return next
+  for (let index = 0; index < next.length; index++) {
+    if (previous[index] !== next[index]) return next
+  }
+  return previous
 }
 
 function buildProcessGroupSummary(blocks: SDKContentBlock[]): string {
@@ -235,6 +209,9 @@ export function ProcessBlockGroup({ blocks, isStreaming, renderChildren, isMessa
   const contentRef = React.useRef<HTMLDivElement>(null)
   const contentInnerRef = React.useRef<HTMLDivElement>(null)
   const stableChildrenRef = React.useRef(new Map<string, StableProcessChildCacheEntry>())
+  const stableProcessBlocksRef = React.useRef(blocks)
+  stableProcessBlocksRef.current = stabilizeProcessBlockReferences(stableProcessBlocksRef.current, blocks)
+  const stableProcessBlocks = stableProcessBlocksRef.current
   const collapseFrameRef = React.useRef<number | null>(null)
   const [measuredHeight, setMeasuredHeight] = React.useState<number | undefined>(undefined)
 
@@ -353,7 +330,7 @@ export function ProcessBlockGroup({ blocks, isStreaming, renderChildren, isMessa
 
   React.useLayoutEffect(() => {
     if (isStreaming && keepProgressViewport) scrollToLatest()
-  }, [blocks, isStreaming, keepProgressViewport, scrollToLatest])
+  }, [stableProcessBlocks, isStreaming, keepProgressViewport, scrollToLatest])
 
   const handleProgressScroll = React.useCallback((event: React.UIEvent<HTMLDivElement>): void => {
     if (!isProgressViewportAtBottom(event.currentTarget)) return

@@ -76,14 +76,14 @@ interface ChannelFormProps {
   onCancel: () => void
 }
 
-/** 所有可选供应商 */
-const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'openai', 'openai-responses', 'openai-codex', 'xai', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'opencode-go-openai', 'zhipu', 'zhipu-coding', 'zhipu-coding-team', 'ark-coding-plan', 'minimax', 'doubao', 'qwen', 'qwen-anthropic', 'qwen-token-plan', 'xiaomi', 'xiaomi-token-plan']
+/** 所有可选的商业版内置供应商。`qwen` 仅为兼容存量渠道保留；第三方中转 provider 不在 UI 开放。 */
+const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'openai', 'openai-responses', 'openai-codex', 'xai', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'opencode-go-openai', 'zhipu', 'zhipu-coding', 'zhipu-coding-team', 'ark-coding-plan', 'doubao', 'doubao-api', 'minimax', 'qwen-anthropic', 'qwen-token-plan', 'xiaomi', 'xiaomi-token-plan']
 
 /** 需要用 messages 端点测试的供应商预设模型 */
 const PROVIDER_TEST_MODEL_PRESETS: Partial<Record<ProviderType, string[]>> = {
   deepseek: ['deepseek-v4-pro', 'deepseek-v4-flash'],
-  'kimi-api': ['k3', 'kimi-k2.6'],
-  'opencode-go-openai': ['grok-4.5', 'glm-5.2', 'kimi-k3'],
+  'kimi-api': ['kimi-k3', 'kimi-k2.6'],
+  'opencode-go-openai': ['grok-4.5', 'kimi-k3'],
   xiaomi: ['mimo-v2.5-pro', 'mimo-v2-pro', 'mimo-v2.5', 'mimo-v2-omni', 'mimo-v2-flash'],
   'xiaomi-token-plan': ['mimo-v2.5-pro', 'mimo-v2-pro', 'mimo-v2.5', 'mimo-v2-omni', 'mimo-v2-flash'],
   'qwen-token-plan': ['qwen3.8-max-preview', 'qwen3.7-max', 'qwen3.7-flash', 'qwen3.6-flash'],
@@ -378,7 +378,7 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
     return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current) }
   }, [models, name, provider, baseUrl, effectiveApiKey, enabled, scheduleAutoSave])
 
-  // 切换供应商时自动更新 Base URL 与名称，Anthropic 兼容渠道自动添加预设模型
+  // 切换供应商时自动更新 Base URL 与名称，并为支持的渠道自动添加预设模型
   const handleProviderChange = (newProvider: string): void => {
     const p = newProvider as ProviderType
     // 若 name 为空或仍是上一个 provider 的默认名称，则用新 provider 的名称覆盖；用户手动改过的 name 不动
@@ -407,7 +407,7 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
         ])
       } else if (p === 'kimi-api') {
         setModels([
-          { id: 'k3', name: 'Kimi K3', enabled: true },
+          { id: 'kimi-k3', name: 'Kimi K3', enabled: true },
           { id: 'kimi-k2.6', name: 'Kimi K2.6', enabled: true },
         ])
       } else if (p === 'kimi-coding') {
@@ -419,7 +419,6 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
         setModels([
           { id: 'grok-4.5', name: 'Grok 4.5', enabled: true },
           { id: 'glm-5.3', name: 'GLM-5.3', enabled: true },
-          { id: 'glm-5.2', name: 'GLM-5.2', enabled: true },
           { id: 'glm-5.1', name: 'GLM-5.1', enabled: true },
           { id: 'kimi-k3', name: 'Kimi K3', enabled: true },
           { id: 'kimi-k2.7-code', name: 'Kimi K2.7 Code', enabled: true },
@@ -432,10 +431,9 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
       } else if (p === 'zhipu' || p === 'zhipu-coding' || p === 'zhipu-coding-team') {
         setModels([
           { id: 'glm-5.3', name: 'GLM-5.3', enabled: true },
-          { id: 'glm-5.2', name: 'GLM-5.2', enabled: true },
           { id: 'glm-5.1', name: 'GLM-5.1', enabled: false },
         ])
-      } else if (p === 'ark-coding-plan') {
+      } else if (p === 'ark-coding-plan' || p === 'doubao') {
         setModels([
           { id: 'doubao-seed-2.1-pro', name: 'Doubao Seed 2.1 Pro', enabled: true },
           { id: 'doubao-seed-2.1-turbo', name: 'Doubao Seed 2.1 Turbo', enabled: true },
@@ -443,7 +441,6 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
           { id: 'doubao-seed-2.0-pro', name: 'Doubao Seed 2.0 Pro', enabled: true },
           { id: 'doubao-seed-2.0-lite', name: 'Doubao Seed 2.0 Lite', enabled: true },
           { id: 'glm-5.3', name: 'GLM-5.3', enabled: true },
-          { id: 'glm-5.2', name: 'GLM-5.2', enabled: true },
           { id: 'k3', name: 'Kimi K3', enabled: true },
           { id: 'kimi-k2.7-code', name: 'Kimi K2.7 Code', enabled: true },
           { id: 'minimax-m3', name: 'MiniMax M3', enabled: true },
@@ -756,6 +753,22 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
   const isDirty = !isEdit && (name.trim() !== '' || effectiveApiKey.trim() !== '' || models.length > 0)
   const hasNoModels = !isEdit && models.length === 0
 
+  /**
+   * 编辑模式下若当前 provider 已从新建下拉移除（如旧版 'qwen'），
+   * 动态追加对应选项，避免 SettingsSelect 因找不到 value 而显示占位符。
+   */
+  const providerSelectOptions = React.useMemo(() => {
+    // 仅为上游已弃用、但仍允许保留的 qwen 渠道提供编辑兼容项。
+    // 禁用的 custom / anthropic-compatible 绝不能因此重新出现在 UI 中。
+    if (isEdit && provider === 'qwen') {
+      return [
+        ...PROVIDER_SELECT_OPTIONS,
+        { value: provider, label: PROVIDER_LABELS[provider], icon: getProviderLogo(provider) },
+      ]
+    }
+    return PROVIDER_SELECT_OPTIONS
+  }, [isEdit, provider])
+
   /** 返回按钮：创建模式下有未保存内容时拦截 */
   const handleBack = (): void => {
     if (!isEdit && isDirty) {
@@ -871,7 +884,7 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
             label="供应商类型"
             value={provider}
             onValueChange={handleProviderChange}
-            options={PROVIDER_SELECT_OPTIONS}
+            options={providerSelectOptions}
             placeholder="选择供应商"
           />
           <SettingsInput

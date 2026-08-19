@@ -2144,6 +2144,13 @@ export function registerIpcHandlers(): void {
     },
   )
   ipcMain.handle(
+    AGENT_IPC_CHANNELS.MINIMIZE_BROWSER,
+    async (event, sessionId: string): Promise<void> => {
+      await assertBrowserSessionAccess(event.sender.id, sessionId)
+      browserController.minimize(sessionId)
+    },
+  )
+  ipcMain.handle(
     AGENT_IPC_CHANNELS.NAVIGATE_BROWSER,
     async (event, input: BrowserNavigateInput): Promise<BrowserViewState> => {
       await assertBrowserSessionAccess(event.sender.id, input.sessionId)

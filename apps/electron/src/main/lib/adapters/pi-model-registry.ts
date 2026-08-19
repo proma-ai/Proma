@@ -122,18 +122,6 @@ function compilePiReasoningCapabilities(
         },
         thinkingLevelMap,
       }
-    case 'zai-toggle':
-      return {
-        compat: {
-          supportsDeveloperRole: false,
-          supportsReasoningEffort: false,
-          thinkingFormat: 'zai',
-          zaiToolStream: true,
-        },
-        thinkingLevelMap,
-      }
-    case 'anthropic-manual':
-      return { thinkingLevelMap }
   }
 }
 
@@ -350,6 +338,7 @@ function normalizePiApi(
     case 'opencode-go-openai':
     case 'zhipu':
     case 'doubao':
+    case 'doubao-api':
     case 'qwen':
     case 'custom':
       return 'openai-completions'
@@ -604,7 +593,7 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
   const api = normalizePiApi(input.provider, input.model, input.modelApiProtocol)
   const providerSpecificCapabilities = compilePiReasoningCapabilities(api, input.model)
   const glmModelId = input.model?.toLowerCase()
-  const isVolcengineGlm5x = (input.provider === 'doubao' || input.provider === 'ark-coding-plan')
+  const isVolcengineGlm5x = (input.provider === 'doubao' || input.provider === 'doubao-api' || input.provider === 'ark-coding-plan')
     && (glmModelId === 'glm-5.2' || glmModelId === 'glm-5.3')
   const isCatalogMissingGlm53 = !catalogModel && glmModelId === 'glm-5.3'
   const catalogContextWindow = catalogModel?.contextWindow ?? DEFAULT_CONTEXT_WINDOW

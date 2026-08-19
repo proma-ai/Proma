@@ -97,12 +97,16 @@ export type MessageGroup =
  * 1. user（真正用户输入）→ 单独的 user group
  * 2. assistant + user(tool_result) + assistant... → 合并为一个 assistant-turn
  * 3. system（压缩状态 / permission_denied）→ 独立渲染，其他归入当前 turn
- * 4. 其他类型（result, tool_progress 等）→ 归入当前 assistant-turn
+ * 4. 其他类型（result, tool_progress 等）→ 归入当前 assistant-turn；被 system 状态分隔的 terminal result 回挂到刚关闭的 turn
  * 5. 后处理：合并相邻同模型的 assistant-turn（处理子代理切换模型导致的碎片化）
  */
 export function groupIntoTurns(messages: SDKMessage[], sessionModelId?: string): MessageGroup[] {
   const groups: MessageGroup[] = []
   let currentTurn: AssistantTurn | null = null
+  // 自动压缩会在最终 assistant 消息与 terminal result 之间插入可持久化的 system 状态。
+  // system 状态会关闭当前 turn；保留该引用，才能把随后到达的 result（包含耗时/usage）
+  // 仍归属到刚完成的回答，而不是让 renderer 丢失 DurationBadge 的数据来源。
+  const trailingResultTarget: { turn: AssistantTurn | null } = { turn: null }
   let pendingInputMessage: SDKUserMessage | undefined
   // 收到后台任务完成通知（task_notification）后，若没有用户输入就直接出现新的 assistant 输出，
   // 说明这是自动唤醒的新一轮，应另起独立消息块，而不是续接上一轮。
@@ -112,6 +116,7 @@ export function groupIntoTurns(messages: SDKMessage[], sessionModelId?: string):
   const flushTurn = (): void => {
     if (currentTurn && currentTurn.assistantMessages.length > 0) {
       groups.push(currentTurn)
+      trailingResultTarget.turn = currentTurn
     }
     currentTurn = null
   }
@@ -125,6 +130,7 @@ export function groupIntoTurns(messages: SDKMessage[], sessionModelId?: string):
         groups.push({ type: 'user', message: userMsg })
         pendingInputMessage = userMsg
         pendingWakeBoundary = false
+        trailingResultTarget.turn = null
       } else {
         // tool_result 消息 → 归入当前 turn
         if (currentTurn) {
@@ -201,7 +207,10 @@ export function groupIntoTurns(messages: SDKMessage[], sessionModelId?: string):
       }
       if (currentTurn) {
         currentTurn.turnMessages.push(msg)
+      } else if (msg.type === 'result' && trailingResultTarget.turn) {
+        trailingResultTarget.turn.turnMessages.push(msg)
       }
+      if (msg.type === 'result') trailingResultTarget.turn = null
     }
   }
 

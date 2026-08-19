@@ -44,6 +44,8 @@ export interface ActivityGroup {
 
 export interface ContextCompactionState {
   status: 'running' | 'success' | 'noop' | 'failed'
+  /** 主任务已收到成功的 agent_end，当前仅在收尾整理上下文。 */
+  afterCompletedTurn?: boolean
   summary?: string
   message?: string
 }
@@ -804,7 +806,17 @@ export const agentSessionIndicatorMapAtom = atom<Map<string, SessionIndicatorSta
     const hasBlock = (pendingPerms.get(id)?.length ?? 0) > 0
       || (pendingAskUser.get(id)?.length ?? 0) > 0
       || (pendingExitPlan.get(id)?.length ?? 0) > 0
-    map.set(id, hasBlock ? 'blocked' : 'running')
+    if (hasBlock) {
+      map.set(id, 'blocked')
+    } else if (
+      state.contextCompaction?.status === 'running'
+      && state.contextCompaction.afterCompletedTurn === true
+    ) {
+      // 主任务已经交付，后续仅在整理上下文时应呈现为可验收的完成态。
+      map.set(id, 'completed')
+    } else {
+      map.set(id, 'running')
+    }
   }
 
   for (const id of unviewedCompleted) {
@@ -936,7 +948,10 @@ export function applyAgentEvent(
         ...prev,
         isCompacting: true,
         compactInFlight: true,
-        contextCompaction: { status: 'running' },
+        contextCompaction: {
+          status: 'running',
+          afterCompletedTurn: event.afterCompletedTurn === true,
+        },
       }
 
     case 'compact_complete': {

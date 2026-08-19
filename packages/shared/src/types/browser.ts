@@ -13,6 +13,8 @@ export interface BrowserViewLayout {
   /** Renderer 全局单调递增代际；主进程忽略晚到的旧布局 IPC。 */
   revision: number
   visible: boolean
+  /** overlay 临时遮挡页面时为 true；Slot 仍挂载，session 不应进入 LRU。 */
+  preserveSessionOnHide?: boolean
   bounds: BrowserViewBounds
 }
 

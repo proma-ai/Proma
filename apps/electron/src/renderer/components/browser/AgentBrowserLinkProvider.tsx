@@ -3,6 +3,7 @@ import { useSetAtom } from 'jotai'
 import type { BrowserStateChange, BrowserViewState } from '@proma/shared'
 import { BROWSER_RISK_DISCLAIMER_VERSION } from '@/types/settings'
 import {
+  browserPanelMinimizedMapAtom,
   browserPanelOpenMapAtom,
   browserPendingNavigationMapAtom,
   browserStateMapAtom,
@@ -31,12 +32,14 @@ export function AgentBrowserLinkProvider({
   children: React.ReactNode
 }): React.ReactElement {
   const setBrowserOpenMap = useSetAtom(browserPanelOpenMapAtom)
+  const setBrowserMinimizedMap = useSetAtom(browserPanelMinimizedMapAtom)
   const setBrowserStateMap = useSetAtom(browserStateMapAtom)
   const setPendingNavigationMap = useSetAtom(browserPendingNavigationMapAtom)
 
   const publishBrowserState = React.useCallback((state: BrowserStateChange) => {
     if ('closed' in state) {
       setBrowserOpenMap((previous) => { const next = new Map(previous); next.set(state.sessionId, false); return next })
+      setBrowserMinimizedMap((previous) => { const next = new Map(previous); next.delete(state.sessionId); return next })
       setBrowserStateMap((previous) => { const next = new Map(previous); next.delete(state.sessionId); return next })
       setPendingNavigationMap((previous) => { const next = new Map(previous); next.delete(state.sessionId); return next })
       return
@@ -51,7 +54,7 @@ export function AgentBrowserLinkProvider({
       next.set(state.sessionId, true)
       return next
     })
-  }, [setBrowserOpenMap, setBrowserStateMap, setPendingNavigationMap])
+  }, [setBrowserOpenMap, setBrowserMinimizedMap, setBrowserStateMap, setPendingNavigationMap])
 
   const openLink = React.useCallback((url: string) => {
     const openBrowser = (window.electronAPI as Partial<typeof window.electronAPI>).openAgentBrowser
@@ -64,6 +67,11 @@ export function AgentBrowserLinkProvider({
       .catch(() => undefined)
       .then(async () => {
         try {
+          setBrowserMinimizedMap((previous) => {
+            const next = new Map(previous)
+            next.delete(sessionId)
+            return next
+          })
           const [settings, state] = await Promise.all([
             window.electronAPI.getSettings(),
             openBrowser(sessionId),
@@ -92,7 +100,7 @@ export function AgentBrowserLinkProvider({
     void nextNavigation.finally(() => {
       if (navigationQueues.get(sessionId) === nextNavigation) navigationQueues.delete(sessionId)
     })
-  }, [publishBrowserState, sessionId, setPendingNavigationMap])
+  }, [publishBrowserState, sessionId, setBrowserMinimizedMap, setPendingNavigationMap])
 
   const value = React.useMemo(() => ({ openLink }), [openLink])
   return <AgentBrowserLinkContext.Provider value={value}>{children}</AgentBrowserLinkContext.Provider>

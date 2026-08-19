@@ -102,6 +102,15 @@ const PI_NATIVE_MAX_RETRIES = 9
 const PI_NATIVE_RETRY_BASE_DELAY_MS = 1_000
 const MAX_AUTOMATIC_COMPACTION_CONTINUATIONS = 20
 
+export function shouldMarkCompactionAfterCompletedTurn(
+  terminalResult: SDKMessage | undefined,
+  requiresOriginalTaskContinuation: boolean,
+): boolean {
+  return terminalResult?.type === 'result'
+    && terminalResult.subtype === 'success'
+    && !requiresOriginalTaskContinuation
+}
+
 /** Pi SDK 查询选项（扩展通用 AgentQueryInput） */
 export interface PiAgentQueryOptions extends AgentQueryInput {
   apiKey: string
@@ -1383,6 +1392,8 @@ export class PiAgentAdapter implements AgentProviderAdapter {
       let pendingCompactionContinuation: string | undefined
       let automaticCompactionContinuations = 0
       let pendingTerminalResult: SDKMessage | undefined
+      /** 当前压缩是否紧随一个成功完成的主 Agent turn。 */
+      let completedAgentTurnPendingCompaction = false
       const customTools = [
         buildCurrentSessionCompactionTool(
           sdk,
@@ -1661,6 +1672,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
               break
             }
             case 'agent_end':
+              completedAgentTurnPendingCompaction = false
               if (active.abortRequested || (active.interrupting && active.pendingInterruptPrompts.length > 0)) {
                 // 用户停止或插入新 prompt 时，当前 loop 的错误与 result 都不得泄漏到下一轮。
                 retryTerminalGate.settle(true)
@@ -1693,10 +1705,15 @@ export class PiAgentAdapter implements AgentProviderAdapter {
               // Pi can start auto-compaction after agent_end but before session.prompt()
               // resolves. Defer the terminal result until then, otherwise the orchestrator's
               // result-drain timeout may dispose the session and abort compaction.
-              pendingTerminalResult = convertResultMessage(
+              const terminalResult = convertResultMessage(
                 event.messages,
                 session.sessionId,
                 runtimeGuard.getResultOverride(event.messages),
+              )
+              pendingTerminalResult = terminalResult
+              completedAgentTurnPendingCompaction = shouldMarkCompactionAfterCompletedTurn(
+                terminalResult,
+                compactContextRequested,
               )
               break
             case 'auto_retry_start':
@@ -1712,15 +1729,20 @@ export class PiAgentAdapter implements AgentProviderAdapter {
                 parent_tool_use_id: null,
               } as unknown as SDKMessage)
               break
-            case 'compaction_start':
+            case 'compaction_start': {
+              const afterCompletedTurn = completedAgentTurnPendingCompaction
+              completedAgentTurnPendingCompaction = false
               // 压缩开始（手动 /compact 或自动阈值/溢出触发）：发前端已识别的 compacting system 消息，
               // 展示「正在压缩上下文...」分隔符。此前迁移遗漏了该事件，导致自动压缩与手动压缩都无 UI。
+              // 只有成功完成主 turn 后才进入可验收完成态；运行中压缩仍保持 running。
               queue.push({
                 type: 'system',
                 subtype: 'compacting',
                 session_id: session.sessionId,
+                afterCompletedTurn,
               } as unknown as SDKMessage)
               break
+            }
             case 'compaction_end':
               if (pendingNativeOverflowRecovery && event.reason === 'overflow') {
                 pendingNativeOverflowRecovery = false

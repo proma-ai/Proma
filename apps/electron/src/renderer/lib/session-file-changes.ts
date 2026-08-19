@@ -13,6 +13,49 @@ export function isPathWithinRoot(rootPath: string, targetPath: string, caseInsen
   return target === root || target.startsWith(`${root}/`)
 }
 
+export interface SessionWatcherOwnershipScope {
+  sessionExists: boolean
+  sessionPath?: string
+  sessionAttachedDirectories: readonly string[]
+  sessionAttachedFiles: readonly string[]
+  workspaceAttachmentsComplete: boolean
+  workspaceFilesPath?: string | null
+  workspaceAttachedDirectories: readonly string[]
+  workspaceAttachedFiles: readonly string[]
+}
+
+/** Returns watcher paths that can be attributed from the available session scope. */
+export function getOwnedSessionWatcherPaths(
+  changedPaths: readonly string[],
+  scope: SessionWatcherOwnershipScope,
+  caseInsensitive = false,
+): string[] {
+  if (!scope.sessionExists) return []
+
+  const directoryRoots = [
+    scope.sessionPath,
+    ...scope.sessionAttachedDirectories,
+  ]
+  const attachedFiles = [...scope.sessionAttachedFiles]
+
+  if (scope.workspaceAttachmentsComplete) {
+    directoryRoots.push(
+      scope.workspaceFilesPath ?? undefined,
+      ...scope.workspaceAttachedDirectories,
+    )
+    attachedFiles.push(...scope.workspaceAttachedFiles)
+  }
+
+  return changedPaths.filter((changedPath) => (
+    directoryRoots.some((rootPath) => (
+      typeof rootPath === 'string'
+      && rootPath.length > 0
+      && isPathWithinRoot(rootPath, changedPath, caseInsensitive)
+    ))
+    || attachedFiles.some((filePath) => arePathsEqual(filePath, changedPath, caseInsensitive))
+  ))
+}
+
 export type SessionFileChangeKind = "created" | "edited";
 
 export interface SessionFileChange {

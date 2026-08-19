@@ -332,7 +332,8 @@ function AgentThinkingPopover({ agentThinking, onToggle, codexConfig }: AgentThi
     codexConfig?.thinkingLevel,
     thinkingLevels,
   )
-  const isEnabled = isCodex ? normalizedLevel !== 'off' : agentThinking?.type === 'adaptive'
+  const supportsThinkingToggle = thinkingLevels.includes('off')
+  const isEnabled = isCodex ? !supportsThinkingToggle || normalizedLevel !== 'off' : agentThinking?.type === 'adaptive'
   const sliderPosition = thinkingLevels.indexOf(normalizedLevel)
 
   const handleMouseEnter = React.useCallback(() => {
@@ -352,6 +353,7 @@ function AgentThinkingPopover({ agentThinking, onToggle, codexConfig }: AgentThi
 
   const handleButtonClick = (): void => {
     if (codexConfig) {
+      if (!supportsThinkingToggle) return
       codexConfig.onThinkingLevelChange(isEnabled ? 'off' : 'high')
       return
     }
@@ -2370,15 +2372,16 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     })
   }, [createBaseAdditionalDirectories, preparePendingFilesForSend, restoreQueuedAttachmentsToPending, sessionId, agentChannelId, agentModelId, agentChannelProvider, currentWorkspaceId, streaming, backgroundWaiting, suggestion, hasAvailableModel, store, consumeQuotedSelection, setStreamingStates, setAgentStreamErrors, setPromptSuggestions, setInputContent, setLiveMessagesMap, permissionMode, messagesLoaded, setQueuedMessages, setQuotedSelectionMap, sendPlainTextAgentMessage, isLegacyTranscript, isStopping])
 
-  /** 停止生成 */
+  /** 停止生成。异常流未发出终态时，允许再次下发幂等的 abort 请求。 */
   const handleStop = React.useCallback((): void => {
-    if (isStopping) return
-    setIsStopping(true)
-    store.set(stoppedByUserSessionsAtom, (prev: Set<string>) => {
-      const next = new Set(prev)
-      next.add(sessionId)
-      return next
-    })
+    if (!isStopping) {
+      setIsStopping(true)
+      store.set(stoppedByUserSessionsAtom, (prev: Set<string>) => {
+        const next = new Set(prev)
+        next.add(sessionId)
+        return next
+      })
+    }
 
     // 保持 running 到 STREAM_COMPLETE 到达。提前把它切成 false 会让输入框误以为
     // 已经可以开启新 run，而底层 query 尚未退出，形成重复保存的竞态。
@@ -2964,13 +2967,13 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           size="icon"
           className={inputToolbarDangerButtonClass}
           onClick={handleStop}
-          disabled={isStopping}
+          aria-label={isStopping ? '再次停止 Agent' : '停止 Agent'}
         >
           <Square className="size-[16px]" fill="currentColor" strokeWidth={0} />
         </Button>
       </TooltipTrigger>
       <TooltipContent side="top">
-        <p>停止 Agent ({getAcceleratorDisplay(getActiveAccelerator('stop-generation'))})</p>
+        <p>{isStopping ? '停止未确认，再次发送中断请求' : `停止 Agent (${getAcceleratorDisplay(getActiveAccelerator('stop-generation'))})`}</p>
       </TooltipContent>
     </Tooltip>
   )

@@ -30,6 +30,11 @@ type CapabilityRequest = {
   queryId: string
 }
 
+type QueryAbortResponse = {
+  accepted: boolean
+  completed?: boolean
+}
+
 type AsyncEventQueue<T> = {
   push: (value: T) => void
   end: () => void
@@ -97,15 +102,26 @@ export class PiUtilityAdapter {
   abort(sessionId: string): void {
     for (const pending of this.pendingQueries.values()) {
       if (pending.sessionId !== sessionId) continue
-      void pending.client.call(
+      void pending.client.call<QueryAbortResponse>(
         AGENT_RUNTIME_METHODS.QUERY_ABORT,
         { queryId: pending.queryId, sessionId },
         { queryId: pending.queryId, timeoutMs: 5_000 },
-      ).catch((error) => {
+      ).then((result) => {
+        if (result.completed !== false) return
+        this.failStoppedQuery(pending, new Error('停止 Agent 超时，已关闭卡住的运行时'))
+      }).catch((error) => {
         console.warn(`[PiUtilityAdapter] abort failed: sessionId=${sessionId}`, error)
+        this.failStoppedQuery(pending, error)
       })
       return
     }
+  }
+
+  private failStoppedQuery(pending: PendingQuery, error: unknown): void {
+    if (pending.ended || pending.runtimeFailed) return
+    pending.runtimeFailed = true
+    pending.queue.fail(error)
+    void pending.client.stop()
   }
 
   async sendQueuedMessage(

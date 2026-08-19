@@ -2,7 +2,7 @@ import { app, BrowserWindow, WebContentsView, session as electronSession, type D
 import path from 'node:path'
 import type { BrowserExecutionSource, BrowserOperationStatus, BrowserSessionClosed, BrowserTraceAction, BrowserTraceItem, BrowserViewLayout, BrowserViewState, BrowserTabState } from '@proma/shared'
 import { AGENT_IPC_CHANNELS } from '@proma/shared'
-import { assertSafeBrowserDestination, assertSafeBrowserDownloadUrl, assertSafeBrowserUrl, isSupportedBrowserPopupUrl, isTransientBrowserPopupUrl } from './browser-policy'
+import { assertSafeBrowserDestination, assertSafeBrowserDownloadUrl, assertSafeBrowserUrl, isSupportedBrowserPopupUrl, isTransientBrowserPopupUrl, USER_NEW_TAB_URL } from './browser-policy'
 import { createAuthorizedPreviewUrl, isAuthorizedPreviewProtocol } from './browser-preview-service'
 import { handlePromaFileRequest } from './local-file-protocol'
 import { BrowserCdpTimeoutError, BrowserOperationAbortedError, BROWSER_OBSERVE_TIMEOUT_MS, resolveBrowserObserveAxDepth, throwIfBrowserOperationAborted, withBrowserCdpTimeout } from './browser-cdp'
@@ -18,6 +18,8 @@ import { isValidImageBytes } from './image-content-validation'
 const MAX_TRACE_ITEMS = 30
 /** 总数超限时只回收 Agent 创建且未在使用的标签，绝不自动关闭用户标签。 */
 const MAX_BROWSER_TABS = 20
+/** 最小化或不在前台展示的浏览器 session 最多保留 8 个，防止长期会话累积 WebContents。 */
+const MAX_BACKGROUND_BROWSER_SESSIONS = 8
 const MAX_SCREENSHOT_BYTES = 3 * 1024 * 1024
 const ACTION_HIGHLIGHT_DURATION_MS = 900
 const MAX_BROWSER_SCRIPT_RESULT_CHARS = 64_000
@@ -85,6 +87,10 @@ type BrowserSessionRecord = {
   agentTabId: string | null
   /** 当前 Agent run 的取消源；UI 操作不接入此 signal。 */
   agentAbortController: AbortController
+  /** 当前已入队或正在执行的 Agent 浏览器操作数量；非零时 session 不参与后台回收。 */
+  activeAgentOperationCount: number
+  /** 应用 overlay 临时遮挡 BrowserSlot 时保持回收保护。 */
+  preserveSessionOnHide: boolean
   allowedRoots: string[]
   executionSource: BrowserExecutionSource
   /** 全会话的脱敏账本，避免仅显示 Agent 当前 tab 的最后 30 条。 */
@@ -289,6 +295,8 @@ export class BrowserController {
    */
   private markUserBrowserContext(browserSession: BrowserSessionRecord): void {
     browserSession.userOpenedAt ??= Date.now()
+    const active = browserSession.tabs.get(browserSession.activeTabId)
+    if (active) active.lastActivityAt = Date.now()
   }
 
   getUserContext(sessionId: string): BrowserUserContextSnapshot | null {
@@ -392,13 +400,28 @@ export class BrowserController {
     return merged.signal
   }
 
-  private runTabOperation<T>(browserSession: BrowserSessionRecord, tab: BrowserTabRecord, signal: AbortSignal | undefined, task: (operationSignal: AbortSignal | undefined) => Promise<T>): Promise<T> {
+  private runTabOperation<T>(browserSession: BrowserSessionRecord, tab: BrowserTabRecord, signal: AbortSignal | undefined, task: (operationSignal: AbortSignal | undefined) => Promise<T>, operationLease?: () => void): Promise<T> {
     // 只有 Agent 工具传入 signal；renderer 操作只排队，不会被 Stop Agent 取消。
     const operationSignal = signal ? this.agentSignal(browserSession, signal) : undefined
-    return this.enqueueTab(tab, async () => {
+    const protectsFromEviction = !!signal
+    const releaseLease = operationLease ?? (protectsFromEviction ? this.acquireAgentOperation(browserSession) : undefined)
+    const operation = this.enqueueTab(tab, async () => {
       throwIfBrowserOperationAborted(operationSignal)
       return task(operationSignal)
     })
+    if (!releaseLease) return operation
+    return operation.finally(releaseLease)
+  }
+
+  private acquireAgentOperation(browserSession: BrowserSessionRecord): () => void {
+    browserSession.activeAgentOperationCount += 1
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      browserSession.activeAgentOperationCount = Math.max(0, browserSession.activeAgentOperationCount - 1)
+      this.pruneBackgroundSessions()
+    }
   }
 
   private assertCurrentDocument(tab: BrowserTabRecord, generation: number, signal?: AbortSignal): void {
@@ -525,6 +548,8 @@ export class BrowserController {
       activeTabId: '',
       agentTabId: null,
       agentAbortController: new AbortController(),
+      activeAgentOperationCount: 0,
+      preserveSessionOnHide: false,
       allowedRoots: [...new Set((allowedRoots.length > 0 ? allowedRoots : configuration?.allowedRoots ?? []).filter(Boolean))],
       executionSource: configuration?.executionSource ?? 'user',
       ledger: [],
@@ -706,10 +731,18 @@ export class BrowserController {
     tab.highlightTimer = undefined
   }
 
-  open(sessionId: string): BrowserViewState {
+  async open(sessionId: string): Promise<BrowserViewState> {
     // 用户从界面手动打开浏览器时，初始标签不应伪装成 Agent 标签。
     const browserSession = this.getOrCreateSession(sessionId, [], false)
     this.markUserBrowserContext(browserSession)
+    const activeTab = this.getDisplayTab(browserSession)
+    // 首次风险告知前不能加载第三方页面；告知已确认后才将用户空白页导航到 Google。
+    if (hasAcknowledgedBrowserRiskDisclaimer(getSettings())
+      && browserSession.agentTabId !== activeTab.tabId
+      && !activeTab.openedByAgent
+      && (activeTab.state.url === '' || activeTab.state.url === 'about:blank')) {
+      return this.navigateDisplay(sessionId, USER_NEW_TAB_URL, activeTab.tabId)
+    }
     this.emit(browserSession)
     return structuredClone(this.buildState(browserSession))
   }
@@ -788,12 +821,50 @@ export class BrowserController {
     return true
   }
 
+  private isBackgroundSession(browserSession: BrowserSessionRecord): boolean {
+    if (this.presentation?.sessionId === browserSession.sessionId) return false
+    if (browserSession.preserveSessionOnHide) return false
+    if (browserSession.activeAgentOperationCount > 0) return false
+    return [...browserSession.tabs.values()].every((tab) => !tab.state.visible)
+  }
+
+  private sessionLastActivityAt(browserSession: BrowserSessionRecord): number {
+    return Math.max(0, ...[...browserSession.tabs.values()].map((tab) => tab.lastActivityAt))
+  }
+
+  /** 回收最久未使用的后台浏览器，永不关闭当前前台或已有 Agent 操作的 session。 */
+  private pruneBackgroundSessions(): void {
+    const candidates = [...this.sessions.values()]
+      .filter((browserSession) => this.isBackgroundSession(browserSession))
+      .sort((left, right) => this.sessionLastActivityAt(left) - this.sessionLastActivityAt(right))
+    const excess = candidates.length - MAX_BACKGROUND_BROWSER_SESSIONS
+    for (const browserSession of candidates.slice(0, Math.max(0, excess))) {
+      void this.close(browserSession.sessionId).catch((error) => {
+        console.warn('[受管浏览器] 回收后台浏览器失败:', error)
+      })
+    }
+  }
+
+  /** 用户最小化当前浏览器：保留 WebContents，并在必要时回收最久未使用的后台 session。 */
+  minimize(sessionId: string): void {
+    const browserSession = this.getSession(sessionId)
+    const tab = this.getDisplayTab(browserSession)
+    tab.lastActivityAt = Date.now()
+    const changedSessions = new Set<BrowserSessionRecord>()
+    if (this.hideTabView(tab)) changedSessions.add(browserSession)
+    if (this.presentation?.sessionId === browserSession.sessionId) this.presentation = null
+    browserSession.preserveSessionOnHide = false
+    this.emitChangedSessions(changedSessions)
+    this.pruneBackgroundSessions()
+  }
+
   setLayout(layout: BrowserViewLayout): void {
     const browserSession = this.sessions.get(layout.sessionId)
     if (!browserSession) return
     // React effect cleanup 和新 slot 的 IPC 可以交错到达。只采纳当前 Session 的最新布局。
     if (!Number.isSafeInteger(layout.revision) || layout.revision <= browserSession.lastLayoutRevision) return
     browserSession.lastLayoutRevision = layout.revision
+    browserSession.preserveSessionOnHide = layout.preserveSessionOnHide === true
     const tab = browserSession.tabs.get(layout.tabId ?? browserSession.activeTabId)
     // BrowserSlot 卸载与 tab 关闭可交错，晚到布局不应让 renderer 报错。
     if (!tab) return
@@ -834,6 +905,7 @@ export class BrowserController {
     this.presentation = shown ? { sessionId: browserSession.sessionId, tabId: tab.tabId, revision: layout.revision } : null
     this.latestPresentationRevision = layout.revision
     this.emitChangedSessions(changedSessions)
+    if (shown) this.pruneBackgroundSessions()
   }
 
   /**
@@ -935,7 +1007,7 @@ export class BrowserController {
     const reclaimed = this.reclaimExcessAgentTabs(browserSession)
     if (reclaimed > 0) this.trace(browserSession, tab, 'tab', `标签超过 ${MAX_BROWSER_TABS} 个上限，已回收 ${reclaimed} 个最久未使用的 Agent 标签`)
     if (url?.trim()) return this.navigateDisplay(sessionId, url)
-    return structuredClone(this.buildState(browserSession))
+    return this.navigateDisplay(sessionId, USER_NEW_TAB_URL, tab.tabId)
   }
 
   /** 用户 UI 的 tab 选择只控制显示，不影响 Agent 之后的默认操作目标。 */
@@ -976,26 +1048,32 @@ export class BrowserController {
 
   async previewOpen(sessionId: string, inputPath: string, tabId: string | undefined, allowedRoots: string[], baseDir?: string, signal?: AbortSignal): Promise<BrowserViewState> {
     const browserSession = this.getOrCreateSession(sessionId, allowedRoots)
-    this.assertRiskDisclaimerAcknowledged()
-    // 先校验路径，避免无效路径遗留一个空白的 Agent 预览标签。
-    const preview = createAuthorizedPreviewUrl(inputPath, browserSession.allowedRoots, baseDir)
-    const tab = tabId ? this.getAgentTab(browserSession, tabId) : this.createTab(browserSession, true, true)
-    browserSession.agentTabId = tab.tabId
-    this.activateDisplayTab(browserSession, tab)
-    const reclaimed = this.reclaimExcessAgentTabs(browserSession)
-    if (reclaimed > 0) this.trace(browserSession, tab, 'tab', `已回收 ${reclaimed} 个最久未使用的 Agent 标签以保持最多 ${MAX_BROWSER_TABS} 个标签`)
-    return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
-      tab.isLocalPreview = true
-      try {
-        await this.loadUrl(tab, preview.url, operationSignal)
-        this.trace(browserSession, tab, 'navigate', `预览本地文件 ${preview.filePath.split(/[\\/]/).pop() ?? preview.filePath}`, 'verified')
-        this.updateNavigationState(browserSession, tab)
-        return structuredClone(this.buildState(browserSession))
-      } catch (error) {
-        this.trace(browserSession, tab, 'navigate', error instanceof BrowserOperationAbortedError ? '本地预览已停止，结果未知' : '本地预览加载失败', error instanceof BrowserOperationAbortedError ? 'unknown' : 'failed')
-        throw error
-      }
-    })
+    const releaseAgentOperation = this.acquireAgentOperation(browserSession)
+    try {
+      this.assertRiskDisclaimerAcknowledged()
+      // 先校验路径，避免无效路径遗留一个空白的 Agent 预览标签。
+      const preview = createAuthorizedPreviewUrl(inputPath, browserSession.allowedRoots, baseDir)
+      const tab = tabId ? this.getAgentTab(browserSession, tabId) : this.createTab(browserSession, true, true)
+      browserSession.agentTabId = tab.tabId
+      this.activateDisplayTab(browserSession, tab)
+      const reclaimed = this.reclaimExcessAgentTabs(browserSession)
+      if (reclaimed > 0) this.trace(browserSession, tab, 'tab', `已回收 ${reclaimed} 个最久未使用的 Agent 标签以保持最多 ${MAX_BROWSER_TABS} 个标签`)
+      return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
+        tab.isLocalPreview = true
+        try {
+          await this.loadUrl(tab, preview.url, operationSignal)
+          this.trace(browserSession, tab, 'navigate', `预览本地文件 ${preview.filePath.split(/[\\/]/).pop() ?? preview.filePath}`, 'verified')
+          this.updateNavigationState(browserSession, tab)
+          return structuredClone(this.buildState(browserSession))
+        } catch (error) {
+          this.trace(browserSession, tab, 'navigate', error instanceof BrowserOperationAbortedError ? '本地预览已停止，结果未知' : '本地预览加载失败', error instanceof BrowserOperationAbortedError ? 'unknown' : 'failed')
+          throw error
+        }
+      }, releaseAgentOperation)
+    } catch (error) {
+      releaseAgentOperation()
+      throw error
+    }
   }
 
   private async loadUrl(tab: BrowserTabRecord, url: string, signal?: AbortSignal): Promise<void> {
@@ -1005,23 +1083,29 @@ export class BrowserController {
 
   async navigate(sessionId: string, url: string, tabId?: string, signal?: AbortSignal): Promise<BrowserViewState> {
     const browserSession = this.getOrCreateSession(sessionId, [])
-    this.assertRiskDisclaimerAcknowledged()
-    const tab = this.getAgentTab(browserSession, tabId)
-    const safeUrl = await assertSafeBrowserDestination(url)
-    const host = new URL(safeUrl).host
-    return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
-      tab.isLocalPreview = false
-      this.trace(browserSession, tab, 'navigate', `正在打开 ${host}`, 'dispatched')
-      try {
-        await this.loadUrl(tab, safeUrl, operationSignal)
-        this.trace(browserSession, tab, 'navigate', `已打开 ${host}`, 'verified')
-        this.updateNavigationState(browserSession, tab)
-        return structuredClone(this.buildState(browserSession))
-      } catch (error) {
-        this.trace(browserSession, tab, 'navigate', error instanceof BrowserOperationAbortedError ? `打开 ${host} 已停止，结果未知` : `无法打开 ${host}`, error instanceof BrowserOperationAbortedError ? 'unknown' : 'failed')
-        throw error
-      }
-    })
+    const releaseAgentOperation = this.acquireAgentOperation(browserSession)
+    try {
+      this.assertRiskDisclaimerAcknowledged()
+      const tab = this.getAgentTab(browserSession, tabId)
+      const safeUrl = await assertSafeBrowserDestination(url)
+      const host = new URL(safeUrl).host
+      return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
+        tab.isLocalPreview = false
+        this.trace(browserSession, tab, 'navigate', `正在打开 ${host}`, 'dispatched')
+        try {
+          await this.loadUrl(tab, safeUrl, operationSignal)
+          this.trace(browserSession, tab, 'navigate', `已打开 ${host}`, 'verified')
+          this.updateNavigationState(browserSession, tab)
+          return structuredClone(this.buildState(browserSession))
+        } catch (error) {
+          this.trace(browserSession, tab, 'navigate', error instanceof BrowserOperationAbortedError ? `打开 ${host} 已停止，结果未知` : `无法打开 ${host}`, error instanceof BrowserOperationAbortedError ? 'unknown' : 'failed')
+          throw error
+        }
+      }, releaseAgentOperation)
+    } catch (error) {
+      releaseAgentOperation()
+      throw error
+    }
   }
 
   /** 用户地址栏导航当前显示 tab，不会改变 Agent 的工作 tab。 */

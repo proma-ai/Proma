@@ -81,6 +81,10 @@ import {
 } from '../web-search-service'
 import { browserController } from '../browser-controller'
 import { resolveBrowserProfileKey } from '../browser-profile-policy'
+import {
+  automationCreateToolParameters,
+  discardInapplicableAutomationScheduleFields,
+} from './automation-tool-schema'
 
 type PiSdk = typeof import('@earendil-works/pi-coding-agent')
 
@@ -349,31 +353,7 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
       name: 'mcp__automation__create_automation',
       label: '创建定时任务',
       description: '创建 Proma 持久化定时任务。适合无人值守、有稳定价值的场景。纯提醒/闹钟、需要用户实时参与判断、或现在就该做完即终结的事不要创建。',
-      parameters: Type.Object({
-        name: Type.String({ description: '任务名，简短说明长期反复执行的目标' }),
-        prompt: Type.String({ description: '每次触发时发送给 Agent 的完整自然语言指令' }),
-        scheduleType: Type.Union([
-          Type.Literal('interval'),
-          Type.Literal('daily'),
-          Type.Literal('weekly'),
-          Type.Literal('monthly'),
-          Type.Literal('once'),
-        ], { description: '调度类型' }),
-        intervalMinutes: Type.Optional(Type.Number({ description: '固定间隔分钟数；scheduleType=interval 时必填' })),
-        activeWindowStart: Type.Optional(Type.String({ description: 'interval 的每日有效开始时刻，HH:MM；需与 activeWindowEnd 同时设置' })),
-        activeWindowEnd: Type.Optional(Type.String({ description: 'interval 的每日有效结束时刻（不包含），HH:MM；需与 activeWindowStart 同时设置' })),
-        activeWeekdays: Type.Optional(Type.Array(Type.Number({ description: '运行日：0=周日，1=周一 … 6=周六；空数组表示每天' }), { description: 'interval 的周内运行日集合，例如工作日传 [1,2,3,4,5]' })),
-        timeOfDay: Type.Optional(Type.String({ description: '每天/每周/每月触发时间，24 小时制 HH:MM' })),
-        dayOfWeek: Type.Optional(Type.Number({ description: '每周触发日，0=周日，...，6=周六' })),
-        dayOfMonth: Type.Optional(Type.Number({ description: '每月触发日，1-31' })),
-        scheduledAt: Type.Optional(Type.Number({ description: '一次性任务的绝对触发时间（毫秒时间戳）；scheduleType=once 时必填' })),
-        maxRuns: Type.Optional(Type.Union([
-          Type.Number({ description: '最大运行次数上限；达到后任务自动停用' }),
-          Type.Null({ description: '清除运行次数上限，长期运行' }),
-        ])),
-        active: Type.Optional(Type.Boolean({ description: '创建后是否启用，默认 true' })),
-        sessionMode: Type.Optional(Type.Union([Type.Literal('daily'), Type.Literal('reuse')], { description: '会话模式' })),
-      }),
+      parameters: automationCreateToolParameters,
       async execute(_toolCallId: string, params: unknown) {
         const args = params as Record<string, unknown>
         if (ctx.triggeredBy === 'automation' || getCurrentAutomationId(ctx)) {
@@ -399,6 +379,7 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
           sourceSessionId: ctx.sessionId,
           active: (args.active as boolean) ?? true,
         }
+        discardInapplicableAutomationScheduleFields(input, input.scheduleType)
         validateScheduleFields(input)
         validateExplicitAutomationScheduleFields(input, input.scheduleType)
         if (input.scheduleType === 'interval' && args.intervalMinutes === undefined) {
@@ -485,10 +466,11 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
         }
         if (input.name !== undefined) assertNonBlank(input.name, 'name')
         if (input.prompt !== undefined) assertNonBlank(input.prompt, 'prompt')
-        validateScheduleFields(input)
         const existing = getAutomation(id)
         if (!existing) throw new Error(`定时任务不存在: ${id}`)
         const scheduleType = input.scheduleType ?? existing.scheduleType
+        discardInapplicableAutomationScheduleFields(input, scheduleType)
+        validateScheduleFields(input)
         validateExplicitAutomationScheduleFields(input, scheduleType)
         const effective = getEffectiveAutomationScheduleFields(input, existing)
         if (effective.scheduleType === 'interval' && (!isFiniteInt(effective.intervalMinutes) || effective.intervalMinutes < 1)) {
@@ -924,8 +906,8 @@ function buildBrowserTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefiniti
     sdk.defineTool({
       name: 'BrowserNavigate',
       label: '在受管浏览器中打开网页',
-      description: 'Navigate the Agent working in-app browser tab to a URL. The managed browser accepts any URL Chromium can load; downloads and popups stay inside the managed browser, while browser permissions remain blocked.',
-      parameters: Type.Object({ url: Type.String({ description: 'A complete URL to navigate to. Protocol-relative and bare domain inputs are normalized to HTTPS.' }), tabId: Type.Optional(Type.String({ description: 'Optional tab id. Defaults to the Agent working tab, independent of the tab visible to the user.' })) }),
+      description: 'Navigate the Agent working in-app browser tab to a URL or search query. Explicit URLs, bare domains, localhost, and IP addresses are opened directly; other text is searched with Google. The managed browser accepts any URL Chromium can load; downloads and popups stay inside the managed browser, while browser permissions remain blocked.',
+      parameters: Type.Object({ url: Type.String({ description: 'A URL, bare domain, or search query. Explicit URLs and recognizable hostnames open directly; other text is searched with Google. about:blank is supported for an empty page.' }), tabId: Type.Optional(Type.String({ description: 'Optional tab id. Defaults to the Agent working tab, independent of the tab visible to the user.' })) }),
       async execute(_id, params, signal?: AbortSignal) {
         const args = params as Record<string, unknown>
         return jsonToolResult(await browserController.navigate(ctx.sessionId, typeof args.url === 'string' ? args.url : '', typeof args.tabId === 'string' ? args.tabId : undefined, signal))

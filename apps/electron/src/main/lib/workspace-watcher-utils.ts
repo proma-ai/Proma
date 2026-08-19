@@ -1,7 +1,10 @@
-// 高频变动目录：跳过其中的变更事件，防止 node_modules / .next 等产生 IPC 事件风暴。
+// 高频变动目录：跳过依赖、缓存和构建中间物，防止产生 IPC 事件风暴。
 const HIGH_NOISE_SEGMENTS = new Set([
   'node_modules', '.next', '.nuxt', '.git', 'dist', 'build',
   '.cache', '__pycache__', '.turbo', '.parcel-cache', '.svelte-kit',
+  '.venv', 'venv', '.tox', '.nox', '__pypackages__',
+  '.pytest_cache', '.mypy_cache', '.ruff_cache', '.hypothesis',
+  '.gradle',
 ])
 
 const GIT_DIFF_STATE_FILES = new Set([

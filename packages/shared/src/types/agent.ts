@@ -327,6 +327,8 @@ export interface SDKSystemMessage {
   compact_error?: string
   /** Pi 手动压缩后的上下文 token 预估值 */
   compactionEstimatedTokensAfter?: number
+  /** 本次压缩是否紧随一个无需续跑的成功主 Agent turn。 */
+  afterCompletedTurn?: boolean
   summary?: string
   output_file?: string
   last_tool_name?: string
@@ -598,7 +600,7 @@ export type AgentEvent =
   // Usage 更新
   | { type: 'usage_update'; usage: AgentEventUsage }
   // 上下文压缩
-  | { type: 'compacting' }
+  | { type: 'compacting'; afterCompletedTurn?: boolean }
   | {
     type: 'compact_complete'
     status: 'success' | 'noop' | 'failed'
@@ -1834,6 +1836,7 @@ export const AGENT_IPC_CHANNELS = {
   CLOSE_BROWSER_TAB: 'agent:close-browser-tab',
   GET_BROWSER_STATE: 'agent:get-browser-state',
   SET_BROWSER_LAYOUT: 'agent:set-browser-layout',
+  MINIMIZE_BROWSER: 'agent:minimize-browser',
   NAVIGATE_BROWSER: 'agent:navigate-browser',
   GO_BACK_BROWSER: 'agent:go-back-browser',
   GO_FORWARD_BROWSER: 'agent:go-forward-browser',

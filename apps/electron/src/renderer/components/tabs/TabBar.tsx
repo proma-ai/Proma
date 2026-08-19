@@ -42,7 +42,7 @@ import { registerShortcut } from '@/lib/shortcut-registry'
 import { cn } from '@/lib/utils'
 import { shortcutGuideOpenAtom } from '@/atoms/shortcut-guide'
 import { faqDialogOpenAtom } from '@/atoms/faq-dialog'
-import { browserFilePanelManualRestoreSessionIdsAtom, browserPanelOpenMapAtom, browserStateMapAtom } from '@/atoms/browser-atoms'
+import { browserFilePanelManualRestoreSessionIdsAtom, browserPanelMinimizedMapAtom, browserPanelOpenMapAtom, browserStateMapAtom } from '@/atoms/browser-atoms'
 // 浏览器入口对所有 Agent 会话开放；来源限制由主进程浏览器策略处理。
 
 export function TabBar(): React.ReactElement {
@@ -247,9 +247,13 @@ function TabBarInner({
   const showBrowserButton = Boolean(activeAgentSession)
   const showOpenPanelButton = !isPanelOpen && activeTab?.type === 'agent'
   const [browserOpenMap, setBrowserOpenMap] = useAtom(browserPanelOpenMapAtom)
+  const browserMinimizedMap = useAtomValue(browserPanelMinimizedMapAtom)
+  const setBrowserMinimizedMap = useSetAtom(browserPanelMinimizedMapAtom)
+  const browserStateMap = useAtomValue(browserStateMapAtom)
   const setBrowserStateMap = useSetAtom(browserStateMapAtom)
   const [browserFilePanelManualRestoreSessionIds, setBrowserFilePanelManualRestoreSessionIds] = useAtom(browserFilePanelManualRestoreSessionIdsAtom)
   const activeBrowserIsOpen = activeAgentSession ? browserOpenMap.get(activeAgentSession.id) === true : false
+  const hasMinimizedBrowser = Boolean(activeAgentSession && browserStateMap.has(activeAgentSession.id) && browserMinimizedMap.get(activeAgentSession.id) === true)
   const priorBrowserStateRef = React.useRef<{ sessionId: string | null; open: boolean }>({ sessionId: null, open: false })
   const actionLayout = getTabBarActionLayout(isWindows, showOpenPanelButton, showBrowserButton)
 
@@ -269,8 +273,9 @@ function TabBarInner({
     if (typeof open !== 'function') return
     const state = await open(activeAgentSession.id)
     setBrowserStateMap((previous) => { const next = new Map(previous); next.set(activeAgentSession.id, state); return next })
+    setBrowserMinimizedMap((previous) => { const next = new Map(previous); next.delete(activeAgentSession.id); return next })
     setBrowserOpenMap((previous) => { const next = new Map(previous); next.set(activeAgentSession.id, true); return next })
-  }, [activeAgentSession, setBrowserOpenMap, setBrowserStateMap])
+  }, [activeAgentSession, setBrowserMinimizedMap, setBrowserOpenMap, setBrowserStateMap])
 
   React.useEffect(() => {
     const sessionId = activeAgentSession?.id ?? null
@@ -475,6 +480,7 @@ function TabBarInner({
       <ShortcutGuideButton
         positionClassName={actionLayout.shortcutPositionClassName}
         showBrowserButton={showBrowserButton}
+        hasMinimizedBrowser={hasMinimizedBrowser}
         onOpenBrowser={openBrowser}
         onOpen={openShortcutGuide}
         onOpenFaq={openFaqDialog}
@@ -492,12 +498,14 @@ function TabBarInner({
 function ShortcutGuideButton({
   positionClassName,
   showBrowserButton,
+  hasMinimizedBrowser,
   onOpenBrowser,
   onOpen,
   onOpenFaq,
 }: {
   positionClassName: string
   showBrowserButton: boolean
+  hasMinimizedBrowser: boolean
   onOpenBrowser: () => void
   onOpen: () => void
   onOpenFaq: () => void
@@ -535,7 +543,10 @@ function ShortcutGuideButton({
               type="button"
               variant="ghost"
               size="icon"
-              className="h-7 w-7"
+              className={cn(
+                'h-7 w-7',
+                hasMinimizedBrowser && 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary',
+              )}
               onClick={() => void onOpenBrowser()}
             >
               <Globe2 className="size-3.5" />

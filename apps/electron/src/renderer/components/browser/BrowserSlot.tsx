@@ -102,7 +102,7 @@ export function BrowserSlot({ sessionId, tabId }: { sessionId: string; tabId: st
     const setLayout = (window.electronAPI as Partial<typeof window.electronAPI>).setAgentBrowserLayout
     if (!element || typeof setLayout !== 'function') return
     let frame = 0
-    const publish = (visible: boolean) => {
+    const publish = (visible: boolean, preserveSessionOnHide = false) => {
       if (frame) cancelAnimationFrame(frame)
       frame = requestAnimationFrame(() => {
         const rect = element.getBoundingClientRect()
@@ -111,6 +111,7 @@ export function BrowserSlot({ sessionId, tabId }: { sessionId: string; tabId: st
           tabId,
           revision: nextBrowserLayoutRevision(),
           visible: visible && rect.width > 4 && rect.height > 4,
+          preserveSessionOnHide,
           bounds: {
             x: Math.round(rect.x), y: Math.round(rect.y),
             width: Math.round(rect.width), height: Math.round(rect.height),
@@ -118,7 +119,10 @@ export function BrowserSlot({ sessionId, tabId }: { sessionId: string; tabId: st
         })
       })
     }
-    const publishCurrentVisibility = () => publish(!hasBlockingAppOverlay())
+    const publishCurrentVisibility = () => {
+      const overlayOpen = hasBlockingAppOverlay()
+      publish(!overlayOpen, overlayOpen)
+    }
     const observer = new ResizeObserver(publishCurrentVisibility)
     const disconnectOverlayObserver = observeAppOverlayLifecycle(publishCurrentVisibility)
     const publishBounded = () => publishCurrentVisibility()
@@ -130,7 +134,7 @@ export function BrowserSlot({ sessionId, tabId }: { sessionId: string; tabId: st
       disconnectOverlayObserver()
       window.removeEventListener('resize', publishBounded)
       if (frame) cancelAnimationFrame(frame)
-      void setLayout({ sessionId, tabId, revision: nextBrowserLayoutRevision(), visible: false, bounds: { x: 0, y: 0, width: 0, height: 0 } })
+      void setLayout({ sessionId, tabId, revision: nextBrowserLayoutRevision(), visible: false, preserveSessionOnHide: false, bounds: { x: 0, y: 0, width: 0, height: 0 } })
     }
   }, [sessionId, tabId])
 

@@ -125,6 +125,26 @@ describe('SDK 压缩状态分组', () => {
     })
   })
 
+  test('Given 自动压缩发生在最终回答和 result 之间 When 分组 Then result 仍归属最终回答', () => {
+    const raw = jsonl([
+      { type: 'user', message: { content: [{ type: 'text', text: '完成任务' }] }, parent_tool_use_id: null },
+      { type: 'assistant', message: { id: 'a1', content: [{ type: 'text', text: '任务已完成' }] }, parent_tool_use_id: null },
+      { type: 'system', subtype: 'compacting' },
+      { type: 'system', subtype: 'compact_boundary' },
+      { type: 'result', subtype: 'success', _durationMs: 2_413_169 },
+    ])
+
+    const groups = groupIntoTurns(readSessionMessagesFromString(raw))
+    const assistantTurn = groups.find((group) => group.type === 'assistant-turn')
+
+    expect(groups.map((group) => group.type)).toEqual(['user', 'assistant-turn', 'system'])
+    expect(assistantTurn).toBeDefined()
+    expect(assistantTurn).toMatchObject({
+      type: 'assistant-turn',
+      turnMessages: [{ type: 'assistant' }, { type: 'result', _durationMs: 2_413_169 }],
+    })
+  })
+
   test('Given 上一次压缩已结束且下一次立即开始 When 分组 Then 保留两个压缩周期', () => {
     const raw = jsonl([
       { type: 'system', subtype: 'compacting' },
