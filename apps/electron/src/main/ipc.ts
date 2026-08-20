@@ -2098,7 +2098,15 @@ export function registerIpcHandlers(): void {
     }
   }
   const assertBrowserSessionAccess = async (senderId: number, sessionId: string): Promise<void> => {
-    await assertMainRenderer(senderId)
+    const { getMainWindow } = await import('./index')
+    const mainWindow = getMainWindow()
+    const isMainWindowSender = !!mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.id === senderId
+    const { getDetachedBrowserWindow } = await import('./lib/detached-browser-window')
+    const detachedWin = getDetachedBrowserWindow(sessionId)
+    const isDetachedSender = !!detachedWin && !detachedWin.isDestroyed() && detachedWin.webContents.id === senderId
+    if (!isMainWindowSender && !isDetachedSender) {
+      throw new Error('仅主窗口或该会话的浏览器独立窗口可以操作受管浏览器。')
+    }
     const session = getAgentSessionMeta(sessionId)
     if (!session) throw new Error('Agent 会话不存在。')
     // 自动任务与协作子会话同样可以使用受管浏览器；仅校验会话仍存在。
@@ -2127,7 +2135,10 @@ export function registerIpcHandlers(): void {
     async (event, layout: BrowserViewLayout): Promise<void> => {
       if (!layout || typeof layout.sessionId !== 'string' || !layout.bounds || !Number.isSafeInteger(layout.revision)) throw new Error('无效的浏览器布局。')
       await assertBrowserSessionAccess(event.sender.id, layout.sessionId)
-      browserController.setLayout(layout)
+      const { getDetachedBrowserWindow } = await import('./lib/detached-browser-window')
+      const detachedWin = getDetachedBrowserWindow(layout.sessionId)
+      const fromDetached = !!detachedWin && !detachedWin.isDestroyed() && detachedWin.webContents.id === event.sender.id
+      browserController.setLayout(layout, fromDetached)
     },
   )
   ipcMain.handle(
@@ -2177,6 +2188,22 @@ export function registerIpcHandlers(): void {
     await assertBrowserSessionAccess(event.sender.id, input.sessionId)
     if (!input.tabId) throw new Error('tabId 必填。')
     return browserController.closeTab(input.sessionId, input.tabId)
+  })
+  // 弹出到独立窗口：仅主窗口可发起（方案 A：全局唯一展示位）。
+  ipcMain.handle(AGENT_IPC_CHANNELS.POP_OUT_BROWSER, async (event, sessionId: string): Promise<BrowserViewState> => {
+    await assertMainRenderer(event.sender.id)
+    await assertBrowserSessionAccess(event.sender.id, sessionId)
+    return browserController.popOut(sessionId)
+  })
+  // 从独立窗口收起回主窗口：由独立窗口自身触发（关闭窗口）。
+  ipcMain.handle(AGENT_IPC_CHANNELS.DOCK_BROWSER, async (event, sessionId: string): Promise<BrowserViewState | null> => {
+    await assertBrowserSessionAccess(event.sender.id, sessionId)
+    const { getDetachedBrowserWindow } = await import('./lib/detached-browser-window')
+    const detachedWin = getDetachedBrowserWindow(sessionId)
+    if (detachedWin && !detachedWin.isDestroyed() && detachedWin.webContents.id === event.sender.id) {
+      detachedWin.close()
+    }
+    return browserController.getState(sessionId)
   })
 
 
