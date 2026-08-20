@@ -1736,6 +1736,8 @@ export const AGENT_IPC_CHANNELS = {
   GO_FORWARD_BROWSER: 'agent:go-forward-browser',
   RELOAD_BROWSER: 'agent:reload-browser',
   CLOSE_BROWSER: 'agent:close-browser',
+  POP_OUT_BROWSER: 'agent:pop-out-browser',
+  DOCK_BROWSER: 'agent:dock-browser',
   BROWSER_STATE_CHANGED: 'agent:browser-state-changed',
 
   // 后台任务管理

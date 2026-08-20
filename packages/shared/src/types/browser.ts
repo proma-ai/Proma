@@ -7,9 +7,14 @@ export interface BrowserViewBounds {
   height: number
 }
 
+/** 浏览器展示位：主窗口槽 或 独立窗口（方案 A：全局唯一，互斥）。 */
+export type BrowserPresentationTarget = 'main' | 'detached'
+
 export interface BrowserViewLayout {
   sessionId: string
   tabId?: string
+  /** 缺省 'main'；独立窗口显式传 'detached'，主进程按 sender 域校验后采用。 */
+  presentationTarget?: BrowserPresentationTarget
   /** Renderer 全局单调递增代际；主进程忽略晚到的旧布局 IPC。 */
   revision: number
   visible: boolean
@@ -79,6 +84,8 @@ export interface BrowserViewState {
   trace: BrowserTraceItem[]
   /** 最近一条 Agent 操作，用于用户未查看工作 tab 时的非阻断活动提示。 */
   activity: BrowserTraceItem | null
+  /** 当前 session 的浏览器是否展示在独立窗口（不再占用主窗口槽）。 */
+  detached: boolean
 }
 
 /** 通知 renderer 当前会话的受管浏览器已销毁。 */
