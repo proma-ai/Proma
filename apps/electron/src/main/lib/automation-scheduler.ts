@@ -143,7 +143,9 @@ export async function runAutomation(automation: Automation, manual = false): Pro
       console.log(`[定时任务] ${automation.name} 上次会话已被用户接管，本次自动开新会话`)
     }
     if (automation.lastSessionId && lastSessionMeta && !lastSessionMeta.automationGraduated) {
-      if (sessionMode === 'reuse') {
+      if (lastSessionMeta.workspaceId !== automation.workspaceId) {
+        console.warn(`[定时任务] ${automation.name} 上次会话项目已变化，本次自动开新会话`)
+      } else if (sessionMode === 'reuse') {
         reuseSessionId = automation.lastSessionId
       } else if (
         sessionMode === 'daily' &&

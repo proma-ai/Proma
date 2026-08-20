@@ -125,6 +125,20 @@ function compilePiReasoningCapabilities(
   }
 }
 
+/**
+ * Proma re-registers every non-OAuth channel as an ephemeral Pi provider. Preserve
+ * only this protocol-safe catalog flag: current Claude models require adaptive
+ * thinking, while copying the complete catalog compat object could leak unrelated
+ * tool/sampling behaviour across provider protocols.
+ */
+export function shouldForcePiAdaptiveThinking(
+  api: Api,
+  catalogModel: { api: Api, compat?: unknown } | undefined,
+): boolean {
+  if (api !== 'anthropic-messages' || catalogModel?.api !== 'anthropic-messages') return false
+  return (catalogModel.compat as { forceAdaptiveThinking?: unknown } | undefined)?.forceAdaptiveThinking === true
+}
+
 const CODEX_56_THINKING_LEVEL_MAP = compilePiReasoningCapabilities('openai-responses', 'gpt-5.6')?.thinkingLevelMap
 
 type CodexRuntimeCredential = CodexOAuthCredentials & {
@@ -598,11 +612,16 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
   const isCatalogMissingGlm53 = !catalogModel && glmModelId === 'glm-5.3'
   const catalogContextWindow = catalogModel?.contextWindow ?? DEFAULT_CONTEXT_WINDOW
   const inferredContextWindow = inferContextWindow(input.model) ?? DEFAULT_CONTEXT_WINDOW
+  const shouldForceAdaptiveThinking = shouldForcePiAdaptiveThinking(api, catalogModel)
   return {
     reasoning: catalogModel?.reasoning ?? true,
     thinkingLevelMap: providerSpecificCapabilities?.thinkingLevelMap
       ?? catalogModel?.thinkingLevelMap,
-    compat: providerSpecificCapabilities?.compat,
+    // 仅把 Claude Adaptive Thinking 所需的安全 compat 标记带入临时 provider；
+    // 其它 catalog compat 不能跨渠道或跨协议继承。
+    compat: shouldForceAdaptiveThinking
+      ? { ...providerSpecificCapabilities?.compat, forceAdaptiveThinking: true }
+      : providerSpecificCapabilities?.compat,
     input: resolvePiModelInput(input.provider, input.model, catalogModel?.input),
     cost: catalogModel ? { ...catalogModel.cost } : { ...ZERO_MODEL_COST },
     // Proma 后端下发的规格优先；其次 Codex 对齐策略，最后才是 catalog 与 shared inference 的较大值。

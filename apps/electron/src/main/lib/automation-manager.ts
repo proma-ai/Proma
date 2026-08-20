@@ -494,7 +494,12 @@ export function updateAutomation(input: UpdateAutomationInput): Automation | und
   if (input.modelId !== undefined) target.modelId = input.modelId
   // workspaceId 允许设为空字符串表示「无工作区」；用 undefined 区分「不修改」
   if (input.workspaceId !== undefined) {
-    target.workspaceId = input.workspaceId || undefined
+    const nextWorkspaceId = input.workspaceId || undefined
+    if (nextWorkspaceId !== target.workspaceId) {
+      target.workspaceId = nextWorkspaceId
+      // 会话 cwd 与项目绑定；项目改变后不能复用旧会话。
+      target.lastSessionId = undefined
+    }
   }
   if (input.permissionMode !== undefined) target.permissionMode = input.permissionMode
   if (input.sessionMode !== undefined) target.sessionMode = input.sessionMode
