@@ -232,6 +232,48 @@ class FeishuBridgeManager {
     return removed
   }
 
+  /**
+   * 会话迁移后同步飞书 binding，确保附件保存和 headless run 使用同一项目。
+   * 未启动的 Bot 直接更新其持久化 binding 文件。
+   */
+  syncWorkspaceForSession(sessionId: string, workspaceId: string): number {
+    let updated = 0
+    const activeBotIds = new Set(this.bridges.keys())
+
+    for (const bridge of this.bridges.values()) {
+      for (const binding of bridge.listBindings()) {
+        if (binding.sessionId === sessionId && binding.workspaceId !== workspaceId) {
+          bridge.updateBinding({ chatId: binding.chatId, workspaceId })
+          updated++
+        }
+      }
+    }
+
+    for (const bot of getFeishuMultiBotConfig().bots) {
+      if (activeBotIds.has(bot.id)) continue
+      const bindingsPath = getFeishuBotBindingsPath(bot.id)
+      if (!existsSync(bindingsPath)) continue
+      try {
+        const bindings = JSON.parse(readFileSync(bindingsPath, 'utf-8')) as unknown
+        if (!Array.isArray(bindings)) continue
+        let changed = false
+        const next = bindings.map((binding) => {
+          if (!binding || typeof binding !== 'object') return binding
+          const candidate = binding as Partial<FeishuChatBinding>
+          if (candidate.sessionId !== sessionId || candidate.workspaceId === workspaceId) return binding
+          changed = true
+          updated++
+          return { ...candidate, workspaceId }
+        })
+        if (changed) writeJsonFileAtomic(bindingsPath, next)
+      } catch (error) {
+        console.error(`[飞书 BridgeManager] 同步 Bot ${bot.id} 的会话项目失败:`, redactSensitiveLogValue(error))
+      }
+    }
+
+    return updated
+  }
+
   /** 跨所有 Bot 的绑定列表 */
   listAllBindings(): FeishuChatBinding[] {
     const all: FeishuChatBinding[] = []

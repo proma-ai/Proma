@@ -77,6 +77,10 @@ export class AgentQueueCoordinator {
     return this.dispatching.has(sessionId)
   }
 
+  hasPending(sessionId: string): boolean {
+    return this.dispatching.has(sessionId) || (this.queues.get(sessionId)?.length ?? 0) > 0
+  }
+
   clear(sessionId: string): void {
     this.queues.delete(sessionId)
     this.dispatching.delete(sessionId)

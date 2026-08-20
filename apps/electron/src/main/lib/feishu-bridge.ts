@@ -1599,9 +1599,20 @@ class FeishuBridge {
     // 当前架构靠 RunCoordinator 的 per-scope 串行 + ScopedQueue.block/unblock
     // + finishedPromise 三层保证不会真正并发，移除此兜底以避免误丢消息。
 
-    // 保存飞书图片和文件到 session 工作目录，构建文件引用
+    const session = getAgentSessionMeta(binding.sessionId)
+    if (!session?.workspaceId) {
+      console.error(`[飞书 Bridge] 绑定会话缺少有效项目: sessionId=${binding.sessionId}`)
+      await this.sendCardMessage(chatId, buildErrorCard('当前会话项目不可用，请在 Proma 中重新选择会话。'))
+      return
+    }
+    if (binding.workspaceId !== session.workspaceId) {
+      binding.workspaceId = session.workspaceId
+      this.saveBindings()
+    }
+
+    // 保存飞书图片和文件到会话所属项目的工作目录，构建文件引用
     const attachedRefs: string[] = []
-    const workspace = binding.workspaceId ? getAgentWorkspace(binding.workspaceId) : undefined
+    const workspace = getAgentWorkspace(session.workspaceId)
 
     // 诊断：附件应保存但 workspace 为空时立即报错（用户能在 Console 看到）
     const hasAnyAttachment = imageAttachments.length > 0 || fileAttachments.length > 0
@@ -1740,7 +1751,7 @@ class FeishuBridge {
       userMessage: agentMessage,
       channelId,
       modelId,
-      workspaceId: binding.workspaceId,
+      workspaceId: session.workspaceId,
       permissionModeOverride: 'bypassPermissions',
     }
 

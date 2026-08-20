@@ -282,7 +282,7 @@ import {
   searchAgentSessionMessages,
   searchAgentSessionReferences,
 } from './lib/agent-session-manager'
-import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive, queueAgentMessage, enqueueAgentQueuedMessage, cancelAgentQueuedMessage, moveAgentQueuedMessage, clearAgentQueuedMessages, updateAgentPermissionMode, rewindAgentSession, setVisibleAgentSession } from './lib/agent-service'
+import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive, isAgentSessionBusy, reserveAgentSessionStart, queueAgentMessage, enqueueAgentQueuedMessage, cancelAgentQueuedMessage, moveAgentQueuedMessage, clearAgentQueuedMessages, updateAgentPermissionMode, rewindAgentSession, setVisibleAgentSession } from './lib/agent-service'
 import { permissionService } from './lib/agent-permission-service'
 import { askUserService } from './lib/agent-ask-user-service'
 import { exitPlanService } from './lib/agent-exit-plan-service'
@@ -2357,15 +2357,12 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.MOVE_SESSION_TO_WORKSPACE,
     async (_, input: MoveSessionToWorkspaceInput): Promise<AgentSessionMeta> => {
-      // 渲染进程的 running 状态可能比主进程 activeSessions 清理更早变为 false
-      // （STREAM_COMPLETE 在 finally 之前发送），短暂等待后重试一次
-      if (isAgentSessionActive(input.sessionId)) {
-        await new Promise((r) => setTimeout(r, 500))
-        if (isAgentSessionActive(input.sessionId)) {
-          throw new Error('会话正在运行中，请停止后再迁移')
-        }
+      if (isAgentSessionBusy(input.sessionId)) {
+        throw new Error('会话正在启动、运行或仍有排队消息，请停止或清空队列后再迁移')
       }
-      return moveSessionToWorkspace(input.sessionId, input.targetWorkspaceId)
+      const moved = moveSessionToWorkspace(input.sessionId, input.targetWorkspaceId)
+      feishuBridgeManager.syncWorkspaceForSession(moved.id, moved.workspaceId!)
+      return moved
     }
   )
 
@@ -2846,13 +2843,18 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.SEND_MESSAGE,
     async (event, input: AgentSendInput): Promise<void> => {
-      const session = getAgentSessionMeta(input.sessionId)
-      if (session) {
-        await feishuBridgeManager.startSessionMirrorRun(session).catch((error) => {
-          console.error('[飞书 Session 镜像] 流式卡片初始化失败:', error)
-        })
+      const releaseStart = reserveAgentSessionStart(input.sessionId)
+      try {
+        const session = getAgentSessionMeta(input.sessionId)
+        if (session) {
+          await feishuBridgeManager.startSessionMirrorRun(session).catch((error) => {
+            console.error('[飞书 Session 镜像] 流式卡片初始化失败:', error)
+          })
+        }
+        await runAgent(input, event.sender)
+      } finally {
+        releaseStart()
       }
-      await runAgent(input, event.sender)
     }
   )
 

@@ -91,6 +91,18 @@ describe('外部 Agent 运行激活', () => {
     expect(result.streamState.running).toBeTrue()
   })
 
+  test('Given 请求项目与会话项目不一致 When 激活外部运行 Then 优先使用会话项目', () => {
+    const result = buildExternalAgentRunActivation({
+      tabs: [],
+      sessions: [session],
+      sessionId: session.id,
+      workspaceId: 'stale-workspace',
+      startedAt: 375,
+    })
+
+    expect(result.workspaceId).toBe(session.workspaceId)
+  })
+
   test('Given the same run has already completed When a delayed start event arrives Then keep it terminal', () => {
     expect(shouldActivateExternalAgentRun({
       running: false,

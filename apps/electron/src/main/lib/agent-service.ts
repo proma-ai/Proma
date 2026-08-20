@@ -130,6 +130,26 @@ const agentQueueCoordinator = new AgentQueueCoordinator({
   },
 })
 
+/**
+ * Renderer run 在创建飞书镜像卡片时尚未进入 orchestrator.activeSessions。
+ * 在此期间保留启动槽位，避免会话迁移改变已接受请求的项目归属。
+ */
+const startingAgentSessions = new Set<string>()
+
+export function reserveAgentSessionStart(sessionId: string): () => void {
+  if (startingAgentSessions.has(sessionId) || orchestrator.isActive(sessionId)) {
+    throw new Error('会话正在启动或运行中，请等待当前请求结束后再发送。')
+  }
+  startingAgentSessions.add(sessionId)
+  return () => startingAgentSessions.delete(sessionId)
+}
+
+export function isAgentSessionBusy(sessionId: string): boolean {
+  return startingAgentSessions.has(sessionId)
+    || orchestrator.isActive(sessionId)
+    || agentQueueCoordinator.hasPending(sessionId)
+}
+
 function publishRunStopped(
   sessionId: string,
   stoppedByUser: boolean | undefined,
@@ -388,7 +408,7 @@ export async function runAgentHeadless(
             source: callbacks.source ?? 'bridge',
             sessionId: runInput.sessionId,
             title: session?.title,
-            workspaceId: runInput.workspaceId ?? session?.workspaceId,
+            workspaceId: session?.workspaceId ?? runInput.workspaceId,
             modelId: runInput.modelId,
             startedAt: persistedStartedAt,
             ...(session ? { session } : {}),
