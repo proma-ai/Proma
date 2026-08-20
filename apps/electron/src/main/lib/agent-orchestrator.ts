@@ -753,20 +753,8 @@ export class AgentOrchestrator {
       completeBeforeRun()
     }
 
-    // 会话元数据是运行项目的权威来源。渲染端的当前项目只是导航状态，不能
-    // 覆盖已存在会话的项目归属，否则会把 Agent cwd 指到另一个用户项目根。
-    const sessionWorkspaceId = sessionMeta?.workspaceId
-    if (sessionWorkspaceId && requestedWorkspaceId && requestedWorkspaceId !== sessionWorkspaceId) {
-      reportPreflightError({
-        code: 'unknown_error',
-        title: '会话项目不匹配',
-        message: '当前会话所属项目与请求项目不一致，已拒绝执行以避免访问错误的项目目录。',
-        actions: [],
-        canRetry: false,
-      })
-      return
-    }
-    const workspaceId = sessionWorkspaceId ?? requestedWorkspaceId
+    // 已有会话的项目归属由持久化元数据决定；渲染端当前项目只是导航状态。
+    const workspaceId = sessionMeta?.workspaceId ?? requestedWorkspaceId
 
     // 本地项目根由用户管理。根目录被删除、替换为文件或无法访问时，绝不能
     // 进入 SDK/Agent 初始化链路，以免后续文件工具通过 mkdir 间接重建该目录。
