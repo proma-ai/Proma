@@ -257,7 +257,7 @@ export function BrowserPanel({ sessionId, state, onMinimize, onClose, onPopOut, 
         <Tooltip><TooltipTrigger asChild><Button type="button" variant="ghost" size="icon" className="size-6 shrink-0" disabled={riskBlocked} onClick={() => void createTab()} aria-label="新建浏览器标签"><Plus className="size-3.5" /></Button></TooltipTrigger><TooltipContent>新建标签</TooltipContent></Tooltip>
       </div>
       {riskAcknowledged === true ? (
-        <BrowserSlot key={activeTabId} sessionId={sessionId} tabId={activeTabId} />
+        <BrowserSlot key={activeTabId} sessionId={sessionId} tabId={activeTabId} presentationTarget={inDetachedWindow ? 'detached' : 'main'} />
       ) : (
         <div className="flex flex-1 min-h-0 items-center justify-center bg-muted/15 px-8 text-center">
           <div className="max-w-sm space-y-2 text-muted-foreground">

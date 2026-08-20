@@ -2195,14 +2195,12 @@ export function registerIpcHandlers(): void {
     await assertBrowserSessionAccess(event.sender.id, sessionId)
     return browserController.popOut(sessionId)
   })
-  // 从独立窗口收起回主窗口：由独立窗口自身触发（关闭窗口）。
+  // 收起回主窗口：主窗口占位或独立窗口自身均可触发，关闭的是该 session 的独立窗口。
   ipcMain.handle(AGENT_IPC_CHANNELS.DOCK_BROWSER, async (event, sessionId: string): Promise<BrowserViewState | null> => {
     await assertBrowserSessionAccess(event.sender.id, sessionId)
     const { getDetachedBrowserWindow } = await import('./lib/detached-browser-window')
     const detachedWin = getDetachedBrowserWindow(sessionId)
-    if (detachedWin && !detachedWin.isDestroyed() && detachedWin.webContents.id === event.sender.id) {
-      detachedWin.close()
-    }
+    if (detachedWin && !detachedWin.isDestroyed()) detachedWin.close()
     return browserController.getState(sessionId)
   })
 

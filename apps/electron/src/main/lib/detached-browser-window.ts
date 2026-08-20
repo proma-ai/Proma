@@ -69,6 +69,13 @@ export function createDetachedBrowserWindow(sessionId: string): BrowserWindow {
   win.once('ready-to-show', () => {
     if (!win.isDestroyed()) win.show()
   })
+  // 防御性诊断：加载失败与 renderer 崩溃时留痕（正常路径无输出）。
+  win.webContents.on('did-fail-load', (_event, code, description, url) => {
+    console.error(`[受管浏览器独立窗口] 加载失败 (${code}) ${description}: ${url}`)
+  })
+  win.webContents.on('render-process-gone', (_event, details) => {
+    console.error(`[受管浏览器独立窗口] renderer 进程退出: ${details.reason}`)
+  })
 
   // 独立窗口只承载受管页面展示；renderer 层面的外链与新窗口一律不允许。
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))

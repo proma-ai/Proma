@@ -933,15 +933,18 @@ export class BrowserController {
       this.detachedSessionId = null
       this.dockDetachedBack(wasSession)
     })
+    // 必须先置 detached presentation 再挂载：resolveAttachOwner 依赖它决定目标窗口，
+    // 否则 view 会被 attach 回主窗口而不是独立窗口。
+    this.presentation = { sessionId, tabId: tab.tabId, revision: Date.now(), target: 'detached' }
     // 隐藏其余 view，把目标 tab 挂到独立窗口 contentView；bounds 先沿用主窗口旧值，
     // 独立窗口 renderer 首帧 layout IPC 到达后校正。
     const changedSessions = this.hideAllViewsExcept(sessionId, tab.tabId)
     const shown = this.attachTabView(browserSession, tab)
+    if (!shown) this.presentation = null
     if (tab.state.visible !== shown) {
       tab.state.visible = shown
       changedSessions.add(browserSession)
     }
-    this.presentation = shown ? { sessionId, tabId: tab.tabId, revision: Date.now(), target: 'detached' } : null
     this.emitChangedSessions(changedSessions)
     this.trace(browserSession, tab, 'tab', '浏览器已弹出到独立窗口', 'verified')
     return structuredClone(this.buildState(browserSession))

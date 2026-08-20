@@ -9,6 +9,7 @@
 import * as React from 'react'
 import { AlertCircle } from 'lucide-react'
 import type { BrowserViewState, BrowserStateChange } from '@proma/shared'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import { BrowserPanel } from './BrowserPanel'
 
 function getSessionId(): string {
@@ -69,14 +70,16 @@ export function ManagedBrowserWindowApp(): React.ReactElement {
   }
 
   return (
-    <div className="h-screen w-screen overflow-hidden bg-content-area">
-      <BrowserPanel
-        sessionId={sessionId}
-        state={state}
-        onMinimize={() => {}}
-        onClose={() => window.close()}
-        inDetachedWindow
-      />
-    </div>
+    <TooltipProvider delayDuration={200} disableHoverableContent>
+      <div className="h-screen w-screen overflow-hidden bg-content-area">
+        <BrowserPanel
+          sessionId={sessionId}
+          state={state}
+          onMinimize={() => {}}
+          onClose={() => window.close()}
+          inDetachedWindow
+        />
+      </div>
+    </TooltipProvider>
   )
 }

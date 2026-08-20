@@ -1,4 +1,5 @@
 import * as React from 'react'
+import type { BrowserPresentationTarget } from '@proma/shared'
 import { nextBrowserLayoutRevision } from './browser-layout-revision'
 
 // 每次 publish（包括卸载隐藏）分配全局单调 revision。旧 slot 的 IPC 即使晚到，
@@ -94,7 +95,7 @@ function observeAppOverlayLifecycle(onChange: () => void): () => void {
   }
 }
 
-export function BrowserSlot({ sessionId, tabId }: { sessionId: string; tabId: string }): React.ReactElement {
+export function BrowserSlot({ sessionId, tabId, presentationTarget = 'main' }: { sessionId: string; tabId: string; presentationTarget?: BrowserPresentationTarget }): React.ReactElement {
   const ref = React.useRef<HTMLDivElement>(null)
 
   React.useLayoutEffect(() => {
@@ -109,6 +110,7 @@ export function BrowserSlot({ sessionId, tabId }: { sessionId: string; tabId: st
         void setLayout({
           sessionId,
           tabId,
+          presentationTarget,
           revision: nextBrowserLayoutRevision(),
           visible: visible && rect.width > 4 && rect.height > 4,
           preserveSessionOnHide,
@@ -134,9 +136,9 @@ export function BrowserSlot({ sessionId, tabId }: { sessionId: string; tabId: st
       disconnectOverlayObserver()
       window.removeEventListener('resize', publishBounded)
       if (frame) cancelAnimationFrame(frame)
-      void setLayout({ sessionId, tabId, revision: nextBrowserLayoutRevision(), visible: false, preserveSessionOnHide: false, bounds: { x: 0, y: 0, width: 0, height: 0 } })
+      void setLayout({ sessionId, tabId, presentationTarget, revision: nextBrowserLayoutRevision(), visible: false, preserveSessionOnHide: false, bounds: { x: 0, y: 0, width: 0, height: 0 } })
     }
-  }, [sessionId, tabId])
+  }, [sessionId, tabId, presentationTarget])
 
   return <div ref={ref} className="flex-1 min-h-0 bg-muted/15 titlebar-no-drag" aria-label="受管浏览器页面" />
 }
