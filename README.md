@@ -218,9 +218,6 @@ Pi 运行时在主进程中作为 esbuild external 依赖运行。`apps/electron
 
 - [Shiki](https://shiki.style/)：代码高亮。
 - [Beautiful Mermaid](https://github.com/lukilabs/beautiful-mermaid) 与 [Mermaid](https://mermaid.js.org/)：Mermaid 图表渲染与官方兜底渲染。
-- [Cherry Studio](https://github.com/CherryHQ/cherry-studio)：多供应商桌面 AI 产品启发。
-- [Lobe Icons](https://github.com/lobehub/lobe-icons)：AI / LLM 品牌图标。
-- [Craft Agents OSS](https://github.com/lukilabs/craft-agents-oss)：Agent SDK 集成模式参考。
 
 ## 许可证
 
