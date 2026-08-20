@@ -1,6 +1,6 @@
 import { app, BrowserWindow, WebContentsView, session as electronSession, type DownloadItem, type Session, type WebContents } from 'electron'
 import path from 'node:path'
-import type { BrowserExecutionSource, BrowserOperationStatus, BrowserSessionClosed, BrowserTraceAction, BrowserTraceItem, BrowserViewLayout, BrowserViewState, BrowserTabState } from '@proma/shared'
+import type { BrowserExecutionSource, BrowserOperationStatus, BrowserPresentationTarget, BrowserSessionClosed, BrowserTraceAction, BrowserTraceItem, BrowserViewLayout, BrowserViewState, BrowserTabState } from '@proma/shared'
 import { AGENT_IPC_CHANNELS } from '@proma/shared'
 import { assertSafeBrowserDestination, assertSafeBrowserDownloadUrl, assertSafeBrowserUrl, isSupportedBrowserPopupUrl, isTransientBrowserPopupUrl, USER_NEW_TAB_URL } from './browser-policy'
 import { createAuthorizedPreviewUrl, isAuthorizedPreviewProtocol } from './browser-preview-service'
@@ -9,6 +9,7 @@ import { BrowserCdpTimeoutError, BrowserOperationAbortedError, BROWSER_OBSERVE_T
 import { parseBrowserPressAction } from './browser-key-policy'
 import { browserObservationNameLimit, prioritizeBrowserObservationCandidates, resolveBrowserObserveMaxElements } from './browser-observation-policy'
 import { buildPersistentBrowserPartition, resolveBrowserProfileKey } from './browser-profile-policy'
+import { shouldIgnoreDetachedLayout, shouldIgnoreMainLayout } from './browser-presentation-policy'
 import { hasAcknowledgedBrowserRiskDisclaimer } from './browser-risk-disclaimer'
 import { buildPromaBrowserUserAgent } from './browser-identity'
 import { assertBrowserScript, buildBrowserDomActionExpression, type BrowserDomActionInput } from './browser-script-policy'
@@ -109,11 +110,13 @@ type BrowserSessionConfiguration = {
 /**
  * 主窗口只有一个原生浏览器展示槽。布局 revision 由 renderer 全局递增，
  * 因此可跨 Agent session 拒绝晚到的 show IPC。
+ * 方案 A：展示位全局唯一——target 为 'detached' 时 view 挂独立窗口，主窗口槽整体禁用。
  */
 type BrowserPresentation = {
   sessionId: string
   tabId: string
   revision: number
+  target: BrowserPresentationTarget
 }
 
 export interface ConfigureBrowserSessionInput {
@@ -210,6 +213,11 @@ export class BrowserController {
   private presentation: BrowserPresentation | null = null
   /** 即使当前没有 Slot，也保留最新 show 代际以拒绝晚到的旧 show IPC。 */
   private latestPresentationRevision = 0
+  /** 方案 A：全局唯一独立窗口；非 null 时主窗口槽整体禁用。 */
+  private detachedWindow: BrowserWindow | null = null
+  private detachedSessionId: string | null = null
+  /** 独立窗口自己的 layout revision 上限，与主窗口域隔离（新 renderer 计数起点不同）。 */
+  private detachedRevision = 0
 
   configureSession(sessionId: string, input: ConfigureBrowserSessionInput): void {
     const previous = this.configurations.get(sessionId)
@@ -246,13 +254,23 @@ export class BrowserController {
     // 不再发布状态，避免把正常的生命周期竞态升级为主进程未捕获异常。
     if (this.sessions.get(browserSession.sessionId) !== browserSession) return
     if (browserSession.tabs.size === 0 || !browserSession.tabs.has(browserSession.activeTabId)) return
-    this.owner.webContents.send(AGENT_IPC_CHANNELS.BROWSER_STATE_CHANGED, this.buildState(browserSession))
+    const change = this.buildState(browserSession)
+    if (this.owner && !this.owner.isDestroyed()) {
+      this.owner.webContents.send(AGENT_IPC_CHANNELS.BROWSER_STATE_CHANGED, change)
+    }
+    // 独立窗口同样订阅状态（按 sessionId 过滤）；窗口加载期丢失的状态由 App 启动时主动拉取补齐。
+    if (this.detachedWindow && !this.detachedWindow.isDestroyed() && !this.detachedWindow.webContents.isLoading()) {
+      this.detachedWindow.webContents.send(AGENT_IPC_CHANNELS.BROWSER_STATE_CHANGED, change)
+    }
   }
 
   private emitClosed(sessionId: string): void {
     if (!this.owner || this.owner.isDestroyed()) return
     const change: BrowserSessionClosed = { sessionId, closed: true }
     this.owner.webContents.send(AGENT_IPC_CHANNELS.BROWSER_STATE_CHANGED, change)
+    if (this.detachedWindow && !this.detachedWindow.isDestroyed() && !this.detachedWindow.webContents.isLoading()) {
+      this.detachedWindow.webContents.send(AGENT_IPC_CHANNELS.BROWSER_STATE_CHANGED, change)
+    }
   }
 
   private buildState(browserSession: BrowserSessionRecord): BrowserViewState {
@@ -280,6 +298,7 @@ export class BrowserController {
       canGoForward: active.state.canGoForward,
       trace,
       activity: trace.at(-1) ?? null,
+      detached: this.detachedSessionId === browserSession.sessionId,
     }
   }
 
@@ -732,6 +751,17 @@ export class BrowserController {
   }
 
   async open(sessionId: string): Promise<BrowserViewState> {
+    // 方案 A：独立窗口在场期间主窗口不再打开新的浏览器展示位，只聚焦独立窗口。
+    if (this.detachedSessionId !== null) {
+      if (this.detachedWindow && !this.detachedWindow.isDestroyed()) {
+        if (this.detachedWindow.isMinimized()) this.detachedWindow.restore()
+        this.detachedWindow.show()
+        this.detachedWindow.focus()
+      }
+      const browserSession = this.getOrCreateSession(sessionId, [], false)
+      this.markUserBrowserContext(browserSession)
+      return structuredClone(this.buildState(browserSession))
+    }
     // 用户从界面手动打开浏览器时，初始标签不应伪装成 Agent 标签。
     const browserSession = this.getOrCreateSession(sessionId, [], false)
     this.markUserBrowserContext(browserSession)
@@ -788,14 +818,31 @@ export class BrowserController {
     } catch { /* owner 或 View 已销毁/已被 Electron 移除 */ }
   }
 
+  /**
+   * 决定 view 当前应挂载的窗口：presentation 指向 detached 时挂独立窗口，
+   * 否则挂主窗口；两个候选都不可用时保持 detach（等待下一次 layout）。
+   */
+  private resolveAttachOwner(browserSession: BrowserSessionRecord, tab: BrowserTabRecord): BrowserWindow | null {
+    const detached = this.detachedWindow && !this.detachedWindow.isDestroyed() ? this.detachedWindow : null
+    if (this.presentation?.sessionId === browserSession.sessionId
+      && this.presentation.tabId === tab.tabId
+      && this.presentation.target === 'detached'
+      && this.detachedSessionId === browserSession.sessionId) {
+      return detached
+    }
+    return this.owner && !this.owner.isDestroyed() ? this.owner : null
+  }
+
   /** 重新展示时只恢复原生挂载、bounds 和 visible，不重建 WebContents。 */
-  private attachTabView(tab: BrowserTabRecord): boolean {
-    const owner = this.owner
+  private attachTabView(browserSession: BrowserSessionRecord, tab: BrowserTabRecord): boolean {
+    const owner = this.resolveAttachOwner(browserSession, tab)
     if (!owner || owner.isDestroyed() || tab.view.webContents.isDestroyed()) {
       this.detachTabView(tab)
       return false
     }
     if (tab.attachedOwner !== owner) {
+      // Electron 保证一个 WebContentsView 同一时刻仅属于一个窗口 contentView；
+      // 先从旧 owner 移除再挂新 owner，不会出现双挂。
       this.detachTabView(tab)
       try {
         owner.contentView.addChildView(tab.view)
@@ -858,21 +905,93 @@ export class BrowserController {
     this.pruneBackgroundSessions()
   }
 
-  setLayout(layout: BrowserViewLayout): void {
+  /**
+   * 弹出到独立窗口（方案 A：全局唯一展示位）。
+   * 已存在独立窗口时只聚焦；否则创建窗口并把当前展示 tab 的 view 迁移过去。
+   * 只迁移挂载位置，不销毁 WebContents / refs / CDP 通道，Agent 操作不受影响。
+   */
+  async popOut(sessionId: string): Promise<BrowserViewState> {
+    const browserSession = this.getSession(sessionId)
+    this.assertRiskDisclaimerAcknowledged()
+    if (this.detachedSessionId !== null || (this.detachedWindow && !this.detachedWindow.isDestroyed())) {
+      if (this.detachedWindow && !this.detachedWindow.isDestroyed()) {
+        if (this.detachedWindow.isMinimized()) this.detachedWindow.restore()
+        this.detachedWindow.show()
+        this.detachedWindow.focus()
+      }
+      return structuredClone(this.buildState(browserSession))
+    }
+    const tab = this.getDisplayTab(browserSession)
+    const { createDetachedBrowserWindow } = await import('./detached-browser-window')
+    const win = createDetachedBrowserWindow(sessionId)
+    this.detachedWindow = win
+    this.detachedSessionId = sessionId
+    this.detachedRevision = 0
+    win.once('closed', () => {
+      const wasSession = this.detachedSessionId
+      this.detachedWindow = null
+      this.detachedSessionId = null
+      this.dockDetachedBack(wasSession)
+    })
+    // 隐藏其余 view，把目标 tab 挂到独立窗口 contentView；bounds 先沿用主窗口旧值，
+    // 独立窗口 renderer 首帧 layout IPC 到达后校正。
+    const changedSessions = this.hideAllViewsExcept(sessionId, tab.tabId)
+    const shown = this.attachTabView(browserSession, tab)
+    if (tab.state.visible !== shown) {
+      tab.state.visible = shown
+      changedSessions.add(browserSession)
+    }
+    this.presentation = shown ? { sessionId, tabId: tab.tabId, revision: Date.now(), target: 'detached' } : null
+    this.emitChangedSessions(changedSessions)
+    this.trace(browserSession, tab, 'tab', '浏览器已弹出到独立窗口', 'verified')
+    return structuredClone(this.buildState(browserSession))
+  }
+
+  /**
+   * 独立窗口已销毁：清理展示位状态并通知主窗口 renderer（detached=false）。
+   * 不在此处 attach——主窗口是否展示由 renderer 状态驱动，其 Slot 重新挂载后
+   * 自然发出新 layout，再由 setLayout 挂载。这是避免回挂竞态的关键。
+   */
+  private dockDetachedBack(sessionId: string | null): void {
+    if (!sessionId) return
+    const browserSession = this.sessions.get(sessionId)
+    if (!browserSession) return
+    const tab = browserSession.tabs.get(browserSession.activeTabId)
+    if (tab) tab.state.visible = false
+    this.presentation = null
+    this.emit(browserSession)
+  }
+
+  setLayout(layout: BrowserViewLayout, fromDetachedWindow = false): void {
     const browserSession = this.sessions.get(layout.sessionId)
     if (!browserSession) return
-    // React effect cleanup 和新 slot 的 IPC 可以交错到达。只采纳当前 Session 的最新布局。
-    if (!Number.isSafeInteger(layout.revision) || layout.revision <= browserSession.lastLayoutRevision) return
-    browserSession.lastLayoutRevision = layout.revision
+    if (!Number.isSafeInteger(layout.revision)) return
+
+    if (fromDetachedWindow) {
+      // 独立窗口域：只接受明确声明 detached 的布局，revision 与主窗口域彻底隔离
+      // （独立窗口是新 renderer，计数起点可能小于主窗口记录的 session 级 lastLayoutRevision）。
+      if (layout.presentationTarget !== 'detached') return
+      if (shouldIgnoreDetachedLayout(layout.revision, this.detachedRevision)) return
+      this.detachedRevision = layout.revision
+    } else {
+      // 主窗口域：不允许伪装成独立窗口布局；独立窗口在场期间主窗口槽整体禁用（方案 A）。
+      if (layout.presentationTarget === 'detached') return
+      if (shouldIgnoreMainLayout(this.detachedSessionId !== null)) return
+      // React effect cleanup 和新 slot 的 IPC 可以交错到达。主窗口域只采纳最新布局。
+      if (layout.revision <= browserSession.lastLayoutRevision) return
+      browserSession.lastLayoutRevision = layout.revision
+    }
+
     browserSession.preserveSessionOnHide = layout.preserveSessionOnHide === true
     const tab = browserSession.tabs.get(layout.tabId ?? browserSession.activeTabId)
     // BrowserSlot 卸载与 tab 关闭可交错，晚到布局不应让 renderer 报错。
     if (!tab) return
 
+    const ownerForVisibility = fromDetachedWindow ? this.detachedWindow : this.owner
     const bounds = layout.bounds
-    const visible = layout.visible && bounds.width > 4 && bounds.height > 4 && !!this.owner && !this.owner.isDestroyed() && this.owner.isVisible()
+    const visible = layout.visible && bounds.width > 4 && bounds.height > 4 && !!ownerForVisibility && !ownerForVisibility.isDestroyed() && ownerForVisibility.isVisible()
     if (!visible) {
-      this.latestPresentationRevision = Math.max(this.latestPresentationRevision, layout.revision)
+      if (!fromDetachedWindow) this.latestPresentationRevision = Math.max(this.latestPresentationRevision, layout.revision)
       const changedSessions = new Set<BrowserSessionRecord>()
       if (this.hideTabView(tab)) changedSessions.add(browserSession)
       if (this.presentation?.sessionId === browserSession.sessionId && this.presentation.tabId === tab.tabId) {
@@ -884,9 +1003,9 @@ export class BrowserController {
 
     // revision 在 renderer 全局单调递增。A 的旧 show 即使在 B 已显示后晚到，
     // 也不能重新把 A 的原生 view 放到前台。
-    if (layout.revision <= this.latestPresentationRevision) return
+    if (layout.revision <= this.latestPresentationRevision && !fromDetachedWindow) return
 
-    const zoomFactor = this.owner?.webContents.getZoomFactor() ?? 1
+    const zoomFactor = ownerForVisibility?.webContents.getZoomFactor() ?? 1
     const adjustedBounds = {
       x: Math.round(bounds.x * zoomFactor),
       y: Math.round(bounds.y * zoomFactor),
@@ -897,13 +1016,13 @@ export class BrowserController {
     if (!tab.lastBounds || Object.entries(adjustedBounds).some(([key, value]) => tab.lastBounds?.[key as keyof typeof adjustedBounds] !== value)) {
       tab.lastBounds = { ...adjustedBounds }
     }
-    const shown = this.attachTabView(tab)
+    const shown = this.attachTabView(browserSession, tab)
     if (tab.state.visible !== shown) {
       tab.state.visible = shown
       changedSessions.add(browserSession)
     }
-    this.presentation = shown ? { sessionId: browserSession.sessionId, tabId: tab.tabId, revision: layout.revision } : null
-    this.latestPresentationRevision = layout.revision
+    this.presentation = shown ? { sessionId: browserSession.sessionId, tabId: tab.tabId, revision: layout.revision, target: fromDetachedWindow ? 'detached' : 'main' } : null
+    if (!fromDetachedWindow) this.latestPresentationRevision = layout.revision
     this.emitChangedSessions(changedSessions)
     if (shown) this.pruneBackgroundSessions()
   }
@@ -927,14 +1046,16 @@ export class BrowserController {
       tab.lastBounds = { ...previous.lastBounds }
     }
     const changedSessions = this.hideAllViewsExcept(browserSession.sessionId, tab.tabId)
-    const shouldShow = !!tab.lastBounds && !!this.owner && !this.owner.isDestroyed() && this.owner.isVisible()
-    const visible = shouldShow && this.attachTabView(tab)
+    // detached 展示中用独立窗口判断可见性，主窗口槽判断只对主窗口展示生效。
+    const ownerForVisibility = this.presentation?.target === 'detached' ? this.detachedWindow : this.owner
+    const shouldShow = !!tab.lastBounds && !!ownerForVisibility && !ownerForVisibility.isDestroyed() && ownerForVisibility.isVisible()
+    const visible = shouldShow && this.attachTabView(browserSession, tab)
     if (!visible) this.detachTabView(tab)
     if (tab.state.visible !== visible) {
       tab.state.visible = visible
       changedSessions.add(browserSession)
     }
-    this.presentation = visible ? { ...this.presentation, tabId: tab.tabId } : null
+    this.presentation = visible ? { ...this.presentation, tabId: tab.tabId, target: this.presentation?.target ?? 'main' } : null
     this.emitChangedSessions(changedSessions)
   }
 
@@ -1036,6 +1157,10 @@ export class BrowserController {
     const tab = this.getDisplayTab(browserSession, tabId)
     this.disposeTab(browserSession, tab)
     if (browserSession.tabs.size === 0) {
+      // 独立窗口中关掉最后一个标签：一并销毁独立窗口，避免孤儿展示位。
+      if (this.detachedSessionId === sessionId && this.detachedWindow && !this.detachedWindow.isDestroyed()) {
+        this.detachedWindow.destroy()
+      }
       this.sessions.delete(sessionId)
       if (this.presentation?.sessionId === sessionId) this.presentation = null
       this.emitClosed(sessionId)
@@ -1436,6 +1561,10 @@ export class BrowserController {
   }
 
   async close(sessionId: string): Promise<void> {
+    // 被关闭的 session 正在独立窗口展示：先销毁窗口（closed 回调幂等清理，不重建 tab）。
+    if (this.detachedSessionId === sessionId && this.detachedWindow && !this.detachedWindow.isDestroyed()) {
+      this.detachedWindow.destroy()
+    }
     const browserSession = this.sessions.get(sessionId)
     if (!browserSession) {
       this.emitClosed(sessionId)
@@ -1454,6 +1583,11 @@ export class BrowserController {
   }
 
   dispose(): void {
+    // 先销毁独立窗口（destroy 不触发业务回挂重建），再按 session 关闭全部 WebContents。
+    if (this.detachedWindow && !this.detachedWindow.isDestroyed()) this.detachedWindow.destroy()
+    this.detachedWindow = null
+    this.detachedSessionId = null
+    this.detachedRevision = 0
     for (const sessionId of [...this.sessions.keys()]) void this.close(sessionId)
     this.configurations.clear()
     this.presentation = null
