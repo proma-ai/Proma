@@ -77,15 +77,16 @@ export function ManagedBrowserWindowApp(): React.ReactElement {
   return (
     <TooltipProvider delayDuration={200} disableHoverableContent>
       <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-content-area antialiased">
-        {/* 与主程序一致的自定义标题栏：系统按钮融入窗口内容区。 */}
+        {/* 与主程序一致的自定义标题栏：系统按钮融入窗口内容区。
+            紧凑高度（h-9）+ 与工具栏同底色，按钮嵌在标题栏内而不是飘在空白上。 */}
         <WindowControls />
         <header className={cn(
-          'relative flex h-11 shrink-0 items-center border-b border-border/70',
+          'relative flex h-9 shrink-0 items-center border-b border-border/40 bg-muted/20',
           isMac ? 'pl-[88px] pr-5' : isWindows ? `pl-4 ${WINDOW_CONTROLS_PADDING_RIGHT}` : 'px-4',
         )}>
           {/* 拖拽层：Windows 上让出右上角按钮区域，避免 drag hitmask 与 WindowControls 重叠。 */}
           <div aria-hidden="true" className={cn('titlebar-drag-region pointer-events-none absolute inset-y-0 left-0', isWindows ? WINDOW_CONTROLS_INSET_RIGHT : 'right-0')} />
-          <Globe2 className="mr-2 size-4 shrink-0 text-primary" />
+          <Globe2 className="mr-2 size-3.5 shrink-0 text-primary" />
           <h1 className="truncate text-xs font-medium text-foreground">
             受管浏览器{state?.title ? ` – ${state.title}` : ''}
           </h1>
