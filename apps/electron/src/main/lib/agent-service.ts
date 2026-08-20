@@ -45,6 +45,7 @@ import { getHeadlessAgentRunTarget } from './agent-headless-run-target'
 import { sendAgentStreamComplete } from './agent-completion-payload'
 import { AgentStreamForwarder } from './agent-stream-forwarder'
 import { AgentQueueCoordinator } from './agent-queue-coordinator'
+import { invalidateBillingCache } from './cloud-billing-service'
 
 // ===== 实例创建 =====
 
@@ -214,6 +215,7 @@ export function setVisibleAgentSession(webContents: WebContents, sessionId: stri
 /** 仅主进程内部使用的单次运行扩展，绝不经 IPC 序列化。 */
 /** Agent 官方渠道调用结束后通知所有窗口刷新余额。 */
 function broadcastBillingChanged(): void {
+  invalidateBillingCache()
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.webContents.isDestroyed()) win.webContents.send(CLOUD_IPC_CHANNELS.BILLING_CHANGED)
   }

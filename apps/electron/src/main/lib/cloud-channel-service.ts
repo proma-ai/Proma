@@ -20,6 +20,7 @@ import { CLOUD_IPC_CHANNELS } from '@proma/shared'
 import { getApiClient } from './cloud-auth-service'
 import { syncOfficialChannel, removeOfficialChannel, syncOfficialAgentModels } from './channel-manager'
 import { getRawChatToolsConfig, updateToolCredentials, updateToolState } from './chat-tool-config'
+import { AsyncTtlCache } from './async-ttl-cache'
 
 // ===== API 实例（延迟初始化） =====
 
@@ -46,12 +47,7 @@ function getApiKeysApi(): ApiKeysApi {
 /** 缓存有效期：1 小时（与 proma-frontend ApiKeyService 一致） */
 const SYSTEM_KEY_CACHE_DURATION = 60 * 60 * 1000
 
-interface SystemKeyCache {
-  key: string
-  fetchedAt: number
-}
-
-let cachedSystemKey: SystemKeyCache | null = null
+const systemKeyCache = new AsyncTtlCache<string>(SYSTEM_KEY_CACHE_DURATION)
 
 /**
  * 获取 system API key（pk_xxx 格式）
@@ -60,19 +56,16 @@ let cachedSystemKey: SystemKeyCache | null = null
  * 结果缓存 1 小时，API client 内置 401 token 刷新机制。
  */
 export async function getSystemApiKey(): Promise<string> {
-  if (cachedSystemKey && Date.now() - cachedSystemKey.fetchedAt < SYSTEM_KEY_CACHE_DURATION) {
-    return cachedSystemKey.key
-  }
-
-  const result = await getApiKeysApi().getSystemApiKey()
-  cachedSystemKey = { key: result.key, fetchedAt: Date.now() }
-  console.log('[Cloud Channel] System API Key 已获取并缓存')
-  return result.key
+  return systemKeyCache.getOrLoad(async () => {
+    const result = await getApiKeysApi().getSystemApiKey()
+    console.log('[Cloud Channel] System API Key 已获取并缓存')
+    return result.key
+  })
 }
 
 /** 清除 system API key 缓存（token 刷新后调用，强制重新获取） */
 export function clearSystemKeyCache(): void {
-  cachedSystemKey = null
+  systemKeyCache.invalidate()
 }
 
 // ===== 模型转换 =====
@@ -176,57 +169,43 @@ export async function fetchAndSyncAgentModels(): Promise<void> {
 
 // ===== 公开 API =====
 
-/**
- * 初始化官方渠道
- *
- * 从 Cloud 后端拉取模型列表，创建或更新 proma-official 渠道。
- * 认证失败时静默跳过。
- */
-export async function initOfficialChannel(): Promise<void> {
-  try {
+// 启动、登录刷新和 20 分钟轮询可能在同一事件循环轮次重叠。它们必须
+// 共用一次 models + agent_models 拉取，避免每个桌面端启动时成对请求。
+let officialChannelSync: Promise<boolean> | null = null
+
+function syncOfficialChannelOnce(): Promise<boolean> {
+  if (officialChannelSync) return officialChannelSync
+  officialChannelSync = (async () => {
     const groups = await getModelsApi().getModels()
     const models = flattenModels(groups)
-
     if (models.length > 0) {
       syncOfficialChannel(models)
       console.log(`[Cloud Channel] 官方渠道已同步，共 ${models.length} 个模型`)
     }
-
-    // 拉取 Agent 专用模型
     await fetchAndSyncAgentModels()
-
-    // 同步云端工具默认配置
     syncCloudToolDefaults()
+    return models.length > 0
+  })().finally(() => {
+    officialChannelSync = null
+  })
+  return officialChannelSync
+}
 
-    // 所有同步完成后广播，保证渲染进程刷新时读到的是最新数据
-    if (models.length > 0) {
-      broadcastOfficialChannelUpdated()
-    }
+/** 初始化官方渠道；认证失败时静默跳过。 */
+export async function initOfficialChannel(): Promise<void> {
+  try {
+    if (await syncOfficialChannelOnce()) broadcastOfficialChannelUpdated()
   } catch (error) {
-    // 未认证或网络错误时静默跳过
     const message = isApiError(error) ? error.message : (error instanceof Error ? error.message : '未知错误')
     console.warn('[Cloud Channel] 初始化官方渠道失败:', message)
   }
 }
 
-/**
- * 刷新官方渠道模型列表
- *
- * 由 IPC handler 或登录后触发。
- */
+/** 刷新官方渠道模型列表；与其他同步调用共享同一上游请求。 */
 export async function refreshOfficialModels(): Promise<BillingIpcResponse<void>> {
   try {
-    const groups = await getModelsApi().getModels()
-    const models = flattenModels(groups)
-
-    syncOfficialChannel(models)
-
-    // 拉取 Agent 专用模型
-    await fetchAndSyncAgentModels()
-
-    // 所有同步完成后再广播，确保渲染进程刷新时能读到最新 agentModels
+    await syncOfficialChannelOnce()
     broadcastOfficialChannelUpdated()
-
     return { success: true }
   } catch (error) {
     const message = isApiError(error) ? error.message : (error instanceof Error ? error.message : '未知错误')

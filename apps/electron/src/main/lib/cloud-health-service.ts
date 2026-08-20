@@ -19,6 +19,7 @@ import type {
 } from '@proma/shared'
 import { CLOUD_IPC_CHANNELS } from '@proma/shared'
 import { getAuthToken } from './cloud-auth-service'
+import { AsyncTtlCache } from './async-ttl-cache'
 
 // ===== 缓存配置 =====
 
@@ -31,12 +32,7 @@ const POLL_INTERVAL = 3 * 60 * 1000
 /** 轮询定时器 */
 let pollTimer: NodeJS.Timeout | null = null
 
-interface HealthCache {
-  data: ModelHealthSummary[]
-  fetchedAt: number
-}
-
-let healthCache: HealthCache | null = null
+const healthCache = new AsyncTtlCache<ModelHealthSummary[]>(CACHE_TTL)
 
 // ===== 数据转换 =====
 
@@ -134,38 +130,26 @@ function transformToSummaries(response: ModelHealthResponse): ModelHealthSummary
  * 优先使用缓存，过期后重新请求
  */
 export async function getModelHealth(): Promise<ModelHealthIpcResponse> {
-  // 检查缓存
-  if (healthCache && Date.now() - healthCache.fetchedAt < CACHE_TTL) {
-    return { success: true, data: healthCache.data }
-  }
-
   try {
-    const config = getCloudApiConfig()
-    const rootUrl = config.baseUrl.replace(/\/api\/v\d+$/, '')
-
-    // 获取认证 token
-    const token = getAuthToken()
-
-    const response = await fetch(`${rootUrl}/api/v1/model-health`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
+    const data = await healthCache.getOrLoad(async () => {
+      const config = getCloudApiConfig()
+      const rootUrl = config.baseUrl.replace(/\/api\/v\d+$/, '')
+      const token = getAuthToken()
+      const response = await fetch(`${rootUrl}/api/v1/model-health`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      })
+      if (!response.ok) {
+        const text = await response.text().catch(() => '')
+        throw new Error(`请求失败 (${response.status}): ${text.slice(0, 100)}`)
+      }
+      const json = (await response.json()) as { data: ModelHealthResponse }
+      return transformToSummaries(json.data)
     })
-
-    if (!response.ok) {
-      const text = await response.text().catch(() => '')
-      return { success: false, error: `请求失败 (${response.status}): ${text.slice(0, 100)}` }
-    }
-
-    const json = (await response.json()) as { data: ModelHealthResponse }
-    const summaries = transformToSummaries(json.data)
-
-    // 更新缓存
-    healthCache = { data: summaries, fetchedAt: Date.now() }
-
-    return { success: true, data: summaries }
+    return { success: true, data }
   } catch (error) {
     const message = error instanceof Error ? error.message : '未知错误'
     return { success: false, error: message }
@@ -176,7 +160,7 @@ export async function getModelHealth(): Promise<ModelHealthIpcResponse> {
  * 清除健康数据缓存（登出时调用）
  */
 export function clearHealthCache(): void {
-  healthCache = null
+  healthCache.invalidate()
 }
 
 /**
@@ -195,7 +179,7 @@ export function broadcastHealthUpdated(): void {
  */
 async function pollHealthData(): Promise<void> {
   // 清除缓存以强制重新获取
-  healthCache = null
+  healthCache.invalidate()
 
   const result = await getModelHealth()
   if (result.success) {

@@ -36,6 +36,7 @@ import { getEnabledTools } from './chat-tool-registry'
 import { executeToolCalls } from './chat-tool-executor'
 import { DEFAULT_REFERENCE_ROUNDS } from './chat-tools/gpt-image-2-tool'
 import { createFallbackTitle, sanitizeGeneratedTitle, SHORT_MESSAGE_THRESHOLD, TITLE_PROMPT } from './title-generation'
+import { invalidateBillingCache } from './cloud-billing-service'
 
 /** 活跃的 AbortController 映射（conversationId → controller） */
 const activeControllers = new Map<string, AbortController>()
@@ -128,6 +129,7 @@ function broadcastQuotaExceeded(): void {
 
 /** 向所有窗口广播余额变动事件（对话扣费后） */
 function broadcastBillingChanged(): void {
+  invalidateBillingCache()
   BrowserWindow.getAllWindows().forEach((win) => {
     win.webContents.send(CLOUD_IPC_CHANNELS.BILLING_CHANGED)
   })

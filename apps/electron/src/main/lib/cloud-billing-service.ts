@@ -23,11 +23,15 @@ import type {
 } from '@proma/shared'
 import { CLOUD_IPC_CHANNELS } from '@proma/shared'
 import { getApiClient, setQuotaExceededHandler } from './cloud-auth-service'
+import { AsyncTtlCache } from './async-ttl-cache'
 
 // ===== API 实例（延迟初始化） =====
 
 let billingApi: BillingApi | null = null
 let subscriptionApi: SubscriptionApi | null = null
+
+// 聚合同一轮 focus/多窗口事件的重复读取；扣费完成时会显式失效。
+const billingCache = new AsyncTtlCache<BillingInfo>(5_000)
 
 function getBillingApi(): BillingApi {
   if (!billingApi) {
@@ -73,11 +77,16 @@ function wrapError(error: unknown): string {
 /** 获取账单信息 */
 export async function getBilling(): Promise<BillingIpcResponse<BillingInfo>> {
   try {
-    const data = await getBillingApi().getBilling()
+    const data = await billingCache.getOrLoad(() => getBillingApi().getBilling())
     return { success: true, data }
   } catch (error) {
     return { success: false, error: wrapError(error) }
   }
+}
+
+/** 扣费完成后失效；并发窗口会合并为一次新的余额读取。 */
+export function invalidateBillingCache(): void {
+  billingCache.invalidate()
 }
 
 /** 检查余额 */
