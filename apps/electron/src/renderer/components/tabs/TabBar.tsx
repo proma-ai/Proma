@@ -274,6 +274,10 @@ function TabBarInner({
     const state = await open(activeAgentSession.id)
     setBrowserStateMap((previous) => { const next = new Map(previous); next.set(activeAgentSession.id, state); return next })
     setBrowserMinimizedMap((previous) => { const next = new Map(previous); next.delete(activeAgentSession.id); return next })
+    if (state?.detached) {
+      // 独立窗口在场：只聚焦独立窗口，主窗口不再展开面板。
+      return
+    }
     setBrowserOpenMap((previous) => { const next = new Map(previous); next.set(activeAgentSession.id, true); return next })
   }, [activeAgentSession, setBrowserMinimizedMap, setBrowserOpenMap, setBrowserStateMap])
 

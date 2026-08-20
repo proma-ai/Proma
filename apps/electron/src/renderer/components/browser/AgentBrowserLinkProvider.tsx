@@ -49,6 +49,15 @@ export function AgentBrowserLinkProvider({
       next.set(state.sessionId, state)
       return next
     })
+    if (state.detached) {
+      // 独立窗口在场：主窗口面板自动隐藏（方案 A，避免占位视图占用右侧区域）。
+      setBrowserOpenMap((previous) => {
+        const next = new Map(previous)
+        next.set(state.sessionId, false)
+        return next
+      })
+      return
+    }
     setBrowserOpenMap((previous) => {
       const next = new Map(previous)
       next.set(state.sessionId, true)
