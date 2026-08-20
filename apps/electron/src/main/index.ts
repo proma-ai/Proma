@@ -107,7 +107,12 @@ import { startPlanningNativeSyncCoordinator, stopPlanningNativeSyncCoordinator }
 import { feishuBridgeManager } from './lib/feishu-bridge-manager'
 import { getFeishuMultiBotConfig } from './lib/feishu-config'
 import { stopFeishuSyncSleepBlocker, syncFeishuSyncSleepBlocker } from './lib/feishu-sleep-blocker'
-import { getPersistableMainWindowState, hideMacMainWindowAfterClose } from './lib/main-window-lifecycle'
+import {
+  getPersistableMainWindowState,
+  hideMacMainWindowAfterClose,
+  normalizeWindowBoundsToVisibleArea,
+  type WindowBounds,
+} from './lib/main-window-lifecycle'
 import { dingtalkBridgeManager } from './lib/dingtalk-bridge-manager'
 import { getDingTalkMultiBotConfig } from './lib/dingtalk-config'
 import { wechatBridge } from './lib/wechat-bridge'
@@ -246,6 +251,38 @@ async function recoverEnabledDingTalkBots(): Promise<void> {
 let mainWindow: BrowserWindow | null = null
 let startupSplashWindow: BrowserWindow | null = null
 
+const DEFAULT_MAIN_WINDOW_WIDTH = 1400
+const DEFAULT_MAIN_WINDOW_HEIGHT = 900
+const MIN_MAIN_WINDOW_WIDTH = 800
+const MIN_MAIN_WINDOW_HEIGHT = 600
+
+function getVisibleMainWindowBounds(bounds: WindowBounds): WindowBounds {
+  return normalizeWindowBoundsToVisibleArea(
+    bounds,
+    screen.getAllDisplays(),
+    screen.getPrimaryDisplay(),
+    {
+      minWidth: MIN_MAIN_WINDOW_WIDTH,
+      minHeight: MIN_MAIN_WINDOW_HEIGHT,
+      fallbackWidth: DEFAULT_MAIN_WINDOW_WIDTH,
+      fallbackHeight: DEFAULT_MAIN_WINDOW_HEIGHT,
+    },
+  )
+}
+
+function getInitialMainWindowBounds(savedState: ReturnType<typeof getSettings>['mainWindowState']): Partial<WindowBounds> {
+  if (!savedState) {
+    return { width: DEFAULT_MAIN_WINDOW_WIDTH, height: DEFAULT_MAIN_WINDOW_HEIGHT }
+  }
+
+  return getVisibleMainWindowBounds({
+    width: savedState.width,
+    height: savedState.height,
+    x: savedState.x,
+    y: savedState.y,
+  })
+}
+
 /**
  * 原生启动页不依赖 Renderer bundle 或运行时检测，避免冷启动期间出现空白窗口。
  * dev 由 build:resources 复制到 dist/resources；打包版由 electron-builder extraResources 提供。
@@ -266,9 +303,7 @@ function createStartupSplashWindow(): void {
   if (startupSplashWindow && !startupSplashWindow.isDestroyed()) return
 
   const savedState = getSettings().mainWindowState
-  const initialBounds = savedState
-    ? { width: savedState.width, height: savedState.height, x: savedState.x, y: savedState.y }
-    : { width: 1400, height: 900 }
+  const initialBounds = getInitialMainWindowBounds(savedState)
 
   startupSplashWindow = new BrowserWindow({
     ...initialBounds,
@@ -328,26 +363,16 @@ function installWindowsZoomInFallback(win: BrowserWindow): void {
  */
 function ensureWindowOnScreen(win: BrowserWindow): void {
   const bounds = win.getBounds()
-  const displays = screen.getAllDisplays()
-  // 检查窗口中心点是否在任一显示器范围内
-  const centerX = bounds.x + bounds.width / 2
-  const centerY = bounds.y + bounds.height / 2
-  const isOnScreen = displays.some((display) => {
-    const { x, y, width, height } = display.workArea
-    return centerX >= x && centerX <= x + width && centerY >= y && centerY <= y + height
-  })
-  if (!isOnScreen) {
-    // 窗口不在任何屏幕内，移动到主显示器居中位置
-    const primary = screen.getPrimaryDisplay()
-    const { x, y, width, height } = primary.workArea
-    win.setBounds({
-      x: x + Math.round((width - bounds.width) / 2),
-      y: y + Math.round((height - bounds.height) / 2),
-      width: bounds.width,
-      height: bounds.height,
-    })
-    console.log('[窗口] 窗口已重新定位到主显示器')
-  }
+  const nextBounds = getVisibleMainWindowBounds(bounds)
+  if (
+    nextBounds.x === bounds.x
+    && nextBounds.y === bounds.y
+    && nextBounds.width === bounds.width
+    && nextBounds.height === bounds.height
+  ) return
+
+  win.setBounds(nextBounds)
+  console.log('[窗口] 窗口已重新定位到可见显示区域')
 }
 
 /** 显示并聚焦主窗口，确保窗口在可见区域；若窗口已销毁则重新创建 */
@@ -425,9 +450,7 @@ function createWindow(): void {
       : {}
 
   const savedState = getSettings().mainWindowState
-  const initialBounds = savedState
-    ? { width: savedState.width, height: savedState.height, x: savedState.x, y: savedState.y }
-    : { width: 1400, height: 900 }
+  const initialBounds = getInitialMainWindowBounds(savedState)
 
   mainWindow = new BrowserWindow({
     ...initialBounds,
@@ -447,6 +470,7 @@ function createWindow(): void {
     ...titleBarOptions,
   })
   setStoredMainWindow(mainWindow)
+  ensureWindowOnScreen(mainWindow)
   installWindowsZoomInFallback(mainWindow)
   browserController.setOwnerWindow(mainWindow)
 
