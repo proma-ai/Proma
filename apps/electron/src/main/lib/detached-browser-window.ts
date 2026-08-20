@@ -13,10 +13,15 @@ import type { Rectangle } from 'electron'
 
 const detachedWindows = new Map<string, BrowserWindow>()
 
-/** 与主程序一致的标题栏形态：Windows 隐藏系统标题栏（renderer 自定义），macOS hiddenInset。 */
-function titleBarOptions(): Pick<Electron.BrowserWindowConstructorOptions, 'titleBarStyle' | 'trafficLightPosition'> {
+/** 与主程序一致的标题栏形态：Windows 隐藏系统标题栏（renderer 自定义），macOS hiddenInset + 毛玻璃。 */
+function titleBarOptions(): Pick<Electron.BrowserWindowConstructorOptions, 'titleBarStyle' | 'trafficLightPosition' | 'vibrancy' | 'visualEffectState'> {
   if (process.platform === 'darwin') {
-    return { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 18, y: 18 } }
+    return {
+      titleBarStyle: 'hiddenInset' as const,
+      trafficLightPosition: { x: 18, y: 18 },
+      vibrancy: 'under-window' as const,
+      visualEffectState: 'followWindow' as const,
+    }
   }
   if (process.platform === 'win32') {
     return { titleBarStyle: 'hidden' as const }
