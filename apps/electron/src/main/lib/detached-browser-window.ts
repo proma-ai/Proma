@@ -43,6 +43,8 @@ export function createDetachedBrowserWindow(sessionId: string): BrowserWindow {
     minWidth: 640,
     minHeight: 480,
     title: '受管浏览器',
+    // 隐藏原生菜单栏（文件/编辑/视图…），与主窗口外观保持一致；Alt 可临时调出。
+    autoHideMenuBar: true,
     show: false,
     backgroundColor: '#101014',
     webPreferences: {
