@@ -139,6 +139,18 @@ export function shouldForcePiAdaptiveThinking(
   return (catalogModel.compat as { forceAdaptiveThinking?: unknown } | undefined)?.forceAdaptiveThinking === true
 }
 
+/** Proma 官方渠道只为 Claude 家族启用 Anthropic adaptive thinking。 */
+export function shouldForcePromaOfficialClaudeAdaptiveThinking(
+  modelId: string | undefined,
+  api: Api,
+  catalogModel: { api: Api, compat?: unknown } | undefined,
+): boolean {
+  const normalized = stripLegacyAgentSdkContextSuffix(modelId)?.trim().toLowerCase()
+  const leafModelId = normalized?.split('/').pop()
+  return leafModelId?.startsWith('claude-') === true
+    && shouldForcePiAdaptiveThinking(api, catalogModel)
+}
+
 const CODEX_56_THINKING_LEVEL_MAP = compilePiReasoningCapabilities('openai-responses', 'gpt-5.6')?.thinkingLevelMap
 
 type CodexRuntimeCredential = CodexOAuthCredentials & {
@@ -612,7 +624,11 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
   const isCatalogMissingGlm53 = !catalogModel && glmModelId === 'glm-5.3'
   const catalogContextWindow = catalogModel?.contextWindow ?? DEFAULT_CONTEXT_WINDOW
   const inferredContextWindow = inferContextWindow(input.model) ?? DEFAULT_CONTEXT_WINDOW
-  const shouldForceAdaptiveThinking = shouldForcePiAdaptiveThinking(api, catalogModel)
+  // 商业版官方渠道的需求仅限 Claude；GPT、Kimi 等官方模型即使共享 Anthropic
+  // transport 或 catalog 标记，也不得继承 Claude 的 adaptive-thinking 请求形态。
+  const shouldForceAdaptiveThinking = input.provider === 'proma'
+    ? shouldForcePromaOfficialClaudeAdaptiveThinking(input.model, api, catalogModel)
+    : shouldForcePiAdaptiveThinking(api, catalogModel)
   return {
     reasoning: catalogModel?.reasoning ?? true,
     thinkingLevelMap: providerSpecificCapabilities?.thinkingLevelMap
