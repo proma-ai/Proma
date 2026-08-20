@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import type { BrowserViewState } from '@proma/shared'
-import { ArrowLeft, ArrowRight, ExternalLink, Globe2, LoaderCircle, Minus, Plus, RefreshCw, ShieldAlert, Square, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ExternalLink, Globe2, LoaderCircle, Minus, PanelTopClose, PictureInPicture2, Plus, RefreshCw, ShieldAlert, Square, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -26,9 +26,13 @@ interface BrowserPanelProps {
   state: BrowserViewState | null
   onMinimize: () => void
   onClose: () => void
+  /** 主窗口槽内触发「弹出到独立窗口」。 */
+  onPopOut?: () => void
+  /** 本面板正渲染在受管浏览器独立窗口内（隐藏弹出/最小化，关闭=收起回主窗口）。 */
+  inDetachedWindow?: boolean
 }
 
-export function BrowserPanel({ sessionId, state, onMinimize, onClose }: BrowserPanelProps): React.ReactElement {
+export function BrowserPanel({ sessionId, state, onMinimize, onClose, onPopOut, inDetachedWindow = false }: BrowserPanelProps): React.ReactElement {
   const [url, setUrl] = React.useState(state?.url ?? '')
   const [riskAcknowledged, setRiskAcknowledged] = React.useState<boolean | null>(null)
   const [savingRiskAcknowledgement, setSavingRiskAcknowledgement] = React.useState(false)
@@ -126,6 +130,25 @@ export function BrowserPanel({ sessionId, state, onMinimize, onClose }: BrowserP
     }
   }, [sessionId, state?.executionSource])
 
+  const dockBack = React.useCallback(async () => {
+    const dock = (window.electronAPI as Partial<typeof window.electronAPI>).dockAgentBrowser
+    if (typeof dock !== 'function') return
+    try {
+      const next = await dock(sessionId)
+      if (!next) onClose()
+    } catch (error) {
+      console.error('[受管浏览器] 收起回主窗口失败:', error)
+    }
+  }, [onClose, sessionId])
+
+  const focusDetachedWindow = React.useCallback(async () => {
+    try {
+      await window.electronAPI.openAgentBrowser(sessionId)
+    } catch (error) {
+      console.error('[受管浏览器] 聚焦独立窗口失败:', error)
+    }
+  }, [sessionId])
+
   const activeTabId = state?.activeTabId ?? ''
   const tabs = state?.tabs ?? []
   const riskBlocked = riskAcknowledged !== true
@@ -154,6 +177,30 @@ export function BrowserPanel({ sessionId, state, onMinimize, onClose }: BrowserP
 
   const title = state?.title || '受管浏览器'
   const isWindows = React.useMemo(() => detectIsWindows(), [])
+  const detached = state?.detached === true && !inDetachedWindow
+  if (detached) {
+    // 方案 A：独立窗口在场期间主窗口槽整体禁用，只显示占位与两个出口。
+    return (
+      <div className="flex flex-col h-full min-w-0 overflow-hidden bg-content-area titlebar-no-drag">
+        <div className="flex flex-1 min-h-0 items-center justify-center bg-muted/15 px-8 text-center">
+          <div className="max-w-sm space-y-3 text-muted-foreground">
+            <PictureInPicture2 className="mx-auto size-8 text-primary/80" />
+            <p className="text-sm font-medium text-foreground">浏览器已弹出到独立窗口</p>
+            <p className="text-xs leading-5">主窗口不再展示第二个浏览器画面；页面操作在独立窗口中进行，Agent 操作不受影响。</p>
+            <div className="flex items-center justify-center gap-2 pt-1">
+              <Button type="button" variant="outline" size="sm" onClick={() => void focusDetachedWindow()}>
+                在独立窗口查看
+              </Button>
+              <Button type="button" size="sm" onClick={() => void dockBack()}>
+                <PanelTopClose className="mr-1.5 size-3.5" />
+                收起回主窗口
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
   return (
     <div className="flex flex-col h-full min-w-0 overflow-hidden bg-content-area titlebar-no-drag">
       <div className={cn('flex items-center h-[42px] gap-1 px-2 border-b border-border/40 bg-muted/20', getWindowControlsPaddingClass(isWindows))}>
@@ -164,13 +211,22 @@ export function BrowserPanel({ sessionId, state, onMinimize, onClose }: BrowserP
         <form className="flex-1 min-w-0" onSubmit={(event) => { event.preventDefault(); if (!riskBlocked) void navigate() }}>
           <Input disabled={riskBlocked} value={url} onChange={(event) => setUrl(event.target.value)} placeholder="输入网址或搜索内容" className="h-7 text-xs bg-background/70" aria-label="浏览器地址" />
         </form>
+        {!inDetachedWindow && (
+          <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-7" disabled={riskBlocked || !state} onClick={() => void onPopOut?.()} aria-label="弹出到独立窗口"><PictureInPicture2 className="size-3.5" /></Button></TooltipTrigger><TooltipContent>弹出到独立窗口</TooltipContent></Tooltip>
+        )}
         <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-7" disabled={!url.startsWith('http://') && !url.startsWith('https://')} onClick={openInDefaultBrowser} aria-label="在系统默认浏览器中打开当前网页"><ExternalLink className="size-3.5" /></Button></TooltipTrigger><TooltipContent>在系统默认浏览器中打开</TooltipContent></Tooltip>
         {state?.loading && <LoaderCircle className="size-3.5 text-muted-foreground animate-spin" />}
         {isBackgroundRun && (
           <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-7 text-amber-600 hover:text-amber-700" onClick={() => void stopBackgroundRun()} aria-label="停止当前后台 Agent"><Square className="size-3.5 fill-current" /></Button></TooltipTrigger><TooltipContent>停止当前{state?.executionSource === 'automation' ? '自动任务' : '委派'}运行</TooltipContent></Tooltip>
         )}
-        <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-7" onClick={() => void minimize()} aria-label="最小化受管浏览器"><Minus className="size-3.5" /></Button></TooltipTrigger><TooltipContent>最小化浏览器</TooltipContent></Tooltip>
-        <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-7" onClick={() => void close()}><X className="size-3.5" /></Button></TooltipTrigger><TooltipContent>关闭并销毁受管浏览器</TooltipContent></Tooltip>
+        {!inDetachedWindow && (
+          <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-7" onClick={() => void minimize()} aria-label="最小化受管浏览器"><Minus className="size-3.5" /></Button></TooltipTrigger><TooltipContent>最小化浏览器</TooltipContent></Tooltip>
+        )}
+        {inDetachedWindow ? (
+          <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-7" onClick={() => void dockBack()} aria-label="收起回主窗口"><PanelTopClose className="size-3.5" /></Button></TooltipTrigger><TooltipContent>收起回主窗口</TooltipContent></Tooltip>
+        ) : (
+          <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-7" onClick={() => void close()}><X className="size-3.5" /></Button></TooltipTrigger><TooltipContent>关闭并销毁受管浏览器</TooltipContent></Tooltip>
+        )}
       </div>
       <div className="flex items-center h-8 gap-1 px-2 border-b border-border/30 bg-muted/10 overflow-x-auto scrollbar-none">
         {tabs.map((tab) => (

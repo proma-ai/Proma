@@ -92,10 +92,11 @@ import 'katex/dist/katex.min.css'
 const isQuickTaskWindow = new URLSearchParams(window.location.search).get('window') === 'quick-task'
 const isVoiceDictationIndicatorWindow = new URLSearchParams(window.location.search).get('window') === 'voice-dictation-indicator'
 const isDetachedPreviewWindow = new URLSearchParams(window.location.search).get('window') === 'detached-preview'
+const isManagedBrowserWindow = new URLSearchParams(window.location.search).get('window') === 'managed-browser'
 const isPlanningWindow = new URLSearchParams(window.location.search).get('window') === 'planning'
 const isWorkspaceMemoryWindow = new URLSearchParams(window.location.search).get('window') === 'workspace-memory'
 const isAgentStatusHoverWindow = new URLSearchParams(window.location.search).get('window') === 'agent-status-hover'
-const isMainWindow = !isQuickTaskWindow && !isVoiceDictationIndicatorWindow && !isDetachedPreviewWindow && !isPlanningWindow && !isWorkspaceMemoryWindow && !isAgentStatusHoverWindow
+const isMainWindow = !isQuickTaskWindow && !isVoiceDictationIndicatorWindow && !isDetachedPreviewWindow && !isManagedBrowserWindow && !isPlanningWindow && !isWorkspaceMemoryWindow && !isAgentStatusHoverWindow
 
 initializePerformanceMonitor()
 
@@ -1094,6 +1095,16 @@ if (isQuickTaskWindow) {
         <ThemeInitializer />
         <MarkdownFontSizeInitializer />
         <DetachedPreviewApp />
+        <Toaster position="bottom-right" />
+      </React.StrictMode>
+    )
+  })
+} else if (isManagedBrowserWindow) {
+  import('./components/browser/ManagedBrowserWindowApp').then(({ ManagedBrowserWindowApp }) => {
+    ReactDOM.createRoot(document.getElementById('root')!).render(
+      <React.StrictMode>
+        <ThemeInitializer />
+        <ManagedBrowserWindowApp />
         <Toaster position="bottom-right" />
       </React.StrictMode>
     )

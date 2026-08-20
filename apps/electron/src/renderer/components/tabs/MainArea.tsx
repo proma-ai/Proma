@@ -317,6 +317,7 @@ export function MainArea(): React.ReactElement {
                     <BrowserPanel
                       sessionId={browserSessionId}
                       state={browserState}
+                      onPopOut={() => void window.electronAPI.popOutAgentBrowser?.(browserSessionId)}
                       onMinimize={() => {
                         setBrowserMinimizedMap((previous) => { const next = new Map(previous); next.set(browserSessionId, true); return next })
                         setBrowserOpenMap((previous) => { const next = new Map(previous); next.set(browserSessionId, false); return next })
