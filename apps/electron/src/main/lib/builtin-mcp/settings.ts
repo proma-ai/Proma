@@ -7,13 +7,14 @@
  */
 
 import { getSettings, updateSettings } from '../settings-service'
+import { DESKTOP_CONTROL_MCP_ID } from './desktop-control'
 
 /**
  * 默认关闭的内置 MCP ID。
  * 这些 MCP 需要用户额外配置（如 API Key）才有意义，默认不向 Agent 注入，
  * 需用户在能力列表中手动开启。
  */
-const DEFAULT_DISABLED_IDS = new Set<string>(['nano-banana', 'chrome-devtools'])
+const DEFAULT_DISABLED_IDS = new Set<string>(['nano-banana', 'chrome-devtools', DESKTOP_CONTROL_MCP_ID])
 
 /** 判断某个内置 MCP 是否默认关闭（需用户手动开启） */
 export function isBuiltinMcpDefaultDisabled(id: string): boolean {
@@ -21,6 +22,10 @@ export function isBuiltinMcpDefaultDisabled(id: string): boolean {
 }
 
 export function isBuiltinMcpUserEnabled(id: string): boolean {
+  if (id === DESKTOP_CONTROL_MCP_ID) {
+    return getSettings().desktopAutomation?.enabled === true
+  }
+
   if (DEFAULT_DISABLED_IDS.has(id)) {
     // 默认关闭：仅当用户显式加入白名单时才启用
     return (getSettings().builtinMcpEnabledIds ?? []).includes(id)
@@ -30,6 +35,16 @@ export function isBuiltinMcpUserEnabled(id: string): boolean {
 }
 
 export function setBuiltinMcpUserEnabled(id: string, enabled: boolean): void {
+  if (id === DESKTOP_CONTROL_MCP_ID) {
+    updateSettings({
+      desktopAutomation: {
+        ...getSettings().desktopAutomation,
+        enabled,
+      },
+    })
+    return
+  }
+
   if (DEFAULT_DISABLED_IDS.has(id)) {
     const enabledIds = new Set(getSettings().builtinMcpEnabledIds ?? [])
     if (enabled) {

@@ -399,6 +399,50 @@ export class AgentPermissionService {
         return typeof input.message === 'string'
           ? `发送通知: ${input.message}`
           : '发送通知'
+      case 'mcp__desktop_control__get_desktop_state':
+        return '观察真实系统桌面'
+      case 'mcp__desktop_control__get_accessibility_tree':
+        return '读取桌面应用控件树'
+      case 'mcp__desktop_control__get_window_state':
+        return `读取窗口状态: ${String(input.windowId ?? input.window_id ?? input.title ?? '')}`.trim()
+      case 'mcp__desktop_control__list_windows':
+        return '列出当前系统窗口'
+      case 'mcp__desktop_control__launch_app':
+        return `启动系统应用: ${String(input.appName ?? input.app_name ?? input.name ?? '')}`.trim()
+      case 'mcp__desktop_control__bring_to_front':
+        return `置顶系统窗口: ${String(input.windowId ?? input.window_id ?? input.appName ?? input.app_name ?? '')}`.trim()
+      case 'mcp__desktop_control__move_cursor':
+        return `移动系统鼠标到: (${String(input.x)}, ${String(input.y)})`
+      case 'mcp__desktop_control__click':
+        return `系统鼠标点击: ${String(input.target ?? input.selector ?? `(${String(input.x)}, ${String(input.y)})`)}`
+      case 'mcp__desktop_control__double_click':
+        return `系统鼠标双击: ${String(input.target ?? input.selector ?? `(${String(input.x)}, ${String(input.y)})`)}`
+      case 'mcp__desktop_control__right_click':
+        return `系统鼠标右键: ${String(input.target ?? input.selector ?? `(${String(input.x)}, ${String(input.y)})`)}`
+      case 'mcp__desktop_control__drag':
+        return `系统鼠标拖拽: ${String(input.from ?? input.source ?? '')} → ${String(input.to ?? input.target ?? '')}`.trim()
+      case 'mcp__desktop_control__scroll':
+        return `系统滚动: ${String(input.direction ?? '')}`
+      case 'mcp__desktop_control__type_text':
+        return typeof input.text === 'string'
+          ? `系统输入文本: ${input.text.slice(0, 120)}`
+          : '系统输入文本'
+      case 'mcp__desktop_control__press_key':
+        return `系统按键: ${String(input.key ?? input.keyName ?? '')}`.trim()
+      case 'mcp__desktop_control__hotkey':
+        return Array.isArray(input.keys)
+          ? `系统快捷键: ${input.keys.join('+')}`
+          : '系统快捷键'
+      case 'mcp__desktop_control__set_value':
+        return typeof input.value === 'string'
+          ? `设置系统控件值: ${input.value.slice(0, 120)}`
+          : '设置系统控件值'
+      case 'mcp__desktop_control__invoke_menu':
+        return `调用应用菜单: ${String(input.menuPath ?? input.menu_path ?? input.path ?? '')}`.trim()
+      case 'mcp__desktop_control__set_window_frame':
+        return '调整系统窗口位置或大小'
+      case 'mcp__desktop_control__zoom':
+        return '缩放系统窗口或控件'
       default:
         return `使用工具: ${toolName}`
     }
@@ -425,6 +469,8 @@ export class AgentPermissionService {
     if (['REPL', 'Workflow', 'ScheduleWakeup', 'Monitor', 'PushNotification', 'CronCreate', 'CronDelete', 'RemoteTrigger'].includes(toolName)) {
       return 'normal'
     }
+
+    if (toolName.startsWith('mcp__desktop_control__')) return 'dangerous'
 
     return 'normal'
   }

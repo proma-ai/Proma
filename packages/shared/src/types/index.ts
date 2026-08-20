@@ -24,6 +24,7 @@ export * from './chat'
 // Agent 相关类型
 export * from './agent'
 export * from './browser'
+export * from './desktop'
 export * from './reasoning-profile'
 
 // Agent Provider 适配器接口

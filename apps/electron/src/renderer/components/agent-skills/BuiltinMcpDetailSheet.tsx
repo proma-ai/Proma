@@ -23,6 +23,7 @@ const CATEGORY_LABELS: Record<BuiltinMcpServerSummary['category'], string> = {
   memory: '记忆',
   media: '媒体',
   browser: '浏览器',
+  desktop: '桌面',
 }
 
 interface BuiltinMcpConfigInfo {
@@ -43,6 +44,13 @@ function getConfigInfo(server: BuiltinMcpServerSummary): BuiltinMcpConfigInfo {
     return {
       source: 'Chrome DevTools MCP / npx',
       description: '启用后 Proma 会通过 npx 启动 chrome-devtools-mcp，让 Agent 可以打开真实浏览器页面、截图和检查 DOM。首次使用可能需要下载 npm 包，并要求本机安装 Chrome。',
+    }
+  }
+  if (server.id === 'desktop-control') {
+    return {
+      source: '工具设置 / 桌面控制',
+      description: '启用桌面控制后，Proma 会通过内置或手动指定的 cua-driver 启动 desktop_control MCP。桌面观察和操作真实系统窗口，默认关闭，前台会话中仍会保留用户确认边界。',
+      actionLabel: '配置桌面控制',
     }
   }
   if (server.id === 'collaboration') {

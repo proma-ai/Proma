@@ -8,13 +8,15 @@
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { toast } from 'sonner'
-import { ExternalLink, Eye, EyeOff, Loader2, CheckCircle2, XCircle, Trash2 } from 'lucide-react'
+import { ExternalLink, Eye, EyeOff, Loader2, CheckCircle2, XCircle, Trash2, RefreshCw, Info, ShieldCheck, Terminal } from 'lucide-react'
+import type { CuaDriverDetectionResult, CuaDriverRuntimeSource } from '@proma/shared'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
 import { SettingsSection, SettingsCard } from './primitives'
 import { chatToolsAtom } from '@/atoms/chat-tool-atoms'
 import { toolSettingsFocusAtom, type ToolSettingsFocus } from '@/atoms/settings-tab'
+import { cn } from '@/lib/utils'
 
 /** 刷新全局工具列表 atom */
 async function refreshChatTools(setter: (tools: Awaited<ReturnType<typeof window.electronAPI.getChatTools>>) => void): Promise<void> {
@@ -24,6 +26,285 @@ async function refreshChatTools(setter: (tools: Awaited<ReturnType<typeof window
   } catch (err) {
     console.error('[ToolSettings] 刷新工具列表失败:', err)
   }
+}
+
+interface DesktopControlFormState {
+  enabled: boolean
+  cuaDriverPath: string
+  startupTimeoutSec: number
+}
+
+function desktopControlFormState(settings: Awaited<ReturnType<typeof window.electronAPI.getSettings>>): DesktopControlFormState {
+  const storedPath = settings.desktopAutomation?.cuaDriver?.path?.trim()
+  return {
+    enabled: settings.desktopAutomation?.enabled === true,
+    cuaDriverPath: storedPath && storedPath !== 'cua-driver' ? storedPath : '',
+    startupTimeoutSec: settings.desktopAutomation?.cuaDriver?.startupTimeoutSec ?? 15,
+  }
+}
+
+const CUA_DRIVER_SOURCE_LABELS: Record<CuaDriverRuntimeSource, string> = {
+  env: '环境变量',
+  configured: '手动路径',
+  bundled: '内置 cua-driver',
+  'user-local': '用户目录',
+  path: '系统 PATH',
+}
+
+function cuaDriverDetectionSummary(result: CuaDriverDetectionResult): string {
+  if (!result.cli.ok) return `cua-driver 不可用：${result.cli.error ?? '未找到可执行文件'}`
+  if (!result.manifest.ok) return `cua-driver 可运行，但 manifest 不可读：${result.manifest.error ?? '状态未知'}`
+  if (!result.mcp.ok) return `cua-driver MCP 工具面异常：${result.mcp.error ?? '状态未知'}`
+  return `检测通过：已发现 ${result.mcp.toolCount} 个桌面控制工具`
+}
+
+function CuaDriverDetectionStatus({ result }: { result: CuaDriverDetectionResult }): React.ReactElement {
+  const statusClass = result.ok
+    ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+    : 'border-destructive/20 bg-destructive/10 text-destructive'
+  const previewTools = result.mcp.tools.slice(0, 8).map((tool) => tool.name)
+
+  return (
+    <div className={cn('rounded-lg border p-3 text-sm', statusClass)}>
+      <div className="flex items-start gap-2">
+        {result.ok ? <CheckCircle2 size={16} className="mt-0.5 shrink-0" /> : <XCircle size={16} className="mt-0.5 shrink-0" />}
+        <div className="min-w-0 flex-1 space-y-2">
+          <div className="font-medium">{cuaDriverDetectionSummary(result)}</div>
+          <div className="space-y-1 text-xs opacity-90">
+            <p className="break-all">
+              cua-driver: {result.cli.version || '版本未知'} · {CUA_DRIVER_SOURCE_LABELS[result.cli.source]} · {result.cli.path}
+            </p>
+            {result.manifest.ok && (
+              <p>
+                MCP: {result.manifest.mcpCommand || 'cua-driver'} {(result.manifest.mcpArgs ?? ['mcp']).join(' ')}
+              </p>
+            )}
+            {previewTools.length > 0 && (
+              <p>工具: {previewTools.join('、')}{result.mcp.toolCount > previewTools.length ? ' ...' : ''}</p>
+            )}
+          </div>
+          {result.hints.length > 0 && (
+            <div className="space-y-1 text-xs opacity-90">
+              {result.hints.map((hint, index) => (
+                <p key={`${index}-${hint}`}>{hint}</p>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** 桌面控制后端设置区域 */
+function DesktopControlSettings(): React.ReactElement {
+  const [state, setState] = React.useState<DesktopControlFormState>({
+    enabled: false,
+    cuaDriverPath: '',
+    startupTimeoutSec: 15,
+  })
+  const [loading, setLoading] = React.useState(true)
+  const [saving, setSaving] = React.useState(false)
+  const [detecting, setDetecting] = React.useState(false)
+  const [detection, setDetection] = React.useState<CuaDriverDetectionResult | null>(null)
+  const savedRef = React.useRef(state)
+
+  React.useEffect(() => {
+    window.electronAPI.getSettings()
+      .then((settings) => {
+        const next = desktopControlFormState(settings)
+        setState(next)
+        savedRef.current = next
+      })
+      .catch((error: unknown) => {
+        console.error('[桌面控制设置] 加载失败:', error)
+        toast.error('桌面控制设置加载失败')
+      })
+      .finally(() => setLoading(false))
+  }, [])
+
+  const persist = React.useCallback(async (next: DesktopControlFormState, showToast = true): Promise<void> => {
+    setSaving(true)
+    try {
+      const saved = await window.electronAPI.updateSettings({
+        desktopAutomation: {
+          enabled: next.enabled,
+          cuaDriver: {
+            path: next.cuaDriverPath.trim() || undefined,
+            startupTimeoutSec: next.startupTimeoutSec,
+          },
+        },
+      })
+      const persisted = desktopControlFormState(saved)
+      setState(persisted)
+      savedRef.current = persisted
+      if (showToast) toast.success('桌面控制设置已保存')
+    } catch (error) {
+      console.error('[桌面控制设置] 保存失败:', error)
+      setState(savedRef.current)
+      toast.error('桌面控制设置保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }, [])
+
+  const handleEnabledChange = (checked: boolean): void => {
+    const next = { ...state, enabled: checked }
+    setState(next)
+    void persist(next)
+  }
+
+  const handlePathBlur = (): void => {
+    const next = { ...state, cuaDriverPath: state.cuaDriverPath.trim() }
+    if (next.cuaDriverPath === savedRef.current.cuaDriverPath) return
+    setState(next)
+    void persist(next)
+  }
+
+  const handleTimeoutBlur = (): void => {
+    const normalized = Math.max(5, Math.min(60, Math.floor(state.startupTimeoutSec || 15)))
+    const next = { ...state, startupTimeoutSec: normalized }
+    if (next.startupTimeoutSec === savedRef.current.startupTimeoutSec) return
+    setState(next)
+    void persist(next, false)
+  }
+
+  const handleDetectCuaDriver = async (): Promise<void> => {
+    setDetecting(true)
+    setDetection(null)
+    try {
+      const next = {
+        ...state,
+        cuaDriverPath: state.cuaDriverPath.trim(),
+        startupTimeoutSec: Math.max(5, Math.min(60, Math.floor(state.startupTimeoutSec || 15))),
+      }
+      if (
+        next.enabled !== savedRef.current.enabled
+        || next.cuaDriverPath !== savedRef.current.cuaDriverPath
+        || next.startupTimeoutSec !== savedRef.current.startupTimeoutSec
+      ) {
+        await persist(next, false)
+      }
+      const result = await window.electronAPI.detectCuaDriver()
+      setDetection(result)
+      if (result.ok) toast.success('Cua Driver 检测通过')
+      else toast.error('Cua Driver 检测未通过')
+    } catch (error) {
+      console.error('[Cua Driver 检测] 失败:', error)
+      toast.error(error instanceof Error ? error.message : 'Cua Driver 检测失败')
+    } finally {
+      setDetecting(false)
+    }
+  }
+
+  if (loading) {
+    return <div className="text-sm text-muted-foreground py-8 text-center">加载中...</div>
+  }
+
+  return (
+    <SettingsSection
+      title="桌面控制"
+      description="让 Agent 操作本机窗口、桌面软件和系统文件选择框"
+      action={
+        <Switch
+          checked={state.enabled}
+          onCheckedChange={handleEnabledChange}
+          disabled={saving}
+        />
+      }
+    >
+      <SettingsCard divided={false}>
+        <div className="space-y-4 p-4">
+          <div className="rounded-lg bg-muted/50 p-3 space-y-2 text-sm text-muted-foreground">
+            <div className="flex items-center gap-2 text-foreground font-medium">
+              <Info size={15} />
+              <span>{state.enabled ? '当前启用 Cua Driver 桌面控制' : '当前未向 Agent 开放桌面控制'}</span>
+            </div>
+            <p>
+              开启后，Agent 会通过内置 Cua Driver 读取窗口、点击桌面应用、输入文本和发送快捷键。它适合处理非网页软件、系统文件上传窗口、ERP/客户端表单等任务。
+            </p>
+            <p className="text-xs">
+              这项能力可以影响你电脑上的其他应用，默认关闭。建议先用一键检测确认可用，再在可信任务中开启。
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-3 rounded-lg border border-border/50 p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0 space-y-1">
+              <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <ShieldCheck size={15} />
+                <span>Cua Driver 准备状态</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                检测不会执行点击或输入，只确认 cua-driver 可运行，并能暴露桌面控制 MCP 工具。
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleDetectCuaDriver}
+              disabled={detecting || saving}
+              className="shrink-0"
+            >
+              {detecting ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : <RefreshCw size={14} className="mr-1.5" />}
+              {detecting ? '检测中...' : '一键检测'}
+            </Button>
+          </div>
+
+          {detection && <CuaDriverDetectionStatus result={detection} />}
+
+          {state.enabled && (
+            <div className="space-y-4 rounded-lg border border-border/50 p-3">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <Terminal size={15} />
+                  <span>Cua Driver 高级设置</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  一般不需要填写路径。留空时会优先使用应用内置 cua-driver，其次查找用户目录和系统 PATH。
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-foreground">cua-driver 命令路径</label>
+                <Input
+                  value={state.cuaDriverPath}
+                  onChange={(event) => {
+                    setDetection(null)
+                    setState((current) => ({ ...current, cuaDriverPath: event.target.value }))
+                  }}
+                  onBlur={handlePathBlur}
+                  placeholder="留空自动使用内置 cua-driver"
+                  disabled={saving}
+                />
+                <p className="text-xs text-muted-foreground">
+                  只有需要覆盖内置版本时才填写，例如 C:\Users\你\.local\bin\cua-driver.exe。
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-foreground">MCP 启动超时（秒）</label>
+                <Input
+                  type="number"
+                  min={5}
+                  max={60}
+                  value={state.startupTimeoutSec}
+                  onChange={(event) => {
+                    setDetection(null)
+                    setState((current) => ({ ...current, startupTimeoutSec: Number(event.target.value) }))
+                  }}
+                  onBlur={handleTimeoutBlur}
+                  disabled={saving}
+                />
+                <p className="text-xs text-muted-foreground">
+                  默认 15 秒。旧电脑或首次启动较慢时可调高，避免 Agent 会话启动时过早跳过桌面控制。
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </SettingsCard>
+    </SettingsSection>
+  )
 }
 
 /** 联网搜索工具设置区域 */
@@ -466,6 +747,7 @@ function CustomToolsSection(): React.ReactElement | null {
 
 export function ToolSettings(): React.ReactElement {
   const [focusedTool, setFocusedTool] = useAtom(toolSettingsFocusAtom)
+  const desktopControlRef = React.useRef<HTMLDivElement>(null)
   const webSearchRef = React.useRef<HTMLDivElement>(null)
   const nanoBananaRef = React.useRef<HTMLDivElement>(null)
   const customToolsRef = React.useRef<HTMLDivElement>(null)
@@ -473,6 +755,7 @@ export function ToolSettings(): React.ReactElement {
   React.useEffect(() => {
     if (!focusedTool) return
     const refs: Record<ToolSettingsFocus, React.RefObject<HTMLDivElement>> = {
+      'desktop-control': desktopControlRef,
       'web-search': webSearchRef,
       'nano-banana': nanoBananaRef,
       'custom-tools': customToolsRef,
@@ -485,6 +768,11 @@ export function ToolSettings(): React.ReactElement {
 
   return (
     <div className="space-y-8">
+      {/* 桌面控制 */}
+      <div ref={desktopControlRef}>
+        <DesktopControlSettings />
+      </div>
+
       {/* 联网搜索工具 */}
       <div ref={webSearchRef}>
         <WebSearchSettings />

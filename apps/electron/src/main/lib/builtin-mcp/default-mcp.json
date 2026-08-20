@@ -78,6 +78,35 @@
         { "name": "performance_start_trace", "description": "开始性能追踪。" },
         { "name": "performance_stop_trace", "description": "停止性能追踪并返回结果。", "readOnly": true }
       ]
+    },
+    {
+      "id": "desktop-control",
+      "name": "desktop_control",
+      "displayName": "桌面控制",
+      "description": "通过内置 Cua Driver 操作本机桌面软件，支持观察窗口、读取控件树、聚焦窗口、点击、输入、热键、滚动、拖拽和文件选择框等系统级工作流。",
+      "category": "desktop",
+      "kind": "internal",
+      "deletable": false,
+      "defaultEnabled": false,
+      "toggleable": true,
+      "tools": [
+        { "name": "list_windows", "description": "列出当前顶层窗口。", "readOnly": true },
+        { "name": "get_accessibility_tree", "description": "读取当前桌面上的应用和可见窗口结构。", "readOnly": true },
+        { "name": "get_window_state", "description": "读取指定窗口的控件树和截图信息。", "readOnly": true },
+        { "name": "get_desktop_state", "description": "截取当前桌面状态。", "readOnly": true },
+        { "name": "bring_to_front", "description": "把指定应用或窗口置于前台。" },
+        { "name": "launch_app", "description": "启动系统应用。" },
+        { "name": "click", "description": "在目标窗口中点击。" },
+        { "name": "double_click", "description": "在目标窗口中双击。" },
+        { "name": "right_click", "description": "在目标窗口中右键点击。" },
+        { "name": "type_text", "description": "向目标窗口输入文本。" },
+        { "name": "press_key", "description": "向目标窗口发送单个按键。" },
+        { "name": "hotkey", "description": "按下组合快捷键。" },
+        { "name": "scroll", "description": "滚动目标窗口。" },
+        { "name": "drag", "description": "拖拽目标窗口内区域。" },
+        { "name": "set_value", "description": "通过系统控件接口设置输入控件的值。" },
+        { "name": "invoke_menu", "description": "调用应用菜单项。" }
+      ]
     }
   ]
 }

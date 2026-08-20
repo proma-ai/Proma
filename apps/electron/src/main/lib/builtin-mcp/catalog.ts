@@ -9,6 +9,7 @@
 
 import type { BuiltinMcpServerSummary } from '@proma/shared'
 import { getToolCredentials, getToolState } from '../chat-tool-config'
+import { resolveCuaDriverRuntimePath } from '../cua-driver-runtime'
 import { getBuiltinMcpDefinitions, type BuiltinMcpDefinition } from './baseline'
 import { isBuiltinMcpDefaultDisabled, isBuiltinMcpUserEnabled } from './settings'
 
@@ -55,6 +56,25 @@ function resolveAvailability(
       availabilityReason: available
         ? undefined
         : state.enabled ? '需要配置 Gemini API Key' : 'Nano Banana 未启用',
+    }
+  }
+
+  if (item.id === 'desktop-control') {
+    const enabled = isBuiltinMcpUserEnabled(item.id)
+    if (!enabled) {
+      return {
+        enabled: false,
+        available: false,
+        availabilityReason: '默认关闭，可手动开启',
+      }
+    }
+    const runtime = resolveCuaDriverRuntimePath()
+    return {
+      enabled: true,
+      available: runtime.source !== 'path',
+      availabilityReason: runtime.source === 'path'
+        ? '未检测到内置或手动配置的 cua-driver'
+        : undefined,
     }
   }
 

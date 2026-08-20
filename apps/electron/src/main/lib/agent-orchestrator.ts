@@ -68,6 +68,9 @@ import { validateToolInput } from './agent-tool-input-validator'
 import { estimateTokenCount, WRITE_CONTENT_TOKEN_THRESHOLD } from './agent-tool-token-estimator'
 import { buildPiBuiltinTools } from './adapters/pi-builtin-tools'
 import { buildPiMcpTools } from './adapters/pi-mcp-tools'
+import { injectChromeDevtoolsMcpServer } from './builtin-mcp/chrome-devtools'
+import { DESKTOP_CONTROL_MCP_ID, injectDesktopControlMcpServer } from './builtin-mcp/desktop-control'
+import { isBuiltinMcpUserEnabled } from './builtin-mcp/settings'
 import { buildAgentRuntimeEnv, type AgentRuntimeEnv } from './agent-runtime-env'
 import { isVisibleRunMessage } from './agent-run-message-visibility'
 import { resolvePiThinkingLevel } from './agent-thinking-level'
@@ -263,39 +266,43 @@ export class AgentOrchestrator {
   /**
    * 构建工作区 MCP 服务器配置
    */
-  private buildMcpServers(workspaceSlug: string | undefined): Record<string, Record<string, unknown>> {
+  private buildMcpServers(workspaceSlug: string | undefined, runtimeEnv?: Record<string, string>): Record<string, Record<string, unknown>> {
     const mcpServers: Record<string, Record<string, unknown>> = {}
-    if (!workspaceSlug) return mcpServers
 
-    const mcpConfig = getWorkspaceMcpConfig(workspaceSlug)
-    for (const [name, entry] of Object.entries(mcpConfig.servers ?? {})) {
-      if (!entry.enabled) continue
-      const type = normalizeMcpTransportType((entry as { type?: unknown }).type)
+    if (workspaceSlug) {
+      const mcpConfig = getWorkspaceMcpConfig(workspaceSlug)
+      for (const [name, entry] of Object.entries(mcpConfig.servers ?? {})) {
+        if (!entry.enabled) continue
+        const type = normalizeMcpTransportType((entry as { type?: unknown }).type)
 
-      if (type === 'stdio' && entry.command) {
-        const mergedEnv: Record<string, string> = {
-          ...(process.env.PATH && { PATH: process.env.PATH }),
-          ...entry.env,
+        if (type === 'stdio' && entry.command) {
+          const mergedEnv: Record<string, string> = {
+            ...(process.env.PATH && { PATH: process.env.PATH }),
+            ...entry.env,
+          }
+          mcpServers[name] = {
+            type: 'stdio',
+            command: entry.command,
+            ...(entry.args && entry.args.length > 0 && { args: entry.args }),
+            ...(Object.keys(mergedEnv).length > 0 && { env: mergedEnv }),
+            required: false,
+            startup_timeout_sec: entry.timeout ?? 30,
+          }
+        } else if ((type === 'http' || type === 'sse') && entry.url) {
+          mcpServers[name] = {
+            type,
+            url: entry.url,
+            ...(entry.headers && Object.keys(entry.headers).length > 0 && { headers: entry.headers }),
+            required: false,
+          }
+        } else {
+          console.warn(`[Agent 编排] MCP 服务器 "${name}" 配置不完整，已跳过（type=${entry.type}, command=${entry.command ?? '无'}, url=${entry.url ?? '无'}）`)
         }
-        mcpServers[name] = {
-          type: 'stdio',
-          command: entry.command,
-          ...(entry.args && entry.args.length > 0 && { args: entry.args }),
-          ...(Object.keys(mergedEnv).length > 0 && { env: mergedEnv }),
-          required: false,
-          startup_timeout_sec: entry.timeout ?? 30,
-        }
-      } else if ((type === 'http' || type === 'sse') && entry.url) {
-        mcpServers[name] = {
-          type,
-          url: entry.url,
-          ...(entry.headers && Object.keys(entry.headers).length > 0 && { headers: entry.headers }),
-          required: false,
-        }
-      } else {
-        console.warn(`[Agent 编排] MCP 服务器 "${name}" 配置不完整，已跳过（type=${entry.type}, command=${entry.command ?? '无'}, url=${entry.url ?? '无'}）`)
       }
     }
+
+    injectChromeDevtoolsMcpServer(mcpServers, runtimeEnv)
+    injectDesktopControlMcpServer(mcpServers, runtimeEnv)
 
     if (Object.keys(mcpServers).length > 0) {
       console.log(`[Agent 编排] 已加载 ${Object.keys(mcpServers).length} 个 MCP 服务器`)
@@ -1003,7 +1010,7 @@ export class AgentOrchestrator {
       }
 
       // 10. 构建 MCP 服务器配置 + 记忆工具 + 生图工具 + 自定义工具
-      const mcpServers = this.buildMcpServers(workspaceSlug)
+      const mcpServers = this.buildMcpServers(workspaceSlug, runtimeEnv.env)
       let piBuiltinTools: unknown[] = []
       let piMcpTools: unknown[] = []
       const piSdk = await import('@earendil-works/pi-coding-agent')
@@ -1176,6 +1183,12 @@ export class AgentOrchestrator {
       ])
       // Pi-native 浏览器工具不是 MCP：必须显式分类，避免被通用 mcp__ 调研放行规则遗漏。
       const PLAN_MODE_READ_ONLY_BROWSER_TOOLS = new Set(['BrowserObserve', 'BrowserScreenshot', 'BrowserListTabs', 'BrowserPreviewOpen'])
+      const DESKTOP_CONTROL_STATUS_TOOLS = new Set([
+        'mcp__desktop_control__check_permissions',
+        'mcp__desktop_control__health_report',
+        'mcp__desktop_control__get_screen_size',
+        'mcp__desktop_control__get_cursor_position',
+      ])
       const runTriggeredBy = input.triggeredBy
 
       /** Plan 模式是否已被 Agent 进入（初始 plan 模式时天然为 true，其他模式需 EnterPlanMode 触发） */
@@ -1277,6 +1290,26 @@ export class AgentOrchestrator {
             return { behavior: 'deny' as const, message: '计划模式下不能将本地图片发送给视觉模型，请在计划获批后执行。' }
           }
           return { behavior: 'allow' as const }
+        }
+
+        // Desktop Control MCP 会观察或控制真实桌面。后台任务和协作子 Agent 不允许使用；
+        // 前台用户会话中，除无敏感内容的状态读取外，即使完全自动模式也保留单次确认。
+        if (toolName.startsWith('mcp__desktop_control__')) {
+          if (!isBuiltinMcpUserEnabled(DESKTOP_CONTROL_MCP_ID)) {
+            return { behavior: 'deny' as const, message: '桌面控制未启用。请先在 Agent 技能或工具设置中启用「桌面控制」。' }
+          }
+          if (runTriggeredBy === 'automation' || runTriggeredBy === 'delegation') {
+            return { behavior: 'deny' as const, message: '后台任务和协作子 Agent 不能操作真实系统桌面，请由用户主会话发起并确认。' }
+          }
+          if (DESKTOP_CONTROL_STATUS_TOOLS.has(toolName)) {
+            return { behavior: 'allow' as const, updatedInput: input }
+          }
+          if (currentMode === 'plan') {
+            return { behavior: 'deny' as const, message: '计划模式下不能观察或操作真实系统桌面，请在计划获批后执行。' }
+          }
+          return permissionService.requestSingleApproval(sessionId, toolName, input, options, (request) => {
+            this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'permission_request', request } })
+          })
         }
 
         // 所有 Pi 会话均可使用受管浏览器。主进程仍隔离网页来源并默认拒绝网页权限；下载和弹窗留在受管浏览器内，

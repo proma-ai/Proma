@@ -157,6 +157,8 @@ function main(): void {
   const opts = parseArgs()
   const arch = process.arch // arm64 或 x64
   const results: StepResult[] = []
+  const cuaDriverPlatform = opts.platform === 'win' ? 'win32' : opts.platform === 'mac' ? 'darwin' : 'linux'
+  const cuaDriverArch = opts.currentArch ? arch : 'all'
 
   // 打印配置信息
   console.log(`\n${color.bgBlue}${color.bold} Proma 打包工具 ${color.reset}\n`)
@@ -167,7 +169,7 @@ function main(): void {
   console.log(`  ${color.bold}详细日志${color.reset}: ${opts.verbose ? '开启' : '关闭'}`)
   printSeparator()
 
-  const totalSteps = 7
+  const totalSteps = 8
   let step = 0
 
   // ── 步骤 1: 构建主进程 ──
@@ -215,7 +217,16 @@ function main(): void {
   printStepResult(results[results.length - 1])
   if (!results[results.length - 1].success) return printSummary(results)
 
-  // ── 步骤 6: 复制资源文件 ──
+  // ── 步骤 6: 下载 Cua Driver ──
+  step++
+  printStepStart(step, totalSteps, '下载 Cua Driver')
+  results.push(
+    runStep('下载 Cua Driver', 'bun', ['run', 'scripts/download-cua-driver.ts', `--platform=${cuaDriverPlatform}`, `--arch=${cuaDriverArch}`], { verbose: opts.verbose })
+  )
+  printStepResult(results[results.length - 1])
+  if (!results[results.length - 1].success) return printSummary(results)
+
+  // ── 步骤 7: 复制资源文件 ──
   step++
   printStepStart(step, totalSteps, '复制资源文件')
   results.push(
@@ -223,7 +234,7 @@ function main(): void {
   )
   printStepResult(results[results.length - 1])
 
-  // ── 步骤 7: electron-builder 打包 ──
+  // ── 步骤 8: electron-builder 打包 ──
   step++
   printStepStart(step, totalSteps, 'Electron Builder 打包')
 

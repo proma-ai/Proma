@@ -158,6 +158,7 @@ export function AgentSkillsView(): React.ReactElement {
 
   const configureBuiltinMcp = React.useCallback((serverId: string): void => {
     const focusMap: Partial<Record<string, ToolSettingsFocus>> = {
+      'desktop-control': 'desktop-control',
       'nano-banana': 'nano-banana',
     }
     const focus = focusMap[serverId]

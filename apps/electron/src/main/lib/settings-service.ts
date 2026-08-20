@@ -8,12 +8,35 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { getSettingsPath } from './config-paths'
 import { DEFAULT_INTERFACE_VARIANT, DEFAULT_THEME_MODE } from '../../types'
+import type { DesktopAutomationSettings } from '@proma/shared'
 import type { AgentIslandSettings, AppSettings } from '../../types'
 
 function sanitizeAgentIslandSettings(input: unknown): AgentIslandSettings | undefined {
   if (!input || typeof input !== 'object') return undefined
   const raw = input as { enabled?: unknown }
   return typeof raw.enabled === 'boolean' ? { enabled: raw.enabled } : undefined
+}
+
+function sanitizeDesktopAutomationSettings(input: unknown): DesktopAutomationSettings {
+  if (!input || typeof input !== 'object') return { enabled: false }
+  const raw = input as {
+    enabled?: unknown
+    cuaDriver?: { path?: unknown; startupTimeoutSec?: unknown }
+  }
+  const path = typeof raw.cuaDriver?.path === 'string' && raw.cuaDriver.path.trim()
+    ? raw.cuaDriver.path.trim()
+    : undefined
+  const rawTimeout = raw.cuaDriver?.startupTimeoutSec
+  const startupTimeoutSec = typeof rawTimeout === 'number' && Number.isFinite(rawTimeout)
+    ? Math.max(5, Math.min(60, Math.floor(rawTimeout)))
+    : 15
+  return {
+    enabled: raw.enabled === true,
+    cuaDriver: {
+      ...(path ? { path } : {}),
+      startupTimeoutSec,
+    },
+  }
 }
 
 /**
@@ -35,6 +58,7 @@ export function getSettings(): AppSettings {
       richTextRenderingEnabled: false,
       feishuSessionMirror: { mode: 'off' },
       visionRelay: { enabled: false },
+      desktopAutomation: { enabled: false },
       builtinMcpDisabledIds: [],
       windowsShellPreference: 'auto',
       agentThinking: { type: 'adaptive' },
@@ -67,6 +91,7 @@ export function getSettings(): AppSettings {
       richTextRenderingEnabled: data.richTextRenderingEnabled ?? false,
       feishuSessionMirror: data.feishuSessionMirror ?? { mode: 'off' },
       visionRelay: data.visionRelay ?? { enabled: false },
+      desktopAutomation: sanitizeDesktopAutomationSettings(data.desktopAutomation),
       builtinMcpDisabledIds: settings.builtinMcpDisabledIds ?? [],
       windowsShellPreference: settings.windowsShellPreference ?? 'auto',
       agentThinking: settings.agentThinking ?? { type: 'adaptive' },
@@ -87,6 +112,7 @@ export function getSettings(): AppSettings {
       richTextRenderingEnabled: false,
       feishuSessionMirror: { mode: 'off' },
       visionRelay: { enabled: false },
+      desktopAutomation: { enabled: false },
       builtinMcpDisabledIds: [],
       windowsShellPreference: 'auto',
       agentThinking: { type: 'adaptive' },
@@ -109,6 +135,9 @@ export function updateSettings(updates: Partial<AppSettings>): AppSettings {
     agentIsland: updates.agentIsland === undefined
       ? sanitizeAgentIslandSettings(current.agentIsland)
       : sanitizeAgentIslandSettings({ ...current.agentIsland, ...updates.agentIsland }),
+    desktopAutomation: updates.desktopAutomation === undefined
+      ? sanitizeDesktopAutomationSettings(current.desktopAutomation)
+      : sanitizeDesktopAutomationSettings({ ...current.desktopAutomation, ...updates.desktopAutomation }),
   }
   const filePath = getSettingsPath()
 

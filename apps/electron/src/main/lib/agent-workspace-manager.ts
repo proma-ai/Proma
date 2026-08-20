@@ -223,10 +223,10 @@ export function getProjectFilesPath(workspaceSlug: string): string {
   return getAgentWorkspaceBySlug(workspaceSlug)?.projectRootPath ?? getWorkspaceFilesDir(workspaceSlug)
 }
 
-/** 将 ~/.proma/default-skills/ 的内容逐个复制到工作区 skills/ 目录 */
+/** 将 ~/.proma/default-skills/ 的内容逐个复制到工作区 Skills 目录 */
 function copyDefaultSkills(workspaceSlug: string, options: { throwOnError?: boolean } = {}): void {
   const defaultDir = getDefaultSkillsDir()
-  const targetDir = getWorkspaceSkillsDir(workspaceSlug)
+  const activeDir = getWorkspaceSkillsDir(workspaceSlug)
 
   try {
     const entries = readdirSync(defaultDir, { withFileTypes: true })
@@ -238,7 +238,7 @@ function copyDefaultSkills(workspaceSlug: string, options: { throwOnError?: bool
     for (const entry of entries) {
       if (!entry.isDirectory() || isRetiredDefaultSkill(entry.name)) continue
       const source = join(defaultDir, entry.name)
-      const target = join(targetDir, entry.name)
+      const target = join(activeDir, entry.name)
       try {
         cpSync(source, target, { recursive: true, filter: skillCopyFilter })
       } catch (err) {
@@ -496,7 +496,7 @@ function removeRetiredDefaultSkillsFromWorkspace(workspace: AgentWorkspace): voi
 
 /**
  * 同步默认 Skills 到所有工作区。规则：
- * - 缺失：注入到 skills/（active），让升级后新增的内置 Skill 对老用户立即可用
+ * - 缺失：注入到 skills/
  * - 已存在（active 或 inactive）：比较 SKILL.md 的 version，bundled 更新时才覆盖
  *   （保留用户停用决定 — 在 inactive 的依然在 inactive；同时避免每次启动
  *    全量 cpSync 4MB+ 文件阻塞主进程）
@@ -696,6 +696,11 @@ export function saveWorkspaceMcpConfig(workspaceSlug: string, config: WorkspaceM
 /** 扫描工作区活跃 Skills，仅返回 skills/ 下的 Skill */
 export function getWorkspaceSkills(workspaceSlug: string): SkillMeta[] {
   return scanSkillsInDir(getWorkspaceSkillsDir(workspaceSlug), true)
+}
+
+export function isWorkspaceSkillEnabled(workspaceSlug: string | undefined, skillSlug: string): boolean {
+  if (!workspaceSlug || !skillSlug) return false
+  return existsSync(join(getWorkspaceSkillsDir(workspaceSlug), skillSlug, 'SKILL.md'))
 }
 
 /** 解析 SKILL.md 的 YAML frontmatter，支持单行值、block scalar（`|` / `>`）和多行缩进 */
