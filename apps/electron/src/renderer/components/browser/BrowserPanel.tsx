@@ -203,7 +203,7 @@ export function BrowserPanel({ sessionId, state, onMinimize, onClose, onPopOut, 
   }
   return (
     <div className="flex flex-col h-full min-w-0 overflow-hidden bg-content-area titlebar-no-drag">
-      <div className={cn('flex items-center h-[42px] gap-1 px-2 border-b border-border/40 bg-muted/20', getWindowControlsPaddingClass(isWindows))}>
+      <div className={cn('flex items-center h-[42px] gap-1 px-2 border-b border-border/40 bg-muted/20', !inDetachedWindow && getWindowControlsPaddingClass(isWindows))}>
         <Globe2 className="size-4 shrink-0 text-primary ml-1" />
         <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-7" disabled={riskBlocked || !state?.canGoBack} onClick={() => void window.electronAPI.goBackAgentBrowser?.(sessionId)}><ArrowLeft className="size-3.5" /></Button></TooltipTrigger><TooltipContent>后退</TooltipContent></Tooltip>
         <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-7" disabled={riskBlocked || !state?.canGoForward} onClick={() => void window.electronAPI.goForwardAgentBrowser?.(sessionId)}><ArrowRight className="size-3.5" /></Button></TooltipTrigger><TooltipContent>前进</TooltipContent></Tooltip>

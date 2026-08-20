@@ -13,6 +13,17 @@ import type { Rectangle } from 'electron'
 
 const detachedWindows = new Map<string, BrowserWindow>()
 
+/** 与主程序一致的标题栏形态：Windows 隐藏系统标题栏（renderer 自定义），macOS hiddenInset。 */
+function titleBarOptions(): Pick<Electron.BrowserWindowConstructorOptions, 'titleBarStyle' | 'trafficLightPosition'> {
+  if (process.platform === 'darwin') {
+    return { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 18, y: 18 } }
+  }
+  if (process.platform === 'win32') {
+    return { titleBarStyle: 'hidden' as const }
+  }
+  return {}
+}
+
 function defaultBounds(): Rectangle {
   const { workArea } = screen.getPrimaryDisplay()
   const width = Math.max(720, Math.floor(workArea.width * 0.62))
@@ -40,6 +51,7 @@ export function createDetachedBrowserWindow(sessionId: string): BrowserWindow {
 
   const win = new BrowserWindow({
     ...defaultBounds(),
+    ...titleBarOptions(),
     minWidth: 640,
     minHeight: 480,
     title: '受管浏览器',

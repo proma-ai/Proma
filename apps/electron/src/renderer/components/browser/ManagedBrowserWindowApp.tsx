@@ -7,9 +7,12 @@
  */
 
 import * as React from 'react'
-import { AlertCircle } from 'lucide-react'
+import { AlertCircle, Globe2 } from 'lucide-react'
 import type { BrowserViewState, BrowserStateChange } from '@proma/shared'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { WindowControls } from '@/components/WindowControls'
+import { WINDOW_CONTROLS_INSET_RIGHT, WINDOW_CONTROLS_PADDING_RIGHT, detectIsMac, detectIsWindows } from '@/lib/platform'
+import { cn } from '@/lib/utils'
 import { BrowserPanel } from './BrowserPanel'
 
 function getSessionId(): string {
@@ -69,16 +72,33 @@ export function ManagedBrowserWindowApp(): React.ReactElement {
     )
   }
 
+  const isWindows = React.useMemo(() => detectIsWindows(), [])
+  const isMac = React.useMemo(() => detectIsMac(), [])
   return (
     <TooltipProvider delayDuration={200} disableHoverableContent>
-      <div className="h-screen w-screen overflow-hidden bg-content-area">
-        <BrowserPanel
-          sessionId={sessionId}
-          state={state}
-          onMinimize={() => {}}
-          onClose={() => window.close()}
-          inDetachedWindow
-        />
+      <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-content-area antialiased">
+        {/* 与主程序一致的自定义标题栏：系统按钮融入窗口内容区。 */}
+        <WindowControls />
+        <header className={cn(
+          'relative flex h-11 shrink-0 items-center border-b border-border/70',
+          isMac ? 'pl-[88px] pr-5' : isWindows ? `pl-4 ${WINDOW_CONTROLS_PADDING_RIGHT}` : 'px-4',
+        )}>
+          {/* 拖拽层：Windows 上让出右上角按钮区域，避免 drag hitmask 与 WindowControls 重叠。 */}
+          <div aria-hidden="true" className={cn('titlebar-drag-region pointer-events-none absolute inset-y-0 left-0', isWindows ? WINDOW_CONTROLS_INSET_RIGHT : 'right-0')} />
+          <Globe2 className="mr-2 size-4 shrink-0 text-primary" />
+          <h1 className="truncate text-xs font-medium text-foreground">
+            受管浏览器{state?.title ? ` – ${state.title}` : ''}
+          </h1>
+        </header>
+        <div className="min-h-0 flex-1">
+          <BrowserPanel
+            sessionId={sessionId}
+            state={state}
+            onMinimize={() => {}}
+            onClose={() => window.close()}
+            inDetachedWindow
+          />
+        </div>
       </div>
     </TooltipProvider>
   )
