@@ -157,7 +157,8 @@ function parseVisionResult(content: string, filename: string): VisionRelayResult
 }
 
 export function isVisionRelayEligibleForModel(modelId: string | undefined): boolean {
-  return /^deepseek-v4-(?:pro|flash)$/i.test(modelId?.trim() ?? '')
+  // Flash 与 Flash Vision Exp 已支持原生视觉；仅 Pro 仍需经独立视觉模型转发。
+  return /^deepseek-v4-pro$/i.test(modelId?.trim() ?? '')
 }
 
 export function isVisionRelayConfigured(): boolean {

@@ -1164,7 +1164,7 @@ export async function buildPiBuiltinTools(
     console.error('[Pi 桥接] 注入受管浏览器工具失败:', error)
   }
 
-  // 视觉助手仅在明确不支持视觉的 DeepSeek V4 用户会话中按需出现。
+  // 视觉助手仅在仍不支持原生视觉的 DeepSeek V4 Pro 用户会话中按需出现。
   try {
     tools.push(...buildVisionRelayTools(sdk, ctx))
   } catch (error) {

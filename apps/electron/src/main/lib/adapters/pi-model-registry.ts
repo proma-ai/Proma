@@ -257,6 +257,26 @@ function createXaiRuntimeCredentialStore(
   }
 }
 
+/**
+ * Pi 0.84.2 的内置 catalog 尚未声明以下 DeepSeek V4 Flash 变体的原生视觉。
+ * 在上游目录同步前，本地覆盖只扩展 input，不改变实际模型 ID、协议或推理参数。
+ */
+const DEEPSEEK_V4_FLASH_VISION_MODEL_IDS = new Set([
+  'deepseek-v4-flash',
+  'deepseek-v4-flash-vision-exp',
+])
+
+/** 判断模型是否已确认支持原生图片输入。 */
+export function supportsPiNativeImageInput(modelId: string | undefined): boolean {
+  const normalized = stripLegacyAgentSdkContextSuffix(modelId)?.trim().toLowerCase()
+  return normalized !== undefined && DEEPSEEK_V4_FLASH_VISION_MODEL_IDS.has(normalized)
+}
+
+function applyPiModelCapabilityOverrides(model: PiCatalogModel | undefined): PiCatalogModel | undefined {
+  if (!model || !supportsPiNativeImageInput(model.id) || model.input.includes('image')) return model
+  return { ...model, input: [...model.input, 'image'] }
+}
+
 const CODEX_MODEL_PATCHES: PiCatalogModelPatch[] = [
   {
     id: 'gpt-5.4',
@@ -385,8 +405,10 @@ function candidatePiProviders(provider: ProviderType): KnownProvider[] {
 function findCatalogModelById(models: readonly PiCatalogModel[], modelId: string): PiCatalogModel | undefined {
   const normalized = modelId.toLowerCase()
   // ID 是渠道实际发送到上游的稳定标识；同名展示名称只能在没有 ID 命中时兜底。
-  return models.find((model) => model.id.toLowerCase() === normalized)
-    ?? models.find((model) => model.name.toLowerCase() === normalized)
+  return applyPiModelCapabilityOverrides(
+    models.find((model) => model.id.toLowerCase() === normalized)
+      ?? models.find((model) => model.name.toLowerCase() === normalized),
+  )
 }
 
 /**
@@ -478,6 +500,8 @@ export async function resolvePiImageInputCapability(
 ): Promise<'supported' | 'unsupported' | 'unknown'> {
   const resolvedModelId = stripLegacyAgentSdkContextSuffix(modelId)
   if (!resolvedModelId) return 'unknown'
+  // 实验变体尚未进入 Pi catalog，不能因目录缺失退回 unknown。
+  if (supportsPiNativeImageInput(resolvedModelId)) return 'supported'
   const catalogModel = await findPiCatalogModel(provider, resolvedModelId)
   if (!catalogModel) return 'unknown'
   return catalogModel.input.includes('image') ? 'supported' : 'unsupported'
