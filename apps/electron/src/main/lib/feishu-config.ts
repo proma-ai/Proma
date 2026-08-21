@@ -13,6 +13,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { safeStorage } from 'electron'
 import { getFeishuConfigPath } from './config-paths'
 import { redactSensitiveLogValue } from './bridge-log-redaction'
+import { normalizeFeishuDomain } from './feishu-domain'
 import type {
   FeishuConfig,
   FeishuConfigInput,
@@ -63,6 +64,7 @@ function migrateV1ToV2(v1: FeishuConfig): FeishuMultiBotConfig {
     appId: v1.appId,
     appSecret: v1.appSecret,
     defaultWorkspaceId: v1.defaultWorkspaceId,
+    domain: normalizeFeishuDomain(v1.domain),
   }
   return { version: 2, bots: [bot] }
 }
@@ -130,6 +132,7 @@ export function saveFeishuBotConfig(input: FeishuBotConfigInput): FeishuBotConfi
       enabled: input.enabled,
       appId: input.appId.trim(),
       appSecret: input.appSecret ? encryptSecret(input.appSecret) : existing.appSecret,
+      domain: normalizeFeishuDomain(input.domain ?? existing.domain),
       defaultWorkspaceId: input.defaultWorkspaceId ?? existing.defaultWorkspaceId,
       defaultChannelId: input.defaultChannelId ?? existing.defaultChannelId,
       defaultModelId: input.defaultModelId ?? existing.defaultModelId,
@@ -147,6 +150,7 @@ export function saveFeishuBotConfig(input: FeishuBotConfigInput): FeishuBotConfi
     enabled: input.enabled,
     appId: input.appId.trim(),
     appSecret: input.appSecret ? encryptSecret(input.appSecret) : '',
+    domain: normalizeFeishuDomain(input.domain),
     defaultWorkspaceId: input.defaultWorkspaceId,
     defaultChannelId: input.defaultChannelId,
     defaultModelId: input.defaultModelId,
@@ -188,6 +192,7 @@ export function getFeishuConfig(): FeishuConfig {
     enabled: first.enabled,
     appId: first.appId,
     appSecret: first.appSecret,
+    domain: first.domain,
     defaultWorkspaceId: first.defaultWorkspaceId,
   }
 }
@@ -202,6 +207,7 @@ export function saveFeishuConfig(input: FeishuConfigInput): FeishuConfig {
     enabled: input.enabled,
     appId: input.appId,
     appSecret: input.appSecret,
+    domain: input.domain ?? first?.domain,
     defaultWorkspaceId: input.defaultWorkspaceId,
     defaultChannelId: first?.defaultChannelId,
     defaultModelId: first?.defaultModelId,

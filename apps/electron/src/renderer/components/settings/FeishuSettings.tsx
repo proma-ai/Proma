@@ -56,7 +56,7 @@ import {
   type FeishuBindingTypeFilter,
   type FeishuBindingViewMode,
 } from '@/lib/feishu-bindings'
-import type { AgentSessionMeta, AgentWorkspace, FeishuTestResult, FeishuChatBinding, FeishuBotConfig, FeishuBotBridgeState, FeishuRegisterAppQRCode, FeishuRegisterAppStatus, FeishuSessionMirrorSettings, FeishuSessionSyncMode } from '@proma/shared'
+import type { AgentSessionMeta, AgentWorkspace, FeishuTestResult, FeishuChatBinding, FeishuBotConfig, FeishuBotBridgeState, FeishuDomain, FeishuRegisterAppQRCode, FeishuRegisterAppStatus, FeishuSessionMirrorSettings, FeishuSessionSyncMode } from '@proma/shared'
 
 // ===== 常量 =====
 
@@ -883,8 +883,8 @@ function CliRecommendationCard(): React.ReactElement {
 interface RegisterFeishuDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  /** 注册成功后回调，返回主进程拿到的 App ID/Secret 与扫码用户身份；上层应在此处保存配置并启动 Bot */
-  onSuccess: (result: { appId: string; appSecret: string; operatorOpenId?: string }) => void
+  /** 注册成功后回调，返回主进程拿到的 App ID/Secret、平台域与扫码用户身份；上层应在此处保存配置并启动 Bot */
+  onSuccess: (result: { appId: string; appSecret: string; tenantBrand?: FeishuDomain; operatorOpenId?: string }) => void
 }
 
 /** 扫码注册飞书 Bot：弹窗内全程引导，扫码成功后自动保存配置并启动 Bot */
@@ -926,6 +926,7 @@ function RegisterFeishuDialog({ open, onOpenChange, onSuccess }: RegisterFeishuD
         onSuccessRef.current({
           appId: result.appId,
           appSecret: result.appSecret,
+          tenantBrand: result.tenantBrand,
           operatorOpenId: result.operatorOpenId,
         })
       })
@@ -1207,6 +1208,7 @@ function BotConfigCard({ bot, state, onSaved, onRemoved }: BotConfigCardProps): 
   const setBotStates = useSetAtom(feishuBotStatesAtom)
   const [name, setName] = React.useState(bot.name)
   const [appId, setAppId] = React.useState(bot.appId)
+  const [domain, setDomain] = React.useState<FeishuDomain>(bot.domain ?? 'feishu')
   const [appSecret, setAppSecret] = React.useState('')
   const [testing, setTesting] = React.useState(false)
   const [testResult, setTestResult] = React.useState<FeishuTestResult | null>(null)
@@ -1238,6 +1240,7 @@ function BotConfigCard({ bot, state, onSaved, onRemoved }: BotConfigCardProps): 
         enabled: true,
         appId: appId.trim(),
         appSecret: appSecret || '',
+        domain,
         defaultWorkspaceId: bot.defaultWorkspaceId,
         defaultChannelId: bot.defaultChannelId,
         defaultModelId: bot.defaultModelId,
@@ -1247,21 +1250,21 @@ function BotConfigCard({ bot, state, onSaved, onRemoved }: BotConfigCardProps): 
     } catch {
       toast.error('保存配置失败')
     }
-  }, [bot.id, name, appId, appSecret, onSaved])
+  }, [bot.id, name, appId, appSecret, domain, onSaved])
 
   const handleTest = React.useCallback(async () => {
     if (!appId.trim() || !appSecret.trim()) return
     setTesting(true)
     setTestResult(null)
     try {
-      const result = await window.electronAPI.testFeishuConnection(appId.trim(), appSecret.trim())
+      const result = await window.electronAPI.testFeishuConnection(appId.trim(), appSecret.trim(), domain)
       setTestResult(result)
     } catch (err) {
       setTestResult({ success: false, message: `测试失败: ${err instanceof Error ? err.message : String(err)}` })
     } finally {
       setTesting(false)
     }
-  }, [appId, appSecret])
+  }, [appId, appSecret, domain])
 
   /** 操作完成后主动拉取最新状态，确保 UI 同步 */
   const refreshBotStates = React.useCallback(async () => {
@@ -1374,6 +1377,19 @@ function BotConfigCard({ bot, state, onSaved, onRemoved }: BotConfigCardProps): 
             onChange={setAppSecret}
             placeholder="输入 App Secret"
           />
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">平台</label>
+            <Select value={domain} onValueChange={(value) => setDomain(value as FeishuDomain)}>
+              <SelectTrigger className="h-9">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="feishu">飞书中国大陆</SelectItem>
+                <SelectItem value="lark">Lark 国际版</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
           <div className="flex items-center gap-3">
             <Button size="sm" variant="outline" onClick={handleTest}
@@ -1496,7 +1512,7 @@ function FeishuConfigTab(): React.ReactElement {
   const [registerOpen, setRegisterOpen] = React.useState(false)
 
   /** 扫码成功后：保存配置 + 自动启动 Bot */
-  const handleRegisterSuccess = React.useCallback(async (result: { appId: string; appSecret: string; operatorOpenId?: string }) => {
+  const handleRegisterSuccess = React.useCallback(async (result: { appId: string; appSecret: string; tenantBrand?: FeishuDomain; operatorOpenId?: string }) => {
     try {
       const saved = await window.electronAPI.saveFeishuBotConfig({
         name: defaultBotName(bots.length),
@@ -1506,6 +1522,7 @@ function FeishuConfigTab(): React.ReactElement {
         defaultWorkspaceId: undefined,
         defaultChannelId: undefined,
         defaultModelId: undefined,
+        domain: result.tenantBrand === 'lark' ? 'lark' : 'feishu',
         operatorOpenId: result.operatorOpenId,
       })
       setBots((prev) => [...prev, saved])

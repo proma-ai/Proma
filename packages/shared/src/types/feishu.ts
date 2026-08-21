@@ -7,6 +7,9 @@
 
 // ===== 飞书 Bot 配置 =====
 
+/** 飞书平台域名 */
+export type FeishuDomain = 'feishu' | 'lark'
+
 /** 飞书 Bot 应用配置（持久化到 ~/.proma/feishu.json）— 旧格式，向后兼容 */
 export interface FeishuConfig {
   /** 是否启用飞书集成 */
@@ -15,6 +18,8 @@ export interface FeishuConfig {
   appId: string
   /** 飞书应用 App Secret（safeStorage 加密后的 base64 字符串） */
   appSecret: string
+  /** 飞书平台域名；缺省时按国内飞书处理 */
+  domain?: FeishuDomain
   /** 默认绑定的工作区 ID */
   defaultWorkspaceId?: string
 }
@@ -25,6 +30,8 @@ export interface FeishuConfigInput {
   appId: string
   /** 明文 App Secret */
   appSecret: string
+  /** 飞书平台域名；缺省时按国内飞书处理 */
+  domain?: FeishuDomain
   defaultWorkspaceId?: string
 }
 
@@ -42,6 +49,8 @@ export interface FeishuBotConfig {
   appId: string
   /** 飞书应用 App Secret（safeStorage 加密后的 base64 字符串） */
   appSecret: string
+  /** 飞书平台域名；缺省时按国内飞书处理 */
+  domain?: FeishuDomain
   /** 该 Bot 的默认工作区 ID */
   defaultWorkspaceId?: string
   /** 该 Bot 的默认渠道 ID */
@@ -68,6 +77,8 @@ export interface FeishuBotConfigInput {
   appId: string
   /** 明文 App Secret（空字符串表示不修改） */
   appSecret: string
+  /** 飞书平台域名；缺省时按国内飞书处理 */
+  domain?: FeishuDomain
   /** 默认工作区 ID */
   defaultWorkspaceId?: string
   /** 默认渠道 ID */

@@ -47,12 +47,9 @@ function CreateShortcutHint(): React.ReactElement | null {
 }
 
 export function PlanningView({ standalone = false }: { standalone?: boolean } = {}): React.ReactElement {
+  // planningTabAtom 的初始值为 Todo；保留当前标签可让定时任务编辑页返回到任务列表。
   const [tab, setTab] = useAtom(planningTabAtom)
   const isWindows = React.useMemo(() => detectIsWindows(), [])
-  React.useEffect(() => {
-    // Todo 是规划中心的默认落点；用户仍可在当前窗口切换到其他规划视图。
-    setTab('todos')
-  }, [setTab])
   const automations = useAtomValue(automationsAtom)
   const setAutomationForm = useSetAtom(automationFormAtom)
   const requestTodoCreate = useSetAtom(planningTodoCreateRequestAtom)

@@ -33,6 +33,7 @@ export interface AgentSkillsData {
   toggleSkill: (slug: string, enabled: boolean) => Promise<void>
   deleteSkill: (slug: string, name: string) => Promise<boolean>
   updateSkill: (slug: string) => Promise<void>
+  refreshMcpConfig: () => Promise<void>
   toggleMcp: (name: string, enabled: boolean) => Promise<void>
   toggleBuiltinMcp: (id: string, enabled: boolean) => Promise<void>
   deleteMcp: (name: string) => Promise<void>
@@ -156,6 +157,16 @@ export function useAgentSkillsData(): AgentSkillsData {
     }
   }, [workspaceSlug, updatingSkill, skills, bumpCapabilitiesVersion])
 
+  const refreshMcpConfig = React.useCallback(async () => {
+    if (!workspaceSlug) return
+    try {
+      const config = await window.electronAPI.getWorkspaceMcpConfig(workspaceSlug)
+      setMcpConfig(config)
+    } catch (error) {
+      console.error('[Agent 技能] 刷新 MCP 配置失败:', error)
+    }
+  }, [workspaceSlug])
+
   const toggleMcp = React.useCallback(async (name: string, enabled: boolean) => {
     try {
       const entry = mcpConfig.servers[name]
@@ -217,6 +228,7 @@ export function useAgentSkillsData(): AgentSkillsData {
     toggleSkill,
     deleteSkill,
     updateSkill,
+    refreshMcpConfig,
     toggleMcp,
     toggleBuiltinMcp,
     deleteMcp,

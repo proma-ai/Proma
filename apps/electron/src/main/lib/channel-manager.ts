@@ -34,6 +34,7 @@ import {
   parseZhipuTeamCredentials,
   PROMA_OFFICIAL_CHANNEL_ID,
   PROVIDER_DEFAULT_URLS,
+  VOLCENGINE_CODING_PLAN_MODELS,
   parseCodexCredentials,
   serializeCodexCredentials,
   isCodexCredentialExpired,
@@ -61,7 +62,7 @@ import { normalizeHttpResponse, normalizeRequestError } from './channel-test-err
 import pkg from '../../../package.json' with { type: 'json' }
 
 /** 当前配置版本 */
-const CONFIG_VERSION = 8
+const CONFIG_VERSION = 9
 
 // v6 前 OpenAI 兼容渠道使用的旧火山方舟地址。
 const LEGACY_VOLCENGINE_OPENAI_URLS: Partial<Record<ProviderType, string>> = {
@@ -188,10 +189,14 @@ function cloneModels(models: ChannelModel[]): ChannelModel[] {
   return models.map((model) => ({ ...model }))
 }
 
-function createPresetModelsResult(providerName: string, models: ChannelModel[]): FetchModelsResult {
+function createPresetModelsResult(
+  providerName: string,
+  models: ChannelModel[],
+  reason = '未开放模型列表端点',
+): FetchModelsResult {
   return {
     success: true,
-    message: `${providerName} 未开放模型列表端点，已加载 ${models.length} 个预设模型`,
+    message: `${providerName} ${reason}，已加载 ${models.length} 个预设模型`,
     models: cloneModels(models),
   }
 }
@@ -272,6 +277,9 @@ function inferProviderFromBaseUrl(provider: ProviderType, baseUrl: string): Prov
  *
  * v7 → v8：在商业版既有 schema 上吸收上游的火山渠道展示名称；仅更新旧默认名称。
  *
+ * v8 → v9：将仍使用 DashScope 默认 Anthropic 兼容端点的通义千问渠道切换到 OpenAI 兼容端点；
+ * 用户自定义 Anthropic 地址不迁移，以免变更其显式协议选择。
+ *
  * @returns 迁移后的配置；`changed` 标记是否发生实际变更（决定是否需要回写文件）
  */
 function migrateConfig(config: ChannelsConfig): { config: ChannelsConfig; changed: boolean; removed: Channel[] } {
@@ -320,6 +328,15 @@ function migrateConfig(config: ChannelsConfig): { config: ChannelsConfig; change
         return { ...channel, name: '火山引擎 API' }
       }
       return channel
+    })
+  }
+
+  if (version < 9) {
+    channels = channels.map((channel) => {
+      if (channel.provider !== 'qwen-anthropic'
+        || normalizeBaseUrl(channel.baseUrl) !== normalizeBaseUrl(PROVIDER_DEFAULT_URLS['qwen-anthropic'])) return channel
+      console.log(`[渠道管理] v${version}→v9 迁移渠道 ${channel.name}：通义千问 Anthropic 兼容端点 → OpenAI 兼容端点`)
+      return { ...channel, provider: 'qwen', baseUrl: PROVIDER_DEFAULT_URLS.qwen }
     })
   }
 
@@ -2125,6 +2142,13 @@ export async function fetchModels(input: FetchModelsInput): Promise<FetchModelsR
       case 'doubao-api':
       case 'qwen':
       case 'custom':
+        if (provider === 'doubao') {
+          return createPresetModelsResult(
+            '火山方舟 Coding Plan',
+            [...VOLCENGINE_CODING_PLAN_MODELS],
+            '使用套餐支持清单，不采用通用 /models 目录',
+          )
+        }
         return await fetchOpenAICompatibleModels(input.baseUrl, input.apiKey, proxyUrl, provider)
       case 'google':
         return await fetchGoogleModels(input.baseUrl, input.apiKey, proxyUrl)

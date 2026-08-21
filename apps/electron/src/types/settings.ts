@@ -9,8 +9,11 @@ import type { EnvironmentCheckResult, ThinkingConfig, AgentEffort, AgentThinking
 /** 通知音场景类型 */
 export type NotificationSoundType = 'taskComplete' | 'permissionRequest' | 'exitPlanMode' | 'planningReminder'
 
+/** UI SFX 音效主题。旧 ID 保留用于兼容已有设置。 */
+export type NotificationSoundPackId = 'minimal' | 'soft' | 'glass' | 'arcade' | 'mechanical' | 'organic' | 'dreamy' | 'scifi' | 'rubber' | 'cinematic' | 'studio' | 'zen'
+
 /** 可选通知音 ID */
-export type NotificationSoundId = 'ding' | 'ding-dong' | 'discord' | 'done' | 'down-power' | 'food' | 'lite' | 'quiet' | 'none'
+export type NotificationSoundId = NotificationSoundPackId | 'ding' | 'ding-dong' | 'discord' | 'done' | 'down-power' | 'food' | 'lite' | 'quiet' | 'none'
 
 /** 各场景通知音配置 */
 export interface NotificationSoundSettings {

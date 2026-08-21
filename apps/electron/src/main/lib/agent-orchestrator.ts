@@ -1429,8 +1429,19 @@ export class AgentOrchestrator {
       const maxTurns = appSettings.agentMaxTurns && appSettings.agentMaxTurns > 0
         ? appSettings.agentMaxTurns
         : undefined
-      const piReasoningCapability = await resolvePiReasoningCapability(channel.provider, selectedModelId)
-      const piThinkingLevel = resolvePiThinkingLevel(appSettings, sessionMeta, channel.provider, selectedModelId, piReasoningCapability)
+      const piReasoningCapability = await resolvePiReasoningCapability(
+        channel.provider,
+        selectedModelId,
+        selectedOfficialAgentModel?.apiProtocol,
+      )
+      const piThinkingLevel = resolvePiThinkingLevel(
+        appSettings,
+        sessionMeta,
+        channel.provider,
+        selectedModelId,
+        piReasoningCapability,
+        selectedOfficialAgentModel?.apiProtocol,
+      )
       const projectInstructions = workspaceSlug
         ? (() => {
             try {

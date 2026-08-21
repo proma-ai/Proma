@@ -34,6 +34,7 @@ import {
   PROVIDER_DEFAULT_URLS,
   PROVIDER_LABELS,
   PROMA_OFFICIAL_CHANNEL_ID,
+  VOLCENGINE_CODING_PLAN_MODELS,
   parseZhipuTeamCredentials,
   parseCodexCredentials,
   parseXaiCredentials,
@@ -76,8 +77,8 @@ interface ChannelFormProps {
   onCancel: () => void
 }
 
-/** 所有可选的商业版内置供应商。`qwen` 仅为兼容存量渠道保留；第三方中转 provider 不在 UI 开放。 */
-const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'openai', 'openai-responses', 'openai-codex', 'xai', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'opencode-go-openai', 'zhipu', 'zhipu-coding', 'zhipu-coding-team', 'ark-coding-plan', 'doubao', 'doubao-api', 'minimax', 'qwen-anthropic', 'qwen-token-plan', 'xiaomi', 'xiaomi-token-plan']
+/** 商业版仅开放供应商官方 API；`qwen-anthropic` 仅兼容存量配置。 */
+const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'openai', 'openai-responses', 'openai-codex', 'xai', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'opencode-go-openai', 'zhipu', 'zhipu-coding', 'zhipu-coding-team', 'ark-coding-plan', 'doubao', 'doubao-api', 'minimax', 'qwen', 'qwen-token-plan', 'xiaomi', 'xiaomi-token-plan']
 
 /** 需要用 messages 端点测试的供应商预设模型 */
 const PROVIDER_TEST_MODEL_PRESETS: Partial<Record<ProviderType, string[]>> = {
@@ -433,7 +434,7 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
           { id: 'glm-5.3', name: 'GLM-5.3', enabled: true },
           { id: 'glm-5.1', name: 'GLM-5.1', enabled: false },
         ])
-      } else if (p === 'ark-coding-plan' || p === 'doubao') {
+      } else if (p === 'ark-coding-plan') {
         setModels([
           { id: 'doubao-seed-2.1-pro', name: 'Doubao Seed 2.1 Pro', enabled: true },
           { id: 'doubao-seed-2.1-turbo', name: 'Doubao Seed 2.1 Turbo', enabled: true },
@@ -447,6 +448,8 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
           { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true },
           { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', enabled: true },
         ])
+      } else if (p === 'doubao') {
+        setModels(VOLCENGINE_CODING_PLAN_MODELS.map((model) => ({ ...model })))
       } else if (p === 'minimax') {
         setModels([
           { id: 'MiniMax-M3', name: 'MiniMax-M3', enabled: true },
@@ -460,7 +463,7 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
           { id: 'mimo-v2-omni', name: 'MiMo V2 Omni', enabled: true },
           { id: 'mimo-v2-flash', name: 'MiMo V2 Flash', enabled: true },
         ])
-      } else if (p === 'qwen-anthropic') {
+      } else if (p === 'qwen') {
         setModels([
           { id: 'qwen3.7-max', name: 'Qwen3.7 Max', enabled: true },
           { id: 'qwen3.7-plus', name: 'Qwen3.7 Plus', enabled: true },
@@ -754,13 +757,13 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
   const hasNoModels = !isEdit && models.length === 0
 
   /**
-   * 编辑模式下若当前 provider 已从新建下拉移除（如旧版 'qwen'），
+   * 编辑模式下若当前 provider 已从新建下拉移除（如旧版 'qwen-anthropic'），
    * 动态追加对应选项，避免 SettingsSelect 因找不到 value 而显示占位符。
    */
   const providerSelectOptions = React.useMemo(() => {
-    // 仅为上游已弃用、但仍允许保留的 qwen 渠道提供编辑兼容项。
+    // 仅为上游已弃用、但仍允许保留的 qwen-anthropic 渠道提供编辑兼容项。
     // 禁用的 custom / anthropic-compatible 绝不能因此重新出现在 UI 中。
-    if (isEdit && provider === 'qwen') {
+    if (isEdit && provider === 'qwen-anthropic') {
       return [
         ...PROVIDER_SELECT_OPTIONS,
         { value: provider, label: PROVIDER_LABELS[provider], icon: getProviderLogo(provider) },

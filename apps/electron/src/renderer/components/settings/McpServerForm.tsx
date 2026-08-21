@@ -154,7 +154,6 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
   const isFirstRenderRef = React.useRef(true)
   const mountedRef = React.useRef(true)
   const [saveStatus, setSaveStatus] = React.useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
-  const lastSavedEnabledRef = React.useRef(server?.entry.enabled ?? false)
 
   // 保留最新表单值，供 unmount 时 flush 待保存变更
   const latestValuesRef = React.useRef({
@@ -216,10 +215,9 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
       }
       await window.electronAPI.saveWorkspaceMcpConfig(workspaceSlug, newConfig)
       if (generation === saveGenerationRef.current && mountedRef.current) {
-        if (entry.enabled !== lastSavedEnabledRef.current) {
-          lastSavedEnabledRef.current = entry.enabled
-          onChanged?.()
-        }
+        // 编辑抽屉外的 MCP 卡片使用独立快照；每次持久化后通知其局部重读，
+        // 让测试结果无需离开再进入页面即可同步显示。
+        onChanged?.()
         setSaveStatus('saved')
         setTimeout(() => {
           if (generation === saveGenerationRef.current && mountedRef.current) {
