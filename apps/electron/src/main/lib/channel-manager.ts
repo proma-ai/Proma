@@ -59,6 +59,7 @@ import {
   resolveOpenAIModelsUrl,
 } from '@proma/core'
 import { normalizeHttpResponse, normalizeRequestError } from './channel-test-error'
+import { applyOfficialModelEnabledStates } from './official-channel-models'
 import pkg from '../../../package.json' with { type: 'json' }
 
 /** 当前配置版本 */
@@ -117,6 +118,7 @@ function assertCommercialChannelInputAllowed(input: Pick<ChannelCreateInput, 'pr
 const DEEPSEEK_PRESET_MODELS: ChannelModel[] = [
   { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', enabled: true },
   { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true },
+  { id: 'deepseek-v4-flash-vision-exp', name: 'DeepSeek V4 Flash Vision Exp', enabled: true },
 ]
 const KIMI_PRESET_MODELS: ChannelModel[] = [
   { id: 'kimi-k3', name: 'Kimi K3', enabled: true },
@@ -150,13 +152,16 @@ const ARK_CODING_PLAN_MODELS: ChannelModel[] = [
 /**
  * 一次性预设更新 ID。独立于配置 schema 版本，保证高版本配置也能收到新增候选模型。
  */
-const GLM_53_PRESET_MODEL_UPDATE_ID = 'glm-5.3-candidates-v1'
+const PRESET_MODEL_CANDIDATE_UPDATE_ID = 'model-candidates-v2'
 
 /**
  * 本次预设更新向存量渠道追加的候选模型，默认禁用。
  * 不在每次启动时按完整预设列表补齐，以尊重用户主动删除过的模型。
  */
-const GLM_53_PRESET_MODEL_CANDIDATES: Partial<Record<ProviderType, readonly ChannelModel[]>> = {
+const PRESET_MODEL_CANDIDATES: Partial<Record<ProviderType, readonly ChannelModel[]>> = {
+  deepseek: [
+    { id: 'deepseek-v4-flash-vision-exp', name: 'DeepSeek V4 Flash Vision Exp', enabled: false },
+  ],
   'ark-coding-plan': [
     { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
   ],
@@ -358,19 +363,27 @@ function migrateConfig(config: ChannelsConfig): { config: ChannelsConfig; change
  */
 function applyPresetModelCandidateUpdates(config: ChannelsConfig): { config: ChannelsConfig; changed: boolean } {
   const appliedUpdates = new Set(config.appliedPresetModelUpdates ?? [])
-  if (appliedUpdates.has(GLM_53_PRESET_MODEL_UPDATE_ID)) return { config, changed: false }
+  if (appliedUpdates.has(PRESET_MODEL_CANDIDATE_UPDATE_ID)) {
+    return { config, changed: false }
+  }
 
   const channels = config.channels.map((channel) => {
-    const candidates = GLM_53_PRESET_MODEL_CANDIDATES[channel.provider]
+    const candidates = PRESET_MODEL_CANDIDATES[channel.provider]
     if (!candidates) return channel
     const existingModelIds = new Set(channel.models.map((model) => model.id))
     const missingCandidates = candidates.filter((model) => !existingModelIds.has(model.id))
     if (missingCandidates.length === 0) return channel
-    console.log(`[渠道管理] 预设更新 ${GLM_53_PRESET_MODEL_UPDATE_ID} 为渠道 ${channel.name} (${channel.provider}) 添加 ${missingCandidates.length} 个候选模型`)
-    return { ...channel, models: [...channel.models, ...cloneModels(missingCandidates)] }
+
+    console.log(
+      `[渠道管理] 预设更新 ${PRESET_MODEL_CANDIDATE_UPDATE_ID} 为渠道 ${channel.name} (${channel.provider}) 添加 ${missingCandidates.length} 个候选模型`,
+    )
+    return {
+      ...channel,
+      models: [...channel.models, ...cloneModels(missingCandidates)],
+    }
   })
 
-  appliedUpdates.add(GLM_53_PRESET_MODEL_UPDATE_ID)
+  appliedUpdates.add(PRESET_MODEL_CANDIDATE_UPDATE_ID)
   return {
     config: { ...config, channels, appliedPresetModelUpdates: [...appliedUpdates] },
     changed: true,
@@ -704,7 +717,7 @@ export function createChannel(input: ChannelCreateInput): Channel {
  * @returns 更新后的渠道
  */
 export function updateChannel(id: string, input: ChannelUpdateInput): Channel {
-  // Proma Cloud 模型和连接配置由服务端同步；用户仅可开关整个渠道。
+  // Proma Cloud 模型和连接配置由服务端同步；用户只能切换渠道或既有模型的 enabled 状态。
   if (
     id === PROMA_OFFICIAL_CHANNEL_ID
     && (input.name !== undefined
@@ -723,6 +736,9 @@ export function updateChannel(id: string, input: ChannelUpdateInput): Channel {
   }
 
   const existing = config.channels[index]!
+  const models = id === PROMA_OFFICIAL_CHANNEL_ID && input.models
+    ? applyOfficialModelEnabledStates(existing.models, input.models)
+    : (input.models ?? existing.models)
 
   const updated: Channel = {
     ...existing,
@@ -730,7 +746,7 @@ export function updateChannel(id: string, input: ChannelUpdateInput): Channel {
     provider: input.provider ?? existing.provider,
     baseUrl: input.baseUrl ?? existing.baseUrl,
     apiKey: input.apiKey ? encryptApiKey(input.apiKey) : existing.apiKey,
-    models: input.models ?? existing.models,
+    models,
     enabled: input.enabled ?? existing.enabled,
     updatedAt: Date.now(),
   }

@@ -269,6 +269,26 @@ function createXaiRuntimeCredentialStore(
   }
 }
 
+/**
+ * Pi 0.84.2 的内置 catalog 尚未声明以下 DeepSeek V4 Flash 变体的原生视觉。
+ * 在上游目录同步前，本地覆盖只扩展 input，不改变实际模型 ID、协议或推理参数。
+ */
+const DEEPSEEK_V4_FLASH_VISION_MODEL_IDS = new Set([
+  'deepseek-v4-flash',
+  'deepseek-v4-flash-vision-exp',
+])
+
+/** 判断模型是否已确认支持原生图片输入。 */
+export function supportsPiNativeImageInput(modelId: string | undefined): boolean {
+  const normalized = stripLegacyAgentSdkContextSuffix(modelId)?.trim().toLowerCase()
+  return normalized !== undefined && DEEPSEEK_V4_FLASH_VISION_MODEL_IDS.has(normalized)
+}
+
+function applyPiModelCapabilityOverrides(model: PiCatalogModel | undefined): PiCatalogModel | undefined {
+  if (!model || !supportsPiNativeImageInput(model.id) || model.input.includes('image')) return model
+  return { ...model, input: [...model.input, 'image'] }
+}
+
 const CODEX_MODEL_PATCHES: PiCatalogModelPatch[] = [
   {
     id: 'gpt-5.4',
@@ -431,8 +451,10 @@ function candidatePiProviders(provider: ProviderType): KnownProvider[] {
 function findCatalogModelById(models: readonly PiCatalogModel[], modelId: string): PiCatalogModel | undefined {
   const normalized = modelId.toLowerCase()
   // ID is the upstream request identifier; display-name matching is only a fallback.
-  return models.find((model) => model.id.toLowerCase() === normalized)
-    ?? models.find((model) => model.name.toLowerCase() === normalized)
+  return applyPiModelCapabilityOverrides(
+    models.find((model) => model.id.toLowerCase() === normalized)
+      ?? models.find((model) => model.name.toLowerCase() === normalized),
+  )
 }
 
 /**
@@ -519,14 +541,13 @@ function positiveInteger(value: number | undefined): number | undefined {
 }
 
 /**
- * Proma 官方 DeepSeek V4 当前上游只接受文本 content；不得把图片直接传给它。
- * 保持显式判断，避免 Pi catalog 缺失该模型时默认的 image fallback 重新放开能力。
+ * Proma 官方 DeepSeek V4 Pro 仍只接受文本 content；Flash 已确认支持原生图片输入。
+ * 保持 Pro 的显式限制，避免 catalog 缺失时的默认 image fallback 错误放开该模型。
  */
-function isOfficialDeepSeekV4TextOnly(provider: ProviderType, modelId: string | undefined): boolean {
+function isOfficialDeepSeekV4ProTextOnly(provider: ProviderType, modelId: string | undefined): boolean {
   if (provider !== 'proma') return false
   const normalized = stripLegacyAgentSdkContextSuffix(modelId)?.trim().toLowerCase()
-  const leafModelId = normalized?.split('/').pop()
-  return /^deepseek-v4(?:[-.]|$)/.test(leafModelId ?? '')
+  return normalized?.split('/').pop() === 'deepseek-v4-pro'
 }
 
 function resolvePiModelInput(
@@ -535,7 +556,7 @@ function resolvePiModelInput(
   catalogInput: PiCatalogModel['input'] | undefined,
 ): PiCatalogModel['input'] {
   const input: PiCatalogModel['input'] = catalogInput ? [...catalogInput] : ['text', 'image']
-  return isOfficialDeepSeekV4TextOnly(provider, modelId)
+  return isOfficialDeepSeekV4ProTextOnly(provider, modelId)
     ? input.filter((kind) => kind !== 'image')
     : input
 }
@@ -551,7 +572,9 @@ export async function resolvePiImageInputCapability(
 ): Promise<'supported' | 'unsupported' | 'unknown'> {
   const resolvedModelId = stripLegacyAgentSdkContextSuffix(modelId)
   if (!resolvedModelId) return 'unknown'
-  if (isOfficialDeepSeekV4TextOnly(provider, resolvedModelId)) return 'unsupported'
+  if (isOfficialDeepSeekV4ProTextOnly(provider, resolvedModelId)) return 'unsupported'
+  // Flash 实验变体尚未进入 Pi catalog，不能因目录缺失退回 unknown。
+  if (supportsPiNativeImageInput(resolvedModelId)) return 'supported'
   const catalogModel = await findPiCatalogModel(provider, resolvedModelId)
   if (!catalogModel) return 'unknown'
   return resolvePiModelInput(provider, resolvedModelId, catalogModel.input).includes('image')

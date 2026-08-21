@@ -41,7 +41,7 @@ export function VisionRelaySettings(): React.ReactElement {
     <div className="space-y-8">
       <SettingsSection
         title="视觉助手"
-        description="为不支持原生视觉的 Agent（当前为 DeepSeek V4）接入独立视觉模型。图片不会发送给当前 DeepSeek 渠道。"
+        description="为不支持原生视觉的 Agent（当前为 DeepSeek V4 Pro）接入独立视觉模型。图片不会发送给当前 DeepSeek 渠道。"
       >
         <SettingsCard>
           <SettingsRow

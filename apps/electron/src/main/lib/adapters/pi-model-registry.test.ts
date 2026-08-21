@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import {
   resolvePiApi,
+  resolvePiImageInputCapability,
   shouldForcePiAdaptiveThinking,
   shouldForcePromaOfficialClaudeAdaptiveThinking,
+  supportsPiNativeImageInput,
 } from './pi-model-registry'
 
 describe('shouldForcePiAdaptiveThinking', () => {
@@ -45,6 +47,18 @@ describe('shouldForcePiAdaptiveThinking', () => {
     }
     expect(shouldForcePromaOfficialClaudeAdaptiveThinking('gpt-5.6-terra', 'openai-responses', adaptiveAnthropicCatalog)).toBe(false)
     expect(shouldForcePromaOfficialClaudeAdaptiveThinking('k3', 'anthropic-messages', adaptiveAnthropicCatalog)).toBe(false)
+  })
+})
+
+describe('DeepSeek V4 native image input', () => {
+  test('Given an official Flash model absent from Pi catalog, when resolving capability, then treats it as supported', async () => {
+    expect(supportsPiNativeImageInput('deepseek-v4-flash[1m]')).toBe(true)
+    await expect(resolvePiImageInputCapability('proma', 'deepseek-v4-flash')).resolves.toBe('supported')
+  })
+
+  test('Given official DeepSeek V4 Pro, when resolving capability, then preserves the Vision Relay-only boundary', async () => {
+    expect(supportsPiNativeImageInput('deepseek-v4-pro')).toBe(false)
+    await expect(resolvePiImageInputCapability('proma', 'deepseek-v4-pro')).resolves.toBe('unsupported')
   })
 })
 
