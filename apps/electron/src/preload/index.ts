@@ -1009,7 +1009,7 @@ export interface ElectronAPI {
   /** 保存飞书配置（appSecret 为明文） */
   saveFeishuConfig: (input: FeishuConfigInput) => Promise<FeishuConfig>
   /** 测试飞书连接 */
-  testFeishuConnection: (appId: string, appSecret: string) => Promise<FeishuTestResult>
+  testFeishuConnection: (appId: string, appSecret: string, domain?: import('@proma/shared').FeishuDomain) => Promise<FeishuTestResult>
   /** 启动飞书 Bridge */
   startFeishuBridge: () => Promise<void>
   /** 停止飞书 Bridge */
@@ -2419,8 +2419,8 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(FEISHU_IPC_CHANNELS.SAVE_CONFIG, input)
   },
 
-  testFeishuConnection: (appId: string, appSecret: string) => {
-    return ipcRenderer.invoke(FEISHU_IPC_CHANNELS.TEST_CONNECTION, appId, appSecret)
+  testFeishuConnection: (appId: string, appSecret: string, domain?: import('@proma/shared').FeishuDomain) => {
+    return ipcRenderer.invoke(FEISHU_IPC_CHANNELS.TEST_CONNECTION, appId, appSecret, domain)
   },
 
   startFeishuBridge: () => {

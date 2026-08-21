@@ -4374,8 +4374,8 @@ export function registerIpcHandlers(): void {
   // 测试飞书连接
   ipcMain.handle(
     FEISHU_IPC_CHANNELS.TEST_CONNECTION,
-    async (_, appId: string, appSecret: string): Promise<FeishuTestResult> => {
-      return feishuBridgeManager.testConnection(appId, appSecret)
+    async (_, appId: string, appSecret: string, domain?: import('@proma/shared').FeishuDomain): Promise<FeishuTestResult> => {
+      return feishuBridgeManager.testConnection(appId, appSecret, domain)
     }
   )
 

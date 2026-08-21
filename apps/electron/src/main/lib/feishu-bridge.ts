@@ -96,6 +96,7 @@ import {
 } from './feishu/prompt-builder'
 
 import { redactSensitiveLogText, redactSensitiveLogValue } from './bridge-log-redaction'
+import { getFeishuApiBaseUrl, normalizeFeishuDomain } from './feishu-domain'
 
 // ===== 类型定义 =====
 
@@ -231,6 +232,8 @@ class FeishuBridge {
     try {
       const plainSecret = getDecryptedBotAppSecret(this.botConfig.id)
       const lark = await import('@larksuiteoapi/node-sdk')
+      const domain = normalizeFeishuDomain(this.botConfig.domain)
+      const apiBaseUrl = getFeishuApiBaseUrl(domain)
 
       // 用 createLarkChannel 替代 lark.Client + lark.WSClient + EventDispatcher 老组合
       // 关键收益：channel.on({cardAction}) 能拿到卡片按钮回调（老 WSClient.handleEventData
@@ -239,7 +242,7 @@ class FeishuBridge {
       this.channel = lark.createLarkChannel({
         appId,
         appSecret: plainSecret,
-        domain: lark.Domain.Feishu,
+        domain: domain === 'lark' ? lark.Domain.Lark : lark.Domain.Feishu,
         loggerLevel: lark.LoggerLevel.warn,
         policy: {
           dmMode: 'open',
@@ -261,7 +264,7 @@ class FeishuBridge {
           data?: { bot?: { open_id?: string; app_name?: string } }
         }>({
           method: 'GET',
-          url: 'https://open.feishu.cn/open-apis/bot/v3/info/',
+          url: `${apiBaseUrl}/open-apis/bot/v3/info/`,
         })
         console.log('[飞书 Bridge] Bot info 响应:', redactSensitiveLogValue(botInfoResp))
         // 飞书 API 返回 bot 在顶层，Lark SDK 可能包装在 data 下，兼容两种
@@ -617,12 +620,13 @@ class FeishuBridge {
 
   // ===== 连接测试 =====
 
-  async testConnection(appId: string, appSecret: string): Promise<FeishuTestResult> {
+  async testConnection(appId: string, appSecret: string, domain?: FeishuBotConfig['domain']): Promise<FeishuTestResult> {
     try {
       const lark = await import('@larksuiteoapi/node-sdk')
       const client = new lark.Client({
         appId,
         appSecret,
+        domain: normalizeFeishuDomain(domain) === 'lark' ? lark.Domain.Lark : lark.Domain.Feishu,
         appType: lark.AppType.SelfBuild,
       })
 
@@ -2067,7 +2071,7 @@ class FeishuBridge {
           data?: { bot?: { open_id?: string } }
         }>({
           method: 'GET',
-          url: 'https://open.feishu.cn/open-apis/bot/v3/info/',
+          url: `${getFeishuApiBaseUrl(this.botConfig.domain)}/open-apis/bot/v3/info/`,
         })
         this.botOpenId = botInfoResp?.bot?.open_id ?? botInfoResp?.data?.bot?.open_id ?? null
         if (this.botOpenId) {
