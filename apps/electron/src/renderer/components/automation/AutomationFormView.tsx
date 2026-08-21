@@ -609,7 +609,7 @@ export function AutomationFormView({ standalone = false }: { standalone?: boolea
             aria-label="返回任务列表"
           >
             <ArrowLeft className="size-3.5" />
-            <span>自动任务</span>
+            <span>定时任务</span>
           </button>
           <Clock className="size-4 text-primary flex-shrink-0" />
           {editingName ? (
