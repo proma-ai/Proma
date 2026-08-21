@@ -2,7 +2,7 @@ import { app, BrowserWindow, WebContentsView, session as electronSession, type D
 import path from 'node:path'
 import type { BrowserExecutionSource, BrowserOperationStatus, BrowserSessionClosed, BrowserTraceAction, BrowserTraceItem, BrowserViewLayout, BrowserViewState, BrowserTabState } from '@proma/shared'
 import { AGENT_IPC_CHANNELS } from '@proma/shared'
-import { assertSafeBrowserDestination, assertSafeBrowserDownloadUrl, assertSafeBrowserUrl, isSupportedBrowserPopupUrl, isTransientBrowserPopupUrl, USER_NEW_TAB_URL } from './browser-policy'
+import { assertSafeBrowserDestination, assertSafeBrowserDestinationWithFallback, assertSafeBrowserDownloadUrl, assertSafeBrowserUrl, isSupportedBrowserPopupUrl, isTransientBrowserPopupUrl, USER_NEW_TAB_URL } from './browser-policy'
 import { createAuthorizedPreviewUrl, isAuthorizedPreviewProtocol } from './browser-preview-service'
 import { handlePromaFileRequest } from './local-file-protocol'
 import { BrowserCdpTimeoutError, BrowserOperationAbortedError, BROWSER_OBSERVE_TIMEOUT_MS, resolveBrowserObserveAxDepth, throwIfBrowserOperationAborted, withBrowserCdpTimeout } from './browser-cdp'
@@ -23,6 +23,8 @@ const MAX_BACKGROUND_BROWSER_SESSIONS = 8
 const MAX_SCREENSHOT_BYTES = 3 * 1024 * 1024
 const ACTION_HIGHLIGHT_DURATION_MS = 900
 const MAX_BROWSER_SCRIPT_RESULT_CHARS = 64_000
+/** 国内网络下默认 Google 新标签页/搜索等待此时长后转向 Bing。 */
+const GOOGLE_DEFAULT_LOAD_TIMEOUT_MS = 3_000
 
 /** 下载文件名脱敏：去掉控制字符与路径穿越，替换 Windows 非法字符，兜底默认名，避免写入 Downloads 之外的路径。 */
 function sanitizeDownloadFilename(raw: string): string {
@@ -1081,9 +1083,23 @@ export class BrowserController {
     }
   }
 
-  private async loadUrl(tab: BrowserTabRecord, url: string, signal?: AbortSignal): Promise<void> {
+  private async loadUrl(tab: BrowserTabRecord, url: string, signal?: AbortSignal, timeoutMs = BROWSER_OBSERVE_TIMEOUT_MS + 3_000): Promise<void> {
     throwIfBrowserOperationAborted(signal)
-    await withBrowserCdpTimeout(() => tab.view.webContents.loadURL(url), 'Page.navigate', BROWSER_OBSERVE_TIMEOUT_MS + 3_000, signal)
+    await withBrowserCdpTimeout(() => tab.view.webContents.loadURL(url), 'Page.navigate', timeoutMs, signal)
+  }
+
+  /** 默认 Google 页面在 3 秒内未完成加载时停止旧导航，并在同一标签页加载 Bing。 */
+  private async loadUrlWithFallback(tab: BrowserTabRecord, url: string, fallbackUrl: string | undefined, signal?: AbortSignal): Promise<{ loadedUrl: string; usedFallback: boolean }> {
+    try {
+      await this.loadUrl(tab, url, signal, fallbackUrl ? GOOGLE_DEFAULT_LOAD_TIMEOUT_MS : undefined)
+      return { loadedUrl: url, usedFallback: false }
+    } catch (error) {
+      if (!fallbackUrl || !(error instanceof BrowserCdpTimeoutError)) throw error
+      try { tab.view.webContents.stop() } catch { /* WebContents 已销毁时由后续加载统一报错 */ }
+      throwIfBrowserOperationAborted(signal)
+      await this.loadUrl(tab, fallbackUrl, signal)
+      return { loadedUrl: fallbackUrl, usedFallback: true }
+    }
   }
 
   async navigate(sessionId: string, url: string, tabId?: string, signal?: AbortSignal): Promise<BrowserViewState> {
@@ -1092,14 +1108,15 @@ export class BrowserController {
     try {
       this.assertRiskDisclaimerAcknowledged()
       const tab = this.getAgentTab(browserSession, tabId)
-      const safeUrl = await assertSafeBrowserDestination(url)
-      const host = new URL(safeUrl).host
+      const destination = await assertSafeBrowserDestinationWithFallback(url)
+      const host = new URL(destination.url).host
       return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
         tab.isLocalPreview = false
         this.trace(browserSession, tab, 'navigate', `正在打开 ${host}`, 'dispatched')
         try {
-          await this.loadUrl(tab, safeUrl, operationSignal)
-          this.trace(browserSession, tab, 'navigate', `已打开 ${host}`, 'verified')
+          const result = await this.loadUrlWithFallback(tab, destination.url, destination.fallbackUrl, operationSignal)
+          const loadedHost = new URL(result.loadedUrl).host
+          this.trace(browserSession, tab, 'navigate', result.usedFallback ? `Google 在 3 秒内未响应，已改用 ${loadedHost}` : `已打开 ${loadedHost}`, 'verified')
           this.updateNavigationState(browserSession, tab)
           return structuredClone(this.buildState(browserSession))
         } catch (error) {
@@ -1119,14 +1136,15 @@ export class BrowserController {
     this.assertRiskDisclaimerAcknowledged()
     this.markUserBrowserContext(browserSession)
     const tab = this.getDisplayTab(browserSession, tabId)
-    const safeUrl = await assertSafeBrowserDestination(url)
-    const host = new URL(safeUrl).host
+    const destination = await assertSafeBrowserDestinationWithFallback(url)
+    const host = new URL(destination.url).host
     return this.runTabOperation(browserSession, tab, undefined, async () => {
       tab.isLocalPreview = false
       this.trace(browserSession, tab, 'navigate', `正在打开 ${host}`, 'dispatched')
       try {
-        await this.loadUrl(tab, safeUrl)
-        this.trace(browserSession, tab, 'navigate', `已打开 ${host}`, 'verified')
+        const result = await this.loadUrlWithFallback(tab, destination.url, destination.fallbackUrl)
+        const loadedHost = new URL(result.loadedUrl).host
+        this.trace(browserSession, tab, 'navigate', result.usedFallback ? `Google 在 3 秒内未响应，已改用 ${loadedHost}` : `已打开 ${loadedHost}`, 'verified')
         this.updateNavigationState(browserSession, tab)
         return structuredClone(this.buildState(browserSession))
       } catch (error) {

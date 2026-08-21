@@ -1,7 +1,15 @@
 /** 受管浏览器的 URL 规范化与合法性校验；保持无 Electron 依赖，便于在普通 Bun 测试中验证。 */
 
 const GOOGLE_SEARCH_URL = 'https://www.google.com/search'
+const BING_SEARCH_URL = 'https://www.bing.com/search'
 const USER_NEW_TAB_URL = 'https://www.google.com/'
+const USER_NEW_TAB_FALLBACK_URL = 'https://www.bing.com/'
+
+export interface BrowserDestination {
+  url: string
+  /** 仅默认 Google 新标签页和搜索词在 3 秒加载超时时回退。 */
+  fallbackUrl?: string
+}
 
 function isLoopbackAddress(hostname: string): boolean {
   const host = hostname.toLowerCase()
@@ -109,22 +117,43 @@ function isLikelyUrl(value: string): boolean {
  * 明确的 URL 和可识别的主机名保持直达，普通文本按搜索词处理。
  */
 export function resolveBrowserDestination(input: string): string {
+  return resolveBrowserDestinationWithFallback(input).url
+}
+
+/**
+ * 仅默认 Google 新标签页和由普通文本生成的 Google 搜索有 Bing 回退；用户输入的 URL 永远直达。
+ */
+export function resolveBrowserDestinationWithFallback(input: string): BrowserDestination {
   const value = input.trim()
   if (!value) throw new Error('浏览器地址或搜索内容不能为空。')
-  if (isLikelyUrl(value)) return normalizeBrowserUrl(value)
-  return `${GOOGLE_SEARCH_URL}?q=${encodeURIComponent(value)}`
+  if (value === USER_NEW_TAB_URL) return { url: USER_NEW_TAB_URL, fallbackUrl: USER_NEW_TAB_FALLBACK_URL }
+  if (isLikelyUrl(value)) return { url: normalizeBrowserUrl(value) }
+  const query = encodeURIComponent(value)
+  return {
+    url: `${GOOGLE_SEARCH_URL}?q=${query}`,
+    fallbackUrl: `${BING_SEARCH_URL}?q=${query}`,
+  }
 }
 
 /**
  * 仅拒绝空值或无法被 URL 标准解析的输入；搜索词会先被转换为 Google 搜索 URL。
  */
 export async function assertSafeBrowserDestination(input: string): Promise<string> {
-  const resolved = resolveBrowserDestination(input)
+  const destination = await assertSafeBrowserDestinationWithFallback(input)
+  return destination.url
+}
+
+/** 验证默认搜索及其回退地址，并保留是否允许回退的语义。 */
+export async function assertSafeBrowserDestinationWithFallback(input: string): Promise<BrowserDestination> {
+  const destination = resolveBrowserDestinationWithFallback(input)
   try {
-    return new URL(resolved).toString()
+    return {
+      url: new URL(destination.url).toString(),
+      ...(destination.fallbackUrl ? { fallbackUrl: new URL(destination.fallbackUrl).toString() } : {}),
+    }
   } catch {
     throw new Error('浏览器地址或搜索内容无效。')
   }
 }
 
-export { GOOGLE_SEARCH_URL, USER_NEW_TAB_URL }
+export { BING_SEARCH_URL, GOOGLE_SEARCH_URL, USER_NEW_TAB_FALLBACK_URL, USER_NEW_TAB_URL }
