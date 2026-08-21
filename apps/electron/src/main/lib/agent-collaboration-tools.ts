@@ -29,6 +29,8 @@ import {
   stopRegisteredAgent,
 } from './agent-headless-runner-registry'
 import {
+  DEFAULT_DELEGATION_WAIT_SECONDS,
+  MAX_DELEGATION_WAIT_SECONDS,
   MAX_RUNNING_DELEGATIONS_PER_PARENT,
   buildRecoveredDelegationState,
   buildDelegationTaskWithSharedContext,
@@ -71,8 +73,6 @@ interface DelegationRecord {
 }
 
 
-const MAX_WAIT_SECONDS = 2 * 60 * 60
-const DEFAULT_WAIT_SECONDS = 30 * 60
 const RESULT_SUMMARY_CHAR_LIMIT = 50_000
 const DELEGATION_GOAL_CHAR_LIMIT = 1_000
 /** live Map 中保留的已结束委派上限，超出时按完成时间清理最老的（持久化仍可回查） */
@@ -858,7 +858,7 @@ export function buildPiCollaborationTools(
         delegationIds: Type.Optional(Type.Array(Type.String(), { description: '要等待的委派 ID' })),
         mode: Type.Optional(Type.Union([Type.Literal('all'), Type.Literal('any')])),
         minCompleted: Type.Optional(Type.Number({ description: 'mode=any 时至少等待完成的数量，默认 1' })),
-        timeoutSeconds: Type.Optional(Type.Number({ description: '最长等待秒数，默认 1800' })),
+        timeoutSeconds: Type.Optional(Type.Number({ description: '最长等待秒数，默认 3600；最大 7200' })),
       }),
       async execute(_toolCallId: string, params: unknown) {
         const args = params as { delegationIds?: string[]; mode?: 'all' | 'any'; minCompleted?: number; timeoutSeconds?: number }
@@ -874,7 +874,10 @@ export function buildPiCollaborationTools(
         }
         const mode = args.mode ?? 'all'
         const minCompleted = args.minCompleted ?? 1
-        const timeoutSeconds = Math.min(args.timeoutSeconds ?? DEFAULT_WAIT_SECONDS, MAX_WAIT_SECONDS)
+        const timeoutSeconds = Math.min(
+          args.timeoutSeconds ?? DEFAULT_DELEGATION_WAIT_SECONDS,
+          MAX_DELEGATION_WAIT_SECONDS,
+        )
         const targetCompleted = mode === 'all' ? totalTargets : Math.max(1, Math.min(minCompleted, totalTargets))
         const liveTarget = Math.max(0, targetCompleted - settled.length)
         const waitResult = liveRecords.length > 0
@@ -1058,7 +1061,10 @@ export function buildPiCollaborationTools(
           })
         })
 
-        const timeout = new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), DEFAULT_WAIT_SECONDS * 1000))
+        const timeout = new Promise<'timeout'>((resolve) => setTimeout(
+          () => resolve('timeout'),
+          DEFAULT_DELEGATION_WAIT_SECONDS * 1000,
+        ))
         await Promise.race([record.completion, timeout])
 
         return piJsonResult({

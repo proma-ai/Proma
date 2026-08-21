@@ -18,6 +18,10 @@ const PERMISSION_RANK: Record<PromaPermissionMode, number> = {
 }
 
 export const MAX_RUNNING_DELEGATIONS_PER_PARENT = 50
+/** 未显式指定时，父会话等待子会话完成的时长。 */
+export const DEFAULT_DELEGATION_WAIT_SECONDS = 60 * 60
+/** 显式指定 timeoutSeconds 时允许的最大等待时长。 */
+export const MAX_DELEGATION_WAIT_SECONDS = 2 * 60 * 60
 
 /**
  * 为具有副作用的工具调用提供进程内幂等保护。
