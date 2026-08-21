@@ -92,8 +92,8 @@ export const PROVIDER_LABELS: Record<ProviderType, string> = {
   minimax: 'MiniMax (API&编程包)',
   doubao: '火山方舟 Coding Plan',
   'doubao-api': '火山引擎 API',
-  qwen: '通义千问 (OpenAI 协议·旧版)',
-  'qwen-anthropic': '通义千问',
+  qwen: '通义千问',
+  'qwen-anthropic': '通义千问 (Anthropic 协议·旧版)',
   'qwen-token-plan': '通义千问 Token Plan',
   xiaomi: '小米 MiMo (API)',
   'xiaomi-token-plan': '小米 MiMo Token Plan',
@@ -275,6 +275,22 @@ export interface ChannelModel {
   /** 来源标记：手动添加的模型在拉取供应商列表时保留，不会被覆盖清除 */
   source?: 'manual' | 'fetched'
 }
+
+/**
+ * 火山方舟 Coding Plan 当前支持的模型名。
+ *
+ * Coding Plan 的 `/models` 返回的是方舟通用模型目录，不等于订阅套餐的授权清单，
+ * 因此不能直接把该接口返回值作为渠道模型列表。
+ */
+export const VOLCENGINE_CODING_PLAN_MODELS: readonly ChannelModel[] = [
+  { id: 'doubao-seed-2.1-turbo', name: 'Doubao Seed 2.1 Turbo', enabled: true },
+  { id: 'doubao-seed-2.0-lite', name: 'Doubao Seed 2.0 Lite', enabled: true },
+  { id: 'minimax-m3', name: 'MiniMax M3', enabled: true },
+  { id: 'glm-5.3', name: 'GLM-5.3', enabled: true },
+  { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true },
+  { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', enabled: true },
+  { id: 'kimi-k2.7-code', name: 'Kimi K2.7 Code', enabled: true },
+]
 
 /**
  * 渠道配置

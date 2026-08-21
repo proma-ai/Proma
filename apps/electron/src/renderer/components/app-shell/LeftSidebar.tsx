@@ -19,6 +19,7 @@ import { SearchDialog } from './SearchDialog'
 import { UserAvatar } from '@/components/chat/UserAvatar'
 import { activeViewAtom, agentSkillsTabAtom } from '@/atoms/active-view'
 import { automationFormAtom, automationsAtom } from '@/atoms/automation-atoms'
+import { planningTabAtom } from '@/atoms/planning-atoms'
 import { appModeAtom, type AppMode } from '@/atoms/app-mode'
 import { settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
 import {
@@ -724,6 +725,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   const [activeView, setActiveView] = useAtom(activeViewAtom)
   const setAgentSkillsTab = useSetAtom(agentSkillsTabAtom)
   const setAutomationForm = useSetAtom(automationFormAtom)
+  const setPlanningTab = useSetAtom(planningTabAtom)
   const automations = useAtomValue(automationsAtom)
   const setAutomations = useSetAtom(automationsAtom)
   const automationCount = automations.length
@@ -1092,8 +1094,10 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       return
     }
     setAutomationForm({ open: false, draft: null })
+    // 从侧栏进入规划中心仍以 Todo 为默认页；表单返回不会触发这条导航，因此可保留定时任务标签。
+    setPlanningTab('todos')
     setActiveView('planning')
-  }, [activeView, setAutomationForm, setActiveView, store])
+  }, [activeView, setAutomationForm, setActiveView, setPlanningTab, store])
 
   /** 打开/关闭 Agent 技能视图 */
   const handleOpenSkills = React.useCallback((): void => {
