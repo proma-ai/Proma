@@ -460,9 +460,18 @@ export function AgentSkillsView(): React.ReactElement {
         open={mcpSheetOpen}
         server={editingMcp}
         workspaceSlug={data.workspaceSlug}
-        onOpenChange={(open) => { setMcpSheetOpen(open); if (!open) bumpCapabilities((v) => v + 1) }}
+        onOpenChange={(open) => {
+          setMcpSheetOpen(open)
+          if (!open) {
+            void data.refreshMcpConfig()
+            bumpCapabilities((v) => v + 1)
+          }
+        }}
         onSaved={() => setMcpSheetOpen(false)}
-        onChanged={() => bumpCapabilities((v) => v + 1)}
+        onChanged={() => {
+          void data.refreshMcpConfig()
+          bumpCapabilities((v) => v + 1)
+        }}
       />
 
       <BuiltinMcpDetailSheet
