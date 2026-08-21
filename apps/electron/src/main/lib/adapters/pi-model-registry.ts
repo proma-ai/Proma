@@ -39,7 +39,8 @@ type PiModelCost = PiCatalogModel['cost']
 type PiRequestHeaders = Record<string, string>
 type PiCatalogModelPatch = Pick<PiCatalogModel, 'id'> & Partial<PiCatalogModel>
 
-interface PiModelDefaults {
+export interface PiModelDefaults {
+  api: Api
   reasoning: boolean
   thinkingLevelMap?: PiCatalogModel['thinkingLevelMap']
   compat?: PiCatalogModel['compat']
@@ -337,6 +338,15 @@ function normalizePiApi(provider: ProviderType): Api {
   }
 }
 
+/**
+ * OpenCode Go 在同一渠道提供多种协议，必须以模型目录声明为准。
+ * 未命中目录时保留历史 OpenAI Chat Completions 默认值。
+ */
+export function resolvePiApi(provider: ProviderType, catalogApi?: Api): Api {
+  if (provider === 'opencode-go-openai' && catalogApi) return catalogApi
+  return normalizePiApi(provider)
+}
+
 function candidatePiProviders(provider: ProviderType): KnownProvider[] {
   switch (provider) {
     case 'anthropic':
@@ -530,15 +540,15 @@ export async function resolvePiReasoningCapability(
   modelId: string | undefined,
 ): Promise<ReasoningCapability | undefined> {
   const resolvedModelId = stripLegacyAgentSdkContextSuffix(modelId)
+  const catalogModel = resolvedModelId
+    ? await findPiCatalogModel(provider, resolvedModelId)
+    : undefined
   const profile = resolveReasoningProfile({
     modelId: resolvedModelId,
     transport: provider === 'openai-codex' || provider === 'xai'
       ? 'openai-responses'
-      : toReasoningTransport(normalizePiApi(provider)),
+      : toReasoningTransport(resolvePiApi(provider, catalogModel?.api)),
   })
-  const catalogModel = resolvedModelId
-    ? await findPiCatalogModel(provider, resolvedModelId)
-    : undefined
   return resolveReasoningCapability({
     profile,
     catalog: catalogModel && {
@@ -551,7 +561,7 @@ export async function resolvePiReasoningCapability(
 async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiModelDefaults> {
   const catalogModel = input.model ? await findPiCatalogModel(input.provider, input.model) : undefined
   const codexAlignedCapabilities = getCodexAlignedGPT5Capabilities(input.model)
-  const api = normalizePiApi(input.provider)
+  const api = resolvePiApi(input.provider, catalogModel?.api)
   const providerSpecificCapabilities = compilePiReasoningCapabilities(api, input.model)
   const glmModelId = input.model?.toLowerCase()
   const isVolcengineGlm5x = (input.provider === 'doubao' || input.provider === 'doubao-api' || input.provider === 'ark-coding-plan')
@@ -561,6 +571,7 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
   const inferredContextWindow = inferContextWindow(input.model) ?? DEFAULT_CONTEXT_WINDOW
   const shouldForceAdaptiveThinking = shouldForcePiAdaptiveThinking(api, catalogModel)
   return {
+    api,
     reasoning: catalogModel?.reasoning ?? true,
     thinkingLevelMap: providerSpecificCapabilities?.thinkingLevelMap
       ?? catalogModel?.thinkingLevelMap,
@@ -578,12 +589,12 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
   }
 }
 
-function normalizePiBaseUrl(baseUrl: string | undefined, provider: ProviderType): string | undefined {
+function normalizePiBaseUrl(baseUrl: string | undefined, provider: ProviderType, api = normalizePiApi(provider)): string | undefined {
   if (!baseUrl) return undefined
-  if (normalizePiApi(provider) === 'anthropic-messages') {
+  if (api === 'anthropic-messages') {
     return normalizeAnthropicBaseUrlForSdk(resolveAnthropicMessagesUrl(baseUrl, provider))
   }
-  if (provider === 'custom' || provider === 'openai-responses') {
+  if (api === 'openai-responses' || provider === 'custom') {
     return normalizeOpenAIBaseUrlForSdk(baseUrl)
   }
   return baseUrl.trim().replace(/\/$/, '')
@@ -766,9 +777,9 @@ export async function buildModel(sdk: PiSdk, input: PiAgentQueryOptions) {
   // pi runtime 统一剥离历史 `[1m]` 后缀：无论上游从哪条路径传入，注册与查找都用干净 ID。
   const resolvedModelId = stripLegacyAgentSdkContextSuffix(input.model)
   const modelRuntime = await sdk.ModelRuntime.create({ allowModelNetwork: false })
-  const api = normalizePiApi(input.provider)
   const modelDefaults = await resolvePiModelDefaults({ ...input, model: resolvedModelId })
-  const baseUrl = normalizePiBaseUrl(input.baseUrl, input.provider)
+  const api = modelDefaults.api
+  const baseUrl = normalizePiBaseUrl(input.baseUrl, input.provider, api)
   if (!baseUrl) {
     throw new Error(`渠道 ${input.channelName ?? input.provider} 缺少 Base URL`)
   }
