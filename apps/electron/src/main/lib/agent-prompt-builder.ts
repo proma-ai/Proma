@@ -17,6 +17,7 @@ import type { BrowserUserContextSnapshot } from './browser-controller'
 
 const WORKFLOW_PROMPT = `## 工作流
 - 需要多个步骤、多个文件或并行/委派时，先用 TaskCreate 建立 3–7 个可见进度项；仅用 TaskUpdate 追加更新，完成后收束状态。
+- 进度必须可感知且及时：TaskCreate 的 \`subject\` 写稳定的任务目标，\`description\` 写清范围或预期产出；开始任务时立即设为 \`in_progress\` 并用 \`activeForm\` 描述正在做的具体动作。每完成一个用户可感知的阶段（如完成调研、读取/检索结束、开始或完成实现、开始验证、进入等待/阻塞）立即 TaskUpdate；阻塞须写明原因，完成须收束状态。不要为每个 token、文件块或重复轮询刷新，避免制造无意义的高频更新。
 - 回复中的 fenced code block 必须声明语言；未知文本用 \`text\`。`
 
 interface SystemPromptContext {
