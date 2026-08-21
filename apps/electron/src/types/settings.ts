@@ -573,3 +573,11 @@ export const STORAGE_IPC_CHANNELS = {
   /** 仅清理临时文件（启动时/快速清理） */
   CLEANUP_TEMP: 'storage:cleanup-temp',
 } as const
+
+/** 用量统计 IPC 通道 */
+export const USAGE_IPC_CHANNELS = {
+  /** 获取用量统计快照（含增量补扫） */
+  GET_SNAPSHOT: 'usage:get-snapshot',
+  /** 忽略增量缓存全量重扫 */
+  RESCAN: 'usage:rescan',
+} as const

@@ -11,7 +11,7 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Star, Settings, Plus, Trash2, Pencil, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, FolderInput, FolderPlus, GripVertical, Clock, AlarmClock, ChevronRight, ChevronDown, ChevronUp, Blocks, GitBranch, Download, Loader2, RotateCw } from 'lucide-react'
+import { Pin, PinOff, Star, Settings, Plus, Trash2, Pencil, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, FolderInput, FolderPlus, GripVertical, Clock, AlarmClock, ChevronRight, ChevronDown, ChevronUp, Blocks, GitBranch, Download, Loader2, RotateCw, BarChart3 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
@@ -303,6 +303,34 @@ function SkillsSidebarEntry({ count, updateCount, active, onClick }: SkillsSideb
         )}
       >
         {formatAutomationCount(count)}
+      </span>
+    </button>
+  )
+}
+
+interface UsageSidebarEntryProps {
+  active: boolean
+  onClick: () => void
+}
+
+function UsageSidebarEntry({ active, onClick }: UsageSidebarEntryProps): React.ReactElement {
+  return (
+    <button
+      type="button"
+      aria-label="用量统计"
+      onClick={onClick}
+      className={cn(
+        'group w-full flex items-center justify-between px-3 py-2 rounded-md text-[13px] transition-colors duration-100 titlebar-no-drag',
+        active
+          ? 'bg-accent-foreground/[0.10] text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
+          : 'text-foreground/60 hover:bg-accent-foreground/[0.08] hover:text-foreground',
+      )}
+    >
+      <span className="flex items-center gap-3 min-w-0">
+        <span className={cn('flex-shrink-0 w-[18px] h-[18px]', active ? 'text-accent-foreground' : 'text-foreground/45')}>
+          <BarChart3 size={16} className="block" />
+        </span>
+        <span className="truncate">用量统计</span>
       </span>
     </button>
   )
@@ -1102,6 +1130,15 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       return
     }
     setActiveView('agent-skills')
+  }, [activeView, setActiveView])
+
+  /** 打开/关闭用量统计视图 */
+  const handleOpenUsage = React.useCallback((): void => {
+    if (activeView === 'usage') {
+      setActiveView('conversations')
+      return
+    }
+    setActiveView('usage')
   }, [activeView, setActiveView])
 
   /** 打开当前工作区的 MCP 管理页 */
@@ -3202,6 +3239,26 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
               <TooltipContent side="right">Agent 技能</TooltipContent>
             </Tooltip>
           )}
+
+          {/* 用量统计入口 */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label="用量统计"
+                onClick={handleOpenUsage}
+                className={cn(
+                  'relative size-10 flex items-center justify-center rounded-[12px] transition-colors titlebar-no-drag border',
+                  activeView === 'usage'
+                    ? 'border-primary/80 bg-primary text-primary-foreground shadow-sm'
+                    : 'border-border/45 bg-foreground/[0.025] text-foreground/45 hover:border-border/70 hover:bg-foreground/[0.045] hover:text-primary',
+                )}
+              >
+                <BarChart3 size={16} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">用量统计</TooltipContent>
+          </Tooltip>
         </div>
 
         <div className="my-3 h-px w-8 bg-border/70" />
@@ -3365,6 +3422,14 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
           />
         </div>
       )}
+
+      {/* 用量统计入口：Token / 费用统计面板，与折叠态图标栏保持一致 */}
+      <div className="px-3 pb-0.5">
+        <UsageSidebarEntry
+          active={activeView === 'usage'}
+          onClick={handleOpenUsage}
+        />
+      </div>
 
       {/* Chat 模式 active 视图：置顶 + 对话历史，结构与 Agent active 视图保持一致 */}
       {mode === 'chat' && viewMode === 'active' ? (

@@ -61,3 +61,6 @@ export * from './planning'
 
 // Agent 灵动岛相关类型
 export * from './agent-island'
+
+// 用量统计（Usage Stats）相关类型
+export * from './usage-stats'
