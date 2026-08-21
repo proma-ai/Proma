@@ -32,6 +32,7 @@ import { Input } from '@/components/ui/input'
 import {
   PROVIDER_DEFAULT_URLS,
   PROVIDER_LABELS,
+  VOLCENGINE_CODING_PLAN_MODELS,
   parseZhipuTeamCredentials,
   parseCodexCredentials,
   parseXaiCredentials,
@@ -434,7 +435,7 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
           { id: 'glm-5.3', name: 'GLM-5.3', enabled: true },
           { id: 'glm-5.1', name: 'GLM-5.1', enabled: false },
         ])
-      } else if (p === 'ark-coding-plan' || p === 'doubao') {
+      } else if (p === 'ark-coding-plan') {
         setModels([
           { id: 'doubao-seed-2.1-pro', name: 'Doubao Seed 2.1 Pro', enabled: true },
           { id: 'doubao-seed-2.1-turbo', name: 'Doubao Seed 2.1 Turbo', enabled: true },
@@ -448,6 +449,8 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
           { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true },
           { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', enabled: true },
         ])
+      } else if (p === 'doubao') {
+        setModels(VOLCENGINE_CODING_PLAN_MODELS.map((model) => ({ ...model })))
       } else if (p === 'minimax') {
         setModels([
           { id: 'MiniMax-M3', name: 'MiniMax-M3', enabled: true },

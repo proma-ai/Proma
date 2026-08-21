@@ -36,6 +36,7 @@ import {
   parseXaiCredentials,
   serializeXaiCredentials,
   isXaiCredentialExpired,
+  VOLCENGINE_CODING_PLAN_MODELS,
 } from '@proma/shared'
 import { refreshCodexOAuth } from './codex-oauth-service'
 import { refreshXaiOAuth } from './xai-oauth-service'
@@ -138,10 +139,14 @@ function cloneModels(models: ChannelModel[]): ChannelModel[] {
   return models.map((model) => ({ ...model }))
 }
 
-function createPresetModelsResult(providerName: string, models: ChannelModel[]): FetchModelsResult {
+function createPresetModelsResult(
+  providerName: string,
+  models: ChannelModel[],
+  reason = '未开放模型列表端点',
+): FetchModelsResult {
   return {
     success: true,
-    message: `${providerName} 未开放模型列表端点，已加载 ${models.length} 个预设模型`,
+    message: `${providerName} ${reason}，已加载 ${models.length} 个预设模型`,
     models: cloneModels(models),
   }
 }
@@ -1789,6 +1794,13 @@ export async function fetchModels(input: FetchModelsInput): Promise<FetchModelsR
       case 'doubao-api':
       case 'qwen':
       case 'custom':
+        if (provider === 'doubao') {
+          return createPresetModelsResult(
+            '火山方舟 Coding Plan',
+            [...VOLCENGINE_CODING_PLAN_MODELS],
+            '使用套餐支持清单，不采用通用 /models 目录',
+          )
+        }
         return await fetchOpenAICompatibleModels(input.baseUrl, input.apiKey, proxyUrl, provider)
       case 'google':
         return await fetchGoogleModels(input.baseUrl, input.apiKey, proxyUrl)
