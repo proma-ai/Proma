@@ -57,7 +57,7 @@ import { writeJsonFileAtomic } from './safe-file'
 import pkg from '../../../package.json' with { type: 'json' }
 
 /** 当前配置版本 */
-const CONFIG_VERSION = 4
+const CONFIG_VERSION = 5
 /** 连接测试 / 模型拉取的统一超时时间 */
 const CHANNEL_TEST_TIMEOUT_MS = 15_000
 // ChatGPT backend 首次经代理 / Cloudflare 建连可能超过普通模型探测的 15 秒。
@@ -215,6 +215,9 @@ function inferProviderFromBaseUrl(provider: ProviderType, baseUrl: string): Prov
  *
  * v3 → v4：将豆包 API 的默认展示名更新为火山引擎 API。
  *
+ * v4 → v5：将使用默认 DashScope Anthropic 兼容端点的通义千问渠道切换为 OpenAI 兼容端点。
+ * 自定义 Anthropic 端点不自动迁移，避免改变用户明确配置的请求协议。
+ *
  * @returns 迁移后的配置；`changed` 标记是否发生实际变更（决定是否需要回写文件）
  */
 function migrateConfig(config: ChannelsConfig): { config: ChannelsConfig; changed: boolean } {
@@ -242,6 +245,18 @@ function migrateConfig(config: ChannelsConfig): { config: ChannelsConfig; change
     }
     if (version < 4 && migratedChannel.provider === 'doubao-api' && migratedChannel.name === '豆包 API') {
       migratedChannel = { ...migratedChannel, name: '火山引擎 API' }
+    }
+    if (version < 5
+      && migratedChannel.provider === 'qwen-anthropic'
+      && normalizeBaseUrl(migratedChannel.baseUrl) === normalizeBaseUrl(PROVIDER_DEFAULT_URLS['qwen-anthropic'])) {
+      console.log(
+        `[渠道管理] v${version}→v5 迁移渠道 ${migratedChannel.name}：通义千问 Anthropic 兼容端点 → OpenAI 兼容端点`,
+      )
+      migratedChannel = {
+        ...migratedChannel,
+        provider: 'qwen',
+        baseUrl: PROVIDER_DEFAULT_URLS.qwen,
+      }
     }
     return migratedChannel
   })
