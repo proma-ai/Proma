@@ -36,13 +36,14 @@ export function normalizeBrowserUrl(input: string): string {
   // `localhost:3000` 和 `example.com:8080` 是没有协议的常见地址栏输入，不能被误判为 scheme。
   if (/^[^/?#:\s]+:\d+(?:[/?#]|$)/.test(value)) {
     const localCandidate = new URL(`http://${value}`)
-    // 本机和局域网开发服务通常未配置 TLS；其他地址仍默认 HTTPS。
+    if (localCandidate.port === '443') return `https://${value}`
     return isLocalNetworkAddress(localCandidate.hostname) ? `http://${value}` : `https://${value}`
   }
   if (/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(value)) return value
   // `localhost` / `app.localhost` 没有端口时同样按 HTTP 打开。
   try {
     const localCandidate = new URL(`http://${value}`)
+    if (localCandidate.port === '443') return `https://${value}`
     if (isLocalNetworkAddress(localCandidate.hostname)) return `http://${value}`
   } catch { /* 交由后续 URL 校验输出统一错误 */ }
   return `https://${value}`

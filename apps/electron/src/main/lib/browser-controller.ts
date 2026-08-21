@@ -452,6 +452,11 @@ export class BrowserController {
     if (this.guardedSessions.has(browserSession)) return
     this.guardedSessions.add(browserSession)
     browserSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
+    browserSession.setCertificateVerifyProc((_request, callback) => {
+      // 受管浏览器面向用户明确打开的网页；内网自签名证书和企业 CA 由用户自行负责，
+      // 仅在该浏览器 Session 内放行，不影响 Proma 主窗口或其他 Electron Session。
+      callback(0)
+    })
     browserSession.webRequest.onBeforeRequest((details, callback) => {
       let protocol = ''
       try { protocol = new URL(details.url).protocol } catch { callback({ cancel: true }); return }
