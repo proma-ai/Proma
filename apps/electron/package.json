@@ -1,6 +1,6 @@
 {
   "name": "@proma/electron",
-  "version": "0.17.55",
+  "version": "0.17.56",
   "description": "Proma next gen ai software with general agents - Electron App",
   "main": "dist/main.cjs",
   "author": {
