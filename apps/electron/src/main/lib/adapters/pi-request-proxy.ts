@@ -18,7 +18,9 @@ import {
   type RequestInit,
 } from 'undici'
 
-const DEFAULT_HTTP_IDLE_TIMEOUT_MS = 300_000
+// Claude extended thinking / long tool chains may remain silent for several minutes.
+// Keep this aligned with proma-api's upstream stream read timeout.
+export const DEFAULT_HTTP_IDLE_TIMEOUT_MS = 1_200_000
 const requestDispatcherStorage = new AsyncLocalStorage<Dispatcher>()
 const originalFetch = globalThis.fetch
 const ignoreUndiciDispatcherError = (_error: Error): void => {}
@@ -66,6 +68,12 @@ export interface PiRequestProxyOptions {
   httpIdleTimeoutMs?: number
 }
 
+/** Resolve the request idle timeout while preserving 0 as an explicit disable. */
+export function resolvePiRequestProxyTimeoutMs(httpIdleTimeoutMs?: number): number {
+  const timeoutMs = httpIdleTimeoutMs ?? DEFAULT_HTTP_IDLE_TIMEOUT_MS
+  return Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 0
+}
+
 /**
  * 为单个 Pi 请求创建 dispatcher。调用者必须在请求结束时 close()，以释放连接池。
  */
@@ -73,8 +81,7 @@ export function createPiRequestProxyDispatcher(options: PiRequestProxyOptions): 
   const proxyUrl = options.proxyUrl?.trim()
   if (!proxyUrl) return undefined
 
-  const timeoutMs = options.httpIdleTimeoutMs ?? DEFAULT_HTTP_IDLE_TIMEOUT_MS
-  const normalizedTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 0
+  const normalizedTimeoutMs = resolvePiRequestProxyTimeoutMs(options.httpIdleTimeoutMs)
   return withUndiciErrorListener(new EnvHttpProxyAgent({
     httpProxy: proxyUrl,
     httpsProxy: proxyUrl,
