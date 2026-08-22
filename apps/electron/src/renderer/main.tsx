@@ -681,14 +681,12 @@ function ChatToolInitializer(): null {
       .catch((err: unknown) => console.error('[ChatToolInitializer] 加载工具列表失败:', err))
   }, [setChatTools])
 
-  // 订阅自定义工具配置变更
+  // 订阅自定义工具配置变更并静默刷新工具列表。
+  // 用户主动操作的反馈由各设置入口提供，避免文件监听产生重复 Toast。
   useEffect(() => {
     const cleanup = window.electronAPI.onCustomToolChanged(() => {
       window.electronAPI.getChatTools()
-        .then((tools) => {
-          setChatTools(tools)
-          toast.success('Chat 工具已更新')
-        })
+        .then(setChatTools)
         .catch((err: unknown) => console.error('[ChatToolInitializer] 刷新工具列表失败:', err))
     })
     return cleanup
