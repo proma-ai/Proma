@@ -1149,13 +1149,6 @@ export class AgentOrchestrator {
         'REPL', 'Workflow', 'ScheduleWakeup', 'Monitor', 'PushNotification',
         'CronCreate', 'CronDelete', 'RemoteTrigger',
       ])
-      const PLAN_MODE_READ_ONLY_CHROME_DEVTOOLS = new Set([
-        'mcp__chrome_devtools__list_pages',
-        'mcp__chrome_devtools__take_snapshot',
-        'mcp__chrome_devtools__take_screenshot',
-        'mcp__chrome_devtools__list_network_requests',
-        'mcp__chrome_devtools__performance_stop_trace',
-      ])
       // Planning 是本地用户数据：计划模式只允许查询，严禁创建、更新、删除或确认/推迟提醒。
       const PLAN_MODE_READ_ONLY_PLANNING_TOOLS = new Set([
         'mcp__planning__list_todos', 'mcp__planning__get_todo',
@@ -1321,13 +1314,6 @@ export class AgentOrchestrator {
                 return { behavior: 'allow' as const, updatedInput: input }
               }
               return { behavior: 'deny' as const, message: '计划模式下不允许执行写操作，请在计划审批通过后再执行' }
-            }
-            // Chrome DevTools MCP 同时包含只读观察和会改变页面状态的操作。
-            // 计划模式只允许快照、截图、网络列表等调研工具；点击、输入、脚本执行等需等计划通过。
-            if (toolName.startsWith('mcp__chrome_devtools__')) {
-              return PLAN_MODE_READ_ONLY_CHROME_DEVTOOLS.has(toolName)
-                ? { behavior: 'allow' as const, updatedInput: input }
-                : { behavior: 'deny' as const, message: '计划模式下不允许执行会改变浏览器页面状态的 Chrome DevTools 操作，请在计划审批通过后再执行' }
             }
             if (toolName.startsWith('mcp__planning__')) {
               return PLAN_MODE_READ_ONLY_PLANNING_TOOLS.has(toolName)
