@@ -1,6 +1,6 @@
 {
   "name": "@proma/electron",
-  "version": "0.17.63",
+  "version": "0.17.64",
   "description": "Proma next gen ai software with general agents - Electron App",
   "main": "dist/main.cjs",
   "author": {
@@ -14,7 +14,7 @@
     "dev:split": "bash scripts/dev-split.sh",
     "dev:vite": "vite dev",
     "dev:kill": "bun run scripts/dev-kill.ts",
-    "dev:electron": "bun run dev:kill && bun run build:main && bun run build:agent-runtime && bun run build:preload && bun run build:native-helpers && bun run build:resources && bun run scripts/sleep.ts 2 && concurrently -k -n main,utility,preload,app -c yellow,red,magenta,cyan \"bun run watch:main\" \"bun run watch:agent-runtime\" \"bun run watch:preload\" \"bunx electronmon .\"",
+    "dev:electron": "bun run dev:kill && bun run build:native-helpers && bun run build:resources && bun run scripts/dev-bundle-readiness.ts --prepare && concurrently -k -n main,utility,preload,app -c yellow,red,magenta,cyan \"bun run watch:main\" \"bun run watch:agent-runtime\" \"bun run watch:preload\" \"bun run scripts/dev-bundle-readiness.ts --wait && bunx electronmon .\"",
     "build:main": "esbuild src/main/index.ts --bundle --platform=node --format=cjs --outfile=dist/main.cjs --external:electron --external:@earendil-works/pi-coding-agent --external:@earendil-works/pi-agent-core --external:@earendil-works/pi-ai --external:sharp",
     "build:agent-runtime": "esbuild src/utility/agent-runtime.ts --bundle --platform=node --format=cjs --outfile=dist/agent-runtime.cjs --external:electron --external:@earendil-works/pi-coding-agent --external:@earendil-works/pi-agent-core --external:@earendil-works/pi-ai --external:sharp",
     "build:preload": "esbuild src/preload/index.ts --bundle --platform=node --format=cjs --outfile=dist/preload.cjs --external:electron",
