@@ -10,7 +10,8 @@ import { existsSync, realpathSync, readFileSync, writeFileSync, mkdirSync, statS
 import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, PLANNING_CONFLICT_ERROR, MAX_ATTACHMENT_SIZE, isPromaPermissionMode, normalizePathForCompare } from '@proma/shared'
-import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS, WINDOWS_AGENT_ISLAND_IPC_CHANNELS, TRAY_IPC_CHANNELS } from '../types'
+import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, AGENT_DRAFT_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS, WINDOWS_AGENT_ISLAND_IPC_CHANNELS, TRAY_IPC_CHANNELS } from '../types'
+import type { AgentDraftsFileData } from '../types'
 import type {
   QuickTaskSubmitInput,
   VoiceDictationAudioChunkInput,
@@ -283,7 +284,8 @@ import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveF
 import { permissionService } from './lib/agent-permission-service'
 import { askUserService } from './lib/agent-ask-user-service'
 import { exitPlanService } from './lib/agent-exit-plan-service'
-import { getAgentSessionWorkspacePath, getAgentWorkspacesDir, getConfigDir, getWorkspaceSkillsDir, getScratchPadPath } from './lib/config-paths'
+import { getAgentSessionWorkspacePath, getAgentWorkspacesDir, getConfigDir, getWorkspaceSkillsDir, getScratchPadPath, getAgentDraftsPath } from './lib/config-paths'
+import { readJsonFileSafe, writeJsonFileAtomic } from './lib/safe-file'
 import { getCachedDefaultAppInfo, saveCachedDefaultAppInfo } from './lib/default-app-cache'
 import { calculateStorageStats, cleanupStorage, cleanupTempFiles } from './lib/storage-service'
 import type { CleanupOptions } from './lib/storage-service'
@@ -1925,6 +1927,49 @@ export function registerIpcHandlers(): void {
       } catch (err) {
         console.error('[ScratchPad] 复制图片到剪贴板失败:', err)
         return { success: false, message: '复制失败' }
+      }
+    }
+  )
+
+  // ===== Agent/Chat 输入框草稿持久化 =====
+
+  // 从磁盘加载草稿快照
+  ipcMain.handle(
+    AGENT_DRAFT_IPC_CHANNELS.LOAD,
+    async (): Promise<AgentDraftsFileData | null> => {
+      try {
+        return readJsonFileSafe<AgentDraftsFileData>(getAgentDraftsPath())
+      } catch (err) {
+        console.error('[AgentDraft] 加载失败:', err)
+        return null
+      }
+    }
+  )
+
+  // 异步保存草稿快照
+  ipcMain.handle(
+    AGENT_DRAFT_IPC_CHANNELS.SAVE,
+    async (_, data: AgentDraftsFileData): Promise<boolean> => {
+      try {
+        writeJsonFileAtomic(getAgentDraftsPath(), data)
+        return true
+      } catch (err) {
+        console.error('[AgentDraft] 保存失败:', err)
+        return false
+      }
+    }
+  )
+
+  // 同步保存草稿快照（beforeunload 场景）
+  ipcMain.on(
+    AGENT_DRAFT_IPC_CHANNELS.SAVE_SYNC,
+    (event, data: AgentDraftsFileData) => {
+      try {
+        writeJsonFileAtomic(getAgentDraftsPath(), data)
+        event.returnValue = true
+      } catch (err) {
+        console.error('[AgentDraft] 同步保存失败:', err)
+        event.returnValue = false
       }
     }
   )

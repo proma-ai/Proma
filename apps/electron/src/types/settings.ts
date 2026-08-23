@@ -425,6 +425,29 @@ export const SCRATCH_PAD_IPC_CHANNELS = {
   COPY_IMAGE: 'scratch-pad:copy-image',
 } as const
 
+/** Agent/Chat 输入框草稿 IPC 通道 */
+export const AGENT_DRAFT_IPC_CHANNELS = {
+  /** 从磁盘加载草稿快照 */
+  LOAD: 'agent-draft:load',
+  /** 异步保存草稿快照 */
+  SAVE: 'agent-draft:save',
+  /** 同步保存草稿快照（beforeunload 场景） */
+  SAVE_SYNC: 'agent-draft:save-sync',
+} as const
+
+/** 输入框草稿快照文件（~/.proma/agent-drafts.json）的数据结构。
+ *
+ * 背景：agentSessionDraftsAtom / agentSessionDraftHtmlAtom / conversationDraftsAtom
+ * 原本只存内存 jotai Map，重启即丢；此文件让未发送的输入框草稿跨重启恢复。
+ */
+export interface AgentDraftsFileData {
+  version: 1
+  /** Agent 会话输入框草稿：sessionId → 文本与可选 HTML（HTML 用于恢复 mention 等富文本） */
+  agentDrafts: Record<string, { text: string; html?: string }>
+  /** Chat 对话输入框草稿：conversationId → 文本 */
+  conversationDrafts: Record<string, string>
+}
+
 /** 应用图标 IPC 通道 */
 export const APP_ICON_IPC_CHANNELS = {
   /** 设置应用图标（variant ID） */

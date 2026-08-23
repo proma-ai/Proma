@@ -41,6 +41,9 @@ import {
   automationGroupOrderAtom,
   dockBadgeCountAtom,
   unviewedCompletedSessionIdsAtom,
+  agentSessionDraftsAtom,
+  agentSessionDraftHtmlAtom,
+  agentSessionDraftSyncVersionsAtom,
 } from './atoms/agent-atoms'
 import { updateStatusAtom, initializeUpdater } from './atoms/updater'
 import { automationsAtom } from './atoms/automation-atoms'
@@ -69,7 +72,8 @@ import type { TabItem } from './atoms/tab-atoms'
 import { chatToolsAtom } from './atoms/chat-tool-atoms'
 import { feishuBotStatesAtom } from './atoms/feishu-atoms'
 import { dingtalkBotStatesAtom } from './atoms/dingtalk-atoms'
-import { currentConversationIdAtom, channelsAtom, channelsLoadedAtom, selectedModelAtom } from './atoms/chat-atoms'
+import { currentConversationIdAtom, channelsAtom, channelsLoadedAtom, selectedModelAtom, conversationDraftsAtom, conversationDraftSyncVersionsAtom } from './atoms/chat-atoms'
+import type { AgentDraftsFileData } from '../types'
 import { appModeAtom } from './atoms/app-mode'
 import type { FeishuBotBridgeState, FeishuBridgeState, DingTalkBotBridgeState, DingTalkBridgeState } from '@proma/shared'
 import { Toaster } from './components/ui/sonner'
@@ -963,6 +967,140 @@ function TabStatePersistenceInitializer(): null {
 }
 
 /**
+ * Agent/Chat 输入框草稿持久化组件
+ *
+ * 输入框草稿（agentSessionDraftsAtom / agentSessionDraftHtmlAtom / conversationDraftsAtom）
+ * 原本只存内存 jotai Map，应用重启即丢。此组件把三个 map 防抖持久化到
+ * ~/.proma/agent-drafts.json，启动时恢复，避免未发送的输入内容因退出丢失。
+ */
+function AgentDraftPersistence(): null {
+  const store = useStore()
+  const loadedRef = useRef(false)
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout>>()
+
+  // 启动：恢复上次退出时的草稿快照
+  useEffect(() => {
+    const init = async (): Promise<void> => {
+      try {
+        if (!window.electronAPI.loadAgentDrafts) return
+        const data = await window.electronAPI.loadAgentDrafts()
+        if (!data || typeof data !== 'object') return
+
+        // —— Agent 文本草稿 ——
+        const currentText = store.get(agentSessionDraftsAtom)
+        const nextText = new Map(currentText)
+        for (const [sessionId, draft] of Object.entries(data.agentDrafts ?? {})) {
+          const text = typeof draft?.text === 'string' ? draft.text : ''
+          if (text.trim() === '') continue
+          // 守卫：启动竞态下已有非空草稿的会话不覆盖
+          if ((currentText.get(sessionId) ?? '') !== '') continue
+          nextText.set(sessionId, text)
+        }
+
+        // —— Agent HTML 草稿（mention 等富文本；仅随被恢复的文本一起写入，
+        //    被竞态守卫跳过 text 恢复的会话不动 html，避免与编辑器实际内容脱节） ——
+        const nextHtml = new Map(store.get(agentSessionDraftHtmlAtom))
+        for (const [sessionId, draft] of Object.entries(data.agentDrafts ?? {})) {
+          if (nextText.get(sessionId) === currentText.get(sessionId)) continue
+          const html = draft?.html
+          if (typeof html === 'string' && html.trim() !== '' && html !== '<p></p>') {
+            nextHtml.set(sessionId, html)
+          }
+        }
+
+        // —— bump 外部同步版本：已挂载的 RichTextInput 才会接受外部值（echo 保护） ——
+        const versions = store.get(agentSessionDraftSyncVersionsAtom)
+        const nextVersions = new Map(versions)
+        for (const sessionId of nextText.keys()) {
+          if (nextText.get(sessionId) !== currentText.get(sessionId)) {
+            nextVersions.set(sessionId, (versions.get(sessionId) ?? 0) + 1)
+          }
+        }
+
+        store.set(agentSessionDraftsAtom, nextText)
+        store.set(agentSessionDraftHtmlAtom, nextHtml)
+        store.set(agentSessionDraftSyncVersionsAtom, nextVersions)
+
+        // —— Chat 对话草稿 ——
+        const currentChat = store.get(conversationDraftsAtom)
+        const nextChat = new Map(currentChat)
+        for (const [conversationId, text] of Object.entries(data.conversationDrafts ?? {})) {
+          if (typeof text !== 'string' || text.trim() === '') continue
+          if ((currentChat.get(conversationId) ?? '') !== '') continue
+          nextChat.set(conversationId, text)
+        }
+        const chatVersions = store.get(conversationDraftSyncVersionsAtom)
+        const nextChatVersions = new Map(chatVersions)
+        for (const [conversationId, text] of nextChat.entries()) {
+          if (text !== currentChat.get(conversationId)) {
+            nextChatVersions.set(conversationId, (chatVersions.get(conversationId) ?? 0) + 1)
+          }
+        }
+        store.set(conversationDraftsAtom, nextChat)
+        store.set(conversationDraftSyncVersionsAtom, nextChatVersions)
+
+        console.log('[AgentDraft] 草稿快照已恢复')
+      } catch (err) {
+        console.error('[AgentDraft] 初始化失败:', err)
+      } finally {
+        loadedRef.current = true
+      }
+    }
+
+    init()
+  }, [store])
+
+  // 自动保存：订阅三个草稿 map，500ms 防抖整体覆盖写盘（发送后清空的条目自然从文件消失）
+  useEffect(() => {
+    const buildPayload = (): AgentDraftsFileData => ({
+      version: 1,
+      agentDrafts: Object.fromEntries(
+        [...store.get(agentSessionDraftsAtom).entries()].map(([sessionId, text]) => [
+          sessionId,
+          { text, html: store.get(agentSessionDraftHtmlAtom).get(sessionId) },
+        ]),
+      ),
+      conversationDrafts: Object.fromEntries(store.get(conversationDraftsAtom).entries()),
+    })
+
+    const save = (): void => {
+      if (window.electronAPI.saveAgentDrafts) {
+        window.electronAPI.saveAgentDrafts(buildPayload()).catch(console.error)
+      }
+    }
+
+    const debouncedSave = (): void => {
+      if (!loadedRef.current) return
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = setTimeout(save, 500)
+    }
+
+    const unsubs = [
+      store.sub(agentSessionDraftsAtom, debouncedSave),
+      store.sub(agentSessionDraftHtmlAtom, debouncedSave),
+      store.sub(conversationDraftsAtom, debouncedSave),
+    ]
+
+    // beforeunload 时同步写入，确保关闭窗口前最后一刻的草稿不丢
+    const handleBeforeUnload = (): void => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      if (window.electronAPI.saveAgentDraftsSync) {
+        window.electronAPI.saveAgentDraftsSync(buildPayload())
+      }
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+
+    return () => {
+      unsubs.forEach((unsub) => unsub())
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [store])
+
+  return null
+}
+
+/**
  * Scratch Pad 初始化和持久化组件
  *
  * 启动时注入 scratch tab 到 tabsAtom 首位，
@@ -1149,6 +1287,7 @@ if (isQuickTaskWindow) {
       <DingTalkInitializer />
       <TabStatePersistenceInitializer />
       <ScratchPadPersistence />
+      <AgentDraftPersistence />
       <VoiceDictationApp embedded />
       <GlobalShortcuts />
       <TabSwitcher />

@@ -701,6 +701,15 @@ export function getScratchPadPath(): string {
 }
 
 /**
+ * 获取 Agent/Chat 输入框草稿快照文件路径
+ *
+ * @returns ~/.proma/agent-drafts.json
+ */
+export function getAgentDraftsPath(): string {
+  return join(getConfigDir(), 'agent-drafts.json')
+}
+
+/**
  * 获取定时任务（Automation）配置文件路径
  *
  * @returns ~/.proma/automations.json
