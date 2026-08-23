@@ -40,6 +40,7 @@ import {
   inputToolbarDisabledButtonClass,
   inputToolbarSendButtonClass,
 } from '@/components/ai-elements/input-toolbar-styles'
+import { preventHoverPopoverFocusRestore } from '@/components/ai-elements/input-toolbar-popover-focus'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -318,6 +319,7 @@ interface AgentThinkingPopoverProps {
 function AgentThinkingPopover({ agentThinking, onToggle, codexConfig }: AgentThinkingPopoverProps): React.ReactElement {
   const [open, setOpen] = React.useState(false)
   const hoverTimeout = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const popoverReceivedFocusRef = React.useRef(false)
   const isCodex = Boolean(codexConfig)
   const thinkingLevels = codexConfig?.levels ?? OPENAI_STANDARD_THINKING_LEVELS
   const normalizedLevel = normalizeOpenAIThinkingLevel(
@@ -374,7 +376,14 @@ function AgentThinkingPopover({ agentThinking, onToggle, codexConfig }: AgentThi
         className="w-64 p-3"
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
+        onFocusCapture={() => {
+          popoverReceivedFocusRef.current = true
+        }}
         onOpenAutoFocus={(e) => e.preventDefault()}
+        onCloseAutoFocus={(event) => {
+          preventHoverPopoverFocusRestore(event, popoverReceivedFocusRef.current)
+          popoverReceivedFocusRef.current = false
+        }}
       >
         <div className="flex flex-col gap-3">
           {codexConfig ? (

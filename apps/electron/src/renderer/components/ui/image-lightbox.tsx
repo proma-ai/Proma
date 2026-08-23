@@ -14,6 +14,7 @@ import * as React from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { ChevronLeft, ChevronRight, Download, Pencil, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { iconButtonNoRingFocusClass } from '@/components/ui/icon-button-styles'
 import { ImageEditor } from '@/components/ui/image-editor'
 
 /** 单张图片描述（多图导航时使用） */
@@ -121,8 +122,8 @@ export function ImageLightbox({
   const navBtn = cn(
     'absolute top-1/2 -translate-y-1/2 z-10 rounded-full p-2',
     'bg-black/50 text-white/80 backdrop-blur-md shadow-lg transition-colors duration-150',
-    'hover:bg-black/70 hover:text-white',
-    'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-2 focus-visible:ring-offset-black'
+    'hover:bg-black/70 hover:text-white focus-visible:bg-black/70 focus-visible:text-white',
+    iconButtonNoRingFocusClass,
   )
 
   return (
@@ -186,11 +187,11 @@ export function ImageLightbox({
                 'bg-black/50 backdrop-blur-md shadow-lg',
                 'px-3 py-2.5'
               )}>
-                <DialogPrimitive.Close className={cn('rounded-full p-1.5 text-white/80 transition-colors duration-150', 'hover:bg-white/15 hover:text-white', 'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-2 focus-visible:ring-offset-black')}>
+                <DialogPrimitive.Close className={cn('rounded-full p-1.5 text-white/80 transition-colors duration-150', 'hover:bg-white/15 hover:text-white focus-visible:bg-white/15 focus-visible:text-white', iconButtonNoRingFocusClass)}>
                   <X className="size-5" /><span className="sr-only">关闭</span>
                 </DialogPrimitive.Close>
-                {showEdit && (<><div className="mx-1.5 h-5 w-px bg-white/20" aria-hidden /><button type="button" onClick={() => setMode('editing')} className={cn('rounded-full p-1.5 text-white/80 transition-colors duration-150', 'hover:bg-white/15 hover:text-white', 'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-2 focus-visible:ring-offset-black')} title="编辑图片"><Pencil className="size-5" /></button></>)}
-                {current.onSave && (<><div className="mx-1.5 h-5 w-px bg-white/20" aria-hidden /><button type="button" onClick={current.onSave} className={cn('rounded-full p-1.5 text-white/80 transition-colors duration-150', 'hover:bg-white/15 hover:text-white', 'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-2 focus-visible:ring-offset-black')} title="保存图片"><Download className="size-5" /></button></>)}
+                {showEdit && (<><div className="mx-1.5 h-5 w-px bg-white/20" aria-hidden /><button type="button" onClick={() => setMode('editing')} className={cn('rounded-full p-1.5 text-white/80 transition-colors duration-150', 'hover:bg-white/15 hover:text-white focus-visible:bg-white/15 focus-visible:text-white', iconButtonNoRingFocusClass)} title="编辑图片"><Pencil className="size-5" /></button></>)}
+                {current.onSave && (<><div className="mx-1.5 h-5 w-px bg-white/20" aria-hidden /><button type="button" onClick={current.onSave} className={cn('rounded-full p-1.5 text-white/80 transition-colors duration-150', 'hover:bg-white/15 hover:text-white focus-visible:bg-white/15 focus-visible:text-white', iconButtonNoRingFocusClass)} title="保存图片"><Download className="size-5" /></button></>)}
               </div>
               </div>
             </div>

@@ -3,14 +3,14 @@
  *
  * 现代化设计：
  * - 大尺寸 Dialog，宽敞易读
- * - 按渠道分组，灰色背景供应商标题行
- * - 选中项左侧绿色竖条高亮
+ * - 按渠道分组，标题与模型项使用统一栅格对齐
+ * - 选中项使用柔和底色与右侧勾选标记
  * - 触发按钮：模型 logo + 模型名 + Chevron
  */
 
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
-import { ChevronDown, Cpu, Search } from 'lucide-react'
+import { Check, ChevronDown, Cpu, Search } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -31,10 +31,32 @@ import {
 } from '@/atoms/chat-atoms'
 import { useConversationModelOptional } from '@/hooks/useConversationSettings'
 import { useConversationIdOptional } from '@/contexts/session-context'
+import { inputToolbarControlHeightClass } from '@/components/ai-elements/input-toolbar-styles'
 import { getModelLogo, getChannelLogo, DefaultLogo } from '@/lib/model-logo'
 import { cn } from '@/lib/utils'
 import type { Channel, ModelOption, ProviderType } from '@proma/shared'
 import { ChannelPlanQuotaBadge } from './ChannelPlanQuotaBadge'
+import { getModelSelectorOptionVisualState } from './model-selector-visual-state'
+
+/** 渠道标题与模型项共享的三列栅格，确保左右边距和文字起点一致。 */
+const MODEL_SELECTOR_ROW_LAYOUT =
+  'mx-1 grid w-[calc(100%-0.5rem)] grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-x-2 px-3'
+
+interface ModelSelectorListIconProps {
+  src: string
+}
+
+/** 使用固定外框吸收不同 Logo 素材的透明留白差异，保持列表中的视觉尺寸稳定。 */
+function ModelSelectorListIcon({ src }: ModelSelectorListIconProps): React.ReactElement {
+  return (
+    <span
+      className="flex size-6 shrink-0 items-center justify-center justify-self-center overflow-hidden rounded-md bg-muted/50"
+      aria-hidden="true"
+    >
+      <img src={src} alt="" className="size-5 rounded-md object-contain" />
+    </span>
+  )
+}
 
 /** 从渠道列表构建扁平化的模型选项 */
 export function buildModelOptions(
@@ -259,7 +281,11 @@ export function ModelSelector({
           <button
             type="button"
             onClick={() => setOpen(true)}
-            className="model-selector-trigger flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            className={cn(
+              'model-selector-trigger flex items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors',
+              'hover:bg-accent hover:text-foreground focus:outline-none focus-visible:bg-accent focus-visible:text-foreground',
+              inputToolbarControlHeightClass,
+            )}
           >
             {displayModelInfo ? (
               <img
@@ -312,67 +338,74 @@ export function ModelSelector({
               (() => {
                 let flatIndex = 0
                 return Array.from(filteredGrouped.entries()).map(([channelId, options]) => {
-                const first = options[0]
-                if (!first) return null
-                const channel = channels.find((c) => c.id === channelId)
+                  const first = options[0]
+                  if (!first) return null
+                  const channel = channels.find((c) => c.id === channelId)
 
-                return (
-                  <div key={channelId}>
-                    {/* 供应商标题行 - 灰色背景 */}
-                    <div className="flex items-center gap-2 px-4 py-2 bg-muted/50 border-b border-border/30">
-                      <img
-                        src={channel ? getChannelLogo(channel) : DefaultLogo}
-                        alt={first.channelName}
-                        className="size-5 rounded object-cover"
-                      />
-                      <span className="min-w-0 truncate text-sm font-medium text-muted-foreground">
-                        {first.channelName}
-                      </span>
-                      {channel ? <ChannelPlanQuotaBadge channel={channel} /> : null}
+                  return (
+                    <div
+                      key={channelId}
+                      role="group"
+                      aria-label={first.channelName}
+                      className="border-b border-border/40 py-1.5 last:border-b-0"
+                    >
+                      {/* 渠道标题与模型行共用栅格，仅通过字号和色阶区分层级。 */}
+                      <div className={cn(MODEL_SELECTOR_ROW_LAYOUT, 'min-h-8 py-1')}>
+                        <ModelSelectorListIcon
+                          src={channel ? getChannelLogo(channel) : DefaultLogo}
+                        />
+                        <span className="min-w-0 truncate text-xs font-medium text-muted-foreground/80">
+                          {first.channelName}
+                        </span>
+                        {channel ? <ChannelPlanQuotaBadge channel={channel} /> : null}
+                      </div>
+
+                      {/* 该渠道下的模型列表 */}
+                      {options.map((option) => {
+                        const isSelected =
+                          selectedModel?.channelId === option.channelId &&
+                          selectedModel?.modelId === option.modelId
+                        const currentFlatIndex = flatIndex++
+                        const isHighlighted = currentFlatIndex === highlightIndex
+                        const visualState = getModelSelectorOptionVisualState(isSelected, isHighlighted)
+
+                        return (
+                          <button
+                            key={`${option.channelId}:${option.modelId}`}
+                            ref={(el) => {
+                              if (el) itemRefs.current.set(currentFlatIndex, el)
+                              else itemRefs.current.delete(currentFlatIndex)
+                            }}
+                            type="button"
+                            aria-pressed={isSelected}
+                            onClick={() => handleSelect(option)}
+                            onMouseEnter={() => setHighlightIndex(currentFlatIndex)}
+                            className={cn(
+                              MODEL_SELECTOR_ROW_LAYOUT,
+                              'min-h-10 rounded-lg py-2 text-left transition-colors',
+                              'hover:bg-accent/60 focus:outline-none focus-visible:bg-accent/70',
+                              visualState === 'highlighted' && 'bg-accent/60',
+                              visualState === 'selected' && 'bg-accent',
+                            )}
+                          >
+                            <ModelSelectorListIcon
+                              src={getModelLogo(option.modelId, option.provider)}
+                            />
+                            <span className={cn(
+                              'min-w-0 truncate text-sm',
+                              isSelected ? 'font-medium text-foreground' : 'text-foreground/80',
+                            )}>
+                              {option.modelName}
+                            </span>
+                            <span className="flex size-5 items-center justify-center" aria-hidden="true">
+                              {isSelected ? <Check className="size-4 text-primary" strokeWidth={2.5} /> : null}
+                            </span>
+                          </button>
+                        )
+                      })}
                     </div>
-
-                    {/* 该渠道下的模型列表 */}
-                    {options.map((option) => {
-                      const isSelected =
-                        selectedModel?.channelId === option.channelId &&
-                        selectedModel?.modelId === option.modelId
-                      const currentFlatIndex = flatIndex++
-                      const isHighlighted = currentFlatIndex === highlightIndex
-
-                      return (
-                        <button
-                          key={`${option.channelId}:${option.modelId}`}
-                          ref={(el) => {
-                            if (el) itemRefs.current.set(currentFlatIndex, el)
-                            else itemRefs.current.delete(currentFlatIndex)
-                          }}
-                          type="button"
-                          onClick={() => handleSelect(option)}
-                          onMouseEnter={() => setHighlightIndex(currentFlatIndex)}
-                          className={cn(
-                            'flex items-center gap-3 w-[calc(100%-1rem)] px-4 py-1.5 mx-2 rounded-lg text-left transition-colors',
-                            'hover:bg-accent',
-                            isHighlighted && 'bg-accent',
-                            isSelected && 'bg-foreground/10 border-l-3 border-l-primary'
-                          )}
-                        >
-                          <img
-                            src={getModelLogo(option.modelId, option.provider)}
-                            alt={option.modelName}
-                            className="size-5 rounded object-cover flex-shrink-0"
-                          />
-                          <span className={cn(
-                            'flex-1 text-sm truncate',
-                            isSelected ? 'font-medium text-foreground' : 'text-foreground/80'
-                          )}>
-                            {option.modelName}
-                          </span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                )
-              })
+                  )
+                })
               })()
             )}
           </div>
