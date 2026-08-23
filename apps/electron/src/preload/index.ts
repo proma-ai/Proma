@@ -111,6 +111,8 @@ import type {
   WeChatBridgeState,
   AgentQueueMessageInput,
   AgentDeferredQueueMessageInput,
+  AgentSubmitOrEnqueueInput,
+  AgentSubmitOrEnqueueResult,
   AgentQueuedMessageControlInput,
   AgentMoveQueuedMessageInput,
   AgentQueuedMessageStatus,
@@ -590,7 +592,9 @@ export interface ElectronAPI {
 
   /** 流式追加发送 Agent 消息（Agent 运行中） */
   queueAgentMessage: (input: AgentQueueMessageInput) => Promise<string>
-  /** 将等待当前 run 结束的消息交给主进程 */
+  /** 主进程原子决定立即注入或等待当前 run 结束后发送。 */
+  submitOrEnqueueAgentMessage: (input: AgentSubmitOrEnqueueInput) => Promise<AgentSubmitOrEnqueueResult>
+  /** 将等待当前 run 结束的消息交给主进程（兼容旧调用）。 */
   enqueueAgentQueuedMessage: (input: AgentDeferredQueueMessageInput) => Promise<void>
   cancelAgentQueuedMessage: (input: AgentQueuedMessageControlInput) => Promise<boolean>
   moveAgentQueuedMessage: (input: AgentMoveQueuedMessageInput) => Promise<boolean>
@@ -1820,6 +1824,9 @@ const electronAPI: ElectronAPI = {
   // Agent 队列消息
   queueAgentMessage: (input: AgentQueueMessageInput) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.QUEUE_MESSAGE, input)
+  },
+  submitOrEnqueueAgentMessage: (input: AgentSubmitOrEnqueueInput) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SUBMIT_OR_ENQUEUE_MESSAGE, input)
   },
   enqueueAgentQueuedMessage: (input: AgentDeferredQueueMessageInput) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.ENQUEUE_QUEUED_MESSAGE, input)

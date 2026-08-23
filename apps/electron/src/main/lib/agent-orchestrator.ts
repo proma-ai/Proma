@@ -44,6 +44,7 @@ import { friendlyErrorMessage, isPromptTooLongError, isThinkingSignatureError, m
 import { getActiveRunRejectionMessage, shouldPersistInitialUserMessage } from './agent-send-message-policy'
 import { isSessionNotFoundError } from './error-patterns'
 import { AgentEventBus } from './agent-event-bus'
+import { isStaleActiveQueueError } from './agent-queue-routing'
 import { decryptApiKey, getChannelById, listChannels, persistCodexOAuthCredentials, persistXaiOAuthCredentials, resolveChannelRuntimeApiKey, resolveCodexOAuthCredentials, resolveXaiOAuthCredentials } from './channel-manager'
 import { getAdapter, fetchTitle } from '@proma/core'
 import pkg from '../../../package.json' with { type: 'json' }
@@ -111,7 +112,7 @@ function errorMessageOf(error: unknown): string {
 }
 
 function isMissingActiveQueueChannelError(error: unknown): boolean {
-  return errorMessageOf(error).includes('无活跃消息通道可注入队列消息')
+  return isStaleActiveQueueError(error)
 }
 
 function isPartialSDKMessage(message: SDKMessage): boolean {
