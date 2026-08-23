@@ -494,6 +494,11 @@ async function getCatalogModels(provider: KnownProvider): Promise<readonly PiCat
 }
 
 async function findPiCatalogModel(provider: ProviderType, modelId: string): Promise<PiCatalogModel | undefined> {
+  // OpenCode Go 的 key、能力声明与协议只能来自其自有 catalog；绝不能因未命中
+  // 而借用其它 provider 的同名模型，否则会把错误协议/规格套到该渠道 Base URL。
+  if (provider === 'opencode-go-openai') {
+    return findCatalogModelById(await getCatalogModels('opencode-go'), modelId)
+  }
   if (provider === 'openai-codex') {
     return findCatalogModelById(await getCodexCatalogModels(), modelId)
   }
@@ -593,6 +598,11 @@ export async function resolvePiVisionRelayRoute(
 ): Promise<PiVisionRelayRoute | undefined> {
   const resolvedModelId = stripLegacyAgentSdkContextSuffix(modelId)
   if (!resolvedModelId) return undefined
+  // DeepSeek Flash 的实验视觉模型尚未进入 Pi catalog；其渠道协议无需 catalog 分流。
+  if (provider !== 'opencode-go-openai' && supportsPiNativeImageInput(resolvedModelId)) {
+    return { adapterProvider: provider }
+  }
+
   // OpenCode Go must never fall back to another provider's catalog: its key and images
   // may only be sent to the catalog endpoint owned by the configured OpenCode Go channel.
   const catalogModel = provider === 'opencode-go-openai'

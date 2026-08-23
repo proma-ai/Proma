@@ -13,6 +13,7 @@ import { FileTypeIcon } from '@/components/file-browser/FileTypeIcon'
 import { agentDiffUnseenFilesAtom, agentDiffDataAtom, agentSelectedWorktreeAtom, agentSessionsAtom, workspaceGitDiffRefreshVersionAtom } from '@/atoms/agent-atoms'
 import type { ChangedFileEntry, ChangedFileStatus, ChangeSource, UntrackedFileEntry, WorktreeInfo } from '@proma/shared'
 import { WorktreeSelector } from './WorktreeSelector'
+import { WorkspaceMemoryChangeDock } from '@/components/agent-skills/WorkspaceMemoryChangeDock'
 import { groupSessionFileChanges } from '@/lib/session-file-changes'
 import type { SessionFileChange } from '@/lib/session-file-changes'
 
@@ -267,7 +268,8 @@ export const DiffChangesList = React.memo(function DiffChangesList({
   const shouldShowWorktreeSelector = isGitRepo && Boolean(workspaceSlug || (worktreeRepoPaths?.length ?? 0) > 0)
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="min-h-0 flex-1 overflow-y-auto">
       {/* Worktree 分支选择器仅作用于 Git 改动。 */}
       {shouldShowWorktreeSelector && (
         <WorktreeSelector
@@ -387,6 +389,8 @@ export const DiffChangesList = React.memo(function DiffChangesList({
           })}
         </>
       )}
+      </div>
+      {workspaceSlug && <WorkspaceMemoryChangeDock workspaceSlug={workspaceSlug} />}
     </div>
   )
 })

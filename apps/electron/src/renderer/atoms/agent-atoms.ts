@@ -1298,38 +1298,6 @@ export const currentAgentSuggestionAtom = atom<string | null>((get) => {
   return get(agentPromptSuggestionsAtom).get(currentId) ?? null
 })
 
-// ===== 后台任务管理 =====
-
-/**
- * 后台任务数据结构
- *
- * 用于 ActiveTasksBar 显示运行中的 Agent 任务和 Shell 任务。
- */
-export interface BackgroundTask {
-  /** 任务或 Shell ID */
-  id: string
-  /** 任务类型 */
-  type: 'agent' | 'shell'
-  /** 关联的工具调用 ID（用于滚动定位到实时工具调用） */
-  toolUseId: string
-  /** 任务开始时间戳 */
-  startTime: number
-  /** 已耗时（秒） */
-  elapsedSeconds: number
-  /** 任务意图/描述 */
-  intent?: string
-}
-
-/**
- * 后台任务列表原子家族
- *
- * 按 sessionId 隔离，每个会话独立管理后台任务。
- * 任务完成后从列表中移除（只显示运行中任务）。
- */
-export const backgroundTasksAtomFamily = atomFamily((sessionId: string) =>
-  atom<BackgroundTask[]>([])
-)
-
 // ===== 用户打断状态 =====
 
 /** 被用户手动打断的会话集合（仅当前 streaming 周期有效，reload 后清除） */

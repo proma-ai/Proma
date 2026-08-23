@@ -1,7 +1,7 @@
 /**
  * Session Context — 为 ChatView / AgentView 提供 conversationId / sessionId
  *
- * 避免逐层 props 透传，子组件通过 useConversationId() / useAgentSessionId() 获取。
+ * 避免逐层 props 透传，子组件通过 useConversationId() 获取。
  */
 
 import * as React from 'react'
@@ -33,28 +33,4 @@ export function useConversationId(): string {
 /** 可选版本：在 Provider 外返回 null（用于 ModelSelector 等双模式组件） */
 export function useConversationIdOptional(): string | null {
   return React.useContext(ConversationContext)
-}
-
-// ===== Agent Session =====
-
-const AgentSessionContext = React.createContext<string | null>(null)
-
-export function AgentSessionProvider({
-  sessionId,
-  children,
-}: {
-  sessionId: string
-  children: React.ReactNode
-}): React.ReactElement {
-  return (
-    <AgentSessionContext.Provider value={sessionId}>
-      {children}
-    </AgentSessionContext.Provider>
-  )
-}
-
-export function useAgentSessionId(): string {
-  const id = React.useContext(AgentSessionContext)
-  if (!id) throw new Error('useAgentSessionId 必须在 AgentSessionProvider 内使用')
-  return id
 }

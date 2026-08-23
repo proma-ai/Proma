@@ -25,7 +25,6 @@ import { tabsAtom, activeTabIdAtom, openTab, TUTORIAL_TAB_ID } from './atoms/tab
 import { CURRENT_ONBOARDING_VERSION, hasCompletedCurrentOnboarding } from '../types'
 import hopperSeasideWhiteHouse from './assets/onboarding/hopper-seaside-white-house.png'
 import promaMarkWhite from './assets/onboarding/proma-mark-white.svg'
-import type { AppShellContextType } from './contexts/AppShellContext'
 
 export default function App(): React.ReactElement {
   // 应用级初始化状态。
@@ -170,14 +169,11 @@ export default function App(): React.ReactElement {
     )
   }
 
-  // Placeholder context value
-  const contextValue: AppShellContextType = {}
-
   // 显示主界面
   return (
     <TooltipProvider delayDuration={200} disableHoverableContent>
       <CloudAuthGate>
-        <AppShell contextValue={contextValue} />
+        <AppShell />
         <PlanningReminderRail />
         <QuotaExceededDialog />
         <OnboardingBillingPromptDialog

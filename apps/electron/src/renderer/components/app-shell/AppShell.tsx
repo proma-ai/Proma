@@ -11,7 +11,6 @@ import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { LeftSidebar } from './LeftSidebar'
 import { RightSidePanel } from './RightSidePanel'
 import { MainArea } from '@/components/tabs/MainArea'
-import { AppShellProvider, type AppShellContextType } from '@/contexts/AppShellContext'
 import { conversationsAtom, syncProgressAtom, isSyncingAtom, lastSyncResultAtom } from '@/atoms'
 import { appModeAtom } from '@/atoms/app-mode'
 import { agentSidePanelWidthAtom, currentAgentSessionIdAtom, currentSessionSidePanelOpenAtom } from '@/atoms/agent-atoms'
@@ -41,11 +40,6 @@ const MAX_LEFT_SIDEBAR_WIDTH = 420
 
 function clampLeftSidebarWidth(width: number): number {
   return Math.max(MIN_LEFT_SIDEBAR_WIDTH, Math.min(MAX_LEFT_SIDEBAR_WIDTH, width))
-}
-
-export interface AppShellProps {
-  /** Context 值，用于传递给子组件 */
-  contextValue: AppShellContextType
 }
 
 /**
@@ -81,7 +75,7 @@ function useSyncProgressListener(): void {
   }, [setConversations, setSyncProgress, setIsSyncing, setLastSyncResult])
 }
 
-export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
+export function AppShell(): React.ReactElement {
   // 保留商业版 Cloud 自动同步状态与上游 Settings workspace 视图。
   useSyncProgressListener()
 
@@ -207,7 +201,7 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
   }, [clampedRightPanelWidth, setRightPanelWidth])
 
   return (
-    <AppShellProvider value={contextValue}>
+    <>
       {/* 可拖动标题栏区域，用于窗口拖动。
           Windows 上必须避开右上角的 WindowControls 区域（buttons ~118px + 8px buffer = 126px），
           否则 drag-region 与按钮区的 hitmask 重叠会让 OS 把单击当成标题栏点击，
@@ -283,6 +277,6 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
         )}
 
       </div>
-    </AppShellProvider>
+    </>
   )
 }
