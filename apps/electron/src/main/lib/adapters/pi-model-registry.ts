@@ -524,6 +524,11 @@ export async function resolvePiVisionRelayRoute(
 ): Promise<PiVisionRelayRoute | undefined> {
   const resolvedModelId = stripLegacyAgentSdkContextSuffix(modelId)
   if (!resolvedModelId) return undefined
+  // DeepSeek Flash 的实验视觉模型尚未进入 Pi catalog；其渠道协议无需 catalog 分流。
+  if (provider !== 'opencode-go-openai' && supportsPiNativeImageInput(resolvedModelId)) {
+    return { adapterProvider: provider }
+  }
+
   const catalogModel = await findPiCatalogModel(provider, resolvedModelId)
   if (!catalogModel?.input.includes('image')) return undefined
 
