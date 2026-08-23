@@ -22,7 +22,6 @@ import {
   allPendingExitPlanRequestsAtom,
   agentPromptSuggestionsAtom,
   agentPendingPromptAtom,
-  backgroundTasksAtomFamily,
   recentlyModifiedPathsAtom,
   RECENTLY_MODIFIED_TTL_MS,
   applyAgentEvent,
@@ -1213,44 +1212,7 @@ export function useGlobalAgentListeners(): void {
             }
           }
 
-          // 处理后台任务事件
-          if (event.type === 'task_backgrounded') {
-            store.set(backgroundTasksAtomFamily(sessionId), (prev) => {
-              if (prev.some((t) => t.toolUseId === event.toolUseId)) return prev
-              return [...prev, {
-                id: event.taskId,
-                type: 'agent' as const,
-                toolUseId: event.toolUseId,
-                startTime: Date.now(),
-                elapsedSeconds: 0,
-                intent: event.intent,
-              }]
-            })
-          } else if (event.type === 'task_progress') {
-            store.set(backgroundTasksAtomFamily(sessionId), (prev) =>
-              prev.map((t) =>
-                t.toolUseId === event.toolUseId
-                  ? { ...t, elapsedSeconds: event.elapsedSeconds ?? t.elapsedSeconds }
-                  : t
-              )
-            )
-          } else if (event.type === 'shell_backgrounded') {
-            store.set(backgroundTasksAtomFamily(sessionId), (prev) => {
-              if (prev.some((t) => t.toolUseId === event.toolUseId)) return prev
-              return [...prev, {
-                id: event.shellId,
-                type: 'shell' as const,
-                toolUseId: event.toolUseId,
-                startTime: Date.now(),
-                elapsedSeconds: 0,
-                intent: event.command || event.intent,
-              }]
-            })
-          } else if (event.type === 'tool_result') {
-            // 工具完成时，移除对应的后台任务
-            store.set(backgroundTasksAtomFamily(sessionId), (prev) =>
-              prev.filter((t) => t.toolUseId !== event.toolUseId)
-            )
+          if (event.type === 'tool_result') {
             // Agent 写类工具成功时刷新 Git diff；非 Git 目录记录为本会话文件变更。
             if (pendingWriteTools.has(event.toolUseId)) {
               const entry = pendingWriteTools.get(event.toolUseId)!
@@ -1318,12 +1280,6 @@ export function useGlobalAgentListeners(): void {
                 })
               })
             }
-          } else if (event.type === 'shell_killed') {
-            store.set(backgroundTasksAtomFamily(sessionId), (prev) => {
-              const task = prev.find((t) => t.id === event.shellId)
-              if (!task) return prev
-              return prev.filter((t) => t.toolUseId !== task.toolUseId)
-            })
           } else if (event.type === 'prompt_suggestion') {
             // 存储提示建议到 atom
             console.log(`[GlobalAgentListeners] 收到建议: sessionId=${sessionId}, suggestion="${event.suggestion.slice(0, 50)}..."`)
@@ -1594,12 +1550,8 @@ export function useGlobalAgentListeners(): void {
           // 竞态保护：新流已启动时不要清理状态
           if (isNewStreamRunning()) return
 
-          // 后台任务等待态：保留后台任务列表（面板继续显示在跑任务），不做收尾清理，
-          // 等任务完成 Agent 自动唤醒续轮后再走真正的完成路径。
+          // 后台任务等待态由运行时状态控制；任务完成会自动唤醒续轮。
           if (backgroundTasksPending) return
-
-          // 清理后台任务
-          store.set(backgroundTasksAtomFamily(data.sessionId), [])
 
           // 后台会话没有挂载的 AgentView 来执行收尾清理（MainArea 只渲染活动 Tab）。
           // 若不在此处回收，liveMessagesMap 与流式状态索引会随运行时长单调增长，

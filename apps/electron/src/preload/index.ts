@@ -55,9 +55,6 @@ import type {
   AgentAttachFileInput,
   WorkspaceAttachDirectoryInput,
   WorkspaceAttachFileInput,
-  GetTaskOutputInput,
-  GetTaskOutputResult,
-  StopTaskInput,
   WorkspaceMcpConfig,
   SkillMeta,
   OtherWorkspaceSkillsGroup,
@@ -599,14 +596,6 @@ export interface ElectronAPI {
   cancelAgentQueuedMessage: (input: AgentQueuedMessageControlInput) => Promise<boolean>
   moveAgentQueuedMessage: (input: AgentMoveQueuedMessageInput) => Promise<boolean>
   onAgentQueuedMessageStatus: (callback: (status: AgentQueuedMessageStatus) => void) => () => void
-
-  // ===== Agent 后台任务管理 =====
-
-  /** 获取任务输出 */
-  getTaskOutput: (input: GetTaskOutputInput) => Promise<GetTaskOutputResult>
-
-  /** 停止任务 */
-  stopTask: (input: StopTaskInput) => Promise<void>
 
   // ===== Agent 工作区管理相关 =====
 
@@ -1841,15 +1830,6 @@ const electronAPI: ElectronAPI = {
     const listener = (_: unknown, status: AgentQueuedMessageStatus): void => callback(status)
     ipcRenderer.on(AGENT_IPC_CHANNELS.QUEUED_MESSAGE_STATUS, listener)
     return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.QUEUED_MESSAGE_STATUS, listener) }
-  },
-
-  // Agent 后台任务管理
-  getTaskOutput: (input: GetTaskOutputInput) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_TASK_OUTPUT, input)
-  },
-
-  stopTask: (input: StopTaskInput) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.STOP_TASK, input)
   },
 
   // Agent 工作区管理

@@ -111,7 +111,6 @@ import { longTextPasteAsAttachmentEnabledAtom } from '@/atoms/ui-preferences'
 import { channelsAtom, modelSelectorOpenAtom } from '@/atoms/chat-atoms'
 import { todoPlanningGroupsAtom } from '@/atoms/planning-atoms'
 import { useOpenSession } from '@/hooks/useOpenSession'
-import { AgentSessionProvider } from '@/contexts/session-context'
 import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
 import { sendWithCmdEnterAtom } from '@/atoms/shortcut-atoms'
 import { useOpenPreview } from '@/components/diff/preview-opener'
@@ -2917,7 +2916,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
   return (
     <>
-    <AgentSessionProvider sessionId={sessionId}>
       <div className="flex h-full min-h-0 flex-1 min-w-0 max-w-[min(72rem,100%)] flex-col overflow-hidden mx-auto">
         {/* Agent Header */}
         <AgentHeader sessionId={sessionId} />
@@ -3092,7 +3090,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         </div>
         )}
       </div>
-    </AgentSessionProvider>
 
     <Dialog open={todoDialogOpen} onOpenChange={setTodoDialogOpen}>
       <DialogContent className="max-w-lg">

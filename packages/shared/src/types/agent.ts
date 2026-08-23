@@ -1304,40 +1304,6 @@ export interface RewindSessionResult {
   }
 }
 
-// ===== 后台任务管理 =====
-
-/**
- * 获取任务输出请求
- */
-export interface GetTaskOutputInput {
-  /** 任务 ID */
-  taskId: string
-  /** 是否阻塞等待完成（默认 false） */
-  block?: boolean
-}
-
-/**
- * 获取任务输出响应
- */
-export interface GetTaskOutputResult {
-  /** 任务输出内容 */
-  output: string
-  /** 任务是否已完成 */
-  isComplete: boolean
-}
-
-/**
- * 停止任务请求
- */
-export interface StopTaskInput {
-  /** 会话 ID */
-  sessionId: string
-  /** 任务 ID */
-  taskId: string
-  /** 任务类型 */
-  type: 'agent' | 'shell'
-}
-
 // ===== Agent 流式事件载荷 =====
 
 /**
@@ -1753,12 +1719,6 @@ export const AGENT_IPC_CHANNELS = {
   RELOAD_BROWSER: 'agent:reload-browser',
   CLOSE_BROWSER: 'agent:close-browser',
   BROWSER_STATE_CHANGED: 'agent:browser-state-changed',
-
-  // 后台任务管理
-  /** 获取任务输出 */
-  GET_TASK_OUTPUT: 'agent:get-task-output',
-  /** 停止任务 */
-  STOP_TASK: 'agent:stop-task',
 
   // 工作区能力（MCP + Skill）
   /** 获取工作区能力摘要 */
