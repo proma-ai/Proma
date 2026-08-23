@@ -1553,6 +1553,17 @@ export class AgentOrchestrator {
       const queryStartedAt = Date.now()
 
       for (let attempt = 1; attempt <= MAX_QUERY_ATTEMPTS; attempt++) {
+        // stop() releases the active slot before aborting the adapter. It can win
+        // the race against async preflight or a recoverable-error retry, when no
+        // adapter query exists yet to cancel. Never start that later query.
+        if (this.activeSessions.get(sessionId) !== runGeneration) {
+          const wasStoppedByUser = this.consumeStoppedByUser(sessionId, runGeneration)
+          this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
+          try { updateAgentSessionMeta(sessionId, { stoppedByUser: wasStoppedByUser }) } catch { /* 会话可能已删除 */ }
+          completeRun(getAgentSessionMessages(sessionId), { stoppedByUser: wasStoppedByUser, startedAt: streamStartedAt })
+          return
+        }
+
         // A recovery query starts a fresh turn; activations from a failed attempt must not leak.
         pendingSkillActivations = []
         // 回退会清除 queryOptions.resumeSessionId；新建 Pi artifact 不应再触发 prompt replay。
@@ -1894,8 +1905,11 @@ export class AgentOrchestrator {
             }
           }
 
-          // 错误 break 触发了 → 继续循环
+          // 需要恢复时，前一次 adapter iterator 尚未自然结束。显式 return 才会
+          // 执行 PiUtilityAdapter 的 finally，释放旧 runtime 与 pending query；否则
+          // 同一 session 会残留多个运行时，后续 stop 只能取消其中一个。
           if (shouldRetryFromError) {
+            await queryIterator.return?.(undefined as never).catch(() => {})
             continue
           }
 
@@ -1931,7 +1945,9 @@ export class AgentOrchestrator {
           return
 
         } catch (error) {
-          if (!this.activeSessions.has(sessionId)) {
+          // 同一 session 的新 run 可能已在旧 run 的迟到错误之前开始；只要
+          // 本代际不再拥有 active slot，就只能收束自己，不能向新 run 泄漏终态。
+          if (this.activeSessions.get(sessionId) !== runGeneration) {
             const wasStoppedByUser = this.consumeStoppedByUser(sessionId, runGeneration)
             this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
             try { updateAgentSessionMeta(sessionId, { stoppedByUser: wasStoppedByUser }) } catch { /* 会话可能已删除 */ }

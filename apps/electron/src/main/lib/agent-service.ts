@@ -44,6 +44,7 @@ import { getHeadlessAgentRunTarget } from './agent-headless-run-target'
 import { sendAgentStreamComplete } from './agent-completion-payload'
 import { AgentStreamForwarder } from './agent-stream-forwarder'
 import { AgentQueueCoordinator } from './agent-queue-coordinator'
+import { shouldStopBeforeAgentRun } from './agent-stop-policy'
 
 // ===== 实例创建 =====
 
@@ -449,7 +450,16 @@ export async function generateAgentTitle(input: AgentGenerateTitleInput): Promis
  * 中止指定会话的 Agent 执行
  */
 export function stopAgent(sessionId: string): void {
-  orchestrator.stop(sessionId, agentQueueCoordinator.isDispatching(sessionId))
+  // SEND_MESSAGE reserves this slot before the async bridge setup reaches the
+  // orchestrator. Remember a stop in that window so the later run is never
+  // allowed to create an uncancellable adapter query.
+  orchestrator.stop(
+    sessionId,
+    shouldStopBeforeAgentRun(
+      startingAgentSessions.has(sessionId),
+      agentQueueCoordinator.isDispatching(sessionId),
+    ),
+  )
 }
 
 setHeadlessAgentRunner(runAgentHeadless)
