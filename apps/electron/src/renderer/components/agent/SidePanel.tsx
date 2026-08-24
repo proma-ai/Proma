@@ -7,7 +7,7 @@
 
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
-import { X, ExternalLink, ChevronRight, MoreHorizontal, FolderSearch, Pencil, FolderInput, MessageSquarePlus } from 'lucide-react'
+import { X, ExternalLink, ChevronRight, MoreHorizontal, FolderSearch, Pencil, FolderInput, MessageSquarePlus, FileDiff, FileText, FolderOpen, Globe, MessageCircle, Brain } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
@@ -19,6 +19,7 @@ import {
 import { cn } from '@/lib/utils'
 import { FileBrowser, FileDropZone, FileTypeIcon, FileSearchBar, computeRevealAncestors, isPathUnderRoot, computeTreeRowLayout, AncestorGuides, STICKY_ROW_BASE_CLASS, canBeSticky } from '@/components/file-browser'
 import { DiffPanelTabBar } from '@/components/diff/DiffPanelTabBar'
+import type { WorkspacePanelTab } from '@/components/diff/DiffPanelTabBar'
 import { DiffChangesList } from '@/components/diff/DiffChangesList'
 import { ChatView } from '@/components/chat/ChatView'
 import {
@@ -36,19 +37,36 @@ import {
   agentDiffRefreshVersionAtom,
   agentNonGitFileChangesAtom,
   agentFileChangesCurrentRunAtom,
+  agentMemoryPanelOpenAtomFamily,
+  agentSessionStreamingStateAtomFamily,
   fileBrowserAutoRevealAtom,
   agentSelectedWorktreeAtom,
 } from '@/atoms/agent-atoms'
+import {
+  getBrowserSidePanelTab,
+  getBrowserTabIdFromSidePanelTab,
+  getPreviewIdFromSidePanelTab,
+  getPreviewSidePanelTab,
+} from '@/atoms/agent-atoms'
 import type { AgentSidePanelTab, AgentFileSourceFilter } from '@/atoms/agent-atoms'
 import { WorkspaceMemoryChangeDock } from '@/components/agent-skills/WorkspaceMemoryChangeDock'
+import { workspaceMemoryChangesAtom } from '@/atoms/memory-change-atoms'
 import { agentSideChatMapAtom } from '@/atoms/chat-atoms'
 import { interfaceVariantAtom } from '@/atoms/theme'
-import { previewFileMapAtom } from '@/atoms/preview-atoms'
-import { browserPanelMinimizedMapAtom, browserPanelOpenMapAtom } from '@/atoms/browser-atoms'
+import {
+  browserPanelMinimizedMapAtom,
+  browserPanelOpenMapAtom,
+  browserPendingNavigationMapAtom,
+  browserStateMapAtom,
+} from '@/atoms/browser-atoms'
+import { BrowserPanel } from '@/components/browser/BrowserPanel'
+import { getPreviewFileId, previewFileMapAtom, previewFilesMapAtom, previewPanelOpenMapAtom } from '@/atoms/preview-atoms'
+import { PreviewPanel } from '@/components/diff/PreviewPanel'
 import { useOpenPreview } from '@/components/diff/preview-opener'
 import { detectIsWindows } from '@/lib/platform'
 import type { FileEntry, AgentPendingFile } from '@proma/shared'
 import { setFilePanelDragData, getMediaTypeFromFilename, dispatchInsertFileMention } from '@/lib/file-panel-drag'
+import { CLOSE_ACTIVE_RIGHT_WORKSPACE_TAB_EVENT } from '@/lib/right-workspace-events'
 
 function getPathBasename(filePath: string): string {
   return filePath.split(/[\\/]/).filter(Boolean).pop() || filePath
@@ -73,59 +91,53 @@ interface SidePanelProps {
   width?: number
 }
 
-export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, width = 280 }: SidePanelProps): React.ReactElement {
+export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, width = 460 }: SidePanelProps): React.ReactElement {
   // 侧面板状态按 sessionId 持久化，切换会话不会互相覆盖。
   const [isOpen, setIsOpen] = useAtom(currentSessionSidePanelOpenAtom)
   const isWindows = React.useMemo(() => detectIsWindows(), [])
 
   // Tab 系统
   const previewFileMap = useAtomValue(previewFileMapAtom)
-  const selectedFilePath = previewFileMap.get(sessionId)?.filePath
+  const setPreviewFileMap = useSetAtom(previewFileMapAtom)
+  const previewFilesMap = useAtomValue(previewFilesMapAtom)
+  const setPreviewFilesMap = useSetAtom(previewFilesMapAtom)
+  const previewOpenMap = useAtomValue(previewPanelOpenMapAtom)
+  const setPreviewOpenMap = useSetAtom(previewPanelOpenMapAtom)
+  const previewFiles = previewFilesMap.get(sessionId) ?? []
+  const requestedPreviewId = getPreviewIdFromSidePanelTab(activeTab)
+  const currentPreviewFile = (requestedPreviewId ? previewFiles.find((file) => getPreviewFileId(file) === requestedPreviewId) : null)
+    ?? previewFileMap.get(sessionId) ?? null
+  const previewOpen = previewFiles.length > 0 || previewOpenMap.get(sessionId) === true
+  const selectedFilePath = currentPreviewFile?.filePath
 
   const openPreview = useOpenPreview()
-  const browserOpenMap = useAtomValue(browserPanelOpenMapAtom)
-  const setBrowserMinimizedMap = useSetAtom(browserPanelMinimizedMapAtom)
   const setBrowserOpenMap = useSetAtom(browserPanelOpenMapAtom)
-
-  const minimizeBrowserForPreview = React.useCallback(async (): Promise<void> => {
-    if (!browserOpenMap.get(sessionId)) return
-    const minimizeBrowser = (window.electronAPI as Partial<typeof window.electronAPI>).minimizeAgentBrowser
-    try {
-      if (typeof minimizeBrowser === 'function') await minimizeBrowser(sessionId)
-    } catch (error) {
-      console.error('[受管浏览器] 为打开文件预览而最小化失败:', error)
-    } finally {
-      setBrowserMinimizedMap((previous) => { const next = new Map(previous); next.set(sessionId, true); return next })
-      setBrowserOpenMap((previous) => { const next = new Map(previous); next.set(sessionId, false); return next })
-    }
-  }, [browserOpenMap, sessionId, setBrowserMinimizedMap, setBrowserOpenMap])
+  const setBrowserMinimizedMap = useSetAtom(browserPanelMinimizedMapAtom)
 
   // 用 ref 存 basePaths 相关值，避免声明顺序问题
   const basePathsRef = React.useRef<string[]>([])
 
-  const handleFilePreview = React.useCallback(async (filePath: string) => {
-    await minimizeBrowserForPreview()
+  const handleFilePreview = React.useCallback((filePath: string) => {
     const bp = basePathsRef.current
     openPreview(sessionId, {
       filePath,
       previewOnly: true,
       basePaths: bp.length > 0 ? bp : undefined,
     })
-  }, [minimizeBrowserForPreview, sessionId, openPreview])
+  }, [sessionId, openPreview])
 
   // Worktree 选择状态（仅用于 diff 文件点击时传递 baseRef，选取逻辑已下沉至 DiffChangesList）
   const selectedWorktreeMap = useAtomValue(agentSelectedWorktreeAtom)
   const selectedWorktreePath = selectedWorktreeMap.get(sessionId) ?? null
 
-  const handleDiffFileClick = React.useCallback(async (filePath: string, _isUntracked: boolean, gitRoot?: string) => {
-    await minimizeBrowserForPreview()
+  const handleDiffFileClick = React.useCallback((filePath: string, _isUntracked: boolean, gitRoot?: string) => {
     openPreview(sessionId, {
       filePath,
       dirPath: sessionPath || undefined,
       gitRoot,
       baseRef: selectedWorktreePath ? 'origin/main' : undefined,
     })
-  }, [minimizeBrowserForPreview, openPreview, sessionId, sessionPath, selectedWorktreePath])
+  }, [openPreview, sessionId, sessionPath, selectedWorktreePath])
 
   // 动画标志：isOpen 变化时启用过渡动画，切换会话时即时显示
   const prevIsOpenRef = React.useRef(isOpen)
@@ -446,9 +458,46 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   const sideChatMap = useAtomValue(agentSideChatMapAtom)
   const setSideChatMap = useSetAtom(agentSideChatMapAtom)
   const sideChatConversationId = sideChatMap.get(sessionId) ?? null
+  const [memoryTabOpen, setMemoryTabOpen] = useAtom(agentMemoryPanelOpenAtomFamily(sessionId))
+  const isAgentRunning = useAtomValue(agentSessionStreamingStateAtomFamily(sessionId))?.running === true
+  const memoryChangesMap = useAtomValue(workspaceMemoryChangesAtom)
+  const latestMemoryChange = workspaceSlug ? memoryChangesMap.get(workspaceSlug)?.[0] : undefined
+  const lastActivatedMemoryChangeRef = React.useRef<string | null>(null)
   const effectiveActiveTab: AgentSidePanelTab = activeTab === 'chat' && !sideChatConversationId
     ? 'files'
-    : activeTab
+    : activeTab === 'memory' && (!workspaceSlug || !memoryTabOpen)
+      ? 'files'
+      : activeTab
+
+  // Agent 对当前项目记忆写入后，自动展开并激活完整编辑器这个独立工作区 Tab。
+  // Watcher 同一事件可因重新挂载被读到多次，按路径和时间戳去重；仅流式 Agent 运行中
+  // 的改动会抢占当前视图，用户在记忆编辑器中的手动保存不会打断其他工作。
+  React.useEffect(() => {
+    if (!isAgentRunning || !latestMemoryChange) return
+    const changeId = `${latestMemoryChange.relativePath}:${latestMemoryChange.changedAt}`
+    if (lastActivatedMemoryChangeRef.current === changeId) return
+    lastActivatedMemoryChangeRef.current = changeId
+    setMemoryTabOpen(true)
+    setIsOpen(true)
+    onTabChange('memory')
+  }, [isAgentRunning, latestMemoryChange, onTabChange, setIsOpen, setMemoryTabOpen])
+
+  const handleClosePreviewTab = React.useCallback((previewId: string) => {
+    const remaining = previewFiles.filter((file) => getPreviewFileId(file) !== previewId)
+    setPreviewFilesMap((previous) => {
+      const next = new Map(previous)
+      if (remaining.length > 0) next.set(sessionId, remaining)
+      else next.delete(sessionId)
+      return next
+    })
+    const fallback = remaining.at(-1) ?? null
+    setPreviewOpenMap((previous) => {
+      const next = new Map(previous)
+      next.set(sessionId, fallback !== null)
+      return next
+    })
+    if (getPreviewIdFromSidePanelTab(activeTab) === previewId) onTabChange(fallback ? getPreviewSidePanelTab(getPreviewFileId(fallback)) : 'files')
+  }, [activeTab, onTabChange, previewFiles, sessionId, setPreviewFilesMap, setPreviewOpenMap])
 
   const handleCloseChatTab = React.useCallback(() => {
     setSideChatMap((prev) => {
@@ -462,6 +511,191 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     }
   }, [activeTab, onTabChange, sessionId, setSideChatMap])
 
+  // 浏览器状态由 MainArea 的全局订阅同步到 atom；右侧工作区只负责呈现和显式打开。
+  // 这样切换文件/改动时 BrowserSlot 会正确隐藏原生 WebContentsView，而不会销毁网页会话。
+  const browserStateMap = useAtomValue(browserStateMapAtom)
+  const setBrowserStateMap = useSetAtom(browserStateMapAtom)
+  const setPendingNavigationMap = useSetAtom(browserPendingNavigationMapAtom)
+  const browserState = browserStateMap.get(sessionId) ?? null
+  const openingBrowserSessionRef = React.useRef<string | null>(null)
+  // 右侧 Tab 可被快速连续点击。必须串行落盘到原生 controller，否则迟到的旧选择
+  // 会把 WebContentsView 切回已卸载的 Slot，造成页面不可见。
+  const desiredBrowserTabIdRef = React.useRef<string | null>(null)
+  const browserSelectionInFlightRef = React.useRef(false)
+
+  const publishBrowserState = React.useCallback((state: NonNullable<typeof browserState>) => {
+    setBrowserStateMap((previous) => {
+      const next = new Map(previous)
+      next.set(sessionId, state)
+      return next
+    })
+    setBrowserMinimizedMap((previous) => {
+      const next = new Map(previous)
+      next.delete(sessionId)
+      return next
+    })
+    setBrowserOpenMap((previous) => {
+      const next = new Map(previous)
+      next.set(sessionId, true)
+      return next
+    })
+  }, [sessionId, setBrowserMinimizedMap, setBrowserOpenMap, setBrowserStateMap])
+
+  const ensureBrowserOpen = React.useCallback(async () => {
+    if (openingBrowserSessionRef.current === sessionId) return null
+    const open = (window.electronAPI as Partial<typeof window.electronAPI>).openAgentBrowser
+    if (typeof open !== 'function') return null
+    openingBrowserSessionRef.current = sessionId
+    try {
+      const state = await open(sessionId)
+      publishBrowserState(state)
+      return state
+    } catch (error) {
+      console.error('[SidePanel] 打开受管浏览器失败:', error)
+      return null
+    } finally {
+      if (openingBrowserSessionRef.current === sessionId) openingBrowserSessionRef.current = null
+    }
+  }, [publishBrowserState, sessionId])
+
+  const flushBrowserTabSelection = React.useCallback(() => {
+    if (browserSelectionInFlightRef.current) return
+    browserSelectionInFlightRef.current = true
+    void (async () => {
+      try {
+        while (desiredBrowserTabIdRef.current) {
+          const targetTabId = desiredBrowserTabIdRef.current
+          desiredBrowserTabIdRef.current = null
+          const state = await window.electronAPI.selectAgentBrowserTab({ sessionId, tabId: targetTabId })
+          publishBrowserState(state)
+        }
+      } catch (error) {
+        console.error('[SidePanel] 切换受管浏览器标签失败:', error)
+      } finally {
+        browserSelectionInFlightRef.current = false
+        // 请求完成的瞬间可能又点击了其他标签，继续落到最终目标。
+        if (desiredBrowserTabIdRef.current) flushBrowserTabSelection()
+      }
+    })()
+  }, [publishBrowserState, sessionId])
+
+  const handleWorkspaceTabChange = React.useCallback((tab: AgentSidePanelTab) => {
+    const previewId = getPreviewIdFromSidePanelTab(tab)
+    if (previewId) {
+      const file = previewFiles.find((item) => getPreviewFileId(item) === previewId)
+      if (file) {
+        setPreviewFileMap((previous) => {
+          const next = new Map(previous)
+          next.set(sessionId, file)
+          return next
+        })
+      }
+    }
+    const browserTabId = getBrowserTabIdFromSidePanelTab(tab)
+    onTabChange(tab)
+    if (!browserTabId) return
+    desiredBrowserTabIdRef.current = browserTabId
+    flushBrowserTabSelection()
+  }, [flushBrowserTabSelection, onTabChange, previewFiles, sessionId, setPreviewFileMap])
+
+  const handleOpenBrowserTab = React.useCallback(async () => {
+    try {
+      const state = browserState
+        ? await window.electronAPI.createAgentBrowserTab({ sessionId })
+        : await ensureBrowserOpen()
+      if (!state) return
+      publishBrowserState(state)
+      onTabChange(getBrowserSidePanelTab(state.activeTabId))
+    } catch (error) {
+      console.error('[SidePanel] 新建受管浏览器标签失败:', error)
+    }
+  }, [browserState, ensureBrowserOpen, onTabChange, publishBrowserState, sessionId])
+
+  const handleCloseBrowserTab = React.useCallback(async (browserTabId: string) => {
+    try {
+      const state = await window.electronAPI.closeAgentBrowserTab({ sessionId, tabId: browserTabId })
+      if (state) {
+        publishBrowserState(state)
+        if (getBrowserTabIdFromSidePanelTab(activeTab) === browserTabId) {
+          onTabChange(getBrowserSidePanelTab(state.activeTabId))
+        }
+        return
+      }
+      setBrowserOpenMap((previous) => {
+        const next = new Map(previous)
+        next.set(sessionId, false)
+        return next
+      })
+      setBrowserMinimizedMap((previous) => {
+        const next = new Map(previous)
+        next.delete(sessionId)
+        return next
+      })
+      setBrowserStateMap((previous) => {
+        const next = new Map(previous)
+        next.delete(sessionId)
+        return next
+      })
+      setPendingNavigationMap((previous) => {
+        const next = new Map(previous)
+        next.delete(sessionId)
+        return next
+      })
+      onTabChange('files')
+    } catch (error) {
+      console.error('[SidePanel] 关闭受管浏览器标签失败:', error)
+    }
+  }, [activeTab, onTabChange, publishBrowserState, sessionId, setBrowserMinimizedMap, setBrowserOpenMap, setBrowserStateMap, setPendingNavigationMap])
+
+  const activeBrowserTabId = getBrowserTabIdFromSidePanelTab(effectiveActiveTab)
+  React.useEffect(() => {
+    if (activeBrowserTabId && !browserState?.tabs.some((tab) => tab.tabId === activeBrowserTabId)) {
+      onTabChange('files')
+    }
+  }, [activeBrowserTabId, browserState?.tabs, onTabChange])
+
+  const showBrowserActivity = Boolean(browserState?.activity && browserState.executionSource !== 'user')
+  const workspaceTabs = React.useMemo<WorkspacePanelTab[]>(() => [
+    { id: 'files', label: '文件', icon: <FolderOpen className="size-3.5" /> },
+    { id: 'changes', label: '改动', icon: <FileDiff className="size-3.5" /> },
+    ...(memoryTabOpen && workspaceSlug ? [{ id: 'memory' as const, label: '项目记忆', icon: <Brain className="size-3.5" />, closable: true }] : []),
+    ...previewFiles.map((file) => ({
+      id: getPreviewSidePanelTab(getPreviewFileId(file)),
+      label: file.filePath.split(/[\\/]/).pop() || '预览',
+      icon: <FileText className="size-3.5" />,
+      closable: true,
+    })),
+    ...(sideChatConversationId ? [{ id: 'chat' as const, label: '问答', icon: <MessageCircle className="size-3.5" />, closable: true }] : []),
+    ...(browserState?.tabs.map((tab) => ({
+      id: getBrowserSidePanelTab(tab.tabId),
+      label: tab.title || '新建标签页',
+      icon: <Globe className="size-3.5" />,
+      closable: true,
+      activity: showBrowserActivity && activeBrowserTabId !== tab.tabId && browserState.activeTabId === tab.tabId,
+    })) ?? []),
+  ], [activeBrowserTabId, browserState, memoryTabOpen, previewFiles, showBrowserActivity, sideChatConversationId, workspaceSlug])
+
+  const handleCloseWorkspaceTab = React.useCallback((tab: AgentSidePanelTab) => {
+    if (tab === 'memory') {
+      setMemoryTabOpen(false)
+      if (activeTab === 'memory') onTabChange('files')
+      return
+    }
+    const previewId = getPreviewIdFromSidePanelTab(tab)
+    if (previewId) { handleClosePreviewTab(previewId); return }
+    if (tab === 'chat') { handleCloseChatTab(); return }
+    const browserTabId = getBrowserTabIdFromSidePanelTab(tab)
+    if (browserTabId) void handleCloseBrowserTab(browserTabId)
+  }, [activeTab, handleCloseBrowserTab, handleCloseChatTab, handleClosePreviewTab, onTabChange, setMemoryTabOpen])
+
+  React.useEffect(() => {
+    const handleCloseActiveWorkspaceTab = (event: Event) => {
+      const { sessionId: targetSessionId } = (event as CustomEvent<{ sessionId?: string }>).detail ?? {}
+      if (targetSessionId === sessionId) handleCloseWorkspaceTab(activeTab)
+    }
+    window.addEventListener(CLOSE_ACTIVE_RIGHT_WORKSPACE_TAB_EVENT, handleCloseActiveWorkspaceTab)
+    return () => window.removeEventListener(CLOSE_ACTIVE_RIGHT_WORKSPACE_TAB_EVENT, handleCloseActiveWorkspaceTab)
+  }, [activeTab, handleCloseWorkspaceTab, sessionId])
 
   return (
     <div
@@ -483,21 +717,41 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
         )}
         >
           <DiffPanelTabBar
+            tabs={workspaceTabs}
             activeTab={effectiveActiveTab}
-            onTabChange={onTabChange}
+            onTabChange={handleWorkspaceTabChange}
+            onCloseTab={handleCloseWorkspaceTab}
+            onOpenBrowser={() => void handleOpenBrowserTab()}
+            onOpenFile={() => onTabChange('files')}
             onClose={() => setIsOpen(false)}
-            onCloseChat={handleCloseChatTab}
-            showChatTab={Boolean(sideChatConversationId)}
             isWindows={isWindows}
           />
 
-          {effectiveActiveTab === 'chat' ? (
+          {requestedPreviewId && currentPreviewFile ? (
+            <div className="min-h-0 flex-1 overflow-hidden"><PreviewPanel sessionId={sessionId} file={currentPreviewFile} onClose={() => handleClosePreviewTab(requestedPreviewId)} /></div>
+          ) : activeBrowserTabId ? (
+            browserState && browserState.tabs.some((tab) => tab.tabId === activeBrowserTabId) ? (
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <BrowserPanel sessionId={sessionId} tabId={activeBrowserTabId} state={browserState} />
+              </div>
+            ) : (
+              <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">浏览器标签已关闭</div>
+            )
+          ) : effectiveActiveTab === 'chat' ? (
             sideChatConversationId ? (
               <div className="min-h-0 flex-1 overflow-hidden">
                 <ChatView conversationId={sideChatConversationId} />
               </div>
             ) : (
               <div className="flex-1 flex items-center justify-center text-muted-foreground text-xs">暂无问答会话</div>
+            )
+          ) : effectiveActiveTab === 'memory' ? (
+            workspaceSlug ? (
+              <div className="min-h-0 flex-1 overflow-auto p-2">
+                <WorkspaceMemoryChangeDock workspaceSlug={workspaceSlug} className="flex h-full min-h-0 flex-col bg-content-area p-3" />
+              </div>
+            ) : (
+              <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">等待项目初始化...</div>
             )
           ) : effectiveActiveTab === 'changes' ? (
             sessionPath ? (
@@ -657,7 +911,6 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
                       />
                     )}
                   </div>
-                  {workspaceSlug && <WorkspaceMemoryChangeDock workspaceSlug={workspaceSlug} />}
                 </>
               ) : (
                 <div className="flex-1 flex items-center justify-center text-muted-foreground text-xs">等待会话初始化...</div>

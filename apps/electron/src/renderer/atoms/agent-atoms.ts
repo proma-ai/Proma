@@ -511,7 +511,7 @@ export const agentSidePanelOpenAtomFamily = atomFamily((sessionId: string) => at
 ))
 
 /** 侧面板宽度（全局共享，用户拖拽后持久化） */
-export const agentSidePanelWidthAtom = atomWithStorage<number>('proma-agent-sidepanel-width', 280)
+export const agentSidePanelWidthAtom = atomWithStorage<number>('proma-agent-workspace-width', 460)
 
 /** 文件来源选择：按会话持久化，未存储的会话默认显示会话文件。 */
 export type AgentFileSourceFilter = 'session' | 'project'
@@ -522,7 +522,29 @@ export const agentFileSourceFilterMapAtom = atomWithStorage<Record<string, Agent
   { getOnInit: true },
 )
 
-export type AgentSidePanelTab = 'files' | 'changes' | 'chat'
+export type AgentSidePanelBaseTab = 'files' | 'changes' | 'memory' | 'chat'
+/** 项目记忆、每个浏览器网页和文件预览都处于右侧工作区顶栏。 */
+export type AgentSidePanelTab = AgentSidePanelBaseTab | `browser:${string}` | `preview:${string}`
+
+export function getBrowserSidePanelTab(tabId: string): AgentSidePanelTab {
+  return `browser:${tabId}`
+}
+
+export function getBrowserTabIdFromSidePanelTab(tab: AgentSidePanelTab | 'browser'): string | null {
+  return tab.startsWith('browser:') ? tab.slice('browser:'.length) : null
+}
+
+export function isBrowserSidePanelTab(tab: AgentSidePanelTab | 'browser' | 'preview'): tab is `browser:${string}` {
+  return tab.startsWith('browser:')
+}
+
+export function getPreviewSidePanelTab(previewId: string): AgentSidePanelTab {
+  return `preview:${previewId}`
+}
+
+export function getPreviewIdFromSidePanelTab(tab: AgentSidePanelTab | 'preview'): string | null {
+  return tab.startsWith('preview:') ? tab.slice('preview:'.length) : null
+}
 
 /** 当前会话的侧面板是否打开，并将写入定向到当前会话。 */
 export const currentSessionSidePanelOpenAtom = atom(
@@ -536,8 +558,11 @@ export const currentSessionSidePanelOpenAtom = atom(
   },
 )
 
-/** 侧面板当前 Tab：Files / 文件改动 / Chat（per-session Map） */
-export const agentDiffPanelTabAtom = atom<Map<string, AgentSidePanelTab>>(new Map())
+/** 项目记忆 Diff 预览是否已作为当前会话的可关闭工作区 Tab 打开。 */
+export const agentMemoryPanelOpenAtomFamily = atomFamily((sessionId: string) => atom(false))
+
+/** 侧面板当前工作区：基础视图或某个浏览器网页（per-session Map）。 */
+export const agentDiffPanelTabAtom = atom<Map<string, AgentSidePanelTab | 'browser' | 'preview'>>(new Map())
 
 /** Diff 视图模式：'split' | 'unified'，默认使用统一预览 */
 export const agentDiffViewModeAtom = atom<'split' | 'unified'>('unified')

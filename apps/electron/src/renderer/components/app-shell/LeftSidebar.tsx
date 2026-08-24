@@ -11,7 +11,7 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Star, Settings, Plus, Trash2, Pencil, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, FolderInput, FolderPlus, GripVertical, Clock, AlarmClock, ChevronRight, ChevronDown, ChevronUp, Blocks, GitBranch, Download, Loader2, RotateCw } from 'lucide-react'
+import { Pin, PinOff, Star, Settings, Plus, CirclePlus, Trash2, Pencil, PanelLeft, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, FolderInput, FolderPlus, GripVertical, Clock, AlarmClock, ChevronRight, ChevronDown, ChevronUp, Blocks, GitBranch, Download, Loader2, RotateCw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
@@ -3300,35 +3300,38 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                 'sidebar-collapse-button mt-2 size-10 flex-shrink-0 flex items-center justify-center rounded-[10px] text-foreground/40 sidebar-control-surface hover:text-foreground/60 titlebar-no-drag transition-[background-color,color] duration-150'
               )}
             >
-              <PanelLeftClose size={14} />
+              <PanelLeft size={14} />
             </button>
           </TooltipTrigger>
           <TooltipContent side="right">收起侧边栏 ({navigator.platform.includes('Mac') ? '⌘B' : 'Ctrl+Shift+E'})</TooltipContent>
         </Tooltip>
       </div>
 
-      {/* 新对话/新会话按钮 + 搜索按钮 */}
-      <div className="px-3 pt-2 flex items-center gap-1.5">
+      {/* 新建任务/对话与搜索：默认无底色，降低左侧栏高频操作的视觉权重。 */}
+      <div className="flex items-center gap-1 px-3 pt-2">
         <Tooltip>
           <TooltipTrigger asChild>
             <button
               type="button"
-              aria-label={mode === 'agent' ? '新建 Agent 会话' : '新建 Chat 对话'}
+              aria-label={mode === 'agent' ? '新建任务' : '新建对话'}
               onClick={() => { void (mode === 'agent' ? createAgentSessionInWorkspace() : createChat()) }}
-              className="flex-1 h-10 flex items-center gap-2 px-2.5 rounded-xl text-[13px] font-medium text-foreground/70 sidebar-control-surface hover:text-foreground transition-colors duration-100 titlebar-no-drag border border-transparent"
+              className="group flex h-9 min-w-0 flex-1 items-center gap-3 rounded-lg px-0 text-[13px] font-medium text-foreground/70 transition-[background-color,color,transform] hover:bg-foreground/[0.055] hover:text-foreground active:scale-[0.96] titlebar-no-drag"
             >
-              <Plus size={14} />
-              <span>{mode === 'agent' ? '新会话' : '新对话'}</span>
+              <CirclePlus size={16} className="shrink-0" />
+              <span>{mode === 'agent' ? '新建任务' : '新建对话'}</span>
+              <span className="ml-auto flex shrink-0 items-center opacity-70 group-hover:opacity-100">
+                <ShortcutKeycaps
+                  shortcutId="new-session"
+                  keycapClassName="h-5 min-w-5 px-1 text-[11px]"
+                  separatorClassName="text-[10px]"
+                />
+              </span>
             </button>
           </TooltipTrigger>
           <TooltipContent side="bottom">
             <span className="flex items-center gap-2">
-              <span>{mode === 'agent' ? '新会话' : '新对话'}</span>
-              <ShortcutKeycaps
-                shortcutId="new-session"
-                keycapClassName="h-5 min-w-5 px-1 text-[11px]"
-                separatorClassName="text-[10px]"
-              />
+              <span>{mode === 'agent' ? '新建任务' : '新建对话'}</span>
+              <ShortcutKeycaps shortcutId="new-session" keycapClassName="h-5 min-w-5 px-1 text-[11px]" separatorClassName="text-[10px]" />
             </span>
           </TooltipContent>
         </Tooltip>
@@ -3338,9 +3341,9 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
               type="button"
               onClick={() => setSearchDialogOpen(true)}
               aria-label="搜索"
-              className="flex-shrink-0 size-10 flex items-center justify-center rounded-xl text-foreground/40 sidebar-control-surface hover:text-foreground/70 transition-colors duration-100 titlebar-no-drag"
+              className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-foreground/45 transition-[background-color,color,transform] hover:bg-foreground/[0.055] hover:text-foreground active:scale-[0.96] titlebar-no-drag"
             >
-              <Search size={14} />
+              <Search size={16} />
             </button>
           </TooltipTrigger>
           <TooltipContent side="bottom">搜索 ({getAcceleratorDisplay(getActiveAccelerator('global-search'))})</TooltipContent>

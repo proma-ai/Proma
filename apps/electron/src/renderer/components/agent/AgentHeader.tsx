@@ -1,18 +1,23 @@
 /**
  * AgentHeader — Agent 会话头部
  *
- * 显示会话标题（可点击编辑）。
- * 参照 ChatHeader 的编辑模式。
+ * 显示会话标题；通过标题下拉菜单进入重命名。
  */
 
 import * as React from 'react'
-import { useAtomValue, useSetAtom } from 'jotai'
-import { Pencil, Check, X } from 'lucide-react'
-import { agentSessionsAtom } from '@/atoms/agent-atoms'
+import { useAtom, useAtomValue, useSetAtom } from 'jotai'
+import { Check, ChevronDown, PanelRight, Pencil, X } from 'lucide-react'
+import { agentSessionsAtom, currentSessionSidePanelOpenAtom } from '@/atoms/agent-atoms'
 import { tabsAtom, updateTabTitle } from '@/atoms/tab-atoms'
 import { replaceAgentSessionInFreshnessOrder } from '@/lib/agent-session-list'
 import { detectIsWindows, WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
 import { cn } from '@/lib/utils'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
 /** AgentHeader 属性接口 */
 interface AgentHeaderProps {
@@ -25,6 +30,7 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
   const session = sessions.find((s) => s.id === sessionId) ?? null
   const setAgentSessions = useSetAtom(agentSessionsAtom)
   const setTabs = useSetAtom(tabsAtom)
+  const [isRightPanelOpen, setRightPanelOpen] = useAtom(currentSessionSidePanelOpenAtom)
   const [editing, setEditing] = React.useState(false)
   const [editTitle, setEditTitle] = React.useState('')
   const inputRef = React.useRef<HTMLInputElement>(null)
@@ -80,7 +86,7 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
             onChange={(e) => setEditTitle(e.target.value)}
             onKeyDown={handleKeyDown}
             onBlur={saveTitle}
-            className="flex-1 bg-transparent text-sm font-medium border-b border-primary/50 outline-none px-0 py-0.5 min-w-0"
+            className="flex-1 bg-transparent text-[15px] font-normal border-b border-primary/50 outline-none px-0 py-0.5 min-w-0"
             maxLength={100}
           />
           <button
@@ -101,20 +107,34 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
           </button>
         </div>
       ) : (
-        <div className="flex items-center gap-1.5 flex-1 min-w-0">
-          <span className="truncate text-sm font-medium text-foreground">
-            {session.title}
-          </span>
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={startEdit}
-            className="titlebar-no-drag p-1 text-muted-foreground hover:text-foreground transition-colors"
-            aria-label="编辑标题"
-          >
-            <Pencil className="size-3.5" />
-          </button>
-        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="titlebar-no-drag group flex min-w-0 items-center gap-1.5 rounded-lg px-2 py-1 text-left transition-colors hover:bg-muted/60"
+              aria-label={`会话菜单：${session.title}`}
+            >
+              <span className="truncate text-[15px] font-normal text-foreground">{session.title}</span>
+              <ChevronDown className="size-3 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="z-[100] min-w-40 titlebar-no-drag">
+            <DropdownMenuItem onSelect={startEdit}>
+              <Pencil className="size-3.5" />
+              重命名
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+      {!isRightPanelOpen && (
+        <button
+          type="button"
+          onClick={() => setRightPanelOpen(true)}
+          className="titlebar-no-drag ml-auto inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-[background-color,color,transform] hover:bg-muted hover:text-foreground active:scale-[0.96]"
+          aria-label="展开右侧工作区"
+        >
+          <PanelRight className="size-4" />
+        </button>
       )}
     </div>
   )

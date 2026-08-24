@@ -13,7 +13,6 @@ import { FileTypeIcon } from '@/components/file-browser/FileTypeIcon'
 import { agentDiffUnseenFilesAtom, agentDiffDataAtom, agentSelectedWorktreeAtom, agentSessionsAtom, workspaceGitDiffRefreshVersionAtom } from '@/atoms/agent-atoms'
 import type { ChangedFileEntry, ChangedFileStatus, ChangeSource, UntrackedFileEntry, WorktreeInfo } from '@proma/shared'
 import { WorktreeSelector } from './WorktreeSelector'
-import { WorkspaceMemoryChangeDock } from '@/components/agent-skills/WorkspaceMemoryChangeDock'
 import { groupSessionFileChanges } from '@/lib/session-file-changes'
 import type { SessionFileChange } from '@/lib/session-file-changes'
 import { buildDiffFileTree } from './diff-file-tree'
@@ -318,7 +317,7 @@ export const DiffChangesList = React.memo(function DiffChangesList({
       {!hasAnyVisibleChanges && (
         <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-4">
           <p className="text-[12px] text-center">
-            {isGitRepo ? (hasFetched ? '没有文件改动' : '加载中…') : '当前目录不是 Git 仓库'}
+            {isGitRepo ? (hasFetched ? '没有文件改动' : '加载中…') : '当前目录不是 Git 仓库，或暂无文件改动'}
           </p>
         </div>
       )}
@@ -368,7 +367,6 @@ export const DiffChangesList = React.memo(function DiffChangesList({
         </>
       )}
       </div>
-      {workspaceSlug && <WorkspaceMemoryChangeDock workspaceSlug={workspaceSlug} />}
     </div>
   )
 })

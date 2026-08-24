@@ -62,7 +62,7 @@ import { cn } from '@/lib/utils'
 import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-registry'
 import { registerShortcut } from '@/lib/shortcut-registry'
 import { supportsChannelPlanQuota } from '@/lib/channel-plan-quota'
-import { previewPanelOpenMapAtom, quotedSelectionMapAtom, currentQuotedSelectionAtom } from '@/atoms/preview-atoms'
+import { previewFileMapAtom, previewPanelOpenMapAtom, quotedSelectionMapAtom, currentQuotedSelectionAtom } from '@/atoms/preview-atoms'
 import type { QuotedSelection } from '@/atoms/preview-atoms'
 import {
   agentStreamingStatesAtom,
@@ -106,6 +106,7 @@ import {
   allPendingAskUserRequestsAtom,
   allPendingPermissionRequestsAtom,
   allPendingExitPlanRequestsAtom,
+  agentDiffPanelTabAtom,
 } from '@/atoms/agent-atoms'
 import { settingsOpenAtom } from '@/atoms/settings-tab'
 import { longTextPasteAsAttachmentEnabledAtom } from '@/atoms/ui-preferences'
@@ -2724,17 +2725,29 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     setQueuedMessages((prev) => moveQueuedMessage(prev, sourceId, targetId, placement))
   }, [sessionId, setQueuedMessages])
 
-  // ===== 预览面板状态（toggle 快捷键，分屏布局在 MainArea） =====
+  // ===== 预览 Tab 快捷键 =====
   const setPreviewOpenMap = useSetAtom(previewPanelOpenMapAtom)
+  const setSidePanelTabMap = useSetAtom(agentDiffPanelTabAtom)
 
   const togglePreviewPanel = React.useCallback(() => {
-    setPreviewOpenMap((prev) => {
-      const m = new Map(prev)
-      const current = m.get(sessionId) ?? false
-      m.set(sessionId, !current)
-      return m
+    const nextOpen = !(store.get(previewPanelOpenMapAtom).get(sessionId) ?? false)
+    const currentPreviewFile = store.get(previewFileMapAtom).get(sessionId) ?? null
+    if (nextOpen && currentPreviewFile) {
+      // 统一交给 opener：会复用/激活对应的动态预览 Tab，而非写入旧的 `preview` 状态。
+      openPreview(sessionId, currentPreviewFile)
+      return
+    }
+    setPreviewOpenMap((previous) => {
+      const next = new Map(previous)
+      next.set(sessionId, false)
+      return next
     })
-  }, [sessionId, setPreviewOpenMap])
+    setSidePanelTabMap((tabs) => {
+      const nextTabs = new Map(tabs)
+      nextTabs.set(sessionId, 'files')
+      return nextTabs
+    })
+  }, [openPreview, sessionId, setPreviewOpenMap, setSidePanelTabMap, store])
 
   React.useEffect(() => {
     return registerShortcut('toggle-preview-panel', togglePreviewPanel)
