@@ -2938,10 +2938,11 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
   return (
     <>
-      <div className="flex h-full min-h-0 flex-1 min-w-0 max-w-[min(72rem,100%)] flex-col overflow-hidden mx-auto">
-        {/* Agent Header */}
+      <div className="flex h-full min-h-0 flex-1 min-w-0 flex-col overflow-hidden">
+        {/* 头部保持全宽，宽屏时让标题与右侧工作区开关贴近主区域两端；历史和输入仍限制可读宽度。 */}
         <AgentHeader sessionId={sessionId} />
 
+        <div className="flex min-h-0 flex-1 w-full max-w-[min(72rem,100%)] flex-col overflow-hidden mx-auto">
         {/* 消息区域 */}
         <AgentMessages
           sessionId={sessionId}
@@ -3111,6 +3112,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           </div>
         </div>
         )}
+        </div>
       </div>
 
     <Dialog open={todoDialogOpen} onOpenChange={setTodoDialogOpen}>

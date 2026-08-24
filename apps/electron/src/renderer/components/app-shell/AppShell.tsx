@@ -241,7 +241,7 @@ export function AppShell(): React.ReactElement {
                   isClassic
                     ? 'transition-[padding] duration-300 ease-in-out'
                     : '',
-                  isClassic && (isPanelOpen ? 'p-2 pl-0' : 'p-0')
+                  isClassic && (isPanelOpen ? 'p-2' : 'p-0')
                 )}
               >
                 {!isClassic && (

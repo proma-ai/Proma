@@ -829,6 +829,30 @@ export function useGlobalAgentListeners(): void {
 
     const isWindows = detectIsWindows()
 
+    /**
+     * 当前前台会话在本轮首次产生文件改动时，自动展开右侧工作区并切到「改动」。
+     * Git 与非 Git 文件都应触发；前者由 Git diff 展示，后者由会话改动记录补充。
+     */
+    const activateChangesTabForCurrentRun = (sessionId: string, runId: string): void => {
+      const activeTabId = store.get(activeTabIdAtom)
+      const activeTab = store.get(tabsAtom).find((tab) => tab.id === activeTabId)
+      const isViewingSession = (activeTab?.type === 'agent' || activeTab?.type === 'preview')
+        && activeTab.sessionId === sessionId
+      if (
+        store.get(currentAgentSessionIdAtom) !== sessionId
+        || !isViewingSession
+        || autoActivatedChangeTurns.get(sessionId) === runId
+      ) return
+
+      autoActivatedChangeTurns.set(sessionId, runId)
+      store.set(agentSidePanelOpenAtomFamily(sessionId), true)
+      store.set(agentDiffPanelTabAtom, (prev) => {
+        const map = new Map(prev)
+        map.set(sessionId, 'changes')
+        return map
+      })
+    }
+
     const cleanupWatchedFileChanges = window.electronAPI.onWorkspaceFilesChanged((changedPaths) => {
       const filePaths = (changedPaths ?? []).filter(isAbsolutePath)
       if (filePaths.length === 0) return
@@ -870,30 +894,20 @@ export function useGlobalAgentListeners(): void {
             ?? String(streamingStates.get(sessionId)?.startedAt ?? Date.now())
           for (const changedPath of uniquelyMatchingPaths) {
             const previewFile = await buildWrittenFilePreviewInfo(sessionId, changedPath)
-            if (!previewFile.previewOnly) continue
-            store.set(agentNonGitFileChangesAtom, (prev) => {
-              const map = new Map(prev)
-              const current = map.get(sessionId) ?? []
-              map.set(sessionId, upsertSessionFileChange(current, {
-                path: changedPath,
-                kind: 'edited',
-                runId,
-                updatedAt: Date.now(),
-              }, isWindows))
-              return map
-            })
-            if (
-              store.get(currentAgentSessionIdAtom) === sessionId
-              && autoActivatedChangeTurns.get(sessionId) !== runId
-            ) {
-              autoActivatedChangeTurns.set(sessionId, runId)
-              store.set(agentSidePanelOpenAtomFamily(sessionId), true)
-              store.set(agentDiffPanelTabAtom, (prev) => {
+            if (previewFile.previewOnly) {
+              store.set(agentNonGitFileChangesAtom, (prev) => {
                 const map = new Map(prev)
-                map.set(sessionId, 'changes')
+                const current = map.get(sessionId) ?? []
+                map.set(sessionId, upsertSessionFileChange(current, {
+                  path: changedPath,
+                  kind: 'edited',
+                  runId,
+                  updatedAt: Date.now(),
+                }, isWindows))
                 return map
               })
             }
+            activateChangesTabForCurrentRun(sessionId, runId)
           }
         }
       })().catch(() => { /* 文件监听不应影响会话流 */ })
@@ -1162,7 +1176,7 @@ export function useGlobalAgentListeners(): void {
             }
           }
 
-          // 非 Git 文件写入时自动打开“文件改动”；Git Diff 的面板状态仍由用户控制。
+          // 当前前台会话本轮首次写入时自动打开“文件改动”，并刷新 Git / 非 Git 改动数据。
 
           // Agent 修改文件时，记入「最近修改」状态，用于 60s 内左侧竖条标记
           if (event.type === 'tool_start' && WRITE_TOOLS.has(event.toolName)) {
@@ -1253,20 +1267,9 @@ export function useGlobalAgentListeners(): void {
                       }, isWindows))
                       return m
                     })
-
-                    if (
-                      store.get(currentAgentSessionIdAtom) === sessionId
-                      && autoActivatedChangeTurns.get(sessionId) !== entry.runId
-                    ) {
-                      autoActivatedChangeTurns.set(sessionId, entry.runId)
-                      store.set(agentSidePanelOpenAtomFamily(sessionId), true)
-                      store.set(agentDiffPanelTabAtom, (prev) => {
-                        const m = new Map(prev)
-                        m.set(sessionId, 'changes')
-                        return m
-                      })
-                    }
                   }
+
+                  activateChangesTabForCurrentRun(sessionId, entry.runId)
 
                 }).catch(() => { /* 改动提示不应影响流式输出 */ })
               }

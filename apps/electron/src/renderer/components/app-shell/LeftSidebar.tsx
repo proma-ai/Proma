@@ -3317,7 +3317,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
               type="button"
               aria-label={mode === 'agent' ? '新建任务' : '新建对话'}
               onClick={() => { void (mode === 'agent' ? createAgentSessionInWorkspace() : createChat()) }}
-              className="group flex h-9 min-w-0 flex-1 items-center gap-3 rounded-lg px-0 text-[13px] font-medium text-foreground/70 transition-[background-color,color,transform] hover:bg-foreground/[0.055] hover:text-foreground active:scale-[0.96] titlebar-no-drag"
+              className="group flex h-9 min-w-0 flex-1 items-center gap-3 rounded-lg px-3 text-[13px] font-medium text-foreground/70 transition-[background-color,color,transform] hover:bg-foreground/[0.055] hover:text-foreground active:scale-[0.96] titlebar-no-drag"
             >
               <CirclePlus size={16} className="shrink-0" />
               <span>{mode === 'agent' ? '新建任务' : '新建对话'}</span>

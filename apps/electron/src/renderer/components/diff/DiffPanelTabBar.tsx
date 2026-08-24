@@ -71,7 +71,7 @@ export function DiffPanelTabBar({
   }, [currentSessionId, onTabChange, setUnseenMap])
 
   return (
-    <div className="relative flex h-9 shrink-0 items-center border-b border-border/50 bg-content-area">
+    <div className="relative flex h-10 shrink-0 items-center border-b border-border/50 bg-content-area">
       <div className={cn('pointer-events-none absolute inset-0 titlebar-drag-region', isWindows && WINDOW_CONTROLS_INSET_RIGHT)} />
       <div className="relative flex min-w-0 flex-1 items-center titlebar-no-drag">
         <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overscroll-x-contain px-2 py-1 scrollbar-none" role="tablist" aria-label="右侧工作区">
@@ -82,9 +82,9 @@ export function DiffPanelTabBar({
               <div
                 key={tab.id}
                 className={cn(
-                  'group flex h-8 min-w-[84px] max-w-60 shrink-0 items-center rounded-lg transition-[background-color,box-shadow,color] duration-150',
+                  'group flex h-7 min-w-[84px] max-w-60 shrink-0 items-center rounded-lg transition-[background-color,color] duration-150',
                   selected
-                    ? 'bg-muted/80 text-foreground shadow-sm shadow-black/[0.08] dark:shadow-black/20'
+                    ? 'bg-foreground/[0.08] text-foreground'
                     : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
                 )}
               >
