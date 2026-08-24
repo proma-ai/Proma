@@ -43,6 +43,7 @@ export function WorkspaceMemoryChangeShelf({ workspaceSlug, sessionId, changes, 
   const [editingState, setEditingState] = useAtom(workspaceMemoryEditingStateAtomFamily(sessionId))
   const openedAtRef = React.useRef(0)
   const ignoreNextLocalChangeRef = React.useRef<string | null>(null)
+  const lastHandledChangeIdRef = React.useRef<string | null>(null)
   const [loadingEditor, setLoadingEditor] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
@@ -55,6 +56,9 @@ export function WorkspaceMemoryChangeShelf({ workspaceSlug, sessionId, changes, 
   React.useEffect(() => {
     const latest = changes[0]
     if (!editingPath || !latest || latest.relativePath !== editingPath || latest.changedAt < openedAtRef.current) return
+    const changeId = `${latest.relativePath}:${latest.changedAt}`
+    if (lastHandledChangeIdRef.current === changeId) return
+    lastHandledChangeIdRef.current = changeId
     if (ignoreNextLocalChangeRef.current === latest.relativePath) {
       ignoreNextLocalChangeRef.current = null
       // watcher 对短时间内的写入会合并。确认磁盘最终内容仍等于刚保存的文本后才
