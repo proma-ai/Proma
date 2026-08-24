@@ -395,6 +395,11 @@ function serializeNamedMention(prefix: '&session' | '&todo' | '&calendar_event',
   return label ? `${prefix}:${id}::${encodeURIComponent(label)}` : `${prefix}:${id}`
 }
 
+function addMentionBoundary(serialized: string, element: HTMLElement): string {
+  const nextText = element.nextSibling?.textContent ?? ''
+  return nextText.length > 0 && !/^\s/u.test(nextText) ? `${serialized} ` : serialized
+}
+
 /** 将 TipTap 输出的 HTML 转换为 Markdown 格式 */
 export function htmlToMarkdown(
   html: string,
@@ -544,15 +549,20 @@ export function htmlToMarkdown(
         const referenceType = el.getAttribute('data-mention-reference-type')
         const agentHistoryQuote = el.getAttribute('data-mention-quote')
         if (dataType === 'mention') {
-          if (agentHistoryQuote) return `&quote:${agentHistoryQuote}`
-          if (referenceType === 'todo') return serializeNamedMention('&todo', dataId, dataLabel)
-          if (referenceType === 'calendar_event') return serializeNamedMention('&calendar_event', dataId, dataLabel)
-          if (suggestionChar === '/') return `/skill:${dataId}`
-          if (suggestionChar === '#') return `#mcp:${dataId}`
-          if (suggestionChar === '&') return serializeNamedMention('&session', dataId, dataLabel)
-          // 路径可能包含空格等字符，必须编码后再嵌入 @file: 协议，
-          // 否则展示层 @file:(\S+) 正则会在空格处截断（remarkMentions / MentionChip / 排队消息均内置解码）。
-          return `@file:${encodeURIComponent(dataId)}`
+          let serializedMention: string
+          if (agentHistoryQuote) serializedMention = `&quote:${agentHistoryQuote}`
+          else if (referenceType === 'todo') serializedMention = serializeNamedMention('&todo', dataId, dataLabel)
+          else if (referenceType === 'calendar_event') serializedMention = serializeNamedMention('&calendar_event', dataId, dataLabel)
+          else if (suggestionChar === '/') serializedMention = `/skill:${dataId}`
+          else if (suggestionChar === '#') serializedMention = `#mcp:${dataId}`
+          else if (suggestionChar === '&') serializedMention = serializeNamedMention('&session', dataId, dataLabel)
+          else {
+            // 路径可能包含空格等字符，必须编码后再嵌入 @file: 协议；
+            // 展示层和排队消息解析器会在显式空格或紧邻的 CJK 文本处结束 token；
+            // 序列化层会为未分隔的后续文本补充空格，避免 ASCII 后缀被吞进 chip。
+            serializedMention = `@file:${encodeURIComponent(dataId)}`
+          }
+          return addMentionBoundary(serializedMention, el)
         }
         return children
       }

@@ -188,6 +188,15 @@ describe('Agent mention serialization', () => {
     expect(markdown).toBe('@file:%2FUsers%2Fme%2FMy%20report.pdf')
   })
 
+  test('adds a separator when a mention is followed by adjacent English text', () => {
+    const markdown = withHtmlDocument(() => htmlToMarkdown([
+      '<p>',
+      '<span data-type="mention" data-id="/Users/me/BPD与LD关系_综合研究报告.pdf" data-mention-suggestion-char="@">BPD与LD关系_综合研究报告.pdf</span>qwedqweq',
+      '</p>',
+    ].join('')))
+
+    expect(markdown).toBe(`@file:${encodeURIComponent('/Users/me/BPD与LD关系_综合研究报告.pdf')} qwedqweq`)
+  })
   test('serializes planning selections by reference type rather than the trigger character', () => {
     const markdown = withHtmlDocument(() => htmlToMarkdown([
       '<p>',

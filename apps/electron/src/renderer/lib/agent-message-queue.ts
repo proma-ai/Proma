@@ -5,6 +5,7 @@ import {
   expandAgentHistoryQuoteMentions,
   parseAgentHistoryQuoteMention,
 } from './quoted-selection'
+import { MENTION_VALUE_PATTERN } from './mention-patterns'
 
 export type QueueDropPlacement = 'before' | 'after'
 
@@ -203,8 +204,14 @@ export function queuedTextToParagraphHtml(text: string): string {
     .join('')
 }
 
-const REF_PATTERN = /\/skill:(?<skill>\S+)|#mcp:(?<mcp>\S+)|&session:(?<session>[A-Za-z0-9-]+)(?:(?:~|::)\S+)?|&todo:(?<todo>[A-Za-z0-9-]+)(?:(?:~|::)\S+)?|&calendar_event:(?<calendarEvent>[A-Za-z0-9-]+)(?:(?:~|::)\S+)?/g
-const DISPLAY_REFERENCE_PATTERN = /&quote:(?<quote>[A-Za-z0-9%_.!~*'()-]+)|@file:(?<file>\S+)|\/skill:(?<skill>\S+)|#mcp:(?<mcp>\S+)|&session:(?<session>[A-Za-z0-9-]+)(?:(?:~|::)(?<sessionLabel>\S+))?|&todo:(?<todo>[A-Za-z0-9-]+)(?:(?:~|::)(?<todoLabel>\S+))?|&calendar_event:(?<calendarEvent>[A-Za-z0-9-]+)(?:(?:~|::)(?<calendarEventLabel>\S+))?/g
+const REF_PATTERN = new RegExp(
+  String.raw`/skill:(?<skill>${MENTION_VALUE_PATTERN})|#mcp:(?<mcp>${MENTION_VALUE_PATTERN})|&session:(?<session>[A-Za-z0-9-]+)(?:(?:~|::)${MENTION_VALUE_PATTERN})?|&todo:(?<todo>[A-Za-z0-9-]+)(?:(?:~|::)${MENTION_VALUE_PATTERN})?|&calendar_event:(?<calendarEvent>[A-Za-z0-9-]+)(?:(?:~|::)${MENTION_VALUE_PATTERN})?`,
+  'gu',
+)
+const DISPLAY_REFERENCE_PATTERN = new RegExp(
+  String.raw`&quote:(?<quote>[A-Za-z0-9%_.!~*'()-]+)|@file:(?<file>${MENTION_VALUE_PATTERN})|/skill:(?<skill>${MENTION_VALUE_PATTERN})|#mcp:(?<mcp>${MENTION_VALUE_PATTERN})|&session:(?<session>[A-Za-z0-9-]+)(?:(?:~|::)(?<sessionLabel>${MENTION_VALUE_PATTERN}))?|&todo:(?<todo>[A-Za-z0-9-]+)(?:(?:~|::)(?<todoLabel>${MENTION_VALUE_PATTERN}))?|&calendar_event:(?<calendarEvent>[A-Za-z0-9-]+)(?:(?:~|::)(?<calendarEventLabel>${MENTION_VALUE_PATTERN}))?`,
+  'gu',
+)
 
 function decodeReferenceLabel(value: string): string {
   try {
@@ -319,7 +326,7 @@ export function parseQueuedMessageMentions(text: string): ParsedQueuedMessageMen
       // @file: 路径在 htmlToMarkdown 序列化时已 encodeURIComponent（路径可能含空格），
       // 这里还原为真实路径，保证 Agent 侧读取的是可访问的完整路径；
       // 仅当含百分号编码时解码，避免破坏旧的未编码路径。
-      .replace(/@file:([^\s]+)/g, (full, encodedPath: string) =>
+      .replace(new RegExp(String.raw`@file:(${MENTION_VALUE_PATTERN})`, 'gu'), (full, encodedPath: string) =>
         /%[0-9A-Fa-f]{2}/.test(encodedPath)
           ? `@file:${decodeReferenceLabel(encodedPath)}`
           : full

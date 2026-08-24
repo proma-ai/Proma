@@ -46,4 +46,20 @@ describe('queued message @file mention path decoding (Agent 侧真实路径)', (
       expect(fileRef.label).toBe('My report.pdf')
     }
   })
+
+  test('preserves text immediately after a file mention without whitespace', () => {
+    const text = '@file:Screenshot%202026-08-24%20at%2014.17.47.png还是做一个单独渲染的内容吧'
+    const result = parseQueuedMessageMentions(text)
+
+    expect(result.cleanedText).toBe('@file:Screenshot 2026-08-24 at 14.17.47.png还是做一个单独渲染的内容吧')
+    expect(getQueuedMessageDisplayParts(text)).toEqual([
+      {
+        type: 'reference',
+        referenceType: 'file',
+        id: 'Screenshot%202026-08-24%20at%2014.17.47.png',
+        label: 'Screenshot 2026-08-24 at 14.17.47.png',
+      },
+      { type: 'text', value: '还是做一个单独渲染的内容吧' },
+    ])
+  })
 })
