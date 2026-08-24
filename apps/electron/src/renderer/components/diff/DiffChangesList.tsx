@@ -600,7 +600,7 @@ function FileRow({
       role="button"
       tabIndex={0}
       className={cn(
-        'group/file mx-2 flex h-8 items-center rounded-md pr-2 text-[14px] transition-colors',
+        'group/file relative mx-2 flex h-8 items-center rounded-md pr-2 text-[14px] transition-colors',
         isSelected
           ? 'session-item-selected bg-primary/10 shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
           : 'hover:bg-primary/5',
@@ -614,27 +614,15 @@ function FileRow({
         onClick()
       }}
     >
-      <span className="flex w-3.5 shrink-0 items-center justify-center">
-        {isUnseen && <span className="size-1.5 rounded-full bg-primary" />}
-      </span>
-      <span className="flex w-5 shrink-0 items-center justify-center" onClick={(event) => event.stopPropagation()}>
-        {onRevert && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                aria-label="还原文件变更"
-                className="flex size-5 items-center justify-center text-foreground/35 opacity-0 transition-colors hover:text-foreground/80 focus-visible:text-foreground/80 focus-visible:opacity-100 focus-visible:outline-none group-hover/file:opacity-100"
-                onClick={onRevert}
-              >
-                <Undo2 className="size-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">还原文件变更</TooltipContent>
-          </Tooltip>
+      <span className="relative flex size-4 shrink-0 items-center justify-center">
+        <FileTypeIcon name={fileName} isDirectory={false} size={16} />
+        {isUnseen && (
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute -left-1.5 top-1/2 size-1.5 -translate-y-1/2 rounded-full bg-primary ring-2 ring-background"
+          />
         )}
       </span>
-      <FileTypeIcon name={fileName} isDirectory={false} size={16} />
       <Tooltip delayDuration={900}>
         <TooltipTrigger asChild>
           <span className="ml-1.5 min-w-0 truncate">{fileName}</span>
@@ -643,7 +631,7 @@ function FileRow({
       </Tooltip>
 
       {hasLineChanges && (
-        <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[13px] tabular-nums">
+        <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[13px] tabular-nums transition-opacity group-hover/file:opacity-0">
           {file.additions > 0 && (
             <span style={{ color: 'rgb(34 197 94)' }}>+{file.additions}</span>
           )}
@@ -651,6 +639,25 @@ function FileRow({
             <span style={{ color: 'rgb(239 68 68)' }}>-{file.deletions}</span>
           )}
         </span>
+      )}
+
+      {onRevert && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label="还原文件变更"
+              className="absolute right-7 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center text-foreground/35 opacity-0 transition-opacity hover:text-foreground/80 focus-visible:text-foreground/80 focus-visible:opacity-100 focus-visible:outline-none group-hover/file:opacity-100"
+              onClick={(event) => {
+                event.stopPropagation()
+                onRevert()
+              }}
+            >
+              <Undo2 className="size-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">还原文件变更</TooltipContent>
+        </Tooltip>
       )}
 
       <GitStatusMarker status={file.status} className={hasLineChanges ? 'ml-2' : 'ml-auto'} />
