@@ -516,8 +516,13 @@ function PlanningInitializer(): null {
     }
     load()
     const unsubscribe = window.electronAPI.onPlanningChanged((change) => {
-      if (change.resources.includes('todos') && change.todo) setTodos((current) => upsertTodo(current, change.todo!))
-      load(change.todo ? change.resources.filter((resource) => resource !== 'todos') : change.resources)
+      const todo = change.todo
+      if (change.resources.includes('todos') && todo) {
+        // 使在途快照过期，避免它在增量事件之后返回并覆盖最新 Todo。
+        latestRequest.todos += 1
+        setTodos((current) => upsertTodo(current, todo))
+      }
+      load(todo ? change.resources.filter((resource) => resource !== 'todos') : change.resources)
     })
     return () => { disposed = true; unsubscribe() }
   }, [setCalendarEvents, setCalendarGroups, setTags, setTodoGroups, setTodos])

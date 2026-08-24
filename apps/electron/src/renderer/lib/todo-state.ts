@@ -6,6 +6,19 @@ function isSameTodo(current: Todo, incoming: Todo): boolean {
   return current.updatedAt === incoming.updatedAt && JSON.stringify(current) === JSON.stringify(incoming)
 }
 
+/** 与 planning-manager 的 listTodos 查询排序保持一致。 */
+function compareTodos(left: Todo, right: Todo): number {
+  const statusOrder = (todo: Todo): number => todo.status === 'open' ? 0 : 1
+  const statusDifference = statusOrder(left) - statusOrder(right)
+  if (statusDifference !== 0) return statusDifference
+
+  const leftDueAt = left.dueAt
+  const rightDueAt = right.dueAt
+  if (leftDueAt === undefined) return rightDueAt === undefined ? right.updatedAt - left.updatedAt : 1
+  if (rightDueAt === undefined) return -1
+  return leftDueAt - rightDueAt || right.updatedAt - left.updatedAt
+}
+
 /**
  * 将全量快照合并进现有状态，保留未变化 Todo 的引用以避免列表行无关重渲染。
  */
@@ -18,13 +31,13 @@ export function mergeTodoSnapshot(current: Todo[], snapshot: Todo[]): Todo[] {
   return merged.length === current.length && merged.every((todo, index) => todo === current[index]) ? current : merged
 }
 
-/** 将单个 Todo 更新合并到本地列表，不影响其余 Todo 的对象引用。 */
+/** 将单个 Todo 更新合并到本地列表，并保持与持久层一致的排序和其余对象引用。 */
 export function upsertTodo(current: Todo[], incoming: Todo): Todo[] {
   const index = current.findIndex((todo) => todo.id === incoming.id)
-  if (index < 0) return [...current, incoming]
+  if (index < 0) return [...current, incoming].sort(compareTodos)
   const existing = current[index]
   if (!existing || isSameTodo(existing, incoming)) return current
   const next = [...current]
   next[index] = incoming
-  return next
+  return next.sort(compareTodos)
 }

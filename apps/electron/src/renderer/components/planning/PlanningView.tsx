@@ -186,6 +186,22 @@ function useLocalDayVersion(): number {
   return dayStart
 }
 
+/** 只在下一个开放 Todo 到期时刷新，避免用高频时钟破坏行级渲染隔离。 */
+function useTodoDeadlineRefresh(todos: Todo[]): void {
+  const [deadlineVersion, setDeadlineVersion] = React.useState(0)
+  React.useEffect(() => {
+    const now = Date.now()
+    let nextDueAt: number | undefined
+    for (const todo of todos) {
+      if (todo.status !== 'open' || todo.dueAt === undefined || todo.dueAt <= now) continue
+      if (nextDueAt === undefined || todo.dueAt < nextDueAt) nextDueAt = todo.dueAt
+    }
+    if (nextDueAt === undefined) return
+    const timer = window.setTimeout(() => setDeadlineVersion((version) => version + 1), Math.max(1_000, nextDueAt - now + 50))
+    return () => window.clearTimeout(timer)
+  }, [deadlineVersion, todos])
+}
+
 function TodoWorkspace({ standalone = false }: { standalone?: boolean } = {}): React.ReactElement {
   const todos = useAtomValue(todosAtom)
   const groups = useAtomValue(todoPlanningGroupsAtom)
@@ -603,6 +619,8 @@ function TodoWorkspace({ standalone = false }: { standalone?: boolean } = {}): R
   }, [agentChannelId, agentModelId, agentWorkspaces, openSession, setAgentSessions, setCurrentWorkspaceId, setPendingPrompt, setTodos, standalone, startingTodoId])
 
   const dayVersion = useLocalDayVersion()
+  useTodoDeadlineRefresh(todos)
+  const now = Date.now()
   const openTodos = React.useMemo(() => todos.filter((todo) => todo.status === 'open'), [todos])
   const todoGroupUsageCounts = React.useMemo(() => {
     const counts = new Map<string, number>()
@@ -644,7 +662,7 @@ function TodoWorkspace({ standalone = false }: { standalone?: boolean } = {}): R
           <div className="border-b border-foreground/20 px-4 py-3">
             <div className="flex items-center justify-between gap-3"><h2 className="text-sm font-semibold">{viewTitle}</h2><div className="flex items-center gap-2"><PlanningNativeSyncControl entity="reminder" />{view !== 'completed' && <span className="text-xs tabular-nums text-muted-foreground">{visibleTodos.length} 项</span>}</div></div>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto">{visibleTodos.length ? visibleTodos.map((todo) => <TodoListItem key={todo.id} todo={todo} selected={selectedId === todo.id} todayEnd={todayEnd} onSelect={selectTodo} onToggle={completeTodo} onDelete={requestTodoDeletion} onUpdateDueAt={updateTodoDueAt} />) : <div className="flex h-full min-h-56 flex-col items-center justify-center gap-3 px-8 text-center text-sm text-muted-foreground"><span>{view === 'today' ? '今天还没有安排的任务。' : '这里还没有任务。'}</span>{view !== 'all' && view !== 'completed' && <button type="button" onClick={() => setView('all')} className="text-xs font-medium text-primary underline-offset-4 hover:underline">查看全部任务</button>}</div>}</div>
+          <div className="min-h-0 flex-1 overflow-y-auto">{visibleTodos.length ? visibleTodos.map((todo) => <TodoListItem key={todo.id} todo={todo} selected={selectedId === todo.id} todayEnd={todayEnd} isOverdue={todo.status === 'open' && todo.dueAt !== undefined && todo.dueAt < now} onSelect={selectTodo} onToggle={completeTodo} onDelete={requestTodoDeletion} onUpdateDueAt={updateTodoDueAt} />) : <div className="flex h-full min-h-56 flex-col items-center justify-center gap-3 px-8 text-center text-sm text-muted-foreground"><span>{view === 'today' ? '今天还没有安排的任务。' : '这里还没有任务。'}</span>{view !== 'all' && view !== 'completed' && <button type="button" onClick={() => setView('all')} className="text-xs font-medium text-primary underline-offset-4 hover:underline">查看全部任务</button>}</div>}</div>
         </div>
 
         {selected && <PlanningFloatingInspector inline label="Todo 详情" onClose={() => { saveDetailNotes(); saveDetailTitle(); setSelectedId(null) }}><div className="space-y-4 p-4">
@@ -688,6 +706,7 @@ const TodoListItem = React.memo(function TodoListItem({
   todo,
   selected,
   todayEnd,
+  isOverdue,
   onSelect,
   onToggle,
   onDelete,
@@ -696,13 +715,13 @@ const TodoListItem = React.memo(function TodoListItem({
   todo: Todo
   selected: boolean
   todayEnd: number
+  isOverdue: boolean
   onSelect: (todo: Todo) => void
   onToggle: (todo: Todo) => void
   onDelete: (todo: Todo) => void
   onUpdateDueAt: (todo: Todo, dueAt?: number) => void
 }): React.ReactElement {
   const priorityLabel = todo.priority === 'high' ? '高优先级' : todo.priority === 'low' ? '低优先级' : '中优先级'
-  const isOverdue = todo.dueAt !== undefined && todo.dueAt < Date.now() && todo.status === 'open'
   const dueTone = isOverdue ? 'text-rose-700 dark:text-rose-300' : todo.dueAt !== undefined && todo.dueAt <= todayEnd ? 'text-amber-800 dark:text-amber-200' : 'text-muted-foreground'
 
   return (
