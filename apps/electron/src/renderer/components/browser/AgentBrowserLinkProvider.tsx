@@ -72,14 +72,15 @@ export function AgentBrowserLinkProvider({
             next.delete(sessionId)
             return next
           })
-          const [settings, state] = await Promise.all([
+          const [settings, existingState] = await Promise.all([
             window.electronAPI.getSettings(),
-            openBrowser(sessionId),
+            window.electronAPI.getAgentBrowserState(sessionId),
           ])
-          publishBrowserState(state)
-
           const riskAcknowledged = (settings.browserRiskDisclaimerVersion ?? 0) >= BROWSER_RISK_DISCLAIMER_VERSION
+
           if (!riskAcknowledged) {
+            // 风险告知尚未确认时，先打开空白浏览器展示确认弹窗，确认后再导航。
+            publishBrowserState(existingState ?? await openBrowser(sessionId))
             setPendingNavigationMap((previous) => {
               const next = new Map(previous)
               next.set(sessionId, url)
@@ -88,7 +89,9 @@ export function AgentBrowserLinkProvider({
             return
           }
 
-          const nextState = shouldReuseInitialBrowserTab(state)
+          // 带目标 URL 的首次打开直接创建并导航 Agent 标签，避免 openAgentBrowser
+          // 先将初始空白标签加载为 Google 后再额外创建一个目标标签。
+          const nextState = existingState && shouldReuseInitialBrowserTab(existingState)
             ? await window.electronAPI.navigateAgentBrowser({ sessionId, url })
             : await window.electronAPI.createAgentBrowserTab({ sessionId, url })
           publishBrowserState(nextState)

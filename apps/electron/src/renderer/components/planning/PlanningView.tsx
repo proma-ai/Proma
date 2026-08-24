@@ -84,7 +84,7 @@ export function PlanningView({ standalone = false }: { standalone?: boolean } = 
   }, [createAutomation, tab, triggerCalendarCreate, triggerTodoCreate]), true, { exclusive: true })
   return (
     <div className="flex h-full flex-col overflow-hidden bg-content-area">
-      <header className={cn('relative flex w-full items-center justify-between titlebar-no-drag', tab === 'todos' ? (standalone ? 'px-5 pb-3 pt-7' : 'px-6 pb-3 pt-6 sm:px-8 xl:px-10') : (standalone ? 'px-5 pb-4 pt-8' : 'px-6 pb-5 pt-8 sm:px-8 xl:px-10'))}>
+      <header className={cn('relative flex w-full items-center justify-between titlebar-no-drag', standalone ? 'px-5 pb-4 pt-8' : 'px-6 pb-5 pt-8 sm:px-8 xl:px-10')}>
         <div className={cn('absolute inset-y-0 left-0 z-0 titlebar-drag-region', isWindows ? WINDOW_CONTROLS_INSET_RIGHT : 'right-0')} />
         <div className="relative z-[1]">
           <h1 className="text-2xl font-semibold tracking-tight text-wrap-balance">{tab === 'todos' ? 'Todo' : '任务/日程'}</h1>

@@ -46,12 +46,17 @@ export function createAgentStreamEventBatcher(options: AgentStreamEventBatcherOp
   let frame: number | null = null
   let fallback: number | null = null
 
-  const flush = (): void => {
+  /** rAF 与 timeout 是同一批 pending events 的竞速调度器；任一方获胜都必须撤销另一方。 */
+  const cancelScheduledFlush = (): void => {
+    if (frame !== null) cancelFrame(frame)
+    if (fallback !== null) cancelFallback(fallback)
     frame = null
-    if (fallback !== null) {
-      cancelFallback(fallback)
-      fallback = null
-    }
+    fallback = null
+  }
+
+  const flush = (): void => {
+    // 后台时 fallback 会先运行；若不撤销被冻结的 rAF，窗口恢复后会集中执行所有旧回调。
+    cancelScheduledFlush()
     const events = [...pending.values()]
     pending.clear()
     for (const event of events) options.dispatch(event)
@@ -88,12 +93,10 @@ export function createAgentStreamEventBatcher(options: AgentStreamEventBatcherOp
     },
     clear(sessionId: string): void {
       pending.delete(sessionId)
+      if (pending.size === 0) cancelScheduledFlush()
     },
     dispose(): void {
-      if (frame !== null) cancelFrame(frame)
-      if (fallback !== null) cancelFallback(fallback)
-      frame = null
-      fallback = null
+      cancelScheduledFlush()
       pending.clear()
     },
   }

@@ -991,8 +991,10 @@ export class BrowserController {
 
   /** Agent 新建工作 tab，并立即切到该标签让用户能看到接下来的操作。 */
   async createNewTab(sessionId: string, url?: string): Promise<BrowserViewState> {
-    const browserSession = this.getOrCreateSession(sessionId)
+    // 新会话由本方法直接创建 Agent 标签，不能经 getOrCreateSession 预建空白标签，
+    // 否则携带 URL 时会留下一个无用的初始标签。
     this.assertRiskDisclaimerAcknowledged()
+    const browserSession = this.sessions.get(sessionId) ?? this.createSession(sessionId)
     const tab = this.createTab(browserSession, false, true)
     browserSession.agentTabId = tab.tabId
     this.activateDisplayTab(browserSession, tab)
