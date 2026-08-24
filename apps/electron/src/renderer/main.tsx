@@ -45,6 +45,7 @@ import {
 import { updateStatusAtom, initializeUpdater } from './atoms/updater'
 import { automationsAtom } from './atoms/automation-atoms'
 import { calendarEventsAtom, calendarPlanningGroupsAtom, planningTagsAtom, todoPlanningGroupsAtom, todosAtom } from './atoms/planning-atoms'
+import { mergeTodoSnapshot, upsertTodo } from './lib/todo-state'
 import {
   notificationsEnabledAtom,
   notificationSoundEnabledAtom,
@@ -524,7 +525,7 @@ function PlanningInitializer(): null {
     const loadTodos = (): void => {
       const requestId = ++latestRequest.todos
       void window.electronAPI.listTodos().then((todos) => {
-        if (!disposed && requestId === latestRequest.todos) setTodos(todos)
+        if (!disposed && requestId === latestRequest.todos) setTodos((current) => mergeTodoSnapshot(current, todos))
       }).catch((error: unknown) => console.error('[任务/日程] 加载 Todo 失败:', error))
     }
     const loadCalendarEvents = (): void => {
@@ -560,7 +561,15 @@ function PlanningInitializer(): null {
       if (includes('tags')) loadTags()
     }
     load()
-    const unsubscribe = window.electronAPI.onPlanningChanged((change) => load(change.resources))
+    const unsubscribe = window.electronAPI.onPlanningChanged((change) => {
+      const todo = change.todo
+      if (change.resources.includes('todos') && todo) {
+        // 使在途快照过期，避免它在增量事件之后返回并覆盖最新 Todo。
+        latestRequest.todos += 1
+        setTodos((current) => upsertTodo(current, todo))
+      }
+      load(todo ? change.resources.filter((resource) => resource !== 'todos') : change.resources)
+    })
     return () => { disposed = true; unsubscribe() }
   }, [setCalendarEvents, setCalendarGroups, setTags, setTodoGroups, setTodos])
 

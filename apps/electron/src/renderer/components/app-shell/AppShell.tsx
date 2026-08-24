@@ -13,7 +13,7 @@ import { RightSidePanel } from './RightSidePanel'
 import { MainArea } from '@/components/tabs/MainArea'
 import { conversationsAtom, syncProgressAtom, isSyncingAtom, lastSyncResultAtom } from '@/atoms'
 import { appModeAtom } from '@/atoms/app-mode'
-import { agentSidePanelWidthAtom, currentAgentSessionIdAtom, currentSessionSidePanelOpenAtom } from '@/atoms/agent-atoms'
+import { agentDiffPanelTabAtom, agentSidePanelWidthAtom, currentAgentSessionIdAtom, currentSessionSidePanelOpenAtom } from '@/atoms/agent-atoms'
 import { leftSidebarWidthAtom } from '@/atoms/sidebar-atoms'
 import { sidebarCollapsedAtom } from '@/atoms/tab-atoms'
 import { automationFormAtom } from '@/atoms/automation-atoms'
@@ -28,14 +28,20 @@ import { detectIsWindows, WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import type { SyncProgressEvent } from '@proma/shared'
 
-const MIN_RIGHT_PANEL_WIDTH = 300
-const MAX_RIGHT_PANEL_WIDTH = 560
+const MIN_RIGHT_PANEL_WIDTH = 360
+const RIGHT_PANEL_MAX_VIEWPORT_RATIO = 3 / 5
+const WIDE_RIGHT_PANEL_DEFAULT_VIEWPORT_RATIO = 1 / 2
 
-function clampRightPanelWidth(width: number): number {
-  return Math.max(MIN_RIGHT_PANEL_WIDTH, Math.min(MAX_RIGHT_PANEL_WIDTH, width))
+function getRightPanelMaxWidth(viewportWidth: number): number {
+  return Math.max(MIN_RIGHT_PANEL_WIDTH, Math.floor(viewportWidth * RIGHT_PANEL_MAX_VIEWPORT_RATIO))
 }
 
-const MIN_LEFT_SIDEBAR_WIDTH = 300
+function clampRightPanelWidth(width: number, viewportWidth: number): number {
+  // 工作区可占整个应用的 3/5；避免窄窗口下最小宽度反而超过可用界面。
+  return Math.max(MIN_RIGHT_PANEL_WIDTH, Math.min(getRightPanelMaxWidth(viewportWidth), width))
+}
+
+const MIN_LEFT_SIDEBAR_WIDTH = 240
 const MAX_LEFT_SIDEBAR_WIDTH = 420
 
 function clampLeftSidebarWidth(width: number): number {
@@ -83,6 +89,7 @@ export function AppShell(): React.ReactElement {
   const { workspaces, currentWorkspaceId } = useProjectActions()
   const currentWorkspace = workspaces.find((workspace) => workspace.id === currentWorkspaceId)
   const currentSessionId = useAtomValue(currentAgentSessionIdAtom)
+  const activeRightPanelTab = useAtomValue(agentDiffPanelTabAtom).get(currentSessionId ?? '')
   const isPanelOpen = useAtomValue(currentSessionSidePanelOpenAtom)
   const automationForm = useAtomValue(automationFormAtom)
   const interfaceVariant = useAtomValue(interfaceVariantAtom)
@@ -149,10 +156,31 @@ export function AppShell(): React.ReactElement {
     document.addEventListener('mouseup', onMouseUp)
   }, [clampedLeftSidebarWidth, setLeftSidebarWidth])
 
-  // 右侧面板可拖拽宽度
+  // 右侧工作区可拖拽到应用视口的 3/5，窗口尺寸变化时重新收敛持久化宽度。
   const [rightPanelWidth, setRightPanelWidth] = useAtom(agentSidePanelWidthAtom)
+  const [viewportWidth, setViewportWidth] = React.useState(() => window.innerWidth)
   const dragging = React.useRef(false)
-  const clampedRightPanelWidth = clampRightPanelWidth(rightPanelWidth)
+  const clampedRightPanelWidth = clampRightPanelWidth(rightPanelWidth, viewportWidth)
+  const isWideRightWorkspace = Boolean(
+    activeRightPanelTab?.startsWith('preview:') || activeRightPanelTab?.startsWith('browser:'),
+  )
+  // 首次打开预览/浏览器后，工作区维持宽视图；切回文件/改动不会自动收窄，交给用户拖拽决定。
+  const [hasOpenedWideWorkspace, setHasOpenedWideWorkspace] = React.useState(false)
+  const [widePanelWidthOverride, setWidePanelWidthOverride] = React.useState<number | null>(null)
+  const effectiveWidePanelWidth = widePanelWidthOverride === null
+    ? clampRightPanelWidth(Math.floor(viewportWidth * WIDE_RIGHT_PANEL_DEFAULT_VIEWPORT_RATIO), viewportWidth)
+    : clampRightPanelWidth(widePanelWidthOverride, viewportWidth)
+  const displayedRightPanelWidth = hasOpenedWideWorkspace ? effectiveWidePanelWidth : clampedRightPanelWidth
+
+  React.useEffect(() => {
+    if (isWideRightWorkspace) setHasOpenedWideWorkspace(true)
+  }, [isWideRightWorkspace])
+
+  React.useEffect(() => {
+    const updateViewportWidth = () => setViewportWidth(window.innerWidth)
+    window.addEventListener('resize', updateViewportWidth)
+    return () => window.removeEventListener('resize', updateViewportWidth)
+  }, [])
 
   React.useEffect(() => {
     if (clampedRightPanelWidth !== rightPanelWidth) {
@@ -164,14 +192,16 @@ export function AppShell(): React.ReactElement {
     e.preventDefault()
     dragging.current = true
     const startX = e.clientX
-    const startWidth = clampedRightPanelWidth
+    const startWidth = displayedRightPanelWidth
     // 记录最新光标位置，rAF 回调读取它而非调度时捕获的旧事件，避免快拖时坐标滞后
     let latestClientX = startX
     let rafId = 0
 
     const applyWidth = () => {
       const delta = startX - latestClientX
-      setRightPanelWidth(clampRightPanelWidth(startWidth + delta))
+      const nextWidth = clampRightPanelWidth(startWidth + delta, viewportWidth)
+      if (hasOpenedWideWorkspace) setWidePanelWidthOverride(nextWidth)
+      else setRightPanelWidth(nextWidth)
     }
 
     const onMouseMove = (ev: MouseEvent) => {
@@ -198,7 +228,7 @@ export function AppShell(): React.ReactElement {
 
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp)
-  }, [clampedRightPanelWidth, setRightPanelWidth])
+  }, [displayedRightPanelWidth, hasOpenedWideWorkspace, setRightPanelWidth, viewportWidth])
 
   return (
     <>
@@ -265,7 +295,7 @@ export function AppShell(): React.ReactElement {
                     onMouseDown={handleMouseDown}
                   />
                 )}
-                <RightSidePanel width={clampedRightPanelWidth} />
+                <RightSidePanel width={displayedRightPanelWidth} />
               </div>
             )}
         </div>

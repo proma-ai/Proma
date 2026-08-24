@@ -225,7 +225,6 @@ function StartupLoadingScreen(): React.ReactElement {
           <div className="h-full w-2/5 animate-pulse bg-white/90" />
         </div>
         <p className="mt-4 text-sm font-medium tracking-[0.08em] text-white/95">正在启动 Proma</p>
-        <p className="mt-2 text-xs tracking-[0.12em] text-white/70">正在初始化你的工作空间</p>
       </div>
 
       <p className="absolute bottom-8 px-6 text-center text-[11px] uppercase tracking-[0.3em] text-white/65">

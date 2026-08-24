@@ -6,7 +6,7 @@
  */
 
 import * as React from 'react'
-import { ChevronRight, Code2, Copy, Check, Eye, List, Pencil, RefreshCw, Save, WrapText, X } from 'lucide-react'
+import { ChevronRight, Code2, Copy, Check, Eye, FolderOpen, List, Pencil, RotateCw, Save, WrapText, X } from 'lucide-react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import DOMPurify from 'dompurify'
 import { File as PierreFile } from '@pierre/diffs/react'
@@ -33,6 +33,7 @@ import { initShortcutRegistry } from '@/lib/shortcut-registry'
 import { DiffView } from './DiffView'
 import { MarkdownRichEditor } from './MarkdownRichEditor'
 import { getPreviewCandidateBasePaths, isAbsoluteFilePath } from './preview-open-path'
+import { DefaultAppOpenButton } from './DefaultAppOpenButton'
 import { PreviewFindBar } from './PreviewFindBar'
 import { MarkdownToc } from './MarkdownToc'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -63,6 +64,19 @@ const DOCX_EXTS = new Set(['.docx'])
 const OFFICE_PREVIEW_EXTS = new Set(['.xlsx', '.pptx'])
 const LEGACY_OFFICE_EXTS = new Set(['.doc', '.xls', '.ppt'])
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico'])
+
+function getPreviewPathLabel(filePath: string): string {
+  return filePath.split(/[\\/]/).filter(Boolean).at(-1) || filePath
+}
+
+function getPreviewTargetPath(filePath: string, dirPath: string): string {
+  return isAbsoluteFilePath(filePath) ? filePath : `${dirPath.replace(/[\\/]+$/, '')}/${filePath}`
+}
+
+function getParentFolderPath(filePath: string): string {
+  const separator = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'))
+  return separator > 0 ? filePath.slice(0, separator) : filePath
+}
 const FILE_FIND_SHORTCUT_OPTIONS = { exclusive: true }
 
 /**
@@ -267,7 +281,8 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   const isEditableText = isMarkdown || isPlainTextEditable
   const isPdf = previewOnly && PDF_EXTS.has(ext)
   const isDocx = previewOnly && DOCX_EXTS.has(ext)
-  const isOfficePreview = previewOnly && OFFICE_PREVIEW_EXTS.has(ext)
+  // XLSX/PPTX 没有可读的文本 diff；无论从文件区还是改动区打开都走 Office 预览。
+  const isOfficePreview = OFFICE_PREVIEW_EXTS.has(ext)
   const isLegacyOffice = previewOnly && LEGACY_OFFICE_EXTS.has(ext)
   const isImage = previewOnly && IMAGE_EXTS.has(ext)
   const markdownEditorCacheKey = React.useMemo(
@@ -844,6 +859,17 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
         let htmlUrl = cached?.htmlPreviewUrl ?? ''
 
         if (!cached) {
+          // 即使从「改动」列表点开，XLSX/PPTX 也应保留原有的 Office 内联预览。
+          if (isOfficePreview) {
+            const result = await window.electronAPI.officeToHtml(filePath, fileAccess)
+            if (cancelled) return
+            const html = DOMPurify.sanitize(result?.html ?? '')
+            const text = result?.text ?? ''
+            setOfficeHtml(html)
+            setOfficeText(text)
+            cacheSet(cacheKey, { oldContent: '', newContent: '', officeHtml: html, officeText: text })
+            return
+          }
           if (previewOnly) {
             if (isPdf) {
               const result = await window.electronAPI.preparePdfPreview(filePath, fileAccess)
@@ -873,16 +899,6 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
               const html = DOMPurify.sanitize(result?.html ?? '')
               setDocxHtml(html)
               cacheSet(cacheKey, { oldContent: '', newContent: '', docxHtml: html })
-              return
-            }
-            if (isOfficePreview) {
-              const result = await window.electronAPI.officeToHtml(filePath, fileAccess)
-              if (cancelled) return
-              const html = DOMPurify.sanitize(result?.html ?? '')
-              const text = result?.text ?? ''
-              setOfficeHtml(html)
-              setOfficeText(text)
-              cacheSet(cacheKey, { oldContent: '', newContent: '', officeHtml: html, officeText: text })
               return
             }
             if (isLegacyOffice) {
@@ -978,17 +994,17 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     emptyDiffFiredRef.current = false
   }, [filePath, sessionId])
   React.useEffect(() => {
-    if (previewOnly || loading || emptyDiffFiredRef.current) return
+    if (previewOnly || isOfficePreview || loading || emptyDiffFiredRef.current) return
     if (oldContent === newContent) {
       emptyDiffFiredRef.current = true
       onEmptyDiff?.()
     }
-  }, [previewOnly, loading, oldContent, newContent, onEmptyDiff])
+  }, [previewOnly, isOfficePreview, loading, oldContent, newContent, onEmptyDiff])
 
   // previewOnly 模式：加载完成后若内容无法预览，弹 Toast 通知用户
   const toastedPreviewFailRef = React.useRef('')
   React.useEffect(() => {
-    if (!previewOnly || loading) return
+    if ((!previewOnly && !isOfficePreview) || loading) return
     const key = `${filePath}:${ext}`
     if (toastedPreviewFailRef.current === key) return
     let message: string | null = null
@@ -1007,7 +1023,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
       toastedPreviewFailRef.current = key
       toast.warning(message)
     }
-  }, [previewOnly, loading, filePath, ext, isLegacyOffice, isPdf, pdfSrc, isDocx, docxHtml, isOfficePreview, officeHtml, isImage, imageDataUrl])
+  }, [previewOnly, isOfficePreview, loading, filePath, ext, isLegacyOffice, isPdf, pdfSrc, isDocx, docxHtml, officeHtml, isImage, imageDataUrl])
 
   // scrollPosition persistent: module-level Map scoped by session, file path, and resolution context
   // content changes (refreshVersion bump) → delete stored position;
@@ -1495,12 +1511,43 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filePath, fileAccess, isEditableText, markdownEditorCacheKey, readOnly, sessionId])
 
+  const previewTargetPath = getPreviewTargetPath(filePath, dirPath)
+  const handleOpenCurrentFolder = React.useCallback(() => {
+    window.electronAPI.systemOpenFile(getParentFolderPath(previewTargetPath), undefined, fileAccess).catch((error) => {
+      console.error('[DiffTabContent] 打开当前文件夹失败:', error)
+      toast.error('无法打开当前文件夹')
+    })
+  }, [fileAccess, previewTargetPath])
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 px-3 py-1.5 flex-shrink-0">
         <span className="min-w-0 flex-1 text-[12px] text-foreground/60 truncate" title={filePath}>
-          {filePath}
+          {getPreviewPathLabel(filePath)}
         </span>
+
+        {previewOnly && (
+          <>
+            <DefaultAppOpenButton
+              filePath={previewTargetPath}
+              access={fileAccess}
+              variant="labeled"
+            />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={handleOpenCurrentFolder}
+                  className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+                  aria-label="打开当前文件夹"
+                >
+                  <FolderOpen className="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">打开当前文件夹</TooltipContent>
+            </Tooltip>
+          </>
+        )}
 
         {!previewOnly && (
           <div
@@ -1600,7 +1647,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
           className="p-1 rounded hover:bg-foreground/[0.06] text-foreground/40 hover:text-foreground/60 shrink-0"
           title="刷新文件内容（检测外部编辑器的修改）"
         >
-          <RefreshCw className="size-3.5" />
+          <RotateCw className="size-3.5" />
         </button>
 
         {canTogglePreviewWrap && (
@@ -1673,7 +1720,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
         <div ref={scrollContainerRef} onScroll={handleScroll} className="h-full flex-1 min-w-0 overflow-auto scrollbar-thin relative">
           {loading ? (
             <div className="flex items-center justify-center h-full text-muted-foreground text-[12px]">加载中...</div>
-          ) : previewOnly ? (
+          ) : (previewOnly || isOfficePreview) ? (
             unsupportedPreviewReason ? (
               <div className="flex h-full items-center justify-center px-6 text-center text-[13px] text-muted-foreground">
                 {unsupportedPreviewReason}

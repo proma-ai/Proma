@@ -15,8 +15,11 @@ export function onPlanningChanged(listener: (change: PlanningChange) => void): (
 }
 
 /** 广播资源级失效通知，使各窗口和原生 Surface 只刷新受影响的规划数据。 */
-export function broadcastPlanningChanged(resources: PlanningChangeResource[] = ALL_PLANNING_CHANGE_RESOURCES): void {
-  const change: PlanningChange = { resources: [...new Set(resources)] }
+export function broadcastPlanningChanged(
+  resources: PlanningChangeResource[] = ALL_PLANNING_CHANGE_RESOURCES,
+  details: Omit<PlanningChange, 'resources'> = {},
+): void {
+  const change: PlanningChange = { resources: [...new Set(resources)], ...details }
   for (const listener of planningChangeListeners) listener(change)
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send(PLANNING_IPC_CHANNELS.CHANGED, change)

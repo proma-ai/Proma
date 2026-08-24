@@ -40,6 +40,7 @@ import {
   inputToolbarDisabledButtonClass,
   inputToolbarSendButtonClass,
 } from '@/components/ai-elements/input-toolbar-styles'
+import { preventHoverPopoverFocusRestore } from '@/components/ai-elements/input-toolbar-popover-focus'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -61,7 +62,7 @@ import { cn } from '@/lib/utils'
 import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-registry'
 import { registerShortcut } from '@/lib/shortcut-registry'
 import { supportsChannelPlanQuota } from '@/lib/channel-plan-quota'
-import { previewPanelOpenMapAtom, quotedSelectionMapAtom, currentQuotedSelectionAtom } from '@/atoms/preview-atoms'
+import { previewFileMapAtom, previewPanelOpenMapAtom, quotedSelectionMapAtom, currentQuotedSelectionAtom } from '@/atoms/preview-atoms'
 import type { QuotedSelection } from '@/atoms/preview-atoms'
 import {
   agentStreamingStatesAtom,
@@ -105,6 +106,7 @@ import {
   allPendingAskUserRequestsAtom,
   allPendingPermissionRequestsAtom,
   allPendingExitPlanRequestsAtom,
+  agentDiffPanelTabAtom,
 } from '@/atoms/agent-atoms'
 import type { AgentContextStatus } from '@/atoms/agent-atoms'
 import { settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
@@ -319,6 +321,7 @@ interface AgentThinkingPopoverProps {
 function AgentThinkingPopover({ agentThinking, onToggle, codexConfig }: AgentThinkingPopoverProps): React.ReactElement {
   const [open, setOpen] = React.useState(false)
   const hoverTimeout = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const popoverReceivedFocusRef = React.useRef(false)
   const isCodex = Boolean(codexConfig)
   const thinkingLevels = codexConfig?.levels ?? OPENAI_STANDARD_THINKING_LEVELS
   const normalizedLevel = normalizeOpenAIThinkingLevel(
@@ -375,7 +378,14 @@ function AgentThinkingPopover({ agentThinking, onToggle, codexConfig }: AgentThi
         className="w-64 p-3"
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
+        onFocusCapture={() => {
+          popoverReceivedFocusRef.current = true
+        }}
         onOpenAutoFocus={(e) => e.preventDefault()}
+        onCloseAutoFocus={(event) => {
+          preventHoverPopoverFocusRestore(event, popoverReceivedFocusRef.current)
+          popoverReceivedFocusRef.current = false
+        }}
       >
         <div className="flex flex-col gap-3">
           {codexConfig ? (
@@ -2747,17 +2757,29 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     setQueuedMessages((prev) => moveQueuedMessage(prev, sourceId, targetId, placement))
   }, [sessionId, setQueuedMessages])
 
-  // ===== 预览面板状态（toggle 快捷键，分屏布局在 MainArea） =====
+  // ===== 预览 Tab 快捷键 =====
   const setPreviewOpenMap = useSetAtom(previewPanelOpenMapAtom)
+  const setSidePanelTabMap = useSetAtom(agentDiffPanelTabAtom)
 
   const togglePreviewPanel = React.useCallback(() => {
-    setPreviewOpenMap((prev) => {
-      const m = new Map(prev)
-      const current = m.get(sessionId) ?? false
-      m.set(sessionId, !current)
-      return m
+    const nextOpen = !(store.get(previewPanelOpenMapAtom).get(sessionId) ?? false)
+    const currentPreviewFile = store.get(previewFileMapAtom).get(sessionId) ?? null
+    if (nextOpen && currentPreviewFile) {
+      // 统一交给 opener：会复用/激活对应的动态预览 Tab，而非写入旧的 `preview` 状态。
+      openPreview(sessionId, currentPreviewFile)
+      return
+    }
+    setPreviewOpenMap((previous) => {
+      const next = new Map(previous)
+      next.set(sessionId, false)
+      return next
     })
-  }, [sessionId, setPreviewOpenMap])
+    setSidePanelTabMap((tabs) => {
+      const nextTabs = new Map(tabs)
+      nextTabs.set(sessionId, 'files')
+      return nextTabs
+    })
+  }, [openPreview, sessionId, setPreviewOpenMap, setSidePanelTabMap, store])
 
   React.useEffect(() => {
     return registerShortcut('toggle-preview-panel', togglePreviewPanel)

@@ -17,6 +17,7 @@ import { searchDialogOpenAtom } from '@/atoms/search-atoms'
 import {
   tabsAtom,
   activeTabIdAtom,
+  activeTabAtom,
   sidebarCollapsedAtom,
   openTab,
 } from '@/atoms/tab-atoms'
@@ -34,6 +35,8 @@ import {
   currentAgentWorkspaceIdAtom,
   agentWorkspacesAtom,
   agentAttachedFilesMapAtom,
+  agentDiffPanelTabAtom,
+  currentSessionSidePanelOpenAtom,
 } from '@/atoms/agent-atoms'
 import {
   chatPendingMessageAtom,
@@ -52,6 +55,7 @@ import {
   updateShortcutOverrides,
 } from '@/lib/shortcut-registry'
 import { getFileParentPath } from '@/lib/file-utils'
+import { CLOSE_ACTIVE_RIGHT_WORKSPACE_TAB_EVENT } from '@/lib/right-workspace-events'
 import {
   shouldFallbackVoiceDictationToActiveTab,
   VOICE_DICTATION_CLEAR_PREVIEW_EVENT,
@@ -78,6 +82,9 @@ export function GlobalShortcuts(): null {
 
   // Tab 管理（用于关闭标签页）
   const activeTabId = useAtomValue(activeTabIdAtom)
+  const activeTab = useAtomValue(activeTabAtom)
+  const activeAgentSidePanelTab = useAtomValue(agentDiffPanelTabAtom).get(activeTab?.type === 'agent' ? activeTab.sessionId : '')
+  const isActiveAgentSidePanelOpen = useAtomValue(currentSessionSidePanelOpenAtom)
 
   // 统一关闭逻辑：与 TabBar.handleClose 共用
   // 含 Agent 子进程 stop + 流式中的确认对话框（修复 Issue #357）
@@ -123,9 +130,23 @@ export function GlobalShortcuts(): null {
       return
     }
 
+    if (activeTab?.type === 'agent') {
+      // Agent 会话常驻左侧历史，不再由 Cmd+W 关闭；仅关闭右侧可关闭工作区 Tab。
+      if (
+        isActiveAgentSidePanelOpen
+        && activeAgentSidePanelTab
+        && (activeAgentSidePanelTab === 'memory' || activeAgentSidePanelTab.startsWith('preview:') || activeAgentSidePanelTab.startsWith('browser:'))
+      ) {
+        window.dispatchEvent(new CustomEvent(CLOSE_ACTIVE_RIGHT_WORKSPACE_TAB_EVENT, {
+          detail: { sessionId: activeTab.sessionId },
+        }))
+      }
+      return
+    }
+
     if (!activeTabId) return
     requestClose(activeTabId)
-  }, [shortcutGuideOpen, setShortcutGuideOpen, settingsOpen, setSettingsOpen, channelFormDirty, setSettingsCloseRequested, searchOpen, setSearchOpen, activeTabId, requestClose])
+  }, [shortcutGuideOpen, setShortcutGuideOpen, settingsOpen, setSettingsOpen, channelFormDirty, setSettingsCloseRequested, searchOpen, setSearchOpen, activeTab, activeAgentSidePanelTab, isActiveAgentSidePanelOpen, activeTabId, requestClose])
 
   // 监听菜单 IPC 事件（Cmd+W 被 Electron 菜单拦截后通过 IPC 转发）
   useEffect(() => {

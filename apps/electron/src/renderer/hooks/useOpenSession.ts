@@ -16,6 +16,7 @@ import {
   type TabType,
 } from '@/atoms/tab-atoms'
 import { previewFileMapAtom } from '@/atoms/preview-atoms'
+import { workspaceMemoryEditingStateAtomFamily } from '@/atoms/memory-change-atoms'
 import { appModeAtom } from '@/atoms/app-mode'
 import { activeViewAtom } from '@/atoms/active-view'
 import { automationFormAtom } from '@/atoms/automation-atoms'
@@ -46,6 +47,8 @@ export function useOpenSession(): OpenSessionFn {
   const setActiveView = useSetAtom(activeViewAtom)
   const setAutomationForm = useSetAtom(automationFormAtom)
   const setCurrentConversationId = useSetAtom(currentConversationIdAtom)
+  const currentAgentSessionId = useAtomValue(currentAgentSessionIdAtom)
+  const currentMemoryEditingState = useAtomValue(workspaceMemoryEditingStateAtomFamily(currentAgentSessionId ?? ''))
   const setCurrentAgentSessionId = useSetAtom(currentAgentSessionIdAtom)
   const agentSessions = useAtomValue(agentSessionsAtom)
   const setCurrentAgentWorkspaceId = useSetAtom(currentAgentWorkspaceIdAtom)
@@ -60,6 +63,9 @@ export function useOpenSession(): OpenSessionFn {
       if (!options?.bypassSettingsGuard && settingsOpen && channelFormDirty) {
         setPendingSessionNavigation({ type, sessionId, title })
         return
+      }
+      if (currentAgentSessionId && sessionId !== currentAgentSessionId && currentMemoryEditingState.dirty) {
+        if (!window.confirm('项目记忆有未保存修改。确定丢弃并切换会话吗？')) return
       }
 
       setSettingsOpen(false)
@@ -107,6 +113,6 @@ export function useOpenSession(): OpenSessionFn {
         setCurrentAgentSessionId(null)
       }
     },
-    [tabs, setTabs, setActiveTabId, setAutomationForm, setActiveView, setAppMode, setCurrentConversationId, setCurrentAgentSessionId, agentSessions, setCurrentAgentWorkspaceId, setUnviewedCompleted, settingsOpen, channelFormDirty, setSettingsOpen, setPendingSessionNavigation],
+    [tabs, setTabs, setActiveTabId, setAutomationForm, setActiveView, setAppMode, setCurrentConversationId, setCurrentAgentSessionId, agentSessions, setCurrentAgentWorkspaceId, setUnviewedCompleted, settingsOpen, channelFormDirty, setSettingsOpen, setPendingSessionNavigation, currentAgentSessionId, currentMemoryEditingState.dirty],
   )
 }

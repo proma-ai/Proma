@@ -15,6 +15,7 @@ import { Loader2, Minimize2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { inputToolbarButtonClass } from '@/components/ai-elements/input-toolbar-styles'
+import { preventHoverPopoverFocusRestore } from '@/components/ai-elements/input-toolbar-popover-focus'
 import { agentSessionViewStreamStateAtomFamily } from '@/atoms/agent-atoms'
 import { cn } from '@/lib/utils'
 import {
@@ -222,6 +223,7 @@ export function ContextUsageBadge({
 
   const [open, setOpen] = React.useState(false)
   const closeTimerRef = React.useRef<number | null>(null)
+  const popoverReceivedFocusRef = React.useRef(false)
   // 保留上次成功/失败结果；悬浮刷新期间继续展示旧值，直到新结果到达后原位替换。
   const [quota, setQuota] = React.useState<ChannelPlanQuotaResult | null>(null)
 
@@ -344,7 +346,14 @@ export function ContextUsageBadge({
         className="w-auto min-w-[220px] p-2.5"
         onMouseEnter={cancelClose}
         onMouseLeave={scheduleClose}
+        onFocusCapture={() => {
+          popoverReceivedFocusRef.current = true
+        }}
         onOpenAutoFocus={(e) => e.preventDefault()}
+        onCloseAutoFocus={(event) => {
+          preventHoverPopoverFocusRestore(event, popoverReceivedFocusRef.current)
+          popoverReceivedFocusRef.current = false
+        }}
       >
         <div className="flex flex-col gap-1.5">
           {displayIsEstimated ? (

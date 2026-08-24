@@ -102,33 +102,44 @@ export function BrowserSlot({ sessionId, tabId }: { sessionId: string; tabId: st
     const setLayout = (window.electronAPI as Partial<typeof window.electronAPI>).setAgentBrowserLayout
     if (!element || typeof setLayout !== 'function') return
     let frame = 0
-    const publish = (visible: boolean, preserveSessionOnHide = false) => {
-      if (frame) cancelAnimationFrame(frame)
-      frame = requestAnimationFrame(() => {
-        const rect = element.getBoundingClientRect()
-        void setLayout({
-          sessionId,
-          tabId,
-          revision: nextBrowserLayoutRevision(),
-          visible: visible && rect.width > 4 && rect.height > 4,
-          preserveSessionOnHide,
-          bounds: {
-            x: Math.round(rect.x), y: Math.round(rect.y),
-            width: Math.round(rect.width), height: Math.round(rect.height),
-          },
-        })
+    const commitLayout = (visible: boolean, preserveSessionOnHide: boolean) => {
+      const rect = element.getBoundingClientRect()
+      void setLayout({
+        sessionId,
+        tabId,
+        revision: nextBrowserLayoutRevision(),
+        visible: visible && rect.width > 4 && rect.height > 4,
+        preserveSessionOnHide,
+        bounds: {
+          x: Math.round(rect.x), y: Math.round(rect.y),
+          width: Math.round(rect.width), height: Math.round(rect.height),
+        },
       })
     }
-    const publishCurrentVisibility = () => {
-      const overlayOpen = hasBlockingAppOverlay()
-      publish(!overlayOpen, overlayOpen)
+    const publish = (visible: boolean, preserveSessionOnHide = false, immediate = false) => {
+      if (frame) cancelAnimationFrame(frame)
+      if (immediate) {
+        frame = 0
+        commitLayout(visible, preserveSessionOnHide)
+        return
+      }
+      frame = requestAnimationFrame(() => {
+        frame = 0
+        commitLayout(visible, preserveSessionOnHide)
+      })
     }
-    const observer = new ResizeObserver(publishCurrentVisibility)
-    const disconnectOverlayObserver = observeAppOverlayLifecycle(publishCurrentVisibility)
+    const publishCurrentVisibility = (immediate = false) => {
+      const overlayOpen = hasBlockingAppOverlay()
+      publish(!overlayOpen, overlayOpen, immediate)
+    }
+    const observer = new ResizeObserver(() => publishCurrentVisibility())
+    const disconnectOverlayObserver = observeAppOverlayLifecycle(() => publishCurrentVisibility())
     const publishBounded = () => publishCurrentVisibility()
     observer.observe(element)
     window.addEventListener('resize', publishBounded)
-    publishCurrentVisibility()
+    // Tab 切换时先前 Slot 会立即发出 hide。新 Slot 不能再等一帧才 show，
+    // 否则快速左右切换时原生视图会停留在隐藏状态，表现为页面内容消失。
+    publishCurrentVisibility(true)
     return () => {
       observer.disconnect()
       disconnectOverlayObserver()

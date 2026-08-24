@@ -16,7 +16,7 @@ import { toast } from 'sonner'
 import {
   ChevronRight,
   Trash2,
-  RefreshCw,
+  RotateCw,
   ExternalLink,
   FolderSearch,
   Terminal,
@@ -437,7 +437,7 @@ export function FileBrowser({ rootPath, roots, hideToolbar, embedded, hideEmpty,
             onClick={loadRoot}
             disabled={loading}
           >
-            <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} />
+            <RotateCw className={cn('size-3.5', loading && 'animate-spin')} />
           </Button>
         </div>
       )}

@@ -187,7 +187,7 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
   {
     id: 'close-tab',
     name: '关闭当前标签',
-    description: '关闭当前活跃的 Chat 或 Agent 标签页',
+    description: '关闭当前 Chat 标签页，或 Agent 右侧的项目记忆/预览/浏览器标签',
     defaultMac: 'Cmd+W',
     defaultWin: 'Ctrl+W',
     category: 'app',
