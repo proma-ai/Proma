@@ -70,7 +70,7 @@ import {
   automationGroupOrderAtom,
 } from '@/atoms/agent-atoms'
 import type { SessionIndicatorStatus } from '@/atoms/agent-atoms'
-import { previewPanelOpenMapAtom, previewFileMapAtom } from '@/atoms/preview-atoms'
+import { previewPanelOpenMapAtom, previewFileMapAtom, previewFilesMapAtom } from '@/atoms/preview-atoms'
 import { clearPreviewCacheForSession } from '@/components/diff/DiffTabContent'
 import {
   tabsAtom,
@@ -873,6 +873,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   const setConvPromptId = useSetAtom(conversationPromptIdAtom)
   const setPreviewPanelOpen = useSetAtom(previewPanelOpenMapAtom)
   const setPreviewFile = useSetAtom(previewFileMapAtom)
+  const setPreviewFiles = useSetAtom(previewFilesMapAtom)
   const setAgentSideChatMap = useSetAtom(agentSideChatMapAtom)
   const setDiffPanelTab = useSetAtom(agentDiffPanelTabAtom)
   const setDiffRefreshVersion = useSetAtom(agentDiffRefreshVersionAtom)
@@ -902,6 +903,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     setConvPromptId(deleteKey)
     setPreviewPanelOpen(deleteKey)
     setPreviewFile(deleteKey)
+    setPreviewFiles(deleteKey)
     setAgentSideChatMap((prev) => {
       let changed = false
       const map = new Map(prev)

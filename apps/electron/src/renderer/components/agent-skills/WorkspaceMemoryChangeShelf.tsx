@@ -57,10 +57,17 @@ export function WorkspaceMemoryChangeShelf({ workspaceSlug, sessionId, changes, 
     if (!editingPath || !latest || latest.relativePath !== editingPath || latest.changedAt < openedAtRef.current) return
     if (ignoreNextLocalChangeRef.current === latest.relativePath) {
       ignoreNextLocalChangeRef.current = null
+      // watcher 对短时间内的写入会合并。确认磁盘最终内容仍等于刚保存的文本后才
+      // 忽略该事件；若 Agent/外部进程紧接着又写入，必须标记冲突而非静默覆盖。
+      void window.electronAPI.readWorkspaceAutoMemoryFile(workspaceSlug, latest.relativePath)
+        .then((file) => {
+          if (file.content !== editText) setEditingState((previous) => ({ ...previous, remoteChanged: true }))
+        })
+        .catch(() => setEditingState((previous) => ({ ...previous, remoteChanged: true })))
       return
     }
     setEditingState((previous) => ({ ...previous, remoteChanged: true }))
-  }, [changes, editingPath, setEditingState])
+  }, [changes, editText, editingPath, setEditingState, workspaceSlug])
 
   const startEditing = React.useCallback(async (relativePath: string): Promise<void> => {
     setLoadingEditor(true)

@@ -54,8 +54,8 @@ export function BrowserPanel({ sessionId, tabId, state }: BrowserPanelProps): Re
     const value = url.trim()
     const navigateBrowser = (window.electronAPI as Partial<typeof window.electronAPI>).navigateAgentBrowser
     if (!value || typeof navigateBrowser !== 'function') return
-    try { await navigateBrowser({ sessionId, url: value }) } catch (error) { console.error('[受管浏览器] 导航失败:', error) }
-  }, [sessionId, url])
+    try { await navigateBrowser({ sessionId, tabId, url: value }) } catch (error) { console.error('[受管浏览器] 导航失败:', error) }
+  }, [sessionId, tabId, url])
 
   const closeBrowser = React.useCallback(async () => {
     try {
@@ -109,16 +109,19 @@ export function BrowserPanel({ sessionId, tabId, state }: BrowserPanelProps): Re
   }, [sessionId, state?.executionSource])
 
   const riskBlocked = riskAcknowledged !== true
+  // 外层右侧 Tab 会先更新 UI，再异步激活 controller 中的原生标签；激活完成前禁用
+  // 依赖 controller.activeTabId 的历史操作，导航则始终显式携带当前 tabId。
+  const isControllerTabActive = state?.activeTabId === tabId
   const isBackgroundRun = state?.executionSource === 'automation' || state?.executionSource === 'delegation'
   const isWindows = React.useMemo(() => detectIsWindows(), [])
   return (
     <div className="flex h-full min-w-0 flex-col overflow-hidden border-l border-border/80 bg-content-area titlebar-no-drag">
       <div className={cn('flex items-center h-[42px] gap-1 px-2 border-b border-border/40 bg-muted/20', getWindowControlsPaddingClass(isWindows))}>
-        <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-8 rounded-lg text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground" disabled={riskBlocked || !state?.canGoBack} onClick={() => void window.electronAPI.goBackAgentBrowser?.(sessionId)}><ChevronLeft className="size-5" /></Button></TooltipTrigger><TooltipContent>后退</TooltipContent></Tooltip>
-        <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-8 rounded-lg text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground" disabled={riskBlocked || !state?.canGoForward} onClick={() => void window.electronAPI.goForwardAgentBrowser?.(sessionId)}><ChevronRight className="size-5" /></Button></TooltipTrigger><TooltipContent>前进</TooltipContent></Tooltip>
-        <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-8 rounded-lg text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground" disabled={riskBlocked} onClick={() => void window.electronAPI.reloadAgentBrowser?.(sessionId)}><RotateCw className="size-[18px]" /></Button></TooltipTrigger><TooltipContent>刷新</TooltipContent></Tooltip>
+        <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-8 rounded-lg text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground" disabled={riskBlocked || !isControllerTabActive || !state?.canGoBack} onClick={() => void window.electronAPI.goBackAgentBrowser?.(sessionId)}><ChevronLeft className="size-5" /></Button></TooltipTrigger><TooltipContent>后退</TooltipContent></Tooltip>
+        <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-8 rounded-lg text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground" disabled={riskBlocked || !isControllerTabActive || !state?.canGoForward} onClick={() => void window.electronAPI.goForwardAgentBrowser?.(sessionId)}><ChevronRight className="size-5" /></Button></TooltipTrigger><TooltipContent>前进</TooltipContent></Tooltip>
+        <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-8 rounded-lg text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground" disabled={riskBlocked || !isControllerTabActive} onClick={() => void window.electronAPI.reloadAgentBrowser?.(sessionId)}><RotateCw className="size-[18px]" /></Button></TooltipTrigger><TooltipContent>刷新</TooltipContent></Tooltip>
         <form className="flex-1 min-w-0" onSubmit={(event) => { event.preventDefault(); if (!riskBlocked) void navigate() }}>
-          <Input disabled={riskBlocked} value={url} onChange={(event) => setUrl(event.target.value)} placeholder="输入网址或搜索内容" className="h-7 bg-background/70 text-xs text-muted-foreground/70" aria-label="浏览器地址" />
+          <Input disabled={riskBlocked || !isControllerTabActive} value={url} onChange={(event) => setUrl(event.target.value)} placeholder="输入网址或搜索内容" className="h-7 bg-background/70 text-xs text-muted-foreground/70" aria-label="浏览器地址" />
         </form>
         {state?.loading && <LoaderCircle className="size-3.5 text-muted-foreground animate-spin" />}
         {isBackgroundRun && (
