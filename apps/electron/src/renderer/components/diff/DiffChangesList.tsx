@@ -11,19 +11,22 @@ import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { FileTypeIcon } from '@/components/file-browser/FileTypeIcon'
 import { agentDiffUnseenFilesAtom, agentDiffDataAtom, agentSelectedWorktreeAtom, agentSessionsAtom, workspaceGitDiffRefreshVersionAtom } from '@/atoms/agent-atoms'
-import type { ChangedFileEntry, ChangedFileStatus, UntrackedFileEntry, WorktreeInfo } from '@proma/shared'
+import type { ChangedFileEntry, ChangedFileStatus, ChangeSource, UntrackedFileEntry, WorktreeInfo } from '@proma/shared'
 import { WorktreeSelector } from './WorktreeSelector'
 import { WorkspaceMemoryChangeDock } from '@/components/agent-skills/WorkspaceMemoryChangeDock'
 import { groupSessionFileChanges } from '@/lib/session-file-changes'
 import type { SessionFileChange } from '@/lib/session-file-changes'
 import { buildDiffFileTree } from './diff-file-tree'
 import type { DiffFileTreeNode } from './diff-file-tree'
+import { collectDiffChangeSources, DIFF_CHANGE_SOURCE_CONFIG } from './diff-change-sources'
 
 interface GitFileEntry {
   filePath: string
   status: ChangedFileStatus
   additions: number
   deletions: number
+  /** 已追踪文件的来源；未追踪文件没有来源归属。 */
+  source?: ChangeSource
   gitRoot: string
 }
 
@@ -33,6 +36,8 @@ interface FileGroup {
   gitRoot: string
   /** 显示用的目录名（仓库的最后一段） */
   dirName: string
+  /** 保留会话、项目与附加目录的改动来源标识。 */
+  sources: ChangeSource[]
   tree: Array<DiffFileTreeNode<GitFileEntry>>
 }
 
@@ -241,6 +246,7 @@ export const DiffChangesList = React.memo(function DiffChangesList({
     const result: FileGroup[] = [...groups.entries()].map(([gitRoot, groupFiles]) => ({
       gitRoot,
       dirName: gitRoot ? gitRoot.split('/').pop() || gitRoot : '/',
+      sources: collectDiffChangeSources(groupFiles),
       tree: buildDiffFileTree(groupFiles),
     }))
     return { fileGroups: result, matchedFilesCount: filteredFiles.length }
@@ -326,9 +332,17 @@ export const DiffChangesList = React.memo(function DiffChangesList({
           {fileGroups.map((group) => {
             return (
               <div key={group.gitRoot} className="py-1">
-                {fileGroups.length > 1 && (
-                  <div className="px-4 py-1 text-[11px] font-medium text-muted-foreground">{group.dirName}</div>
-                )}
+                <div className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium text-muted-foreground">
+                  <span className="truncate">{group.dirName}</span>
+                  {group.sources.map((source) => {
+                    const config = DIFF_CHANGE_SOURCE_CONFIG[source]
+                    return (
+                      <span key={source} className={cn('shrink-0 rounded px-1 py-0.5 text-[11px] leading-none', config.color)}>
+                        {config.label}
+                      </span>
+                    )
+                  })}
+                </div>
                 {group.tree.map((node) => (
                   <GitFileTreeNode
                     key={`${group.gitRoot}:${node.path}`}
@@ -419,7 +433,6 @@ function GitFileTreeNode({
           className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform duration-150', !isCollapsed && 'rotate-90')}
         />
         <span className="min-w-0 flex-1 truncate">{node.name}</span>
-        <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-amber-500/60" />
       </button>
       {!isCollapsed && (
         <div className="relative">
