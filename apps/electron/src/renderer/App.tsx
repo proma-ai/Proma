@@ -19,7 +19,6 @@ import { tabsAtom, activeTabIdAtom, openTab, TUTORIAL_TAB_ID } from './atoms/tab
 import { hasCompletedCurrentOnboarding } from '../types'
 import hopperSeasideWhiteHouse from './assets/onboarding/hopper-seaside-white-house.png'
 import promaMarkWhite from './assets/onboarding/proma-mark-white.svg'
-import type { AppShellContextType } from './contexts/AppShellContext'
 
 export default function App(): React.ReactElement {
   // 应用级初始化状态。
@@ -128,13 +127,10 @@ export default function App(): React.ReactElement {
     )
   }
 
-  // Placeholder context value
-  const contextValue: AppShellContextType = {}
-
   // 显示主界面
   return (
     <TooltipProvider delayDuration={200} disableHoverableContent>
-      <AppShell contextValue={contextValue} />
+      <AppShell />
       <PlanningReminderRail />
       <ShortcutGuideDialog />
       <FaqDialog />
@@ -179,7 +175,6 @@ function StartupLoadingScreen(): React.ReactElement {
           <div className="h-full w-2/5 animate-pulse bg-white/90" />
         </div>
         <p className="mt-4 text-sm font-medium tracking-[0.08em] text-white/95">正在启动 Proma</p>
-        <p className="mt-2 text-xs tracking-[0.12em] text-white/70">正在初始化你的工作空间</p>
       </div>
 
       <p className="absolute bottom-8 px-6 text-center text-[11px] uppercase tracking-[0.3em] text-white/65">

@@ -94,9 +94,8 @@ export function ManagedBrowserWindowApp(): React.ReactElement {
         <div className="min-h-0 flex-1">
           <BrowserPanel
             sessionId={sessionId}
+            tabId={state?.activeTabId ?? ''}
             state={state}
-            onMinimize={() => {}}
-            onClose={() => window.close()}
             inDetachedWindow
           />
         </div>

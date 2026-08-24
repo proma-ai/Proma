@@ -45,6 +45,7 @@ import {
 import { updateStatusAtom, initializeUpdater } from './atoms/updater'
 import { automationsAtom } from './atoms/automation-atoms'
 import { calendarEventsAtom, calendarPlanningGroupsAtom, planningTagsAtom, todoPlanningGroupsAtom, todosAtom } from './atoms/planning-atoms'
+import { mergeTodoSnapshot, upsertTodo } from './lib/todo-state'
 import {
   notificationsEnabledAtom,
   notificationSoundEnabledAtom,
@@ -479,7 +480,7 @@ function PlanningInitializer(): null {
     const loadTodos = (): void => {
       const requestId = ++latestRequest.todos
       void window.electronAPI.listTodos().then((todos) => {
-        if (!disposed && requestId === latestRequest.todos) setTodos(todos)
+        if (!disposed && requestId === latestRequest.todos) setTodos((current) => mergeTodoSnapshot(current, todos))
       }).catch((error: unknown) => console.error('[任务/日程] 加载 Todo 失败:', error))
     }
     const loadCalendarEvents = (): void => {
@@ -515,7 +516,15 @@ function PlanningInitializer(): null {
       if (includes('tags')) loadTags()
     }
     load()
-    const unsubscribe = window.electronAPI.onPlanningChanged((change) => load(change.resources))
+    const unsubscribe = window.electronAPI.onPlanningChanged((change) => {
+      const todo = change.todo
+      if (change.resources.includes('todos') && todo) {
+        // 使在途快照过期，避免它在增量事件之后返回并覆盖最新 Todo。
+        latestRequest.todos += 1
+        setTodos((current) => upsertTodo(current, todo))
+      }
+      load(todo ? change.resources.filter((resource) => resource !== 'todos') : change.resources)
+    })
     return () => { disposed = true; unsubscribe() }
   }, [setCalendarEvents, setCalendarGroups, setTags, setTodoGroups, setTodos])
 
@@ -682,14 +691,12 @@ function ChatToolInitializer(): null {
       .catch((err: unknown) => console.error('[ChatToolInitializer] 加载工具列表失败:', err))
   }, [setChatTools])
 
-  // 订阅自定义工具配置变更
+  // 订阅自定义工具配置变更并静默刷新工具列表。
+  // 用户主动操作的反馈由各设置入口提供，避免文件监听产生重复 Toast。
   useEffect(() => {
     const cleanup = window.electronAPI.onCustomToolChanged(() => {
       window.electronAPI.getChatTools()
-        .then((tools) => {
-          setChatTools(tools)
-          toast.success('Chat 工具已更新')
-        })
+        .then(setChatTools)
         .catch((err: unknown) => console.error('[ChatToolInitializer] 刷新工具列表失败:', err))
     })
     return cleanup

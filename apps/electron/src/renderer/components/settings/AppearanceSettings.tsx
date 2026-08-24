@@ -30,7 +30,6 @@ import {
   markdownFontSizeAtom,
   updateMarkdownFontSize,
 } from '@/atoms/markdown-font-size'
-import { previewModePreferenceAtom, type PreviewModePreference } from '@/atoms/preview-atoms'
 import { cn } from '@/lib/utils'
 import { detectIsWindows } from '@/lib/platform'
 import type { InterfaceVariant, ThemeMode, ThemeStyle, MarkdownFontSize } from '../../../types'
@@ -78,12 +77,6 @@ const MARKDOWN_FONT_SIZE_OPTIONS = [
   { value: 'small', label: '小' },
   { value: 'medium', label: '中' },
   { value: 'large', label: '大' },
-]
-
-/** 预览默认展开方式 */
-const PREVIEW_MODE_OPTIONS: { value: PreviewModePreference; label: string }[] = [
-  { value: 'tab', label: '标签页' },
-  { value: 'split', label: '侧边分屏' },
 ]
 
 /** 特殊风格 ID（排除 default） */
@@ -191,7 +184,6 @@ export function AppearanceSettings(): React.ReactElement {
   const [interfaceVariant, setInterfaceVariant] = useAtom(interfaceVariantAtom)
   const systemIsDark = useAtomValue(systemIsDarkAtom)
   const [markdownFontSize, setMarkdownFontSize] = useAtom(markdownFontSizeAtom)
-  const [previewModePref, setPreviewModePref] = useAtom(previewModePreferenceAtom)
 
   /** 切换主题模式 */
   const handleThemeChange = React.useCallback((value: string) => {
@@ -283,13 +275,6 @@ export function AppearanceSettings(): React.ReactElement {
             options={MARKDOWN_FONT_SIZE_OPTIONS}
           />
 
-          <SettingsSegmentedControl
-            label="Agent 预览展开方式"
-            description="点击文件、工具结果「预览」按钮时的默认展开位置；拖拽预览 Tab 出标签栏可即时切换为侧边分屏"
-            value={previewModePref}
-            onValueChange={(v) => setPreviewModePref(v as PreviewModePreference)}
-            options={PREVIEW_MODE_OPTIONS}
-          />
         </SettingsCard>
       </SettingsSection>
 

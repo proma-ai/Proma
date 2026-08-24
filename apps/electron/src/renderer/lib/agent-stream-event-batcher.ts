@@ -4,6 +4,10 @@ export interface AgentStreamEventBatcherOptions {
   dispatch: (event: AgentStreamEvent) => void
   requestFrame?: (callback: FrameRequestCallback) => number
   cancelFrame?: (handle: number) => void
+  /** 帧调度被后台节流时的交付兜底。 */
+  scheduleFallback?: (callback: () => void, delayMs: number) => number
+  cancelFallback?: (handle: number) => void
+  fallbackDelayMs?: number
 }
 
 function isPartialAssistantEvent(event: AgentStreamEvent): boolean {
@@ -36,10 +40,23 @@ export function createAgentStreamEventBatcher(options: AgentStreamEventBatcherOp
   const pending = new Map<string, AgentStreamEvent>()
   const requestFrame = options.requestFrame ?? window.requestAnimationFrame
   const cancelFrame = options.cancelFrame ?? window.cancelAnimationFrame
+  const scheduleFallback = options.scheduleFallback ?? ((callback, delayMs) => window.setTimeout(callback, delayMs))
+  const cancelFallback = options.cancelFallback ?? ((handle) => window.clearTimeout(handle))
+  const fallbackDelayMs = options.fallbackDelayMs ?? 100
   let frame: number | null = null
+  let fallback: number | null = null
+
+  /** rAF 与 timeout 是同一批 pending events 的竞速调度器；任一方获胜都必须撤销另一方。 */
+  const cancelScheduledFlush = (): void => {
+    if (frame !== null) cancelFrame(frame)
+    if (fallback !== null) cancelFallback(fallback)
+    frame = null
+    fallback = null
+  }
 
   const flush = (): void => {
-    frame = null
+    // 后台时 fallback 会先运行；若不撤销被冻结的 rAF，窗口恢复后会集中执行所有旧回调。
+    cancelScheduledFlush()
     const events = [...pending.values()]
     pending.clear()
     for (const event of events) options.dispatch(event)
@@ -67,14 +84,19 @@ export function createAgentStreamEventBatcher(options: AgentStreamEventBatcherOp
         options.dispatch(existing)
       }
       pending.set(event.sessionId, existing ? mergePendingEvents(existing, event) : event)
-      if (frame === null) frame = requestFrame(flush)
+      if (frame === null) {
+        frame = requestFrame(flush)
+        // backgroundThrottling 可能暂停 requestAnimationFrame；定时器确保
+        // Agent 仍在运行时 renderer 至少能周期性收到可见增量。
+        fallback = scheduleFallback(flush, fallbackDelayMs)
+      }
     },
     clear(sessionId: string): void {
       pending.delete(sessionId)
+      if (pending.size === 0) cancelScheduledFlush()
     },
     dispose(): void {
-      if (frame !== null) cancelFrame(frame)
-      frame = null
+      cancelScheduledFlush()
       pending.clear()
     },
   }

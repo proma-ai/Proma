@@ -9,8 +9,11 @@ import type { EnvironmentCheckResult, ThinkingConfig, AgentEffort, AgentThinking
 /** 通知音场景类型 */
 export type NotificationSoundType = 'taskComplete' | 'permissionRequest' | 'exitPlanMode' | 'planningReminder'
 
+/** UI SFX 音效主题。旧 ID 保留用于兼容已有设置。 */
+export type NotificationSoundPackId = 'minimal' | 'soft' | 'glass' | 'arcade' | 'mechanical' | 'organic' | 'dreamy' | 'scifi' | 'rubber' | 'cinematic' | 'studio' | 'zen'
+
 /** 可选通知音 ID */
-export type NotificationSoundId = 'ding' | 'ding-dong' | 'discord' | 'done' | 'down-power' | 'food' | 'lite' | 'quiet' | 'none'
+export type NotificationSoundId = NotificationSoundPackId | 'ding' | 'ding-dong' | 'discord' | 'done' | 'down-power' | 'food' | 'lite' | 'quiet' | 'none'
 
 /** 各场景通知音配置 */
 export interface NotificationSoundSettings {
@@ -349,7 +352,7 @@ export interface AppSettings {
   browserRiskDisclaimerVersion?: number
   /** 用户手动关闭的 Proma 内置 MCP ID 列表（针对默认开启的内置 MCP） */
   builtinMcpDisabledIds?: string[]
-  /** 用户手动开启的 Proma 内置 MCP ID 列表（针对默认关闭的内置 MCP，如 nano-banana、mem） */
+  /** 用户手动开启的 Proma 内置 MCP ID 列表（针对默认关闭的内置 MCP，如 nano-banana） */
   builtinMcpEnabledIds?: string[]
   /** 启动时自动清理临时文件（proma-preview、proma-installers），默认 true */
   autoCleanupTempOnStart?: boolean

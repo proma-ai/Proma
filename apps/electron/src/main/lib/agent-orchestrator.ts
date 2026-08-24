@@ -44,6 +44,7 @@ import { friendlyErrorMessage, isPromptTooLongError, isThinkingSignatureError, m
 import { getActiveRunRejectionMessage, shouldPersistInitialUserMessage } from './agent-send-message-policy'
 import { isSessionNotFoundError } from './error-patterns'
 import { AgentEventBus } from './agent-event-bus'
+import { isStaleActiveQueueError } from './agent-queue-routing'
 import { decryptApiKey, getChannelById, listChannels, persistCodexOAuthCredentials, persistXaiOAuthCredentials, resolveChannelRuntimeApiKey, resolveCodexOAuthCredentials, resolveXaiOAuthCredentials } from './channel-manager'
 import { getAdapter, fetchTitle } from '@proma/core'
 import pkg from '../../../package.json' with { type: 'json' }
@@ -111,7 +112,7 @@ function errorMessageOf(error: unknown): string {
 }
 
 function isMissingActiveQueueChannelError(error: unknown): boolean {
-  return errorMessageOf(error).includes('无活跃消息通道可注入队列消息')
+  return isStaleActiveQueueError(error)
 }
 
 function isPartialSDKMessage(message: SDKMessage): boolean {
@@ -1148,13 +1149,6 @@ export class AgentOrchestrator {
         'REPL', 'Workflow', 'ScheduleWakeup', 'Monitor', 'PushNotification',
         'CronCreate', 'CronDelete', 'RemoteTrigger',
       ])
-      const PLAN_MODE_READ_ONLY_CHROME_DEVTOOLS = new Set([
-        'mcp__chrome_devtools__list_pages',
-        'mcp__chrome_devtools__take_snapshot',
-        'mcp__chrome_devtools__take_screenshot',
-        'mcp__chrome_devtools__list_network_requests',
-        'mcp__chrome_devtools__performance_stop_trace',
-      ])
       // Planning 是本地用户数据：计划模式只允许查询，严禁创建、更新、删除或确认/推迟提醒。
       const PLAN_MODE_READ_ONLY_PLANNING_TOOLS = new Set([
         'mcp__planning__list_todos', 'mcp__planning__get_todo',
@@ -1320,13 +1314,6 @@ export class AgentOrchestrator {
                 return { behavior: 'allow' as const, updatedInput: input }
               }
               return { behavior: 'deny' as const, message: '计划模式下不允许执行写操作，请在计划审批通过后再执行' }
-            }
-            // Chrome DevTools MCP 同时包含只读观察和会改变页面状态的操作。
-            // 计划模式只允许快照、截图、网络列表等调研工具；点击、输入、脚本执行等需等计划通过。
-            if (toolName.startsWith('mcp__chrome_devtools__')) {
-              return PLAN_MODE_READ_ONLY_CHROME_DEVTOOLS.has(toolName)
-                ? { behavior: 'allow' as const, updatedInput: input }
-                : { behavior: 'deny' as const, message: '计划模式下不允许执行会改变浏览器页面状态的 Chrome DevTools 操作，请在计划审批通过后再执行' }
             }
             if (toolName.startsWith('mcp__planning__')) {
               return PLAN_MODE_READ_ONLY_PLANNING_TOOLS.has(toolName)
@@ -1553,6 +1540,17 @@ export class AgentOrchestrator {
       const queryStartedAt = Date.now()
 
       for (let attempt = 1; attempt <= MAX_QUERY_ATTEMPTS; attempt++) {
+        // stop() releases the active slot before aborting the adapter. It can win
+        // the race against async preflight or a recoverable-error retry, when no
+        // adapter query exists yet to cancel. Never start that later query.
+        if (this.activeSessions.get(sessionId) !== runGeneration) {
+          const wasStoppedByUser = this.consumeStoppedByUser(sessionId, runGeneration)
+          this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
+          try { updateAgentSessionMeta(sessionId, { stoppedByUser: wasStoppedByUser }) } catch { /* 会话可能已删除 */ }
+          completeRun(getAgentSessionMessages(sessionId), { stoppedByUser: wasStoppedByUser, startedAt: streamStartedAt })
+          return
+        }
+
         // A recovery query starts a fresh turn; activations from a failed attempt must not leak.
         pendingSkillActivations = []
         // 回退会清除 queryOptions.resumeSessionId；新建 Pi artifact 不应再触发 prompt replay。
@@ -1894,8 +1892,11 @@ export class AgentOrchestrator {
             }
           }
 
-          // 错误 break 触发了 → 继续循环
+          // 需要恢复时，前一次 adapter iterator 尚未自然结束。显式 return 才会
+          // 执行 PiUtilityAdapter 的 finally，释放旧 runtime 与 pending query；否则
+          // 同一 session 会残留多个运行时，后续 stop 只能取消其中一个。
           if (shouldRetryFromError) {
+            await queryIterator.return?.(undefined as never).catch(() => {})
             continue
           }
 
@@ -1931,7 +1932,9 @@ export class AgentOrchestrator {
           return
 
         } catch (error) {
-          if (!this.activeSessions.has(sessionId)) {
+          // 同一 session 的新 run 可能已在旧 run 的迟到错误之前开始；只要
+          // 本代际不再拥有 active slot，就只能收束自己，不能向新 run 泄漏终态。
+          if (this.activeSessions.get(sessionId) !== runGeneration) {
             const wasStoppedByUser = this.consumeStoppedByUser(sessionId, runGeneration)
             this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
             try { updateAgentSessionMeta(sessionId, { stoppedByUser: wasStoppedByUser }) } catch { /* 会话可能已删除 */ }

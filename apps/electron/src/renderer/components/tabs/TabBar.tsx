@@ -10,7 +10,7 @@
 
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
-import { HelpCircle, Keyboard, Globe2, PanelRight } from 'lucide-react'
+import { HelpCircle, Keyboard, Globe, PanelRight } from 'lucide-react'
 import {
   tabsAtom,
   activeTabIdAtom,
@@ -26,6 +26,8 @@ import {
   agentWorkspacesAtom,
   currentAgentSessionIdAtom,
   currentAgentWorkspaceIdAtom,
+  agentDiffPanelTabAtom,
+  getBrowserSidePanelTab,
   unviewedCompletedSessionIdsAtom,
 } from '@/atoms/agent-atoms'
 import { appModeAtom } from '@/atoms/app-mode'
@@ -38,11 +40,10 @@ import { TabBarItem } from './TabBarItem'
 import { getTabBarActionLayout } from './tab-bar-action-layout'
 import { useCloseTab } from '@/hooks/useCloseTab'
 import { detectIsWindows, WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
-import { registerShortcut } from '@/lib/shortcut-registry'
 import { cn } from '@/lib/utils'
 import { shortcutGuideOpenAtom } from '@/atoms/shortcut-guide'
 import { faqDialogOpenAtom } from '@/atoms/faq-dialog'
-import { browserFilePanelManualRestoreSessionIdsAtom, browserPanelMinimizedMapAtom, browserPanelOpenMapAtom, browserStateMapAtom } from '@/atoms/browser-atoms'
+import { browserPanelMinimizedMapAtom, browserPanelOpenMapAtom, browserStateMapAtom } from '@/atoms/browser-atoms'
 // 浏览器入口对所有 Agent 会话开放；来源限制由主进程浏览器策略处理。
 
 export function TabBar(): React.ReactElement {
@@ -251,21 +252,14 @@ function TabBarInner({
   const setBrowserMinimizedMap = useSetAtom(browserPanelMinimizedMapAtom)
   const browserStateMap = useAtomValue(browserStateMapAtom)
   const setBrowserStateMap = useSetAtom(browserStateMapAtom)
-  const [browserFilePanelManualRestoreSessionIds, setBrowserFilePanelManualRestoreSessionIds] = useAtom(browserFilePanelManualRestoreSessionIdsAtom)
-  const activeBrowserIsOpen = activeAgentSession ? browserOpenMap.get(activeAgentSession.id) === true : false
+  const setSidePanelTabMap = useSetAtom(agentDiffPanelTabAtom)
   const hasMinimizedBrowser = Boolean(activeAgentSession && browserStateMap.has(activeAgentSession.id) && browserMinimizedMap.get(activeAgentSession.id) === true)
-  const priorBrowserStateRef = React.useRef<{ sessionId: string | null; open: boolean }>({ sessionId: null, open: false })
   const actionLayout = getTabBarActionLayout(isWindows, showOpenPanelButton, showBrowserButton)
 
   const togglePanel = React.useCallback(() => {
     if (!isAgentContextTab(activeTab)) return
-    if (!isPanelOpen && activeAgentSession && browserOpenMap.get(activeAgentSession.id)) {
-      setBrowserFilePanelManualRestoreSessionIds((previous) => (
-        previous.includes(activeAgentSession.id) ? previous : [...previous, activeAgentSession.id]
-      ))
-    }
     setSidePanelOpen(!isPanelOpen)
-  }, [activeAgentSession, activeTab, browserOpenMap, isPanelOpen, setBrowserFilePanelManualRestoreSessionIds, setSidePanelOpen])
+  }, [activeTab, isPanelOpen, setSidePanelOpen])
 
   const openBrowser = React.useCallback(async () => {
     if (!activeAgentSession) return
@@ -279,24 +273,13 @@ function TabBarInner({
       return
     }
     setBrowserOpenMap((previous) => { const next = new Map(previous); next.set(activeAgentSession.id, true); return next })
-  }, [activeAgentSession, setBrowserMinimizedMap, setBrowserOpenMap, setBrowserStateMap])
-
-  React.useEffect(() => {
-    const sessionId = activeAgentSession?.id ?? null
-    const previous = priorBrowserStateRef.current
-    const shouldAutoCollapse = Boolean(
-      sessionId &&
-      previous.sessionId === sessionId &&
-      !previous.open &&
-      activeBrowserIsOpen &&
-      isPanelOpen &&
-      !browserFilePanelManualRestoreSessionIds.includes(sessionId),
-    )
-    priorBrowserStateRef.current = { sessionId, open: activeBrowserIsOpen }
-
-    if (!shouldAutoCollapse) return
-    setSidePanelOpen(false)
-  }, [activeAgentSession?.id, activeBrowserIsOpen, browserFilePanelManualRestoreSessionIds, isPanelOpen, setSidePanelOpen])
+    setSidePanelOpen(true)
+    setSidePanelTabMap((previous) => {
+      const next = new Map(previous)
+      next.set(activeAgentSession.id, getBrowserSidePanelTab(state.activeTabId))
+      return next
+    })
+  }, [activeAgentSession, setBrowserMinimizedMap, setBrowserOpenMap, setBrowserStateMap, setSidePanelOpen, setSidePanelTabMap])
 
   const openShortcutGuide = React.useCallback(() => {
     setShortcutGuideOpen(true)
@@ -305,10 +288,6 @@ function TabBarInner({
   const openFaqDialog = React.useCallback(() => {
     setFaqDialogOpen(true)
   }, [setFaqDialogOpen])
-
-  React.useEffect(() => {
-    return registerShortcut('toggle-right-panel', togglePanel)
-  }, [togglePanel])
 
   // 滚动容器 ref
   const scrollRef = React.useRef<HTMLDivElement>(null)
@@ -553,7 +532,7 @@ function ShortcutGuideButton({
               )}
               onClick={() => void onOpenBrowser()}
             >
-              <Globe2 className="size-3.5" />
+              <Globe className="size-3.5" />
               <span className="sr-only">打开受管浏览器</span>
             </Button>
           </TooltipTrigger>

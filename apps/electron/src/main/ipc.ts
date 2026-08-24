@@ -59,9 +59,6 @@ import type {
   AgentAttachFileInput,
   WorkspaceAttachDirectoryInput,
   WorkspaceAttachFileInput,
-  GetTaskOutputInput,
-  GetTaskOutputResult,
-  StopTaskInput,
   WorkspaceMcpConfig,
   SkillMeta,
   BulkImportSkillItemResult,
@@ -282,7 +279,7 @@ import {
   searchAgentSessionMessages,
   searchAgentSessionReferences,
 } from './lib/agent-session-manager'
-import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive, isAgentSessionBusy, reserveAgentSessionStart, queueAgentMessage, enqueueAgentQueuedMessage, cancelAgentQueuedMessage, moveAgentQueuedMessage, clearAgentQueuedMessages, updateAgentPermissionMode, rewindAgentSession, setVisibleAgentSession } from './lib/agent-service'
+import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive, isAgentSessionBusy, reserveAgentSessionStart, queueAgentMessage, submitOrEnqueueAgentMessage, enqueueAgentQueuedMessage, cancelAgentQueuedMessage, moveAgentQueuedMessage, clearAgentQueuedMessages, updateAgentPermissionMode, rewindAgentSession, setVisibleAgentSession } from './lib/agent-service'
 import { permissionService } from './lib/agent-permission-service'
 import { askUserService } from './lib/agent-ask-user-service'
 import { exitPlanService } from './lib/agent-exit-plan-service'
@@ -2913,7 +2910,15 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // 将等待当前 run 结束的消息交给主进程调度器
+  // 主进程原子决定立即注入活跃 Agent 或进入 deferred queue。
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.SUBMIT_OR_ENQUEUE_MESSAGE,
+    async (event, input: import('@proma/shared').AgentSubmitOrEnqueueInput): Promise<import('@proma/shared').AgentSubmitOrEnqueueResult> => {
+      return submitOrEnqueueAgentMessage(input, event.sender)
+    },
+  )
+
+  // 兼容旧调用：将消息交给主进程 deferred queue。
   ipcMain.handle(
     AGENT_IPC_CHANNELS.ENQUEUE_QUEUED_MESSAGE,
     async (event, input: import('@proma/shared').AgentDeferredQueueMessageInput): Promise<void> => {
@@ -2935,24 +2940,6 @@ export function registerIpcHandlers(): void {
     },
   )
 
-  // 获取任务输出（保留接口，供未来扩展）
-  ipcMain.handle(
-    AGENT_IPC_CHANNELS.GET_TASK_OUTPUT,
-    async (_, input: GetTaskOutputInput): Promise<GetTaskOutputResult> => {
-      try {
-        // TODO: 实现通过 SDK 的 TaskOutput 获取任务输出
-        console.warn('[IPC] GET_TASK_OUTPUT: 当前版本暂未实现，返回空输出')
-        return {
-          output: '',
-          isComplete: false,
-        }
-      } catch (error) {
-        console.error('[IPC] 获取任务输出失败:', error)
-        throw error
-      }
-    }
-  )
-
   // ===== Agent 权限系统 =====
 
   // 响应权限请求
@@ -2968,23 +2955,6 @@ export function registerIpcHandlers(): void {
           sessionId,
           payload: { kind: 'proma_event', event: { type: 'permission_resolved', requestId, behavior } },
         })
-      }
-    }
-  )
-
-  // 停止任务
-  ipcMain.handle(
-    AGENT_IPC_CHANNELS.STOP_TASK,
-    async (_, input: StopTaskInput): Promise<void> => {
-      try {
-        if (input.type === 'shell') {
-          console.warn('[IPC] STOP_TASK: Shell 任务停止功能待实现')
-        } else {
-          console.warn('[IPC] STOP_TASK: Agent 任务暂不支持单独停止')
-        }
-      } catch (error) {
-        console.error('[IPC] 停止任务失败:', error)
-        throw error
       }
     }
   )
@@ -4399,8 +4369,8 @@ export function registerIpcHandlers(): void {
   // 测试飞书连接
   ipcMain.handle(
     FEISHU_IPC_CHANNELS.TEST_CONNECTION,
-    async (_, appId: string, appSecret: string): Promise<FeishuTestResult> => {
-      return feishuBridgeManager.testConnection(appId, appSecret)
+    async (_, appId: string, appSecret: string, domain?: import('@proma/shared').FeishuDomain): Promise<FeishuTestResult> => {
+      return feishuBridgeManager.testConnection(appId, appSecret, domain)
     }
   )
 
@@ -5091,7 +5061,7 @@ export function registerIpcHandlers(): void {
         expectedUpdatedAt: existing.updatedAt,
       })
     if (!todo) throw new Error('Todo 不存在')
-    if (todo !== existing) broadcastPlanningChanged(['todos', 'reminders'])
+    if (todo !== existing) broadcastPlanningChanged(['todos', 'reminders'], { todo })
 
     const session = createAgentSession(
       `处理：${todo.title}`,
@@ -5133,7 +5103,7 @@ export function registerIpcHandlers(): void {
     if (input.dueAt !== undefined && input.dueAt !== null && !isPlanningTimestamp(input.dueAt)) throw new Error('Todo dueAt 非法')
     if (input.expectedUpdatedAt !== undefined && !isPlanningTimestamp(input.expectedUpdatedAt)) throw new Error('Todo expectedUpdatedAt 非法')
     const todo = updateTodo(input)
-    if (todo) broadcastPlanningChanged(['todos', 'reminders'])
+    if (todo) broadcastPlanningChanged(['todos', 'reminders'], { todo })
     return todo
   })
   ipcMain.handle(PLANNING_IPC_CHANNELS.DELETE_TODO, async (_, id: string): Promise<boolean> => {

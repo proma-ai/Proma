@@ -38,6 +38,9 @@ chmodSync(output, 0o755)
 if (existsSync(devElectronInfo)) {
   execFileSync('plutil', ['-replace', 'NSCalendarsFullAccessUsageDescription', '-string', 'Proma 需要访问你选择的日历，以显示、创建和同步日程。', devElectronInfo])
   execFileSync('plutil', ['-replace', 'NSRemindersFullAccessUsageDescription', '-string', 'Proma 需要访问你选择的提醒事项列表，以同步 Todo。', devElectronInfo])
+  // Finder / File Provider 可能为 Electron.app 添加扩展属性，codesign 会拒绝此类元数据。
+  // 递归清理全部扩展属性；即使当前没有属性也会成功，避免逐项删除因“属性不存在”中断构建。
+  execFileSync('xattr', ['-cr', devElectronApp], { stdio: 'inherit' })
   // macOS 26+ 还会检查 EventKit entitlement；开发态 Electron 也必须带与成品相同的权限。
   execFileSync('codesign', ['--force', '--deep', '--sign', '-', '--entitlements', entitlements, devElectronApp], { stdio: 'inherit' })
 }

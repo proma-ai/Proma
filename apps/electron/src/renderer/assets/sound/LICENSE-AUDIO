@@ -1,0 +1,16 @@
+UI SFX audio assets are dedicated to the public domain under the Creative
+Commons CC0 1.0 Universal Public Domain Dedication.
+
+To the extent possible under law, Yuki Capital has waived all copyright and
+related or neighboring rights to the procedurally generated audio files in
+`packages/uisfx/sounds`.
+
+You may copy, modify, distribute, and use these files, including for commercial
+purposes, without asking permission. Attribution is appreciated but not
+required.
+
+This dedication does not apply to files under `.generated`, including any
+provider-backed research or evaluation output.
+
+Legal code: https://creativecommons.org/publicdomain/zero/1.0/legalcode
+SPDX identifier: CC0-1.0

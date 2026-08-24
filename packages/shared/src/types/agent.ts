@@ -1195,6 +1195,22 @@ export interface AgentDeferredQueueMessageInput extends AgentSendInput {
   queueMessageId: string
 }
 
+/**
+ * 消息提交意图。由主进程基于实时运行状态原子决定注入活跃 Agent 或保留到 deferred queue，
+ * 不能依赖 renderer 的 streaming 快照。
+ */
+export interface AgentSubmitOrEnqueueInput extends AgentDeferredQueueMessageInput {
+  /** after_current：本轮结束后发送；now：尽量立即注入，通道已结束时自动降级为 deferred queue。 */
+  dispatch: 'after_current' | 'now'
+  /** dispatch=now 时，是否软中断当前 turn。 */
+  interrupt?: boolean
+}
+
+export interface AgentSubmitOrEnqueueResult {
+  /** injected：已注入当前活跃 Agent；queued：已由主进程接管，等待或启动下一轮。 */
+  disposition: 'injected' | 'queued'
+}
+
 /** 流式追加消息的输入参数（Agent 流式中发送新消息） */
 export interface AgentQueueMessageInput {
   /** 会话 ID */
@@ -1286,40 +1302,6 @@ export interface RewindSessionResult {
     insertions?: number
     deletions?: number
   }
-}
-
-// ===== 后台任务管理 =====
-
-/**
- * 获取任务输出请求
- */
-export interface GetTaskOutputInput {
-  /** 任务 ID */
-  taskId: string
-  /** 是否阻塞等待完成（默认 false） */
-  block?: boolean
-}
-
-/**
- * 获取任务输出响应
- */
-export interface GetTaskOutputResult {
-  /** 任务输出内容 */
-  output: string
-  /** 任务是否已完成 */
-  isComplete: boolean
-}
-
-/**
- * 停止任务请求
- */
-export interface StopTaskInput {
-  /** 会话 ID */
-  sessionId: string
-  /** 任务 ID */
-  taskId: string
-  /** 任务类型 */
-  type: 'agent' | 'shell'
 }
 
 // ===== Agent 流式事件载荷 =====
@@ -1740,12 +1722,6 @@ export const AGENT_IPC_CHANNELS = {
   DOCK_BROWSER: 'agent:dock-browser',
   BROWSER_STATE_CHANGED: 'agent:browser-state-changed',
 
-  // 后台任务管理
-  /** 获取任务输出 */
-  GET_TASK_OUTPUT: 'agent:get-task-output',
-  /** 停止任务 */
-  STOP_TASK: 'agent:stop-task',
-
   // 工作区能力（MCP + Skill）
   /** 获取工作区能力摘要 */
   GET_CAPABILITIES: 'agent:get-capabilities',
@@ -1936,7 +1912,9 @@ export const AGENT_IPC_CHANNELS = {
   // 队列消息（Agent 运行中排队发送）
   /** 流式追加发送消息 */
   QUEUE_MESSAGE: 'agent:queue-message',
-  /** 排队发送消息（主进程 deferred queue） */
+  /** 原子提交消息：注入当前运行或交由主进程 deferred queue。 */
+  SUBMIT_OR_ENQUEUE_MESSAGE: 'agent:submit-or-enqueue-message',
+  /** 排队发送消息（兼容旧调用；主进程 deferred queue） */
   ENQUEUE_QUEUED_MESSAGE: 'agent:enqueue-queued-message',
   /** 取消队列消息 */
   CANCEL_QUEUED_MESSAGE: 'agent:cancel-queued-message',

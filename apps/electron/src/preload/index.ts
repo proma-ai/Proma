@@ -55,9 +55,6 @@ import type {
   AgentAttachFileInput,
   WorkspaceAttachDirectoryInput,
   WorkspaceAttachFileInput,
-  GetTaskOutputInput,
-  GetTaskOutputResult,
-  StopTaskInput,
   WorkspaceMcpConfig,
   SkillMeta,
   OtherWorkspaceSkillsGroup,
@@ -111,6 +108,8 @@ import type {
   WeChatBridgeState,
   AgentQueueMessageInput,
   AgentDeferredQueueMessageInput,
+  AgentSubmitOrEnqueueInput,
+  AgentSubmitOrEnqueueResult,
   AgentQueuedMessageControlInput,
   AgentMoveQueuedMessageInput,
   AgentQueuedMessageStatus,
@@ -592,19 +591,13 @@ export interface ElectronAPI {
 
   /** 流式追加发送 Agent 消息（Agent 运行中） */
   queueAgentMessage: (input: AgentQueueMessageInput) => Promise<string>
-  /** 将等待当前 run 结束的消息交给主进程 */
+  /** 主进程原子决定立即注入或等待当前 run 结束后发送。 */
+  submitOrEnqueueAgentMessage: (input: AgentSubmitOrEnqueueInput) => Promise<AgentSubmitOrEnqueueResult>
+  /** 将等待当前 run 结束的消息交给主进程（兼容旧调用）。 */
   enqueueAgentQueuedMessage: (input: AgentDeferredQueueMessageInput) => Promise<void>
   cancelAgentQueuedMessage: (input: AgentQueuedMessageControlInput) => Promise<boolean>
   moveAgentQueuedMessage: (input: AgentMoveQueuedMessageInput) => Promise<boolean>
   onAgentQueuedMessageStatus: (callback: (status: AgentQueuedMessageStatus) => void) => () => void
-
-  // ===== Agent 后台任务管理 =====
-
-  /** 获取任务输出 */
-  getTaskOutput: (input: GetTaskOutputInput) => Promise<GetTaskOutputResult>
-
-  /** 停止任务 */
-  stopTask: (input: StopTaskInput) => Promise<void>
 
   // ===== Agent 工作区管理相关 =====
 
@@ -1011,7 +1004,7 @@ export interface ElectronAPI {
   /** 保存飞书配置（appSecret 为明文） */
   saveFeishuConfig: (input: FeishuConfigInput) => Promise<FeishuConfig>
   /** 测试飞书连接 */
-  testFeishuConnection: (appId: string, appSecret: string) => Promise<FeishuTestResult>
+  testFeishuConnection: (appId: string, appSecret: string, domain?: import('@proma/shared').FeishuDomain) => Promise<FeishuTestResult>
   /** 启动飞书 Bridge */
   startFeishuBridge: () => Promise<void>
   /** 停止飞书 Bridge */
@@ -1825,6 +1818,9 @@ const electronAPI: ElectronAPI = {
   queueAgentMessage: (input: AgentQueueMessageInput) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.QUEUE_MESSAGE, input)
   },
+  submitOrEnqueueAgentMessage: (input: AgentSubmitOrEnqueueInput) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SUBMIT_OR_ENQUEUE_MESSAGE, input)
+  },
   enqueueAgentQueuedMessage: (input: AgentDeferredQueueMessageInput) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.ENQUEUE_QUEUED_MESSAGE, input)
   },
@@ -1838,15 +1834,6 @@ const electronAPI: ElectronAPI = {
     const listener = (_: unknown, status: AgentQueuedMessageStatus): void => callback(status)
     ipcRenderer.on(AGENT_IPC_CHANNELS.QUEUED_MESSAGE_STATUS, listener)
     return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.QUEUED_MESSAGE_STATUS, listener) }
-  },
-
-  // Agent 后台任务管理
-  getTaskOutput: (input: GetTaskOutputInput) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_TASK_OUTPUT, input)
-  },
-
-  stopTask: (input: StopTaskInput) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.STOP_TASK, input)
   },
 
   // Agent 工作区管理
@@ -2423,8 +2410,8 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(FEISHU_IPC_CHANNELS.SAVE_CONFIG, input)
   },
 
-  testFeishuConnection: (appId: string, appSecret: string) => {
-    return ipcRenderer.invoke(FEISHU_IPC_CHANNELS.TEST_CONNECTION, appId, appSecret)
+  testFeishuConnection: (appId: string, appSecret: string, domain?: import('@proma/shared').FeishuDomain) => {
+    return ipcRenderer.invoke(FEISHU_IPC_CHANNELS.TEST_CONNECTION, appId, appSecret, domain)
   },
 
   startFeishuBridge: () => {

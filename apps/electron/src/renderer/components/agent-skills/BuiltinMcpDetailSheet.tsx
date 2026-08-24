@@ -39,12 +39,6 @@ function getConfigInfo(server: BuiltinMcpServerSummary): BuiltinMcpConfigInfo {
       actionLabel: '配置生图',
     }
   }
-  if (server.id === 'chrome-devtools') {
-    return {
-      source: 'Chrome DevTools MCP / npx',
-      description: '启用后 Proma 会通过 npx 启动 chrome-devtools-mcp，让 Agent 可以打开真实浏览器页面、截图和检查 DOM。首次使用可能需要下载 npm 包，并要求本机安装 Chrome。',
-    }
-  }
   if (server.id === 'collaboration') {
     return {
       source: '当前 Agent 项目',

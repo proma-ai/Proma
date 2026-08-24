@@ -1,11 +1,13 @@
 import * as React from 'react'
 import { useAtomValue } from 'jotai'
-import type { SkillFileNode, WorkspaceMemoryFileChange } from '@proma/shared'
+import type { SkillFileNode } from '@proma/shared'
 import { workspaceMemoryChangesAtom } from '@/atoms/memory-change-atoms'
 import { WorkspaceMemoryChangeShelf } from './WorkspaceMemoryChangeShelf'
 
 interface WorkspaceMemoryChangeDockProps {
   workspaceSlug: string
+  sessionId: string
+  className?: string
 }
 
 interface MemoryFileListItem {
@@ -19,8 +21,8 @@ function flattenMemoryFiles(nodes: SkillFileNode[]): MemoryFileListItem[] {
     : [{ relativePath: node.relativePath, modifiedAt: node.modifiedAt }])
 }
 
-/** Embedded at the bottom of the right file panel; observation is handled by App Shell. */
-export function WorkspaceMemoryChangeDock({ workspaceSlug }: WorkspaceMemoryChangeDockProps): React.ReactElement | null {
+/** 紧凑项目记忆 Diff 预览；变更观察由 App Shell 常驻处理。 */
+export function WorkspaceMemoryChangeDock({ workspaceSlug, sessionId, className }: WorkspaceMemoryChangeDockProps): React.ReactElement | null {
   const updatesByWorkspace = useAtomValue(workspaceMemoryChangesAtom)
   const changes = updatesByWorkspace.get(workspaceSlug) ?? []
   const [memoryFiles, setMemoryFiles] = React.useState<MemoryFileListItem[]>([])
@@ -34,21 +36,13 @@ export function WorkspaceMemoryChangeDock({ workspaceSlug }: WorkspaceMemoryChan
     void refreshMemoryFiles().catch(() => {})
   }, [refreshMemoryFiles, changes[0]?.changedAt])
 
-  const open = React.useCallback((change?: WorkspaceMemoryFileChange) => {
-    void window.electronAPI.openWorkspaceMemoryWindow(workspaceSlug, change?.relativePath)
-  }, [workspaceSlug])
-
-  const openFile = React.useCallback((relativePath: string) => {
-    void window.electronAPI.openWorkspaceMemoryWindow(workspaceSlug, relativePath)
-  }, [workspaceSlug])
-
   return (
     <WorkspaceMemoryChangeShelf
+      workspaceSlug={workspaceSlug}
+      sessionId={sessionId}
       changes={changes}
       memoryFiles={memoryFiles}
-      onOpen={open}
-      onOpenFile={openFile}
-      className="-mx-2 -mb-2 mt-1 shrink-0 border-t border-border/70 bg-content-area"
+      className={className ?? '-mx-2 -mb-2 mt-1 shrink-0 border-t border-border/70 bg-content-area'}
     />
   )
 }

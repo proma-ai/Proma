@@ -7,7 +7,7 @@
 
 import * as React from 'react'
 import { useAtom } from 'jotai'
-import { Camera, ImagePlus, Volume2 } from 'lucide-react'
+import { Camera, Check, ExternalLink, ImagePlus, Play, Volume2 } from 'lucide-react'
 import Picker from '@emoji-mart/react'
 import data from '@emoji-mart/data'
 import {
@@ -49,7 +49,7 @@ import {
 } from '@/atoms/ui-preferences'
 import { cn } from '@/lib/utils'
 import { detectIsMac, detectIsWindows } from '@/lib/platform'
-import { Button } from '../ui/button'
+import { getEffectiveSoundPackId } from '@/lib/notification-sound-selection'
 import type { NotificationSoundId, NotificationSoundType, NotificationSoundSettings } from '@/types/settings'
 
 /** emoji-mart 选择回调的 emoji 对象类型 */
@@ -302,9 +302,7 @@ export function GeneralSettings(): React.ReactElement {
               updateNotificationSoundEnabled(checked)
             }}
           />
-          <SoundPicker
-            label="任务完成音效"
-            type="taskComplete"
+          <SoundLibrary
             sounds={notificationSounds}
             disabled={!notificationsEnabled || !notificationSoundEnabled}
             onSoundChange={async (type, soundId) => {
@@ -312,36 +310,24 @@ export function GeneralSettings(): React.ReactElement {
               setNotificationSounds(newSounds)
             }}
           />
-          <SoundPicker
-            label="权限审批音效"
-            type="permissionRequest"
-            sounds={notificationSounds}
-            disabled={!notificationsEnabled || !notificationSoundEnabled}
-            onSoundChange={async (type, soundId) => {
-              const newSounds = await updateNotificationSound(type, soundId, notificationSounds)
-              setNotificationSounds(newSounds)
-            }}
-          />
-          <SoundPicker
-            label="计划审批音效"
-            type="exitPlanMode"
-            sounds={notificationSounds}
-            disabled={!notificationsEnabled || !notificationSoundEnabled}
-            onSoundChange={async (type, soundId) => {
-              const newSounds = await updateNotificationSound(type, soundId, notificationSounds)
-              setNotificationSounds(newSounds)
-            }}
-          />
-          <SoundPicker
-            label="任务/日程提醒音效"
-            type="planningReminder"
-            sounds={notificationSounds}
-            disabled={!notificationsEnabled || !notificationSoundEnabled}
-            onSoundChange={async (type, soundId) => {
-              const newSounds = await updateNotificationSound(type, soundId, notificationSounds)
-              setNotificationSounds(newSounds)
-            }}
-          />
+          <div className="mx-4 mb-3 flex items-start justify-between gap-3 rounded-lg bg-muted/35 px-3 py-2.5 text-xs text-muted-foreground">
+            <div className="flex min-w-0 flex-1 items-start gap-2">
+              <Volume2 className="mt-0.5 size-3.5 shrink-0" />
+              <div className="min-w-0">
+                <p>音效与卡片插画来自 UI SFX，采用 CC0 公共领域许可。</p>
+                <p className="mt-0.5">Proma 非常喜欢这个音效库，并特别还原了一部分 UI SFX 的设计风格，推荐大家访问和使用他们的产品。</p>
+              </div>
+            </div>
+            <a
+              href="https://uisfx.com/"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex min-h-8 shrink-0 items-center gap-1 rounded-md px-2 text-foreground/70 transition-colors hover:bg-background hover:text-foreground"
+            >
+              查看来源
+              <ExternalLink className="size-3" />
+            </a>
+          </div>
           {isWindows && (
             <SettingsToggle
               label="Agent 状态通知"
@@ -431,49 +417,168 @@ export function GeneralSettings(): React.ReactElement {
   )
 }
 
-// ===== SoundPicker 内部组件 =====
+// ===== SoundLibrary 内部组件 =====
 
-interface SoundPickerProps {
-  label: string
-  type: NotificationSoundType
+const SOUND_SCENES: Array<{ type: NotificationSoundType; label: string; shortLabel: string }> = [
+  { type: 'taskComplete', label: '任务完成', shortLabel: '完成' },
+  { type: 'permissionRequest', label: '权限审批', shortLabel: '权限' },
+  { type: 'exitPlanMode', label: '计划审批', shortLabel: '计划' },
+  { type: 'planningReminder', label: '日程提醒', shortLabel: '提醒' },
+]
+
+interface SoundLibraryProps {
   sounds: NotificationSoundSettings
   disabled: boolean
   onSoundChange: (type: NotificationSoundType, soundId: NotificationSoundId) => void
 }
 
-/** 单个场景的通知音选择器（下拉 + 试听按钮） */
-function SoundPicker({ label, type, sounds, disabled, onSoundChange }: SoundPickerProps): React.ReactElement {
-  const currentId = sounds[type] ?? DEFAULT_NOTIFICATION_SOUNDS[type]
+/** 单一 UISFX 风格音效库：场景只切换当前配置，不重复渲染四套卡片。 */
+function SoundLibrary({ sounds, disabled, onSoundChange }: SoundLibraryProps): React.ReactElement {
+  const [activeType, setActiveType] = React.useState<NotificationSoundType>('taskComplete')
+  const currentId = sounds[activeType] ?? DEFAULT_NOTIFICATION_SOUNDS[activeType]
+  const currentPackId = currentId === 'none' ? undefined : getEffectiveSoundPackId(currentId)
+  const selectedSound = NOTIFICATION_SOUNDS.find((sound) => sound.id === currentPackId) ?? NOTIFICATION_SOUNDS[0]
+  if (!selectedSound) throw new Error('通知音 feel 列表不能为空')
+  const selectedIndex = NOTIFICATION_SOUNDS.findIndex((sound) => sound.id === selectedSound.id)
+  const activeScene = SOUND_SCENES.find((scene) => scene.type === activeType) ?? SOUND_SCENES[0]
+  if (!activeScene) throw new Error('通知音场景列表不能为空')
 
   return (
-    <SettingsRow label={label}>
-      <div className="flex items-center gap-1.5">
-        <Select
-          value={currentId}
-          onValueChange={(value) => onSoundChange(type, value as NotificationSoundId)}
-          disabled={disabled}
+    <div className={cn('border-t border-border/25 px-4 py-3', disabled && 'opacity-55')}>
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-foreground">声音库</div>
+          <div className="mt-0.5 text-xs text-muted-foreground">选择一个通知场景，再为它挑选 feel</div>
+        </div>
+        <a
+          href="https://uisfx.com/#sound-library"
+          target="_blank"
+          rel="noreferrer"
+          className="hidden min-h-8 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:inline-flex"
         >
-          <SelectTrigger className="w-[130px] h-8 text-[13px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {NOTIFICATION_SOUNDS.map((s) => (
-              <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>
-            ))}
-            <SelectItem value="none">无</SelectItem>
-          </SelectContent>
-        </Select>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 shrink-0"
-          disabled={disabled || currentId === 'none'}
-          onClick={() => { void playNotificationSound(currentId) }}
-          title="试听"
-        >
-          <Volume2 size={14} />
-        </Button>
+          UI SFX 音效库
+          <ExternalLink className="size-3" />
+        </a>
       </div>
-    </SettingsRow>
+
+      <div className="flex gap-1 overflow-x-auto border-b border-foreground/15 pb-1">
+        {SOUND_SCENES.map((scene) => {
+          const sceneId = sounds[scene.type] ?? DEFAULT_NOTIFICATION_SOUNDS[scene.type]
+          const scenePack = sceneId === 'none' ? undefined : getEffectiveSoundPackId(sceneId)
+          const sceneSound = NOTIFICATION_SOUNDS.find((sound) => sound.id === scenePack) ?? NOTIFICATION_SOUNDS[0]
+          return (
+            <button
+              key={scene.type}
+              type="button"
+              disabled={disabled}
+              aria-pressed={activeType === scene.type}
+              onClick={() => setActiveType(scene.type)}
+              className={cn(
+                'flex min-h-9 min-w-[92px] flex-1 items-center justify-between gap-2 border-b-2 px-2 text-left transition-[border-color,background-color,color] duration-150',
+                activeType === scene.type ? 'border-foreground bg-muted/55 text-foreground' : 'border-transparent text-muted-foreground hover:bg-muted/35 hover:text-foreground'
+              )}
+            >
+              <span className="truncate text-xs font-medium">{scene.label}</span>
+              <span className="flex shrink-0 items-center gap-1 text-[10px] uppercase tracking-[0.08em] opacity-75">
+                <span className="size-1.5 rounded-full" style={{ backgroundColor: sceneSound?.color }} />
+                {sceneId === 'none' ? '关' : sceneSound?.label}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+
+      <div className="mt-3 overflow-hidden border-2 border-foreground/70 bg-background/45 shadow-[4px_4px_0_rgba(122,110,206,0.4)]">
+        <div className="grid grid-cols-[88px_1fr_auto] items-center gap-3 px-3 py-2.5 sm:grid-cols-[104px_1fr_auto]">
+          <div className="relative aspect-[1.25] overflow-hidden border border-foreground/50 bg-muted">
+            <img src={selectedSound.image} alt="" className="size-full object-cover" />
+            <span className="absolute left-1 top-1 bg-background/90 px-1 py-0.5 text-[9px] font-semibold tabular-nums">{String(selectedIndex + 1).padStart(2, '0')}</span>
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-baseline gap-2">
+              <span className="truncate text-base font-semibold text-foreground">{activeScene.label} · {currentId === 'none' ? '已关闭' : selectedSound.label}</span>
+              <span className="hidden shrink-0 text-[10px] uppercase tracking-[0.12em] text-muted-foreground sm:inline">{selectedSound.duration} S · ONE-SHOT</span>
+            </div>
+            <p className="mt-1 truncate text-xs text-muted-foreground">{selectedSound.description}</p>
+            <Waveform color={selectedSound.color} />
+          </div>
+          <button
+            type="button"
+            disabled={disabled || currentId === 'none'}
+            aria-label={`试听${activeScene.label}`}
+            title={`试听${activeScene.label}`}
+            onClick={() => { void playNotificationSound(currentId, activeType) }}
+            className="inline-flex size-9 items-center justify-center rounded-full bg-foreground text-background transition-[transform,opacity] hover:scale-105 active:scale-[0.96] disabled:opacity-35"
+          >
+            <Play className="size-3.5" />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-3 border-t-2 border-foreground/55 sm:grid-cols-4 lg:grid-cols-6">
+          {NOTIFICATION_SOUNDS.map((sound, index) => {
+            const selected = currentId !== 'none' && sound.id === currentPackId
+            return (
+              <div key={sound.id} className="relative min-w-0 border-b border-r border-foreground/20 last:border-r-0">
+                <button
+                  type="button"
+                  disabled={disabled}
+                  aria-pressed={selected}
+                  onClick={() => onSoundChange(activeType, sound.id)}
+                  className={cn(
+                    'group/card flex min-h-[152px] w-full flex-col bg-background text-left transition-[background-color,transform] duration-150 hover:bg-muted/45 active:scale-[0.98]',
+                    selected && 'bg-muted/70'
+                  )}
+                >
+                  <span className="relative block aspect-[1.5] overflow-hidden border-b border-foreground/25">
+                    <img src={sound.image} alt="" className="size-full object-cover transition-transform duration-200 group-hover/card:scale-105" />
+                    <span className="absolute left-1.5 top-1.5 bg-background/90 px-1 py-0.5 text-[9px] font-semibold tabular-nums">{String(index + 1).padStart(2, '0')}</span>
+                    {selected && <Check className="absolute right-1.5 top-1.5 size-3.5 rounded-full bg-foreground p-0.5 text-background" />}
+                  </span>
+                  <span className="flex min-w-0 flex-col gap-0.5 px-2 py-1.5 pr-8">
+                    <span className="flex min-w-0 items-center justify-between gap-1">
+                      <span className="truncate text-xs font-medium text-foreground">{sound.label}</span>
+                      <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: sound.color }} />
+                    </span>
+                    <span className="truncate text-[10px] leading-4 text-muted-foreground">{sound.description}</span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  aria-label={`试听 ${sound.label}`}
+                  title={`试听 ${sound.label}`}
+                  onClick={() => { void playNotificationSound(sound.id, activeType) }}
+                  className="absolute bottom-1.5 right-1.5 inline-flex size-6 items-center justify-center rounded-full bg-foreground/90 text-background transition-[transform,opacity] hover:scale-105 active:scale-[0.96] disabled:opacity-35"
+                >
+                  <Play className="size-2.5" />
+                </button>
+              </div>
+            )
+          })}
+        </div>
+        <button
+          type="button"
+          disabled={disabled}
+          aria-pressed={currentId === 'none'}
+          onClick={() => onSoundChange(activeType, 'none')}
+          className="inline-flex min-h-8 items-center gap-1.5 px-3 text-xs text-muted-foreground transition-colors hover:bg-muted/45 hover:text-foreground"
+        >
+          <Volume2 className="size-3.5" />
+          {currentId === 'none' ? '已关闭此场景音效' : '关闭此场景音效'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+const WAVEFORM_HEIGHTS = [0.35, 0.56, 0.28, 0.72, 0.94, 0.5, 0.78, 0.42, 0.66, 0.9, 0.58, 0.3, 0.7, 0.46, 0.84, 0.62, 0.38, 0.76, 0.52, 0.88, 0.44, 0.68, 0.34, 0.56, 0.8, 0.48, 0.64, 0.3]
+
+function Waveform({ color }: { color: string }): React.ReactElement {
+  return (
+    <span className="mt-2 flex h-5 w-full items-center gap-px border-b border-foreground/25 pb-1" aria-hidden="true">
+      {WAVEFORM_HEIGHTS.map((height, index) => (
+        <span key={index} className="w-px shrink-0 rounded-full opacity-85" style={{ height: `${Math.round(height * 14)}px`, backgroundColor: color }} />
+      ))}
+    </span>
   )
 }

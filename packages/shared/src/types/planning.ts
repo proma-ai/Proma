@@ -20,6 +20,8 @@ export type PlanningChangeResource = 'todos' | 'calendar_events' | 'todo_groups'
 
 export interface PlanningChange {
   resources: PlanningChangeResource[]
+  /** 单项 Todo 更新可直接增量合并，避免每个窗口重新读取完整列表。 */
+  todo?: Todo
 }
 
 /** macOS 中用户可选、且当前允许 Proma 写入的 Calendar / Reminders List。 */

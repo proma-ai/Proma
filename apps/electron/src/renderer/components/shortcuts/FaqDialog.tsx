@@ -11,6 +11,7 @@ import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { HelpCircle, X } from 'lucide-react'
 import { faqDialogOpenAtom } from '@/atoms/faq-dialog'
 import { FAQ_GROUPS } from '@/components/onboarding/faq-content'
+import { iconButtonNoRingFocusClass } from '@/components/ui/icon-button-styles'
 import { cn } from '@/lib/utils'
 
 export function FaqDialog(): React.ReactElement {
@@ -44,7 +45,12 @@ export function FaqDialog(): React.ReactElement {
             <DialogPrimitive.Close asChild>
               <button
                 type="button"
-                className="flex h-7 w-7 items-center justify-center rounded-sm text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800"
+                className={cn(
+                  'flex h-7 w-7 items-center justify-center rounded-sm text-neutral-500 transition-colors',
+                  'hover:bg-neutral-100 hover:text-neutral-700 focus-visible:bg-neutral-100 focus-visible:text-neutral-700',
+                  'dark:hover:bg-neutral-800 dark:focus-visible:bg-neutral-800',
+                  iconButtonNoRingFocusClass,
+                )}
               >
                 <X className="size-4" />
                 <span className="sr-only">关闭</span>

@@ -15,12 +15,16 @@ import type { ChangedFileEntry, ChangedFileStatus, ChangeSource, UntrackedFileEn
 import { WorktreeSelector } from './WorktreeSelector'
 import { groupSessionFileChanges } from '@/lib/session-file-changes'
 import type { SessionFileChange } from '@/lib/session-file-changes'
+import { buildDiffFileTree } from './diff-file-tree'
+import type { DiffFileTreeNode } from './diff-file-tree'
+import { collectDiffChangeSources, DIFF_CHANGE_SOURCE_CONFIG } from './diff-change-sources'
 
 interface GitFileEntry {
   filePath: string
   status: ChangedFileStatus
   additions: number
   deletions: number
+  /** 已追踪文件的来源；未追踪文件没有来源归属。 */
   source?: ChangeSource
   gitRoot: string
 }
@@ -31,10 +35,9 @@ interface FileGroup {
   gitRoot: string
   /** 显示用的目录名（仓库的最后一段） */
   dirName: string
-  files: GitFileEntry[]
-  totalAdditions: number
-  totalDeletions: number
+  /** 保留会话、项目与附加目录的改动来源标识。 */
   sources: ChangeSource[]
+  tree: Array<DiffFileTreeNode<GitFileEntry>>
 }
 
 interface DiffChangesListProps {
@@ -64,14 +67,6 @@ interface DiffChangesListProps {
   currentFileChangeRunId?: string
   /** 点击非 Git 文件时打开纯文件预览 */
   onPlainFileClick?: (filePath: string) => void
-}
-
-/** 文件来源 badge 的颜色和文案 */
-const SOURCE_CONFIG: Record<string, { color: string; label: string }> = {
-  session: { color: 'bg-blue-500/10 text-blue-500', label: '会话文件' },
-  workspace: { color: 'bg-purple-500/10 text-purple-500', label: '项目文件' },
-  both: { color: 'bg-cyan-500/10 text-cyan-500', label: '会话+项目文件' },
-  none: { color: 'bg-muted text-muted-foreground', label: '附加目录文件' },
 }
 
 export const DiffChangesList = React.memo(function DiffChangesList({
@@ -250,10 +245,8 @@ export const DiffChangesList = React.memo(function DiffChangesList({
     const result: FileGroup[] = [...groups.entries()].map(([gitRoot, groupFiles]) => ({
       gitRoot,
       dirName: gitRoot ? gitRoot.split('/').pop() || gitRoot : '/',
-      files: groupFiles,
-      totalAdditions: groupFiles.reduce((sum, file) => sum + file.additions, 0),
-      totalDeletions: groupFiles.reduce((sum, file) => sum + file.deletions, 0),
-      sources: [...new Set(groupFiles.flatMap((file) => file.source ? [file.source] : []))],
+      sources: collectDiffChangeSources(groupFiles),
+      tree: buildDiffFileTree(groupFiles),
     }))
     return { fileGroups: result, matchedFilesCount: filteredFiles.length }
   }, [files, untrackedFiles, searchQuery])
@@ -267,7 +260,8 @@ export const DiffChangesList = React.memo(function DiffChangesList({
   const shouldShowWorktreeSelector = isGitRepo && Boolean(workspaceSlug || (worktreeRepoPaths?.length ?? 0) > 0)
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="min-h-0 flex-1 overflow-y-auto">
       {/* Worktree 分支选择器仅作用于 Git 改动。 */}
       {shouldShowWorktreeSelector && (
         <WorktreeSelector
@@ -323,7 +317,7 @@ export const DiffChangesList = React.memo(function DiffChangesList({
       {!hasAnyVisibleChanges && (
         <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-4">
           <p className="text-[12px] text-center">
-            {isGitRepo ? (hasFetched ? '没有文件改动' : '加载中…') : '当前目录不是 Git 仓库'}
+            {isGitRepo ? (hasFetched ? '没有文件改动' : '加载中…') : '当前目录不是 Git 仓库，或暂无文件改动'}
           </p>
         </div>
       )}
@@ -335,61 +329,137 @@ export const DiffChangesList = React.memo(function DiffChangesList({
       {hasGitChanges && !isEmpty && (
         <>
           {fileGroups.map((group) => {
-            const isCollapsed = collapsedDirs.has(group.gitRoot)
             return (
-              <div key={group.gitRoot}>
-                {/* 文件夹 bar */}
-                <button
-                  type="button"
-                  onClick={() => toggleDir(group.gitRoot)}
-                  className="flex items-center gap-1.5 w-full px-3 py-2 text-[13px] font-medium text-foreground/60 hover:bg-foreground/[0.04] transition-colors"
-                >
-                  <ChevronRight
-                    className={cn('size-3.5 transition-transform', !isCollapsed && 'rotate-90')}
-                  />
+              <div key={group.gitRoot} className="py-1">
+                <div className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium text-muted-foreground">
                   <span className="truncate">{group.dirName}</span>
-                  {/* 文件夹层级的来源 badges */}
-                  {group.sources.map((src) => {
-                    const cfg = SOURCE_CONFIG[src] ?? SOURCE_CONFIG.none!
+                  {group.sources.map((source) => {
+                    const config = DIFF_CHANGE_SOURCE_CONFIG[source]
                     return (
-                      <span key={src} className={cn('rounded px-1 py-0.5 text-[12px] leading-none shrink-0', cfg.color)}>
-                        {cfg.label}
+                      <span key={source} className={cn('shrink-0 rounded px-1 py-0.5 text-[11px] leading-none', config.color)}>
+                        {config.label}
                       </span>
                     )
                   })}
-                  <span className="ml-auto shrink-0 flex items-center gap-1.5">
-                    <span className="text-foreground/30">{group.files.length} files</span>
-                    {group.totalAdditions > 0 && <span className="text-foreground/30">+{group.totalAdditions}</span>}
-                    {group.totalDeletions > 0 && <span className="text-foreground/30">-{group.totalDeletions}</span>}
-                  </span>
-                </button>
-
-                {/* 文件列表 */}
-                {!isCollapsed && group.files.map((file) => {
-                  const absPath = `${file.gitRoot || dirPath}/${file.filePath}`.replace(/\/+/g, '/')
-                  return (
-                    <FileRow
-                      key={`${file.gitRoot}:${file.filePath}`}
-                      file={file}
-                      isSelected={absPath === selectedFilePath || file.filePath === selectedFilePath}
-                      isUnseen={unseenFiles.has(absPath)}
-                      onClick={() => {
-                        markFileAsSeen(absPath)
-                        onFileClick(file.filePath, file.status === 'untracked', file.gitRoot)
-                      }}
-                      onRevert={file.status === 'untracked' ? undefined : () => handleRevert(file.filePath, file.gitRoot)}
-                      dirPath={dirPath}
-                    />
-                  )
-                })}
+                </div>
+                {group.tree.map((node) => (
+                  <GitFileTreeNode
+                    key={`${group.gitRoot}:${node.path}`}
+                    node={node}
+                    depth={0}
+                    gitRoot={group.gitRoot}
+                    dirPath={dirPath}
+                    selectedFilePath={selectedFilePath}
+                    unseenFiles={unseenFiles}
+                    collapsedDirs={collapsedDirs}
+                    forceExpanded={searchQuery.trim().length > 0}
+                    onToggle={toggleDir}
+                    onFileClick={(file, absPath) => {
+                      markFileAsSeen(absPath)
+                      onFileClick(file.filePath, file.status === 'untracked', file.gitRoot)
+                    }}
+                    onRevert={(file) => handleRevert(file.filePath, file.gitRoot)}
+                  />
+                ))}
               </div>
             )
           })}
         </>
       )}
+      </div>
     </div>
   )
 })
+
+function GitFileTreeNode({
+  node,
+  depth,
+  gitRoot,
+  dirPath,
+  selectedFilePath,
+  unseenFiles,
+  collapsedDirs,
+  forceExpanded,
+  onToggle,
+  onFileClick,
+  onRevert,
+}: {
+  node: DiffFileTreeNode<GitFileEntry>
+  depth: number
+  gitRoot: string
+  dirPath: string
+  selectedFilePath?: string
+  unseenFiles: Set<string>
+  collapsedDirs: Set<string>
+  forceExpanded: boolean
+  onToggle: (path: string) => void
+  onFileClick: (file: GitFileEntry, absPath: string) => void
+  onRevert: (file: GitFileEntry) => void
+}): React.ReactElement {
+  if (node.kind === 'file') {
+    const file = node.entry
+    const absPath = `${file.gitRoot || dirPath}/${file.filePath}`.replace(/\/+/g, '/')
+    return (
+      <FileRow
+        file={file}
+        depth={depth}
+        isSelected={absPath === selectedFilePath || file.filePath === selectedFilePath}
+        isUnseen={unseenFiles.has(absPath)}
+        onClick={() => onFileClick(file, absPath)}
+        onRevert={file.status === 'untracked' ? undefined : () => onRevert(file)}
+        dirPath={dirPath}
+      />
+    )
+  }
+
+  const stateKey = `${gitRoot}:${node.path}`
+  const isCollapsed = !forceExpanded && collapsedDirs.has(stateKey)
+  const rowPaddingLeft = 8 + depth * 16
+  const guideLeft = 23 + depth * 16
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        aria-expanded={!isCollapsed}
+        title={node.name}
+        className="mx-2 flex h-8 items-center gap-1.5 rounded-md pr-2 text-left text-[13px] font-medium text-foreground/75 transition-colors hover:bg-accent/50"
+        style={{ paddingLeft: rowPaddingLeft }}
+        onClick={() => onToggle(stateKey)}
+      >
+        <ChevronRight
+          className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform duration-150', !isCollapsed && 'rotate-90')}
+        />
+        <span className="min-w-0 flex-1 truncate">{node.name}</span>
+      </button>
+      {!isCollapsed && (
+        <div className="relative">
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute bottom-1 top-0 w-px bg-border/70"
+            style={{ left: guideLeft }}
+          />
+          {node.children.map((child) => (
+            <GitFileTreeNode
+              key={`${gitRoot}:${child.path}`}
+              node={child}
+              depth={depth + 1}
+              gitRoot={gitRoot}
+              dirPath={dirPath}
+              selectedFilePath={selectedFilePath}
+              unseenFiles={unseenFiles}
+              collapsedDirs={collapsedDirs}
+              forceExpanded={forceExpanded}
+              onToggle={onToggle}
+              onFileClick={onFileClick}
+              onRevert={onRevert}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 function NonGitChangesList({
   changes,
@@ -504,6 +574,7 @@ function getCompactFilePath(path: string): string {
 /** Git 文件行：已追踪和未追踪文件共用同一布局。 */
 function FileRow({
   file,
+  depth,
   onClick,
   onRevert,
   isSelected,
@@ -511,15 +582,14 @@ function FileRow({
   dirPath,
 }: {
   file: GitFileEntry
+  depth: number
   onClick: () => void
   onRevert?: () => void
   isSelected?: boolean
   isUnseen?: boolean
   dirPath: string
 }): React.ReactElement {
-  const parts = file.filePath.split('/')
-  const fileName = parts.pop()!
-  const dir = parts.join('/')
+  const fileName = file.filePath.split('/').pop()!
   const fullPath = `${file.gitRoot || dirPath}/${file.filePath}`.replace(/\/+/g, '/')
   const hasLineChanges = file.additions > 0 || file.deletions > 0
 
@@ -528,31 +598,38 @@ function FileRow({
       role="button"
       tabIndex={0}
       className={cn(
-        'flex items-center w-full px-2 pl-3 h-[36px] text-[14px] transition-colors group',
+        'group/file relative mx-2 flex h-8 items-center rounded-md pr-2 text-[14px] transition-colors',
         isSelected
           ? 'session-item-selected bg-primary/10 shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
           : 'hover:bg-primary/5',
       )}
+      style={{ paddingLeft: 8 + depth * 16 }}
       onClick={onClick}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        event.preventDefault()
+        onClick()
+      }}
     >
-      <span className="w-3 shrink-0 flex items-center justify-center">
-        {isUnseen && <span className="size-1.5 rounded-full bg-primary" />}
+      <span className="relative flex size-4 shrink-0 items-center justify-center">
+        <FileTypeIcon name={fileName} isDirectory={false} size={16} />
+        {isUnseen && (
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute -left-1.5 top-1/2 size-1.5 -translate-y-1/2 rounded-full bg-primary ring-2 ring-background"
+          />
+        )}
       </span>
-      <FileTypeIcon name={fileName} isDirectory={false} size={16} />
       <Tooltip delayDuration={900}>
         <TooltipTrigger asChild>
-          <span className="ml-1.5 truncate flex items-baseline gap-1.5 min-w-0">
-            <span className="shrink-0">{fileName}</span>
-            {dir && (
-              <span className="text-[11px] text-foreground/30 truncate">{dir}</span>
-            )}
-          </span>
+          <span className="ml-1.5 min-w-0 truncate">{fileName}</span>
         </TooltipTrigger>
         <TooltipContent side="bottom" className="max-w-[400px] break-all">{fullPath}</TooltipContent>
       </Tooltip>
 
       {hasLineChanges && (
-        <span className="ml-auto shrink-0 flex items-center gap-1.5 text-[13px] tabular-nums group-hover:hidden">
+        <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[13px] tabular-nums transition-opacity group-hover/file:opacity-0">
           {file.additions > 0 && (
             <span style={{ color: 'rgb(34 197 94)' }}>+{file.additions}</span>
           )}
@@ -563,24 +640,25 @@ function FileRow({
       )}
 
       {onRevert && (
-        <span className="ml-auto shrink-0 hidden group-hover:flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                aria-label="还原文件变更"
-                className="flex size-8 items-center justify-center rounded text-foreground/40 hover:bg-foreground/[0.08] hover:text-foreground/70"
-                onClick={onRevert}
-              >
-                <Undo2 className="size-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">还原文件变更</TooltipContent>
-          </Tooltip>
-        </span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label="还原文件变更"
+              className="absolute right-7 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center text-foreground/35 opacity-0 transition-opacity hover:text-foreground/80 focus-visible:text-foreground/80 focus-visible:opacity-100 focus-visible:outline-none group-hover/file:opacity-100"
+              onClick={(event) => {
+                event.stopPropagation()
+                onRevert()
+              }}
+            >
+              <Undo2 className="size-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">还原文件变更</TooltipContent>
+        </Tooltip>
       )}
 
-      <GitStatusMarker status={file.status} className={onRevert ? 'ml-2' : 'ml-auto'} />
+      <GitStatusMarker status={file.status} className={hasLineChanges ? 'ml-2' : 'ml-auto'} />
     </div>
   )
 }
