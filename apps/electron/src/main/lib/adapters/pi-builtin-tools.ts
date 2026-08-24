@@ -591,7 +591,7 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
         if (!updated) throw new Error('Todo 不存在')
         touchTodoSession(updated.id, ctx.sessionId)
         const todo = getTodo(updated.id)!
-        broadcastPlanningChanged(['todos', 'reminders'])
+        broadcastPlanningChanged(['todos', 'reminders'], { todo })
         broadcastPlanningAgentOperation({ sessionId: ctx.sessionId, target: 'todo', action: 'updated', title: todo.title })
         return jsonToolResult({ todo })
       },
@@ -607,7 +607,7 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
         if (!updated) throw new Error('Todo 不存在')
         touchTodoSession(updated.id, ctx.sessionId)
         const todo = getTodo(updated.id)!
-        broadcastPlanningChanged(['todos', 'reminders'])
+        broadcastPlanningChanged(['todos', 'reminders'], { todo })
         broadcastPlanningAgentOperation({ sessionId: ctx.sessionId, target: 'todo', action: 'updated', title: todo.title })
         return jsonToolResult({ todo })
       },

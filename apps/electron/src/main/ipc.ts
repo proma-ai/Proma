@@ -5036,7 +5036,7 @@ export function registerIpcHandlers(): void {
         expectedUpdatedAt: existing.updatedAt,
       })
     if (!todo) throw new Error('Todo 不存在')
-    if (todo !== existing) broadcastPlanningChanged(['todos', 'reminders'])
+    if (todo !== existing) broadcastPlanningChanged(['todos', 'reminders'], { todo })
 
     const session = createAgentSession(
       `处理：${todo.title}`,
@@ -5078,7 +5078,7 @@ export function registerIpcHandlers(): void {
     if (input.dueAt !== undefined && input.dueAt !== null && !isPlanningTimestamp(input.dueAt)) throw new Error('Todo dueAt 非法')
     if (input.expectedUpdatedAt !== undefined && !isPlanningTimestamp(input.expectedUpdatedAt)) throw new Error('Todo expectedUpdatedAt 非法')
     const todo = updateTodo(input)
-    if (todo) broadcastPlanningChanged(['todos', 'reminders'])
+    if (todo) broadcastPlanningChanged(['todos', 'reminders'], { todo })
     return todo
   })
   ipcMain.handle(PLANNING_IPC_CHANNELS.DELETE_TODO, async (_, id: string): Promise<boolean> => {
