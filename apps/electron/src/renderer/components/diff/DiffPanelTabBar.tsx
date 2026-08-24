@@ -6,7 +6,7 @@
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { FolderOpen, Globe, MessageCircle, PanelRight, Plus, X } from 'lucide-react'
+import { Brain, FolderOpen, Globe, MessageCircle, PanelRight, Plus, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
@@ -35,6 +35,7 @@ interface DiffPanelTabBarProps {
   onCloseTab: (tab: AgentSidePanelTab) => void
   onOpenBrowser: () => void
   onOpenFile: () => void
+  onOpenMemory?: () => void
   onOpenChat?: () => void
   onClose?: () => void
   isWindows?: boolean
@@ -47,6 +48,7 @@ export function DiffPanelTabBar({
   onCloseTab,
   onOpenBrowser,
   onOpenFile,
+  onOpenMemory,
   onOpenChat,
   onClose,
   isWindows = false,
@@ -143,6 +145,12 @@ export function DiffPanelTabBar({
               <FolderOpen className="size-3.5" />
               打开文件
             </DropdownMenuItem>
+            {onOpenMemory && (
+              <DropdownMenuItem onSelect={onOpenMemory}>
+                <Brain className="size-3.5" />
+                打开项目记忆
+              </DropdownMenuItem>
+            )}
             {onOpenChat && (
               <>
                 <DropdownMenuSeparator />

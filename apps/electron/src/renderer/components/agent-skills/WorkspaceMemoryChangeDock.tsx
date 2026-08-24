@@ -6,6 +6,7 @@ import { WorkspaceMemoryChangeShelf } from './WorkspaceMemoryChangeShelf'
 
 interface WorkspaceMemoryChangeDockProps {
   workspaceSlug: string
+  sessionId: string
   className?: string
 }
 
@@ -21,7 +22,7 @@ function flattenMemoryFiles(nodes: SkillFileNode[]): MemoryFileListItem[] {
 }
 
 /** 紧凑项目记忆 Diff 预览；变更观察由 App Shell 常驻处理。 */
-export function WorkspaceMemoryChangeDock({ workspaceSlug, className }: WorkspaceMemoryChangeDockProps): React.ReactElement | null {
+export function WorkspaceMemoryChangeDock({ workspaceSlug, sessionId, className }: WorkspaceMemoryChangeDockProps): React.ReactElement | null {
   const updatesByWorkspace = useAtomValue(workspaceMemoryChangesAtom)
   const changes = updatesByWorkspace.get(workspaceSlug) ?? []
   const [memoryFiles, setMemoryFiles] = React.useState<MemoryFileListItem[]>([])
@@ -38,6 +39,7 @@ export function WorkspaceMemoryChangeDock({ workspaceSlug, className }: Workspac
   return (
     <WorkspaceMemoryChangeShelf
       workspaceSlug={workspaceSlug}
+      sessionId={sessionId}
       changes={changes}
       memoryFiles={memoryFiles}
       className={className ?? '-mx-2 -mb-2 mt-1 shrink-0 border-t border-border/70 bg-content-area'}

@@ -50,7 +50,7 @@ import {
 } from '@/atoms/agent-atoms'
 import type { AgentSidePanelTab, AgentFileSourceFilter } from '@/atoms/agent-atoms'
 import { WorkspaceMemoryChangeDock } from '@/components/agent-skills/WorkspaceMemoryChangeDock'
-import { workspaceMemoryChangesAtom } from '@/atoms/memory-change-atoms'
+import { workspaceMemoryChangesAtom, workspaceMemoryEditingStateAtomFamily } from '@/atoms/memory-change-atoms'
 import { agentSideChatMapAtom } from '@/atoms/chat-atoms'
 import { interfaceVariantAtom } from '@/atoms/theme'
 import {
@@ -461,6 +461,8 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   const [memoryTabOpen, setMemoryTabOpen] = useAtom(agentMemoryPanelOpenAtomFamily(sessionId))
   const isAgentRunning = useAtomValue(agentSessionStreamingStateAtomFamily(sessionId))?.running === true
   const memoryChangesMap = useAtomValue(workspaceMemoryChangesAtom)
+  const memoryEditingState = useAtomValue(workspaceMemoryEditingStateAtomFamily(sessionId))
+  const setMemoryEditingState = useSetAtom(workspaceMemoryEditingStateAtomFamily(sessionId))
   const latestMemoryChange = workspaceSlug ? memoryChangesMap.get(workspaceSlug)?.[0] : undefined
   const lastActivatedMemoryChangeRef = React.useRef<string | null>(null)
   const effectiveActiveTab: AgentSidePanelTab = activeTab === 'chat' && !sideChatConversationId
@@ -580,6 +582,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   }, [publishBrowserState, sessionId])
 
   const handleWorkspaceTabChange = React.useCallback((tab: AgentSidePanelTab) => {
+    if (effectiveActiveTab === 'memory' && tab !== 'memory' && memoryEditingState.dirty && !window.confirm('项目记忆有未保存修改。确定丢弃并离开吗？')) return
     const previewId = getPreviewIdFromSidePanelTab(tab)
     if (previewId) {
       const file = previewFiles.find((item) => getPreviewFileId(item) === previewId)
@@ -596,7 +599,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     if (!browserTabId) return
     desiredBrowserTabIdRef.current = browserTabId
     flushBrowserTabSelection()
-  }, [flushBrowserTabSelection, onTabChange, previewFiles, sessionId, setPreviewFileMap])
+  }, [effectiveActiveTab, flushBrowserTabSelection, memoryEditingState.dirty, onTabChange, previewFiles, sessionId, setPreviewFileMap])
 
   const handleOpenBrowserTab = React.useCallback(async () => {
     try {
@@ -670,13 +673,16 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       id: getBrowserSidePanelTab(tab.tabId),
       label: tab.title || '新建标签页',
       icon: <Globe className="size-3.5" />,
-      closable: true,
+      // Agent 当前工作标签不能直接销毁，否则未指定 tabId 的后续浏览器工具会失去目标。
+      closable: tab.tabId !== browserState.agentTabId,
       activity: showBrowserActivity && activeBrowserTabId !== tab.tabId && browserState.activeTabId === tab.tabId,
     })) ?? []),
   ], [activeBrowserTabId, browserState, memoryTabOpen, previewFiles, showBrowserActivity, sideChatConversationId, workspaceSlug])
 
   const handleCloseWorkspaceTab = React.useCallback((tab: AgentSidePanelTab) => {
     if (tab === 'memory') {
+      if (memoryEditingState.dirty && !window.confirm('项目记忆有未保存修改。确定丢弃并关闭吗？')) return
+      setMemoryEditingState({ editingPath: null, dirty: false, remoteChanged: false })
       setMemoryTabOpen(false)
       if (activeTab === 'memory') onTabChange('files')
       return
@@ -685,8 +691,8 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     if (previewId) { handleClosePreviewTab(previewId); return }
     if (tab === 'chat') { handleCloseChatTab(); return }
     const browserTabId = getBrowserTabIdFromSidePanelTab(tab)
-    if (browserTabId) void handleCloseBrowserTab(browserTabId)
-  }, [activeTab, handleCloseBrowserTab, handleCloseChatTab, handleClosePreviewTab, onTabChange, setMemoryTabOpen])
+    if (browserTabId && browserTabId !== browserState?.agentTabId) void handleCloseBrowserTab(browserTabId)
+  }, [activeTab, browserState?.agentTabId, handleCloseBrowserTab, handleCloseChatTab, handleClosePreviewTab, memoryEditingState.dirty, onTabChange, setMemoryEditingState, setMemoryTabOpen])
 
   React.useEffect(() => {
     const handleCloseActiveWorkspaceTab = (event: Event) => {
@@ -722,7 +728,11 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
             onTabChange={handleWorkspaceTabChange}
             onCloseTab={handleCloseWorkspaceTab}
             onOpenBrowser={() => void handleOpenBrowserTab()}
-            onOpenFile={() => onTabChange('files')}
+            onOpenFile={() => handleWorkspaceTabChange('files')}
+            onOpenMemory={() => {
+              setMemoryTabOpen(true)
+              onTabChange('memory')
+            }}
             onClose={() => setIsOpen(false)}
             isWindows={isWindows}
           />
@@ -748,7 +758,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
           ) : effectiveActiveTab === 'memory' ? (
             workspaceSlug ? (
               <div className="min-h-0 flex-1 overflow-auto p-2">
-                <WorkspaceMemoryChangeDock workspaceSlug={workspaceSlug} className="flex h-full min-h-0 flex-col bg-content-area p-3" />
+                <WorkspaceMemoryChangeDock key={sessionId} workspaceSlug={workspaceSlug} sessionId={sessionId} className="flex h-full min-h-0 flex-col bg-content-area p-3" />
               </div>
             ) : (
               <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">等待项目初始化...</div>

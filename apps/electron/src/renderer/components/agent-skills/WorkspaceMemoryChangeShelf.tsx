@@ -1,7 +1,9 @@
 import * as React from 'react'
+import { useAtom } from 'jotai'
 import { ChevronLeft, ChevronRight, FileText, Loader2, Save, X } from 'lucide-react'
 import type { WorkspaceMemoryFileChange } from '@proma/shared'
 import { Button } from '@/components/ui/button'
+import { workspaceMemoryEditingStateAtomFamily } from '@/atoms/memory-change-atoms'
 
 interface MemoryFileListItem {
   relativePath: string
@@ -10,6 +12,7 @@ interface MemoryFileListItem {
 
 interface WorkspaceMemoryChangeShelfProps {
   workspaceSlug: string
+  sessionId: string
   changes: WorkspaceMemoryFileChange[]
   memoryFiles: MemoryFileListItem[]
   className?: string
@@ -32,10 +35,14 @@ function formatUpdatedAt(updatedAt?: number): string {
 }
 
 /** 项目记忆的紧凑 Diff 预览；文件可直接在右侧工作区 Tab 内编辑和保存。 */
-export function WorkspaceMemoryChangeShelf({ workspaceSlug, changes, memoryFiles, className }: WorkspaceMemoryChangeShelfProps): React.ReactElement {
+export function WorkspaceMemoryChangeShelf({ workspaceSlug, sessionId, changes, memoryFiles, className }: WorkspaceMemoryChangeShelfProps): React.ReactElement {
   const [index, setIndex] = React.useState(0)
   const [editingPath, setEditingPath] = React.useState<string | null>(null)
   const [editText, setEditText] = React.useState('')
+  const [initialText, setInitialText] = React.useState('')
+  const [editingState, setEditingState] = useAtom(workspaceMemoryEditingStateAtomFamily(sessionId))
+  const openedAtRef = React.useRef(0)
+  const ignoreNextLocalChangeRef = React.useRef<string | null>(null)
   const [loadingEditor, setLoadingEditor] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
@@ -44,14 +51,27 @@ export function WorkspaceMemoryChangeShelf({ workspaceSlug, changes, memoryFiles
 
   React.useEffect(() => setIndex(0), [changes[0]?.changedAt])
   React.useEffect(() => setIndex((current) => current >= changes.length ? 0 : current), [changes.length])
+  React.useEffect(() => () => setEditingState({ editingPath: null, dirty: false, remoteChanged: false }), [setEditingState])
+  React.useEffect(() => {
+    const latest = changes[0]
+    if (!editingPath || !latest || latest.relativePath !== editingPath || latest.changedAt < openedAtRef.current) return
+    if (ignoreNextLocalChangeRef.current === latest.relativePath) {
+      ignoreNextLocalChangeRef.current = null
+      return
+    }
+    setEditingState((previous) => ({ ...previous, remoteChanged: true }))
+  }, [changes, editingPath, setEditingState])
 
   const startEditing = React.useCallback(async (relativePath: string): Promise<void> => {
     setLoadingEditor(true)
     setError(null)
     try {
       const file = await window.electronAPI.readWorkspaceAutoMemoryFile(workspaceSlug, relativePath)
+      openedAtRef.current = Date.now()
       setEditingPath(file.relativePath)
       setEditText(file.content ?? '')
+      setInitialText(file.content ?? '')
+      setEditingState({ editingPath: file.relativePath, dirty: false, remoteChanged: false })
     } catch (cause) {
       console.error('[项目记忆] 读取文件失败:', cause)
       setError(cause instanceof Error ? cause.message : '读取记忆文件失败')
@@ -62,10 +82,18 @@ export function WorkspaceMemoryChangeShelf({ workspaceSlug, changes, memoryFiles
 
   const saveEditing = React.useCallback(async (): Promise<void> => {
     if (!editingPath) return
+    if (editingState.remoteChanged) {
+      setError('该文件在编辑期间已被外部更新。请返回预览后重新打开，避免覆盖新内容。')
+      return
+    }
     setSaving(true)
     setError(null)
     try {
       await window.electronAPI.writeWorkspaceAutoMemoryFile(workspaceSlug, editingPath, editText)
+      setInitialText(editText)
+      setEditingState({ editingPath, dirty: false, remoteChanged: false })
+      // watcher 会回传本次本地保存；只忽略这一个相同路径的最新事件。
+      ignoreNextLocalChangeRef.current = editingPath
     } catch (cause) {
       console.error('[项目记忆] 保存文件失败:', cause)
       setError(cause instanceof Error ? cause.message : '保存记忆文件失败')
@@ -73,7 +101,7 @@ export function WorkspaceMemoryChangeShelf({ workspaceSlug, changes, memoryFiles
     } finally {
       setSaving(false)
     }
-  }, [editText, editingPath, workspaceSlug])
+  }, [editText, editingPath, editingState.remoteChanged, setEditingState, workspaceSlug])
 
   if (editingPath) {
     return (
@@ -84,7 +112,12 @@ export function WorkspaceMemoryChangeShelf({ workspaceSlug, changes, memoryFiles
             <p className="mt-1 truncate font-mono text-xs text-muted-foreground" title={editingPath}>{editingPath}</p>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => { setEditingPath(null); setError(null) }} disabled={saving}>返回预览</Button>
+            <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => {
+              if (editingState.dirty && !window.confirm('项目记忆有未保存修改。确定丢弃并返回预览吗？')) return
+              setEditingPath(null)
+              setError(null)
+              setEditingState({ editingPath: null, dirty: false, remoteChanged: false })
+            }} disabled={saving}>返回预览</Button>
             <Button size="sm" className="h-8 px-2 text-xs" onClick={() => void saveEditing()} disabled={saving}>
               {saving ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : <Save className="mr-1 size-3.5" />}
               保存
@@ -94,11 +127,22 @@ export function WorkspaceMemoryChangeShelf({ workspaceSlug, changes, memoryFiles
         <textarea
           autoFocus
           value={editText}
-          onChange={(event) => setEditText(event.target.value)}
+          onChange={(event) => {
+            const nextText = event.target.value
+            setEditText(nextText)
+            setEditingState((previous) => ({ ...previous, dirty: nextText !== initialText }))
+          }}
+          onKeyDown={(event) => {
+            if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+              event.preventDefault()
+              void saveEditing()
+            }
+          }}
           spellCheck={false}
           className="min-h-0 flex-1 resize-none rounded-lg border border-border/70 bg-background p-3 font-mono text-xs leading-5 text-foreground outline-none transition-[border-color,box-shadow] focus:border-primary focus:ring-2 focus:ring-primary/20"
           aria-label={`编辑 ${editingPath}`}
         />
+        {editingState.remoteChanged && <p className="mt-2 shrink-0 text-xs text-amber-600 dark:text-amber-400">文件已被外部更新；为避免覆盖，保存已暂停。请返回预览后重新打开。</p>}
         {error && <p className="mt-2 shrink-0 text-xs text-destructive">{error}</p>}
       </section>
     )
@@ -161,7 +205,17 @@ export function WorkspaceMemoryChangeShelf({ workspaceSlug, changes, memoryFiles
               ))}
             </div>
           ) : (
-            <p className="rounded-lg bg-muted/50 p-3 text-xs leading-relaxed text-muted-foreground">还没有记忆文件。</p>
+            <div className="rounded-lg bg-muted/50 p-3 text-xs leading-relaxed text-muted-foreground">
+              <p>还没有记忆文件。</p>
+              <Button size="sm" variant="ghost" className="mt-2 h-8 px-2 text-xs" onClick={() => {
+                const initial = '# 项目记忆\n\n'
+                openedAtRef.current = Date.now()
+                setEditingPath('MEMORY.md')
+                setEditText(initial)
+                setInitialText(initial)
+                setEditingState({ editingPath: 'MEMORY.md', dirty: true, remoteChanged: false })
+              }}>创建 MEMORY.md</Button>
+            </div>
           )}
         </div>
       )}

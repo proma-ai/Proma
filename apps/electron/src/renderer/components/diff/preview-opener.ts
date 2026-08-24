@@ -40,7 +40,12 @@ export function useOpenPreview() {
       store.set(previewFilesMapAtom, (prev) => {
         const next = new Map(prev)
         const files = next.get(sessionId) ?? []
-        next.set(sessionId, files.some((item) => getPreviewFileId(item) === previewId) ? files : [...files, file])
+        // 同一预览身份再次打开时保留 Tab 顺序，但采用最新权限、根目录与解析上下文。
+        // 否则先以只读/Skill 上下文打开后会永久复用过期元数据。
+        const existingIndex = files.findIndex((item) => getPreviewFileId(item) === previewId)
+        next.set(sessionId, existingIndex === -1
+          ? [...files, file]
+          : files.map((item, index) => index === existingIndex ? file : item))
         return next
       })
       store.set(previewFileMapAtom, (prev) => {
