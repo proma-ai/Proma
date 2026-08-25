@@ -224,6 +224,8 @@ export function buildBrowserExtractExpression(input: BrowserExtractInput): strin
       remainingRawChars -= bounded.length;
       return emit(bounded.replace(/\\s+/g, ' ').trim());
     };
+    // rendered is already capped by remainingOutputChars, so this final normalization cannot scan unbounded page content.
+    const cleanRendered = (value) => String(value).replace(/\\s+/g, ' ').trim();
     const safeLink = (href) => { try { const url = new URL(String(href).slice(0, 2_048), location.href); return url.protocol === 'http:' || url.protocol === 'https:' ? url.origin + url.pathname : ''; } catch { return ''; } };
     const markdown = (node, depth = 0) => {
       if (++visitedNodes > maxNodes || depth > maxDepth) { stoppedEarly = true; return ''; }
@@ -255,7 +257,7 @@ export function buildBrowserExtractExpression(input: BrowserExtractInput): strin
     };
     const rendered = markdown(root);
     const content = input.format === 'text'
-      ? clean(rendered)
+      ? cleanRendered(rendered)
       : rendered.replace(/[ \\t]+\\n/g, '\\n').replace(/\\n{3,}/g, '\\n\\n').trim();
     return { ok: true, format: input.format, selector: input.selector || null, text: content.slice(0, maxChars), truncated: stoppedEarly || content.length > maxChars, totalChars: content.length, totalCharsIsLowerBound: stoppedEarly, visitedNodes };
   })()`
