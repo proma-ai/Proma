@@ -33,10 +33,16 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { hideClose?: boolean }
->(({ className, children, hideClose, ...props }, ref) => (
-  <DialogPortal>
-    <DialogOverlay />
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
+    hideClose?: boolean
+    /** 将弹框限制在指定容器内，而非默认挂载到 document.body。 */
+    container?: HTMLElement | null
+    /** 与本地容器配合时覆写 Overlay 的定位方式。 */
+    overlayClassName?: string
+  }
+>(({ className, children, hideClose, container, overlayClassName, ...props }, ref) => (
+  <DialogPortal container={container ?? undefined}>
+    <DialogOverlay className={overlayClassName} />
     <DialogPrimitive.Content
       ref={ref}
       className={cn(

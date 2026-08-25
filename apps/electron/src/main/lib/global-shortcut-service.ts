@@ -22,7 +22,6 @@ const registeredAccelerators = new Map<string, string>()
 const GLOBAL_SHORTCUT_DEFAULTS: Record<string, { mac: string; win: string }> = {
   'quick-task': { mac: 'Alt+Space', win: 'Alt+Space' },
   'show-main-window': { mac: 'CommandOrControl+Shift+P', win: 'CommandOrControl+Shift+P' },
-  'open-planning': { mac: 'CommandOrControl+Shift+T', win: 'CommandOrControl+Shift+T' },
   'voice-dictation': { mac: 'Ctrl+`', win: 'Ctrl+`' },
 }
 

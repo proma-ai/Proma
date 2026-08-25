@@ -1020,7 +1020,9 @@ export class BrowserController {
 
   /** 用户在浏览器面板中新建 tab；不会抢占 Agent 的工作 tab。 */
   async createDisplayTab(sessionId: string, url?: string): Promise<BrowserViewState> {
-    const browserSession = this.getOrCreateSession(sessionId, [], false)
+    // 首次由历史链接携带 URL 创建时，此标签本身就是初始展示标签；不要先经
+    // getOrCreateSession 预建一个空白标签，否则会留下无用的空 Tab。
+    const browserSession = this.sessions.get(sessionId) ?? this.createSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     this.markUserBrowserContext(browserSession)
     const tab = this.createTab(browserSession)

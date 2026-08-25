@@ -52,7 +52,7 @@ function parseEvent(line: string): NativeAgentIslandEvent | null {
     if (event.name === 'open-session' && typeof event.sessionId === 'string' && event.sessionId.length > 0) {
       return { type: 'intent', name: 'open-session', sessionId: event.sessionId }
     }
-    if (event.name === 'open-main' || event.name === 'open-planning' || event.name === 'dismiss') {
+    if (event.name === 'open-main' || event.name === 'dismiss') {
       return { type: 'intent', name: event.name }
     }
     return null

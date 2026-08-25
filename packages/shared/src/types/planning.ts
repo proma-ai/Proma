@@ -242,12 +242,6 @@ export interface StartTodoAgentResult {
   session: import('./agent').AgentSessionMeta
 }
 
-/** 独立规划窗口请求主窗口打开并自动启动 Todo Agent 的跨窗口激活载荷。 */
-export interface TodoAgentSessionActivation {
-  todo: Todo
-  session: import('./agent').AgentSessionMeta
-}
-
 export interface UpdateTodoInput {
   id: string
   title?: string
@@ -341,7 +335,6 @@ export const PLANNING_IPC_CHANNELS = {
   CREATE_TODO: 'planning:create-todo',
   /** 原子地确认 Todo 项目归属并创建对应 Agent 会话。 */
   START_TODO_AGENT: 'planning:start-todo-agent',
-  TODO_AGENT_SESSION_READY: 'planning:todo-agent-session-ready',
   UPDATE_TODO: 'planning:update-todo',
   DELETE_TODO: 'planning:delete-todo',
   LIST_CALENDAR_EVENTS: 'planning:list-calendar-events',
@@ -357,8 +350,6 @@ export const PLANNING_IPC_CHANNELS = {
   ACKNOWLEDGE_REMINDER: 'planning:acknowledge-reminder',
   SNOOZE_REMINDER: 'planning:snooze-reminder',
   REMINDER_DUE: 'planning:reminder-due',
-  /** 打开或聚焦单例独立规划窗口。 */
-  OPEN_WINDOW: 'planning:open-window',
   CHANGED: 'planning:changed',
   AGENT_OPERATION: 'planning:agent-operation',
   /** macOS Calendar / Reminders 连接设置（仅主进程可访问 EventKit）。 */

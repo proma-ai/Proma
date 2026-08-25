@@ -33,18 +33,24 @@ export interface AgentSkillsData {
   toggleSkill: (slug: string, enabled: boolean) => Promise<void>
   deleteSkill: (slug: string, name: string) => Promise<boolean>
   updateSkill: (slug: string) => Promise<void>
+  /** 用于安装或更新企业来源 Skill 后显式刷新当前工作区快照。 */
+  refreshSkills: () => Promise<void>
   refreshMcpConfig: () => Promise<void>
   toggleMcp: (name: string, enabled: boolean) => Promise<void>
   toggleBuiltinMcp: (id: string, enabled: boolean) => Promise<void>
   deleteMcp: (name: string) => Promise<void>
 }
 
-export function useAgentSkillsData(): AgentSkillsData {
+/**
+ * workspaceId 指定时用于右侧 Component Workspace：数据归属必须锁定到宿主 Agent
+ * 会话的项目，不能跟随全局项目选择器切换。
+ */
+export function useAgentSkillsData(workspaceId?: string): AgentSkillsData {
   const workspaces = useAtomValue(agentWorkspacesAtom)
-  const currentWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
+  const selectedWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
   const bumpCapabilitiesVersion = useSetAtom(workspaceCapabilitiesVersionAtom)
 
-  const currentWorkspace = workspaces.find((w) => w.id === currentWorkspaceId)
+  const currentWorkspace = workspaces.find((w) => w.id === (workspaceId ?? selectedWorkspaceId))
   const workspaceSlug = currentWorkspace?.slug ?? ''
 
   const [loading, setLoading] = React.useState(true)
@@ -157,6 +163,11 @@ export function useAgentSkillsData(): AgentSkillsData {
     }
   }, [workspaceSlug, updatingSkill, skills, bumpCapabilitiesVersion])
 
+  const refreshSkills = React.useCallback(async () => {
+    setLoading(true)
+    await loadData()
+  }, [loadData])
+
   const refreshMcpConfig = React.useCallback(async () => {
     if (!workspaceSlug) return
     try {
@@ -228,6 +239,7 @@ export function useAgentSkillsData(): AgentSkillsData {
     toggleSkill,
     deleteSkill,
     updateSkill,
+    refreshSkills,
     refreshMcpConfig,
     toggleMcp,
     toggleBuiltinMcp,

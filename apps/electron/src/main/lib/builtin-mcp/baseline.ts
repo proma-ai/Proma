@@ -57,10 +57,16 @@ export function getBuiltinMcpName(id: string): string {
 }
 
 /**
- * 内置 MCP 占用的全部保留名（id + 运行时 name）。
- * 工作区 mcp.json 不允许出现这些 key——内置项是 kind=internal，由代码注入，
- * 任何同名条目都是误写/冲突，应在保存时剔除。
+ * 虽不在 MCP 组件展示，仍由 Pi runtime 注入的第一方工具 server 名。
+ * 它们必须继续保留，避免工作区 mcp.json 产生同名工具前缀冲突。
  */
-export const RESERVED_BUILTIN_KEYS: ReadonlySet<string> = new Set(
-  DEFINITIONS.flatMap((d) => [d.id, d.name]),
-)
+const INTERNAL_RUNTIME_SERVER_NAMES = ['automation', 'collaboration']
+
+/**
+ * 内置或第一方 runtime 工具占用的全部保留名（id + 运行时 name）。
+ * 工作区 mcp.json 不允许出现这些 key——任何同名条目都是误写/冲突，应在保存时剔除。
+ */
+export const RESERVED_BUILTIN_KEYS: ReadonlySet<string> = new Set([
+  ...DEFINITIONS.flatMap((d) => [d.id, d.name]),
+  ...INTERNAL_RUNTIME_SERVER_NAMES,
+])

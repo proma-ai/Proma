@@ -11,7 +11,8 @@ interface EnterpriseSkillsTabProps {
   workspaceSlug: string
   search: string
   installedSkills: SkillMeta[]
-  onInstalled: () => void
+  /** 本地安装完成后刷新宿主的 Skills 快照；支持异步，避免卡片保留旧安装状态。 */
+  onInstalled: () => void | Promise<void>
 }
 
 interface EnterpriseSkillInstallState {
@@ -77,7 +78,7 @@ export function EnterpriseSkillsTab({ workspaceSlug, search, installedSkills, on
       toast.success(state.isInstalled ? `已更新 ${skill.name}` : `已安装 ${skill.name}`, {
         description: `当前本地版本：${result.installedVersion}`,
       })
-      onInstalled()
+      await onInstalled()
       await load()
     } catch (error) {
       const message = error instanceof Error ? error.message : '安装失败'

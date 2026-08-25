@@ -36,7 +36,7 @@ export function createApplicationMenu(): Menu {
     {
       label: '文件',
       submenu: [
-        // Cmd+W / Ctrl+W：主窗口关闭当前标签页；独立规划窗口关闭自身。
+        // Cmd+W / Ctrl+W：主窗口关闭当前标签页；独立记忆窗口关闭自身。
         {
           label: '关闭标签页',
           accelerator: 'CmdOrCtrl+W',
@@ -50,7 +50,7 @@ export function createApplicationMenu(): Menu {
             } catch {
               // 窗口尚未加载页面时沿用主窗口的安全默认行为。
             }
-            if (windowType === 'planning' || windowType === 'workspace-memory') {
+            if (windowType === 'workspace-memory') {
               win.close()
               return
             }

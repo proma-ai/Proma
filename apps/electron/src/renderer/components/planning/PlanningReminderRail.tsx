@@ -3,8 +3,8 @@ import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { BellRing, Check, ListTodo, X } from 'lucide-react'
 import { toast } from 'sonner'
 import type { ActivePlanningReminder } from '@proma/shared'
-import { activePlanningRemindersAtom, planningSelectedTodoIdAtom, planningTabAtom } from '@/atoms/planning-atoms'
-import { activeViewAtom } from '@/atoms/active-view'
+import { activePlanningRemindersAtom, planningSelectedTodoIdAtom } from '@/atoms/planning-atoms'
+import { openWorkspaceComponentAtom } from '@/atoms/agent-atoms'
 import { notificationsEnabledAtom, notificationSoundEnabledAtom, notificationSoundsAtom, playNotificationSoundForType } from '@/atoms/notifications'
 import { Button } from '@/components/ui/button'
 
@@ -23,8 +23,7 @@ function mergeReminders(current: ActivePlanningReminder[], incoming: ActivePlann
 /** 全局常驻提醒条。未确认提醒从 SQLite 恢复，不依赖一次性 toast 生命周期。 */
 export function PlanningReminderRail({ playSound = true }: { playSound?: boolean } = {}): React.ReactElement | null {
   const [reminders, setReminders] = useAtom(activePlanningRemindersAtom)
-  const setActiveView = useSetAtom(activeViewAtom)
-  const setPlanningTab = useSetAtom(planningTabAtom)
+  const openWorkspaceComponent = useSetAtom(openWorkspaceComponentAtom)
   const setSelectedTodoId = useSetAtom(planningSelectedTodoIdAtom)
   const notificationsEnabled = useAtomValue(notificationsEnabledAtom)
   const soundEnabled = useAtomValue(notificationSoundEnabledAtom)
@@ -69,9 +68,8 @@ export function PlanningReminderRail({ playSound = true }: { playSound?: boolean
     }
   }
   const openTodo = (reminder: ActivePlanningReminder): void => {
-    setPlanningTab('todos')
     setSelectedTodoId(reminder.targetId)
-    setActiveView('planning')
+    openWorkspaceComponent(reminder.targetType === 'todo' ? 'todos' : 'calendar')
   }
   const snooze = async (id: string, minutes: number) => {
     try {

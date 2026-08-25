@@ -148,7 +148,6 @@ export type NativeAgentIslandEvent =
   | { type: 'intent'; name: 'set-hovered'; hovered: boolean }
   | { type: 'intent'; name: 'open-main' }
   | { type: 'intent'; name: 'open-session'; sessionId: string }
-  | { type: 'intent'; name: 'open-planning' }
   /** 用户主动关闭当前提醒；主进程决定何时因新的状态再次出现。 */
   | { type: 'intent'; name: 'dismiss' }
   | { type: 'fatal'; message: string }
