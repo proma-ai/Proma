@@ -1157,7 +1157,7 @@ export class AgentOrchestrator {
         'mcp__planning__list_active_reminders',
       ])
       // Pi-native 浏览器工具不是 MCP：必须显式分类，避免被通用 mcp__ 调研放行规则遗漏。
-      const PLAN_MODE_READ_ONLY_BROWSER_TOOLS = new Set(['BrowserObserve', 'BrowserScreenshot', 'BrowserListTabs', 'BrowserPreviewOpen'])
+      const PLAN_MODE_READ_ONLY_BROWSER_TOOLS = new Set(['BrowserObserve', 'BrowserFind', 'BrowserExtract', 'BrowserScreenshot', 'BrowserListTabs', 'BrowserPreviewOpen'])
       const runTriggeredBy = input.triggeredBy
 
       /** Plan 模式是否已被 Agent 进入（初始 plan 模式时天然为 true，其他模式需 EnterPlanMode 触发） */
@@ -1259,6 +1259,15 @@ export class AgentOrchestrator {
             return { behavior: 'deny' as const, message: '计划模式下不能将本地图片发送给视觉模型，请在计划获批后执行。' }
           }
           return { behavior: 'allow' as const }
+        }
+
+        // 选择 file input 后，站点可能自动把本地文件上传到第三方；即使路径已在会话授权目录内，
+        // 仍需逐次确认该外发边界，不能被通用 Browser 放行规则覆盖。
+        if (toolName === 'BrowserUpload') {
+          if (currentMode === 'plan') return { behavior: 'deny' as const, message: '计划模式下不能选择网页上传文件，请在计划获批后执行。' }
+          return permissionService.requestSingleApproval(sessionId, toolName, input, options, (request) => {
+            this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'permission_request', request } })
+          })
         }
 
         // 所有 Pi 会话均可使用受管浏览器。主进程仍隔离网页来源并默认拒绝网页权限；下载和弹窗留在受管浏览器内，

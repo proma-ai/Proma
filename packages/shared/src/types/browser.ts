@@ -20,7 +20,7 @@ export interface BrowserViewLayout {
 
 export type BrowserExecutionSource = 'user' | 'automation' | 'delegation'
 
-export type BrowserTraceAction = 'navigate' | 'observe' | 'wait' | 'click' | 'fill' | 'press' | 'dom' | 'script' | 'screenshot' | 'tab' | 'download' | 'popup'
+export type BrowserTraceAction = 'navigate' | 'observe' | 'find' | 'wait' | 'click' | 'act' | 'fill' | 'press' | 'hover' | 'drag' | 'scroll' | 'extract' | 'select' | 'upload' | 'dom' | 'script' | 'screenshot' | 'tab' | 'download' | 'popup'
 export type BrowserOperationStatus = 'dispatched' | 'verified' | 'failed' | 'unknown'
 
 /** 脱敏的浏览器操作账本项；绝不含输入正文、Cookie、截图或脚本全文。 */

@@ -85,11 +85,19 @@ export const TOOL_ICONS: Record<string, LucideIcon> = {
   ListMcpResourcesTool: Server,
   SendMessage: Send,
   BrowserObserve: Globe,
+  BrowserFind: Search,
   BrowserNavigate: Globe,
   BrowserWaitFor: LoaderCircle,
   BrowserClick: Globe,
+  BrowserAct: MousePointer2,
   BrowserFill: Globe,
   BrowserPress: Globe,
+  BrowserHover: MousePointer2,
+  BrowserDrag: MousePointer2,
+  BrowserScroll: Globe,
+  BrowserExtract: FileText,
+  BrowserSelectOption: MousePointer2,
+  BrowserUpload: FilePenLine,
   BrowserScreenshot: Globe,
   BrowserListTabs: Globe,
   BrowserNewTab: Globe,
@@ -153,11 +161,19 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   ListMcpResourcesTool: '列出 MCP 资源',
   SendMessage: '发送消息',
   BrowserObserve: '查看受管浏览器',
+  BrowserFind: '语义定位网页元素',
   BrowserNavigate: '打开网页',
   BrowserWaitFor: '等待网页状态',
   BrowserClick: '点击网页元素',
+  BrowserAct: '点击并等待网页状态',
   BrowserFill: '填写网页字段',
   BrowserPress: '按下浏览器按键',
+  BrowserHover: '悬停网页元素',
+  BrowserDrag: '拖拽网页元素',
+  BrowserScroll: '滚动网页或容器',
+  BrowserExtract: '抽取网页内容',
+  BrowserSelectOption: '选择下拉选项',
+  BrowserUpload: '选择网页上传文件',
   BrowserScreenshot: '截取网页',
   BrowserListTabs: '列出浏览器标签',
   BrowserNewTab: '新建浏览器标签',
@@ -240,8 +256,30 @@ export function getInputSummary(
     }
 
     case 'BrowserClick':
-    case 'BrowserFill': {
+    case 'BrowserAct':
+    case 'BrowserFill':
+    case 'BrowserHover':
+    case 'BrowserUpload': {
       return typeof input.ref === 'string' ? input.ref : null
+    }
+
+    case 'BrowserDrag': {
+      return typeof input.sourceRef === 'string' && typeof input.targetRef === 'string'
+        ? `${input.sourceRef} → ${input.targetRef}`
+        : null
+    }
+
+    case 'BrowserFind': {
+      return typeof input.name === 'string' ? input.name : typeof input.role === 'string' ? input.role : null
+    }
+
+    case 'BrowserScroll': {
+      return typeof input.selector === 'string' ? input.selector : typeof input.position === 'string' ? input.position : typeof input.deltaY === 'number' ? `${input.deltaY}px` : null
+    }
+
+    case 'BrowserExtract':
+    case 'BrowserSelectOption': {
+      return typeof input.selector === 'string' ? input.selector : null
     }
 
     case 'BrowserPress': {
