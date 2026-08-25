@@ -83,13 +83,23 @@ function waitForTokenRefresh(): Promise<string> {
   })
 }
 
-/** 尝试刷新 token */
+type TokenRefreshResult =
+  | { status: 'refreshed'; token: string }
+  | { status: 'expired' }
+  | { status: 'transient_failure'; error: ApiError }
+
+/**
+ * 刷新 access token，并严格区分 refresh token 已失效与暂时故障。
+ *
+ * 只有服务端明确拒绝 refresh token（401/403）或本地根本没有 refresh token
+ * 才可清理用户会话；网络中断和 5xx 时保留会话，允许稍后重试。
+ */
 async function tryRefreshToken(
   baseUrl: string,
   tokenStorage: TokenStorage,
-): Promise<string | null> {
+): Promise<TokenRefreshResult> {
   const refreshToken = tokenStorage.getRefreshToken()
-  if (!refreshToken) return null
+  if (!refreshToken) return { status: 'expired' }
 
   try {
     // 直接用 fetch 调用刷新接口，不经过拦截器以避免循环
@@ -99,7 +109,22 @@ async function tryRefreshToken(
       body: JSON.stringify({ refresh_token: refreshToken }),
     })
 
-    if (!response.ok) return null
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        return { status: 'expired' }
+      }
+      const errorData = await response.json().catch(() => null)
+      return {
+        status: 'transient_failure',
+        error: createApiError(
+          response.status,
+          (errorData as Record<string, string>)?.detail ||
+            (errorData as Record<string, string>)?.message ||
+            `Token 刷新失败: ${response.status}`,
+          errorData,
+        ),
+      }
+    }
 
     const data = (await response.json()) as RefreshTokenResponse
     tokenStorage.setToken(data.access_token)
@@ -108,10 +133,13 @@ async function tryRefreshToken(
     }
 
     console.log('[CloudApiClient] Token 刷新成功')
-    return data.access_token
+    return { status: 'refreshed', token: data.access_token }
   } catch (error) {
     console.error('[CloudApiClient] Token 刷新失败:', error)
-    return null
+    return {
+      status: 'transient_failure',
+      error: createApiError(0, `网络错误: ${error instanceof Error ? error.message : '未知错误'}`),
+    }
   }
 }
 
@@ -190,28 +218,25 @@ export function createApiClient(options?: {
         }
 
         isRefreshing = true
+        const refreshResult = await tryRefreshToken(config.baseUrl, tokenStorage)
 
-        try {
-          const newToken = await tryRefreshToken(config.baseUrl, tokenStorage)
+        if (refreshResult.status === 'refreshed') {
+          onTokenRefreshed(refreshResult.token)
+          isRefreshing = false
+          return request<T>(path, init, true)
+        }
 
-          if (newToken) {
-            onTokenRefreshed(newToken)
-            isRefreshing = false
-            return request<T>(path, init, true)
-          } else {
-            onRefreshFailed(new Error('Token 刷新失败'))
-            isRefreshing = false
-            tokenStorage.clearTokens()
-            onAuthFailed?.()
-            throw createApiError(401, '认证已过期，请重新登录')
-          }
-        } catch (refreshError) {
-          onRefreshFailed(refreshError instanceof Error ? refreshError : new Error('Token 刷新失败'))
+        if (refreshResult.status === 'expired') {
+          onRefreshFailed(new Error('认证已过期，请重新登录'))
           isRefreshing = false
           tokenStorage.clearTokens()
           onAuthFailed?.()
           throw createApiError(401, '认证已过期，请重新登录')
         }
+
+        onRefreshFailed(new Error(refreshResult.error.message))
+        isRefreshing = false
+        throw refreshResult.error
       }
 
       // 402 处理：额度不足

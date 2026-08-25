@@ -158,6 +158,43 @@ function broadcastAuthStateChanged(): void {
   })
 }
 
+/** 清理仅在已登出或确认认证失效后才可继续使用的运行时状态。 */
+async function cleanupCloudSessionRuntime(): Promise<void> {
+  // 清理官方渠道（延迟导入避免循环依赖）
+  try {
+    const { cleanupOfficialChannel, stopModelsPolling } = await import('./cloud-channel-service')
+    cleanupOfficialChannel()
+    stopModelsPolling()
+  } catch {
+    // 清理失败不应阻塞认证状态恢复
+  }
+  // 清理 inner key 进程内缓存（1h TTL），避免旧账号凭据继续被复用。
+  try {
+    const { invalidatePromaAgentInnerKeyCache } = await import('./proma-agent-key-service')
+    invalidatePromaAgentInnerKeyCache()
+  } catch {
+    // 清理失败不应阻塞认证状态恢复
+  }
+  // 清理健康数据缓存并停止轮询。
+  try {
+    const { clearHealthCache, stopHealthPolling } = await import('./cloud-health-service')
+    clearHealthCache()
+    stopHealthPolling()
+  } catch {
+    // 清理失败不应阻塞认证状态恢复
+  }
+}
+
+/**
+ * 仅用于服务端明确确认认证失效的场景。
+ * 认证广播会让 CloudAuthGate 立即展示登录页；网络、超时和 5xx 不得调用此函数。
+ */
+function invalidateExpiredCloudSession(): void {
+  tokenStorage.clearTokens()
+  void cleanupCloudSessionRuntime()
+  broadcastAuthStateChanged()
+}
+
 /**
  * 登录时先使官方渠道和 Agent system key 就绪，再通知渲染进程进入主界面。
  *
@@ -226,9 +263,8 @@ export function getApiClient(): CloudApiClient {
         quotaExceededHandler?.()
       },
       onAuthFailed: () => {
-        console.log('[Cloud Auth] 认证失败，清除状态')
-        cachedUser = null
-        broadcastAuthStateChanged()
+        console.log('[Cloud Auth] 认证已失效，切换到登录页')
+        invalidateExpiredCloudSession()
       },
     })
   }
@@ -280,6 +316,10 @@ export async function tryRefreshAuthToken(): Promise<string | null> {
 
     if (!response.ok) {
       console.warn('[Cloud Auth] Token 刷新失败:', response.status)
+      // 只有 refresh endpoint 明确拒绝 token 时，才确认本地登录已失效并切换到登录页。
+      if (response.status === 401 || response.status === 403) {
+        invalidateExpiredCloudSession()
+      }
       return null
     }
 
@@ -371,30 +411,7 @@ export async function register(data: RegisterRequest): Promise<CloudAuthIpcRespo
 /** 登出 */
 export async function logout(): Promise<CloudAuthIpcResponse> {
   tokenStorage.clearTokens()
-  // 清理官方渠道（延迟导入避免循环依赖）
-  try {
-    const { cleanupOfficialChannel, stopModelsPolling } = await import('./cloud-channel-service')
-    cleanupOfficialChannel()
-    stopModelsPolling()
-  } catch {
-    // 清理失败不影响登出
-  }
-  // 清理 inner key 进程内缓存（1h TTL），避免登出后仍持有上一个账号的 pk_xxx，
-  // 触发后端 auth_cache 命中过期 credits 快照而误报 402。
-  try {
-    const { invalidatePromaAgentInnerKeyCache } = await import('./proma-agent-key-service')
-    invalidatePromaAgentInnerKeyCache()
-  } catch {
-    // 清理失败不影响登出
-  }
-  // 清理健康数据缓存并停止轮询
-  try {
-    const { clearHealthCache, stopHealthPolling } = await import('./cloud-health-service')
-    clearHealthCache()
-    stopHealthPolling()
-  } catch {
-    // 清理失败不影响登出
-  }
+  await cleanupCloudSessionRuntime()
   broadcastAuthStateChanged()
   return { success: true }
 }

@@ -51,7 +51,7 @@ import { decryptApiKey, getChannelById, listChannels, persistCodexOAuthCredentia
 import { getAdapter, fetchTitle } from '@proma/core'
 import { getCloudApiConfig } from '@proma/cloud'
 import { getSystemApiKey, clearSystemKeyCache } from './cloud-channel-service'
-import { getAuthToken, tryRefreshAuthToken } from './cloud-auth-service'
+import { getAuthState, getAuthToken, tryRefreshAuthToken } from './cloud-auth-service'
 import pkg from '../../../package.json' with { type: 'json' }
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
@@ -830,9 +830,12 @@ export class AgentOrchestrator {
       if (channel.provider === 'proma') {
         try {
           apiKey = await getSystemApiKey()
-        } catch {
+        } catch (initialError) {
+          // getSystemApiKey 的 Cloud client 已在 access/refresh token 被服务端明确拒绝时
+          // 清理认证状态并触发登录页。网络、超时和 5xx 则保留当前会话，避免误登出。
+          if (!getAuthState().isAuthenticated) throw initialError
           const refreshed = await tryRefreshAuthToken()
-          if (!refreshed) throw new Error('Proma 登录已过期')
+          if (!refreshed) throw initialError
           clearSystemKeyCache()
           apiKey = await getSystemApiKey()
         }
@@ -849,13 +852,23 @@ export class AgentOrchestrator {
       }
     } catch (err) {
       if (channel.provider === 'proma') {
-        reportPreflightError({
-          code: 'invalid_api_key',
-          title: 'Proma Cloud 登录已失效',
-          message: '无法取得 Proma 官方渠道凭据，请重新登录后重试。',
-          actions: [{ key: 's', label: '打开渠道设置', action: 'open_channel_settings' }],
-          canRetry: true,
-        })
+        if (!getAuthState().isAuthenticated) {
+          reportPreflightError({
+            code: 'token_expired',
+            title: 'Proma Cloud 登录已失效',
+            message: '登录凭据已过期，已切换到登录页。请重新登录后再运行此任务。',
+            actions: [],
+            canRetry: false,
+          })
+        } else {
+          reportPreflightError({
+            code: 'network_error',
+            title: 'Proma Cloud 暂时不可用',
+            message: '暂时无法取得 Proma 官方渠道凭据，请检查网络或稍后重试。',
+            actions: [{ key: 'r', label: '重试', action: 'retry' }],
+            canRetry: true,
+          })
+        }
         return
       }
       if (channel.provider === 'openai-codex' || channel.provider === 'xai') {
@@ -1782,7 +1795,7 @@ export class AgentOrchestrator {
                     console.log('[Agent 编排] 从 Proma 错误文本识别到额度不足')
                   }
                 }
-                const typedError = mapAgentErrorToTypedError(errorCode, friendlyErrorMessage(detailedMessage), originalError, {
+                let typedError = mapAgentErrorToTypedError(errorCode, friendlyErrorMessage(detailedMessage), originalError, {
                   isPromaChannel: channel.provider === 'proma',
                 })
 
@@ -1801,6 +1814,15 @@ export class AgentOrchestrator {
                       break
                     } catch (error) {
                       console.warn('[Agent 编排] 刷新 Proma system key 失败:', error)
+                    }
+                  }
+                  if (!getAuthState().isAuthenticated) {
+                    typedError = {
+                      code: 'token_expired',
+                      title: 'Proma Cloud 登录已失效',
+                      message: '登录凭据已过期，已切换到登录页。请重新登录后再运行此任务。',
+                      actions: [],
+                      canRetry: false,
                     }
                   }
                 }
