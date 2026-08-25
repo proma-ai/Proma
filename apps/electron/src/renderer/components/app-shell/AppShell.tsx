@@ -12,7 +12,7 @@ import { LeftSidebar } from './LeftSidebar'
 import { RightSidePanel } from './RightSidePanel'
 import { MainArea } from '@/components/tabs/MainArea'
 import { appModeAtom } from '@/atoms/app-mode'
-import { agentDiffPanelTabAtom, agentSessionsAtom, agentSidePanelLayoutAtomFamily, agentSidePanelLayoutMapAtom, currentAgentSessionIdAtom, currentSessionSidePanelOpenAtom, pruneAgentSidePanelLayouts } from '@/atoms/agent-atoms'
+import { agentDiffPanelTabAtom, agentSessionsAtom, agentSidePanelLayoutAtomFamily, agentSidePanelLayoutMapAtom, currentAgentSessionIdAtom, currentSessionSidePanelOpenAtom, isWorkspaceComponentTab, pruneAgentSidePanelLayouts } from '@/atoms/agent-atoms'
 import { leftSidebarWidthAtom } from '@/atoms/sidebar-atoms'
 import { sidebarCollapsedAtom } from '@/atoms/tab-atoms'
 import { automationFormAtom } from '@/atoms/automation-atoms'
@@ -31,6 +31,8 @@ const MIN_RIGHT_PANEL_WIDTH = 360
 // 探索/委派 Agent 需要同时容纳消息正文、工具活动和输入区；略宽于普通文件栏，
 // 但显著小于浏览器/预览的半屏宽视图。
 const MIN_AGENT_SESSION_PANEL_WIDTH = 480
+// Todo、日程、能力和记忆都含列表与详情；与临时 Agent 一样需要可读的并排空间。
+const MIN_WORKSPACE_COMPONENT_PANEL_WIDTH = 480
 const RIGHT_PANEL_MAX_VIEWPORT_RATIO = 3 / 5
 const WIDE_RIGHT_PANEL_DEFAULT_VIEWPORT_RATIO = 1 / 2
 // 窄窗口时优先保留主会话的最小可读宽度；Agent 侧栏的 480px 仅在空间足够时强制。
@@ -38,8 +40,12 @@ const MIN_MAIN_AREA_WIDTH = 320
 const COLLAPSED_LEFT_SIDEBAR_WIDTH = 60
 const CLASSIC_LEFT_SIDEBAR_LEADING_PADDING = 8
 
-function getRightPanelMinWidth(isAgentSessionTab: boolean): number {
-  return isAgentSessionTab ? MIN_AGENT_SESSION_PANEL_WIDTH : MIN_RIGHT_PANEL_WIDTH
+function getRightPanelMinWidth(isAgentSessionTab: boolean, isWorkspaceComponent: boolean): number {
+  return isAgentSessionTab
+    ? MIN_AGENT_SESSION_PANEL_WIDTH
+    : isWorkspaceComponent
+      ? MIN_WORKSPACE_COMPONENT_PANEL_WIDTH
+      : MIN_RIGHT_PANEL_WIDTH
 }
 
 function getRightPanelMaxWidth(viewportWidth: number, leftSidebarOccupiedWidth: number): number {
@@ -83,7 +89,7 @@ export function AppShell(): React.ReactElement {
   const isClassic = interfaceVariant === 'classic'
   // 定时任务表单打开时隐藏右侧文件面板，让中间区域扩展到全宽（表单内含自己的右栏配置）
   const activeView = useAtomValue(activeViewAtom)
-  const showRightPanel = appMode === 'agent' && !!currentSessionId && !automationForm.open && activeView !== 'planning' && activeView !== 'agent-skills'
+  const showRightPanel = appMode === 'agent' && !!currentSessionId && !(automationForm.open && activeView !== 'conversations') && activeView !== 'planning' && activeView !== 'agent-skills'
   const isWindows = React.useMemo(() => detectIsWindows(), [])
 
   // 左侧边栏可拖拽宽度
@@ -154,7 +160,7 @@ export function AppShell(): React.ReactElement {
   const isAgentSessionRightTab = Boolean(
     activeRightPanelTab?.startsWith('exploration:') || activeRightPanelTab?.startsWith('delegation:'),
   )
-  const rightPanelMinimumWidth = getRightPanelMinWidth(isAgentSessionRightTab)
+  const rightPanelMinimumWidth = getRightPanelMinWidth(isAgentSessionRightTab, Boolean(activeRightPanelTab && isWorkspaceComponentTab(activeRightPanelTab)))
   const leftSidebarContentWidth = sidebarCollapsed ? COLLAPSED_LEFT_SIDEBAR_WIDTH : clampedLeftSidebarWidth
   const leftSidebarOccupiedWidth = leftSidebarContentWidth + (isClassic ? CLASSIC_LEFT_SIDEBAR_LEADING_PADDING : 1)
   const clampedRightPanelWidth = clampRightPanelWidth(

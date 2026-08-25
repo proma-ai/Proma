@@ -1259,12 +1259,11 @@ export async function buildPiBuiltinTools(
     }
   }
 
-  if (isBuiltinMcpUserEnabled('automation')) {
-    try {
-      tools.push(...buildAutomationTools(sdk, ctx))
-    } catch (error) {
-      console.error('[Pi 桥接] 注入 automation 工具失败:', error)
-    }
+  // 自动化是 Proma 基础运行时能力，不作为可配置 MCP 展示或开关。
+  try {
+    tools.push(...buildAutomationTools(sdk, ctx))
+  } catch (error) {
+    console.error('[Pi 桥接] 注入 automation 工具失败:', error)
   }
 
   // 任务/日程是 Pi native customTools。
@@ -1275,8 +1274,8 @@ export async function buildPiBuiltinTools(
   }
 
   // collaboration 桥接
-  const collaborationAvailable = isBuiltinMcpUserEnabled('collaboration') &&
-    !!ctx.workspaceId &&
+  // 协作是 Proma 基础运行时能力；仅由工作区和委派上下文决定是否可用。
+  const collaborationAvailable = !!ctx.workspaceId &&
     ctx.triggeredBy !== 'delegation'
 
   if (collaborationAvailable) {

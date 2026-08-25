@@ -93,15 +93,14 @@ import 'katex/dist/katex.min.css'
 const isQuickTaskWindow = new URLSearchParams(window.location.search).get('window') === 'quick-task'
 const isVoiceDictationIndicatorWindow = new URLSearchParams(window.location.search).get('window') === 'voice-dictation-indicator'
 const isDetachedPreviewWindow = new URLSearchParams(window.location.search).get('window') === 'detached-preview'
-const isPlanningWindow = new URLSearchParams(window.location.search).get('window') === 'planning'
 const isWorkspaceMemoryWindow = new URLSearchParams(window.location.search).get('window') === 'workspace-memory'
 const isAgentStatusHoverWindow = new URLSearchParams(window.location.search).get('window') === 'agent-status-hover'
-const isMainWindow = !isQuickTaskWindow && !isVoiceDictationIndicatorWindow && !isDetachedPreviewWindow && !isPlanningWindow && !isWorkspaceMemoryWindow && !isAgentStatusHoverWindow
+const isMainWindow = !isQuickTaskWindow && !isVoiceDictationIndicatorWindow && !isDetachedPreviewWindow && !isWorkspaceMemoryWindow && !isAgentStatusHoverWindow
 
 initializePerformanceMonitor()
 
-// 主窗口和独立规划窗口均由内部面板管理滚动，避免页面本身出现第二层滚动。
-if (isMainWindow || isPlanningWindow || isWorkspaceMemoryWindow) {
+// 主窗口与记忆窗口均由内部面板管理滚动，避免页面本身出现第二层滚动。
+if (isMainWindow || isWorkspaceMemoryWindow) {
   document.documentElement.classList.add('proma-main-window')
 }
 
@@ -1101,20 +1100,6 @@ if (isQuickTaskWindow) {
         <ThemeInitializer />
         <MarkdownFontSizeInitializer />
         <DetachedPreviewApp />
-        <Toaster position="top-right" offset={{ top: 58, right: 12 }} />
-      </React.StrictMode>
-    )
-  })
-} else if (isPlanningWindow) {
-  import('./components/planning/PlanningWindowApp').then(({ PlanningWindowApp }) => {
-    ReactDOM.createRoot(document.getElementById('root')!).render(
-      <React.StrictMode>
-        <ThemeInitializer />
-        <AgentSettingsInitializer />
-        <PlanningShortcutInitializer />
-        <AutomationInitializer />
-        <PlanningInitializer />
-        <PlanningWindowApp />
         <Toaster position="top-right" offset={{ top: 58, right: 12 }} />
       </React.StrictMode>
     )

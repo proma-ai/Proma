@@ -6,7 +6,7 @@
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { Brain, FolderOpen, Globe, MessageCircle, PanelRight, Plus, X } from 'lucide-react'
+import { Blocks, Brain, CalendarDays, FolderOpen, Globe, ListTodo, MessageCircle, PanelRight, Plus, Repeat2, ServerCog, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
@@ -18,7 +18,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { agentDiffUnseenChangesAtom, currentAgentSessionIdAtom } from '@/atoms/agent-atoms'
-import type { AgentSidePanelTab } from '@/atoms/agent-atoms'
+import type { AgentSidePanelTab, WorkspaceComponentTab } from '@/atoms/agent-atoms'
 
 export interface WorkspacePanelTab {
   id: AgentSidePanelTab
@@ -35,7 +35,7 @@ interface DiffPanelTabBarProps {
   onCloseTab: (tab: AgentSidePanelTab) => void
   onOpenBrowser: () => void
   onOpenFile: () => void
-  onOpenMemory?: () => void
+  onOpenWorkspaceComponent?: (component: WorkspaceComponentTab) => void
   onOpenChat?: () => void
   /** 仅当前右侧 Tab 需要的紧凑动作，渲染于标签列表之后，不影响内容区布局。 */
   activeTabAction?: React.ReactNode
@@ -50,7 +50,7 @@ export function DiffPanelTabBar({
   onCloseTab,
   onOpenBrowser,
   onOpenFile,
-  onOpenMemory,
+  onOpenWorkspaceComponent,
   onOpenChat,
   activeTabAction,
   onClose,
@@ -149,11 +149,34 @@ export function DiffPanelTabBar({
               <FolderOpen className="size-3.5" />
               打开文件
             </DropdownMenuItem>
-            {onOpenMemory && (
-              <DropdownMenuItem onSelect={onOpenMemory}>
-                <Brain className="size-3.5" />
-                打开项目记忆
-              </DropdownMenuItem>
+            {onOpenWorkspaceComponent && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => onOpenWorkspaceComponent('todos')}>
+                  <ListTodo className="size-3.5" />
+                  打开 Todo
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => onOpenWorkspaceComponent('calendar')}>
+                  <CalendarDays className="size-3.5" />
+                  打开日程
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => onOpenWorkspaceComponent('automations')}>
+                  <Repeat2 className="size-3.5" />
+                  打开定时任务
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => onOpenWorkspaceComponent('skills')}>
+                  <Blocks className="size-3.5" />
+                  打开 Skills
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => onOpenWorkspaceComponent('mcp')}>
+                  <ServerCog className="size-3.5" />
+                  打开 MCP
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => onOpenWorkspaceComponent('memory')}>
+                  <Brain className="size-3.5" />
+                  打开项目记忆
+                </DropdownMenuItem>
+              </>
             )}
             {onOpenChat && (
               <>

@@ -130,7 +130,6 @@ import type {
   CreateTodoInput,
   StartTodoAgentInput,
   StartTodoAgentResult,
-  TodoAgentSessionActivation,
   UpdateTodoInput,
   CreateCalendarEventInput,
   UpdateCalendarEventInput,
@@ -4999,11 +4998,6 @@ export function registerIpcHandlers(): void {
     return query
   }
 
-  ipcMain.handle(PLANNING_IPC_CHANNELS.OPEN_WINDOW, async (): Promise<void> => {
-    const { showPlanningWindow } = await import('./lib/planning-window')
-    showPlanningWindow()
-  })
-
   ipcMain.handle(PLANNING_IPC_CHANNELS.LIST_TODOS, async (_, input?: unknown): Promise<Todo[]> => listTodos(parseTodoListQuery(input)))
   ipcMain.handle(PLANNING_IPC_CHANNELS.CREATE_TODO, async (_, input: CreateTodoInput): Promise<Todo> => {
     if (!input || !isPlanningTitle(input.title)) throw new Error('Todo 标题不能为空且不能超过 500 字')
@@ -5015,8 +5009,8 @@ export function registerIpcHandlers(): void {
     return todo
   })
   // Todo 项目归属更新与 Agent 会话创建必须在一次主进程同步处理内完成，
-  // 避免多个 Planning 窗口之间在校验、更新和创建会话的间隙发生 TOCTOU。
-  ipcMain.handle(PLANNING_IPC_CHANNELS.START_TODO_AGENT, (event, input: StartTodoAgentInput): StartTodoAgentResult => {
+  // 避免项目选择、Todo 更新与会话创建之间出现状态竞争。
+  ipcMain.handle(PLANNING_IPC_CHANNELS.START_TODO_AGENT, (_, input: StartTodoAgentInput): StartTodoAgentResult => {
     if (!input || typeof input.todoId !== 'string' || !input.todoId.trim()) throw new Error('Todo id 必填')
     if (typeof input.workspaceId !== 'string' || !input.workspaceId.trim()) throw new Error('项目 id 必填')
     if (!isPlanningTimestamp(input.expectedUpdatedAt)) throw new Error('Todo expectedUpdatedAt 非法')
@@ -5049,25 +5043,6 @@ export function registerIpcHandlers(): void {
       console.error('[飞书 Session 镜像] Todo 启动会话建群失败:', error)
     })
 
-    // 独立规划窗口没有 AgentView，需由主窗口接手打开会话并消费自动启动提示。
-    try {
-      const sourceWindowKind = new URL(event.sender.getURL()).searchParams.get('window')
-      if (sourceWindowKind === 'planning') {
-        const mainWindow = BrowserWindow.getAllWindows().find((win) => {
-          if (win.isDestroyed() || win.webContents.id === event.sender.id) return false
-          return new URL(win.webContents.getURL()).searchParams.get('window') === null
-        })
-        if (mainWindow) {
-          if (mainWindow.isMinimized()) mainWindow.restore()
-          mainWindow.show()
-          mainWindow.focus()
-          const activation: TodoAgentSessionActivation = { todo, session }
-          mainWindow.webContents.send(PLANNING_IPC_CHANNELS.TODO_AGENT_SESSION_READY, activation)
-        }
-      }
-    } catch (error) {
-      console.error('[任务/日程] 转交 Todo Agent 会话到主窗口失败:', error)
-    }
     return { todo, session }
   })
   ipcMain.handle(PLANNING_IPC_CHANNELS.UPDATE_TODO, async (_, input: UpdateTodoInput): Promise<Todo | undefined> => {

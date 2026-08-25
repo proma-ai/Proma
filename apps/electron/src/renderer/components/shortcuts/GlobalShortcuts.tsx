@@ -37,6 +37,7 @@ import {
   agentAttachedFilesMapAtom,
   agentDiffPanelTabAtom,
   currentSessionSidePanelOpenAtom,
+  isWorkspaceComponentTab,
 } from '@/atoms/agent-atoms'
 import {
   chatPendingMessageAtom,
@@ -135,7 +136,7 @@ export function GlobalShortcuts(): null {
       if (
         isActiveAgentSidePanelOpen
         && activeAgentSidePanelTab
-        && (activeAgentSidePanelTab === 'memory' || activeAgentSidePanelTab.startsWith('preview:') || activeAgentSidePanelTab.startsWith('browser:') || activeAgentSidePanelTab.startsWith('exploration:') || activeAgentSidePanelTab.startsWith('delegation:'))
+        && (isWorkspaceComponentTab(activeAgentSidePanelTab) || activeAgentSidePanelTab.startsWith('preview:') || activeAgentSidePanelTab.startsWith('browser:') || activeAgentSidePanelTab.startsWith('exploration:') || activeAgentSidePanelTab.startsWith('delegation:'))
       ) {
         window.dispatchEvent(new CustomEvent(CLOSE_ACTIVE_RIGHT_WORKSPACE_TAB_EVENT, {
           detail: { sessionId: activeTab.sessionId },
@@ -169,16 +170,6 @@ export function GlobalShortcuts(): null {
   useShortcut(
     'global-search',
     useCallback(() => setSearchOpen(true), [setSearchOpen]),
-  )
-
-  // Cmd+Shift+T / Ctrl+Shift+T → 打开或聚焦独立任务/日程窗口
-  useShortcut(
-    'open-planning',
-    useCallback(() => {
-      void window.electronAPI.openPlanningWindow().catch((error) => {
-        console.error('[任务/日程] 打开独立窗口失败:', error)
-      })
-    }, []),
   )
 
   // Cmd+N → 新建对话/会话（根据当前模式）

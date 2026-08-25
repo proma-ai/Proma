@@ -132,7 +132,6 @@ import type {
   CreateTodoInput,
   StartTodoAgentInput,
   StartTodoAgentResult,
-  TodoAgentSessionActivation,
   UpdateTodoInput,
   CreateCalendarEventInput,
   UpdateCalendarEventInput,
@@ -1211,14 +1210,10 @@ export interface ElectronAPI {
   onAutomationChanged: (callback: () => void) => () => void
 
   // ===== 任务 / 日程（Planning）=====
-  /** 打开或聚焦单例独立任务/日程窗口。 */
-  openPlanningWindow: () => Promise<void>
   listTodos: (query?: TodoListQuery) => Promise<Todo[]>
   createTodo: (input: CreateTodoInput) => Promise<Todo>
   /** 在主进程原子地关联项目并创建 Todo 的 Agent 会话。 */
   startTodoAgent: (input: StartTodoAgentInput) => Promise<StartTodoAgentResult>
-  /** 独立规划窗口启动 Todo 时由主窗口接收并打开对应 Agent 会话。 */
-  onTodoAgentSessionReady: (callback: (activation: TodoAgentSessionActivation) => void) => () => void
   updateTodo: (input: UpdateTodoInput) => Promise<Todo | undefined>
   deleteTodo: (id: string) => Promise<boolean>
   listCalendarEvents: (query?: CalendarEventListQuery) => Promise<CalendarEvent[]>
@@ -2795,15 +2790,9 @@ const electronAPI: ElectronAPI = {
   },
 
   // ===== 任务 / 日程（Planning）=====
-  openPlanningWindow: () => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.OPEN_WINDOW),
   listTodos: (query?: TodoListQuery) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.LIST_TODOS, query),
   createTodo: (input: CreateTodoInput) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.CREATE_TODO, input),
   startTodoAgent: (input: StartTodoAgentInput) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.START_TODO_AGENT, input),
-  onTodoAgentSessionReady: (callback: (activation: TodoAgentSessionActivation) => void) => {
-    const listener = (_: Electron.IpcRendererEvent, activation: TodoAgentSessionActivation): void => callback(activation)
-    ipcRenderer.on(PLANNING_IPC_CHANNELS.TODO_AGENT_SESSION_READY, listener)
-    return () => { ipcRenderer.removeListener(PLANNING_IPC_CHANNELS.TODO_AGENT_SESSION_READY, listener) }
-  },
   updateTodo: (input: UpdateTodoInput) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.UPDATE_TODO, input),
   deleteTodo: (id: string) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.DELETE_TODO, id),
   listCalendarEvents: (query?: CalendarEventListQuery) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.LIST_CALENDAR_EVENTS, query),

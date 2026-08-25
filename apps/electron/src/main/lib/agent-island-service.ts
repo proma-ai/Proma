@@ -777,8 +777,6 @@ export interface AgentIslandServiceDeps {
   showAndFocusMainWindow: () => void
   /** 打开指定 Agent 会话（转发到主窗口渲染进程） */
   openAgentSession: (sessionId: string, title: string) => void
-  /** 打开独立 Planning 窗口（原生岛的日程入口）。 */
-  openPlanning?: () => void
   /** 是否允许启用灵动岛（如设置开关） */
   enabled?: () => boolean
 }
@@ -915,12 +913,6 @@ export function handleNativeAgentIslandEvent(event: NativeAgentIslandEvent): voi
       break
     case 'open-session':
       openAgentIslandSession(event.sessionId)
-      break
-    case 'open-planning':
-      // Native islands prefer the focused Planning window, while deployments
-      // without that optional surface still retain a useful main-window route.
-      if (serviceDeps.openPlanning) serviceDeps.openPlanning()
-      else serviceDeps.showAndFocusMainWindow()
       break
     case 'dismiss':
       dismissAgentIsland()

@@ -1,52 +1,28 @@
 /**
- * Proma 内置 MCP 开关设置
+ * Proma 可配置内置能力开关。
  *
- * 大部分内置 MCP 默认开启，由 builtinMcpDisabledIds 黑名单管理关闭项；
- * 少数内置 MCP（DEFAULT_DISABLED_IDS）默认关闭，由 builtinMcpEnabledIds 白名单
- * 管理用户手动开启的项。是否真正可用（如 API Key）仍由各 MCP 自己的配置判断。
+ * 这里只有需要用户配置凭据或显式启用的能力；自动化与协作属于 Pi runtime
+ * 基础工具，始终按会话上下文注入，不在此处登记或展示。
  */
 
 import { getSettings, updateSettings } from '../settings-service'
 
-/**
- * 默认关闭的内置 MCP ID。
- * 这些 MCP 需要用户额外配置（如 API Key）才有意义，默认不向 Agent 注入，
- * 需用户在能力列表中手动开启。
- */
-const DEFAULT_DISABLED_IDS = new Set<string>(['nano-banana'])
+const NANO_BANANA_ID = 'nano-banana'
 
-/** 判断某个内置 MCP 是否默认关闭（需用户手动开启） */
+/** Nano Banana 默认关闭，配置好 Gemini 后由用户显式启用。 */
 export function isBuiltinMcpDefaultDisabled(id: string): boolean {
-  return DEFAULT_DISABLED_IDS.has(id)
+  return id === NANO_BANANA_ID
 }
 
 export function isBuiltinMcpUserEnabled(id: string): boolean {
-  if (DEFAULT_DISABLED_IDS.has(id)) {
-    // 默认关闭：仅当用户显式加入白名单时才启用
-    return (getSettings().builtinMcpEnabledIds ?? []).includes(id)
-  }
-  // 默认开启:仅当用户显式加入黑名单时才关闭
-  return !(getSettings().builtinMcpDisabledIds ?? []).includes(id)
+  return id === NANO_BANANA_ID && (getSettings().builtinMcpEnabledIds ?? []).includes(id)
 }
 
 export function setBuiltinMcpUserEnabled(id: string, enabled: boolean): void {
-  if (DEFAULT_DISABLED_IDS.has(id)) {
-    const enabledIds = new Set(getSettings().builtinMcpEnabledIds ?? [])
-    if (enabled) {
-      enabledIds.add(id)
-    } else {
-      enabledIds.delete(id)
-    }
-    updateSettings({ builtinMcpEnabledIds: Array.from(enabledIds).sort() })
-    return
-  }
+  if (id !== NANO_BANANA_ID) throw new Error(`不支持配置内置能力：${id}`)
 
-  const disabledIds = new Set(getSettings().builtinMcpDisabledIds ?? [])
-  if (enabled) {
-    disabledIds.delete(id)
-  } else {
-    disabledIds.add(id)
-  }
-
-  updateSettings({ builtinMcpDisabledIds: Array.from(disabledIds).sort() })
+  const enabledIds = new Set(getSettings().builtinMcpEnabledIds ?? [])
+  if (enabled) enabledIds.add(id)
+  else enabledIds.delete(id)
+  updateSettings({ builtinMcpEnabledIds: Array.from(enabledIds).sort() })
 }

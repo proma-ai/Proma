@@ -7,7 +7,7 @@
 
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
-import { X, ExternalLink, ChevronRight, MoreHorizontal, FolderSearch, Pencil, FolderInput, GitBranch, GitMerge, MessageSquarePlus, FileDiff, FileText, FolderOpen, Globe, MessageCircle, Brain, Split } from 'lucide-react'
+import { X, ExternalLink, ChevronRight, MoreHorizontal, FolderSearch, Pencil, FolderInput, GitBranch, GitMerge, MessageSquarePlus, FileDiff, FileText, FolderOpen, Globe, MessageCircle, Brain, Split, Blocks, CalendarDays, ListTodo, Clock, ServerCog } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -40,7 +40,8 @@ import {
   agentDiffRefreshVersionAtom,
   agentNonGitFileChangesAtom,
   agentFileChangesCurrentRunAtom,
-  agentMemoryPanelOpenAtomFamily,
+  workspaceComponentTabsAtomFamily,
+  isWorkspaceComponentTab,
   agentSessionStreamingStateAtomFamily,
   fileBrowserAutoRevealAtom,
   agentSelectedWorktreeAtom,
@@ -62,9 +63,14 @@ import {
   getPreviewIdFromSidePanelTab,
   getPreviewSidePanelTab,
 } from '@/atoms/agent-atoms'
-import type { AgentSidePanelTab, AgentFileSourceFilter, AgentExplorationBranchTab } from '@/atoms/agent-atoms'
+import type { AgentSidePanelTab, AgentFileSourceFilter, AgentExplorationBranchTab, WorkspaceComponentTab } from '@/atoms/agent-atoms'
 import { WorkspaceMemoryChangeDock } from '@/components/agent-skills/WorkspaceMemoryChangeDock'
-import { workspaceMemoryChangesAtom, workspaceMemoryEditingStateAtomFamily } from '@/atoms/memory-change-atoms'
+import { WorkspaceMemoryTab } from '@/components/agent-skills/WorkspaceMemoryTab'
+import { AgentSkillsView } from '@/components/agent-skills/AgentSkillsView'
+import { PlanningView } from '@/components/planning/PlanningView'
+import { AutomationFormView } from '@/components/automation/AutomationFormView'
+import { automationFormAtom } from '@/atoms/automation-atoms'
+import { memoryFileNavigationAtom, workspaceMemoryChangesAtom } from '@/atoms/memory-change-atoms'
 import { agentSideChatMapAtom } from '@/atoms/chat-atoms'
 import { interfaceVariantAtom } from '@/atoms/theme'
 import {
@@ -619,11 +625,12 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   const activeExplorationBranch = activeExplorationSessionId
     ? sideTemporaryAgents.find((branch) => branch.sessionId === activeExplorationSessionId) ?? null
     : null
-  const [memoryTabOpen, setMemoryTabOpen] = useAtom(agentMemoryPanelOpenAtomFamily(sessionId))
+  // Todo / 日程 / 能力 / 记忆是工作区组件，而不是会话附件；同一项目下切换会话仍保留打开状态。
+  const [workspaceComponentTabs, setWorkspaceComponentTabs] = useAtom(workspaceComponentTabsAtomFamily(currentWorkspaceId ?? ''))
+  const automationFormOpen = useAtomValue(automationFormAtom).open
   const isAgentRunning = useAtomValue(agentSessionStreamingStateAtomFamily(sessionId))?.running === true
   const memoryChangesMap = useAtomValue(workspaceMemoryChangesAtom)
-  const memoryEditingState = useAtomValue(workspaceMemoryEditingStateAtomFamily(sessionId))
-  const setMemoryEditingState = useSetAtom(workspaceMemoryEditingStateAtomFamily(sessionId))
+  const setMemoryNavigationRequest = useSetAtom(memoryFileNavigationAtom)
   const latestMemoryChange = workspaceSlug ? memoryChangesMap.get(workspaceSlug)?.[0] : undefined
   const lastActivatedMemoryChangeRef = React.useRef<string | null>(null)
   const effectiveActiveTab: AgentSidePanelTab = activeTab === 'chat' && !sideChatConversationId
@@ -631,7 +638,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     // `temporary-agent` 是旧的单分支内存状态；新状态使用 exploration:<sessionId>。
     : activeTab === 'temporary-agent' || (activeExplorationSessionId !== null && !activeExplorationBranch) || (activeDelegationSessionId !== null && !activeDelegationSession)
       ? 'files'
-      : activeTab === 'memory' && (!workspaceSlug || !memoryTabOpen)
+      : isWorkspaceComponentTab(activeTab) && (!workspaceSlug || !workspaceComponentTabs.includes(activeTab))
         ? 'files'
         : activeTab
 
@@ -643,10 +650,11 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     const changeId = `${latestMemoryChange.relativePath}:${latestMemoryChange.changedAt}`
     if (lastActivatedMemoryChangeRef.current === changeId) return
     lastActivatedMemoryChangeRef.current = changeId
-    setMemoryTabOpen(true)
+    setWorkspaceComponentTabs((previous) => previous.includes('memory') ? previous : [...previous, 'memory'])
+    setMemoryNavigationRequest({ workspaceSlug: workspaceSlug!, relativePath: latestMemoryChange.relativePath, mode: 'preview' })
     setIsOpen(true)
     onTabChange('memory')
-  }, [isAgentRunning, latestMemoryChange, onTabChange, setIsOpen, setMemoryTabOpen])
+  }, [isAgentRunning, latestMemoryChange, onTabChange, setIsOpen, setMemoryNavigationRequest, setWorkspaceComponentTabs, workspaceSlug])
 
   const handleClosePreviewTab = React.useCallback((previewId: string) => {
     const remaining = previewFiles.filter((file) => getPreviewFileId(file) !== previewId)
@@ -808,7 +816,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   }, [publishBrowserState, sessionId])
 
   const handleWorkspaceTabChange = React.useCallback((tab: AgentSidePanelTab) => {
-    if (effectiveActiveTab === 'memory' && tab !== 'memory' && memoryEditingState.dirty && !window.confirm('项目记忆有未保存修改。确定丢弃并离开吗？')) return
+    // 记忆编辑器采用防抖自动保存，并在组件卸载时 flush；切换组件不丢草稿。
     const previewId = getPreviewIdFromSidePanelTab(tab)
     if (previewId) {
       const file = previewFiles.find((item) => getPreviewFileId(item) === previewId)
@@ -825,7 +833,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     if (!browserTabId) return
     desiredBrowserTabIdRef.current = browserTabId
     flushBrowserTabSelection()
-  }, [effectiveActiveTab, flushBrowserTabSelection, memoryEditingState.dirty, onTabChange, previewFiles, sessionId, setPreviewFileMap])
+  }, [flushBrowserTabSelection, onTabChange, previewFiles, sessionId, setPreviewFileMap])
 
   const handleOpenBrowserTab = React.useCallback(async () => {
     try {
@@ -887,7 +895,17 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   const workspaceTabs = React.useMemo<WorkspacePanelTab[]>(() => [
     { id: 'files', label: '文件', icon: <FolderOpen className="size-3.5" /> },
     { id: 'changes', label: '改动', icon: <FileDiff className="size-3.5" /> },
-    ...(memoryTabOpen && workspaceSlug ? [{ id: 'memory' as const, label: '项目记忆', icon: <Brain className="size-3.5" />, closable: true }] : []),
+    ...workspaceComponentTabs.map((component) => {
+      const meta: Record<WorkspaceComponentTab, { label: string; icon: React.ReactNode }> = {
+        todos: { label: 'Todo', icon: <ListTodo className="size-3.5" /> },
+        calendar: { label: '日程', icon: <CalendarDays className="size-3.5" /> },
+        automations: { label: '定时任务', icon: <Clock className="size-3.5" /> },
+        skills: { label: 'Skills', icon: <Blocks className="size-3.5" /> },
+        mcp: { label: 'MCP', icon: <ServerCog className="size-3.5" /> },
+        memory: { label: '项目记忆', icon: <Brain className="size-3.5" /> },
+      }
+      return { id: component, ...meta[component], closable: true }
+    }),
     ...previewFiles.map((file) => ({
       id: getPreviewSidePanelTab(getPreviewFileId(file)),
       label: file.filePath.split(/[\\/]/).pop() || '预览',
@@ -920,14 +938,12 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       closable: tab.tabId !== browserState.agentTabId,
       activity: showBrowserActivity && activeBrowserTabId !== tab.tabId && browserState.activeTabId === tab.tabId,
     })) ?? []),
-  ], [activeBrowserTabId, browserState, memoryTabOpen, previewFiles, sessions, sessionId, showBrowserActivity, sideChatConversationId, sideDelegationSessionIds, sideTemporaryAgents, workspaceSlug])
+  ], [activeBrowserTabId, browserState, previewFiles, sessions, sessionId, showBrowserActivity, sideChatConversationId, sideDelegationSessionIds, sideTemporaryAgents, workspaceComponentTabs])
 
   const handleCloseWorkspaceTab = React.useCallback((tab: AgentSidePanelTab) => {
-    if (tab === 'memory') {
-      if (memoryEditingState.dirty && !window.confirm('项目记忆有未保存修改。确定丢弃并关闭吗？')) return
-      setMemoryEditingState({ editingPath: null, dirty: false, remoteChanged: false })
-      setMemoryTabOpen(false)
-      if (activeTab === 'memory') onTabChange('files')
+    if (isWorkspaceComponentTab(tab)) {
+      setWorkspaceComponentTabs((previous) => previous.filter((component) => component !== tab))
+      if (activeTab === tab) onTabChange('files')
       return
     }
     const previewId = getPreviewIdFromSidePanelTab(tab)
@@ -939,7 +955,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     if (delegationSessionId) { handleCloseDelegationTab(delegationSessionId); return }
     const browserTabId = getBrowserTabIdFromSidePanelTab(tab)
     if (browserTabId && browserTabId !== browserState?.agentTabId) void handleCloseBrowserTab(browserTabId)
-  }, [activeTab, browserState?.agentTabId, handleCloseBrowserTab, handleCloseChatTab, handleCloseDelegationTab, handleCloseExplorationTab, handleClosePreviewTab, memoryEditingState.dirty, onTabChange, setMemoryEditingState, setMemoryTabOpen])
+  }, [activeTab, browserState?.agentTabId, handleCloseBrowserTab, handleCloseChatTab, handleCloseDelegationTab, handleCloseExplorationTab, handleClosePreviewTab, onTabChange, setWorkspaceComponentTabs])
 
   React.useEffect(() => {
     const handleCloseActiveWorkspaceTab = (event: Event) => {
@@ -976,9 +992,9 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
             onCloseTab={handleCloseWorkspaceTab}
             onOpenBrowser={() => void handleOpenBrowserTab()}
             onOpenFile={() => handleWorkspaceTabChange('files')}
-            onOpenMemory={() => {
-              setMemoryTabOpen(true)
-              onTabChange('memory')
+            onOpenWorkspaceComponent={(component) => {
+              setWorkspaceComponentTabs((previous) => previous.includes(component) ? previous : [...previous, component])
+              onTabChange(component)
             }}
             activeTabAction={activeExplorationBranch ? (
               <ExplorationBringBackAction parentSessionId={sessionId} branch={activeExplorationBranch} sessions={sessions} />
@@ -1013,10 +1029,20 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
             <SideAgentSessionContent contentKey={`delegation:${activeDelegationSession.id}`}>
               <AgentView sessionId={activeDelegationSession.id} embedded />
             </SideAgentSessionContent>
+          ) : effectiveActiveTab === 'todos' ? (
+            <PlanningView embedded componentTab="todos" />
+          ) : effectiveActiveTab === 'calendar' ? (
+            <PlanningView embedded componentTab="calendar" />
+          ) : effectiveActiveTab === 'automations' ? (
+            automationFormOpen ? <AutomationFormView embedded /> : <PlanningView embedded componentTab="automations" />
+          ) : effectiveActiveTab === 'skills' ? (
+            <AgentSkillsView embedded componentTab="skills" workspaceId={currentWorkspaceId ?? undefined} />
+          ) : effectiveActiveTab === 'mcp' ? (
+            <AgentSkillsView embedded componentTab="mcp" workspaceId={currentWorkspaceId ?? undefined} />
           ) : effectiveActiveTab === 'memory' ? (
             workspaceSlug ? (
-              <div className="min-h-0 flex-1 overflow-auto p-2">
-                <WorkspaceMemoryChangeDock key={sessionId} workspaceSlug={workspaceSlug} sessionId={sessionId} className="flex h-full min-h-0 flex-col bg-content-area p-3" />
+              <div className="min-h-0 flex-1 overflow-hidden p-2">
+                <WorkspaceMemoryTab workspaceSlug={workspaceSlug} embedded />
               </div>
             ) : (
               <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">等待项目初始化...</div>

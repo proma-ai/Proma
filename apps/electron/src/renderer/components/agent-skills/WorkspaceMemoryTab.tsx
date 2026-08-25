@@ -1,12 +1,13 @@
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { toast } from 'sonner'
-import { AlertTriangle, ChevronDown, ChevronRight, Code2, Eye, FileText, FolderOpen, Loader2, RefreshCw, Save, Sparkles } from 'lucide-react'
+import { AlertTriangle, Brain, ChevronDown, ChevronRight, Code2, Eye, FileText, FolderOpen, Loader2, RefreshCw, Save, Sparkles } from 'lucide-react'
 import type { SkillFileNode, WorkspaceMemorySummary } from '@proma/shared'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { SettingsCard } from '@/components/settings/primitives'
 import { DefaultAppOpenButton } from '@/components/diff/DefaultAppOpenButton'
+import { AgentActionHint } from '@/components/agent/AgentActionHint'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { MessageResponse } from '@/components/ai-elements/message'
 import { agentPendingPromptAtom } from '@/atoms/agent-atoms'
@@ -26,7 +27,9 @@ type SelectedMemoryFile =
 
 interface WorkspaceMemoryTabProps {
   workspaceSlug: string
-  search: string
+  /** 能力中心传入的统一搜索词；嵌入组件未传时提供自己的内容搜索。 */
+  search?: string
+  embedded?: boolean
 }
 
 function formatBytes(bytes: number): string {
@@ -51,15 +54,16 @@ function dirnameOf(absolutePath: string): string {
   return idx < 0 ? absolutePath : absolutePath.slice(0, idx)
 }
 
-function filterNodes(nodes: SkillFileNode[], query: string): SkillFileNode[] {
+function filterNodes(nodes: SkillFileNode[], query: string, contentMatchPaths = new Set<string>()): SkillFileNode[] {
   const q = query.trim().toLowerCase()
   if (!q) return nodes
   const result: SkillFileNode[] = []
   for (const node of nodes) {
-    const children = node.children ? filterNodes(node.children, query) : undefined
+    const children = node.children ? filterNodes(node.children, query, contentMatchPaths) : undefined
     const selfMatch =
       node.name.toLowerCase().includes(q) ||
-      node.relativePath.toLowerCase().includes(q)
+      node.relativePath.toLowerCase().includes(q) ||
+      contentMatchPaths.has(node.relativePath)
     if (selfMatch || (children && children.length > 0)) {
       result.push({ ...node, children })
     }
@@ -67,7 +71,7 @@ function filterNodes(nodes: SkillFileNode[], query: string): SkillFileNode[] {
   return result
 }
 
-export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTabProps): React.ReactElement {
+export function WorkspaceMemoryTab({ workspaceSlug, search, embedded = false }: WorkspaceMemoryTabProps): React.ReactElement {
   const { createAgent } = useCreateSession()
   const setPendingPrompt = useSetAtom(agentPendingPromptAtom)
   const [memoryNavigationRequest, setMemoryNavigationRequest] = useAtom(memoryFileNavigationAtom)
@@ -86,6 +90,9 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
   const [bootstrapping, setBootstrapping] = React.useState(false)
   const [scanningHistory, setScanningHistory] = React.useState(false)
   const [historyRange, setHistoryRange] = React.useState<MemoryHistoryRange>('1m')
+  const [contentMatches, setContentMatches] = React.useState<Map<string, string>>(new Map())
+  // 右侧项目记忆 Tab 不提供搜索；全屏能力中心仍复用其顶部搜索框。
+  const effectiveSearch = embedded ? '' : (search ?? '')
 
   // 自动保存：用 ref 持有最新的编辑状态，供防抖定时器与"切换文件前 flush"复用，
   // 避免把 selected/editText 塞进一堆回调的依赖数组里。
@@ -359,9 +366,43 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
     await startGuidedSession(buildWorkspaceSessionEvidencePrompt(historyRange), 'history')
   }
 
+  // 文件名之外也可按正文内容检索。只在用户主动搜索时读取文本文件，做 180ms 防抖、
+  // 忽略大文件并限制候选数，避免右侧面板的每次输入触发大量 IPC 或重渲染。
+  React.useEffect(() => {
+    const query = effectiveSearch.trim().toLowerCase()
+    if (!query) {
+      setContentMatches(new Map())
+      return
+    }
+    const candidates: SkillFileNode[] = []
+    const collect = (nodes: SkillFileNode[]): void => {
+      for (const node of nodes) {
+        if (node.type === 'directory') collect(node.children ?? [])
+        else if (node.isText !== false && (node.size ?? 0) <= 512 * 1024) candidates.push(node)
+      }
+    }
+    collect(autoFiles)
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      void Promise.all(candidates.slice(0, 60).map(async (node) => {
+        try {
+          const file = await window.electronAPI.readWorkspaceAutoMemoryFile(workspaceSlug, node.relativePath)
+          const line = (file.content ?? '').split(/\r?\n/).find((item) => item.toLowerCase().includes(query))
+          return line ? [node.relativePath, line.trim().slice(0, 160)] as const : null
+        } catch {
+          return null
+        }
+      })).then((results) => {
+        if (cancelled) return
+        setContentMatches(new Map(results.filter((result): result is readonly [string, string] => result !== null)))
+      })
+    }, 180)
+    return () => { cancelled = true; window.clearTimeout(timer) }
+  }, [autoFiles, effectiveSearch, workspaceSlug])
+
   const visibleAutoFiles = React.useMemo(
-    () => filterNodes(autoFiles, search),
-    [autoFiles, search],
+    () => filterNodes(autoFiles, effectiveSearch, new Set(contentMatches.keys())),
+    [autoFiles, contentMatches, effectiveSearch],
   )
   const hasProfile = autoFiles.some((node) => node.relativePath === 'user-profile.md')
   const migrationIssues = [
@@ -378,8 +419,18 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
   }
 
   return (
-    <div className="flex flex-col gap-5">
-      <SettingsCard divided={false}>
+    <div className={cn('flex flex-col gap-5', embedded && 'h-full min-h-0 gap-3')}>
+      {embedded && (
+        <div className="flex shrink-0 items-center gap-2 rounded-xl bg-muted/45 px-3 py-2">
+          <Brain className="size-4 shrink-0 text-foreground/65" />
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-semibold text-foreground">项目记忆</div>
+            <div className="text-[11px] text-muted-foreground">{summary.autoMemory.fileCount} 个主题文件 · 可搜索正文并直接编辑</div>
+          </div>
+        </div>
+      )}
+      {embedded && <AgentActionHint action="查找、补充或整理项目记忆" />}
+      {!embedded && <SettingsCard divided={false}>
         <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <div className="text-sm font-medium text-foreground">建立项目地图与协作画像</div>
@@ -392,9 +443,9 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
             {bootstrapping ? '创建中...' : '同意并开始建立'}
           </Button>
         </div>
-      </SettingsCard>
+      </SettingsCard>}
 
-      <SettingsCard divided={false}>
+      {!embedded && <SettingsCard divided={false}>
         <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <div className="text-sm font-medium text-foreground">授权会话补证据</div>
@@ -419,9 +470,9 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
             </Button>
           </div>
         </div>
-      </SettingsCard>
+      </SettingsCard>}
 
-      <div className="grid min-h-[520px] gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
+      <div className={cn('grid min-h-[520px] gap-4 lg:grid-cols-[280px_minmax(0,1fr)]', embedded && 'min-h-0 flex-1 grid-cols-[180px_minmax(0,1fr)] gap-3')}>
         <SettingsCard divided={false} className="min-h-0 overflow-hidden">
           <div className="flex h-full min-h-0 flex-col">
             <div className="flex items-center justify-between border-b border-border/50 px-3 py-2">
@@ -467,6 +518,7 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
                       level={0}
                       selectedPath={selected?.kind === 'auto' ? selected.relativePath : null}
                       expanded={expanded}
+                      contentMatches={contentMatches}
                       onToggle={(path) => {
                         setExpanded((prev) => {
                           const next = new Set(prev)
@@ -626,6 +678,7 @@ function MemoryTreeNode({
   level,
   selectedPath,
   expanded,
+  contentMatches,
   onToggle,
   onOpen,
 }: {
@@ -633,12 +686,14 @@ function MemoryTreeNode({
   level: number
   selectedPath: string | null
   expanded: Set<string>
+  contentMatches: Map<string, string>
   onToggle: (path: string) => void
   onOpen: (path: string) => void
 }): React.ReactElement {
   const isDirectory = node.type === 'directory'
   const isExpanded = expanded.has(node.relativePath)
   const isActive = selectedPath === node.relativePath
+  const contentExcerpt = contentMatches.get(node.relativePath)
   const paddingLeft = 8 + level * 14
 
   return (
@@ -657,7 +712,10 @@ function MemoryTreeNode({
         ) : (
           <FileText size={13} className="shrink-0 text-muted-foreground" />
         )}
-        <span className="min-w-0 flex-1 truncate">{node.name}</span>
+        <span className="min-w-0 flex-1 overflow-hidden">
+          <span className="block truncate">{node.name}</span>
+          {contentExcerpt && <span className="block truncate text-[10px] text-muted-foreground" title={contentExcerpt}>{contentExcerpt}</span>}
+        </span>
         {!isDirectory && node.size != null && (
           <span className="shrink-0 text-[10px] text-muted-foreground/75">{formatBytes(node.size)}</span>
         )}
@@ -671,6 +729,7 @@ function MemoryTreeNode({
               level={level + 1}
               selectedPath={selectedPath}
               expanded={expanded}
+              contentMatches={contentMatches}
               onToggle={onToggle}
               onOpen={onOpen}
             />

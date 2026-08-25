@@ -350,9 +350,7 @@ export interface AppSettings {
   visionRelay?: VisionRelaySettings
   /** 已确认的受管浏览器风险告知版本；低于当前版本时首次使用会再次要求确认。 */
   browserRiskDisclaimerVersion?: number
-  /** 用户手动关闭的 Proma 内置 MCP ID 列表（针对默认开启的内置 MCP） */
-  builtinMcpDisabledIds?: string[]
-  /** 用户手动开启的 Proma 内置 MCP ID 列表（针对默认关闭的内置 MCP，如 nano-banana） */
+  /** 用户手动开启的 Proma 内置能力 ID 列表（默认关闭的 Nano Banana）。 */
   builtinMcpEnabledIds?: string[]
   /** 启动时自动清理临时文件（proma-preview、proma-installers），默认 true */
   autoCleanupTempOnStart?: boolean
@@ -368,8 +366,6 @@ export interface AppSettings {
   agentIsland?: AgentIslandSettings
   /** 主窗口状态（大小、位置、是否最大化） */
   mainWindowState?: MainWindowState
-  /** 独立任务/日程窗口状态（大小、位置、是否最大化） */
-  planningWindowState?: MainWindowState
 }
 
 /** 当前发布的 Onboarding 内容版本。提升该值可让所有用户重新完成新版引导。 */

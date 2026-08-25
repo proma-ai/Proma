@@ -39,21 +39,9 @@ function getConfigInfo(server: BuiltinMcpServerSummary): BuiltinMcpConfigInfo {
       actionLabel: '配置生图',
     }
   }
-  if (server.id === 'collaboration') {
-    return {
-      source: '当前 Agent 项目',
-      description: '协作子 Agent 使用当前项目、会话和权限上下文，无需填写额外凭据。',
-    }
-  }
-  if (server.id === 'automation') {
-    return {
-      source: 'Proma 本地自动任务',
-      description: '自动任务 MCP 直接使用 Proma 本地任务服务，无需填写额外凭据。',
-    }
-  }
   return {
     source: 'Proma 运行时',
-    description: '该内置 MCP 由 Proma 运行时托管。',
+    description: '该内置能力由 Proma 运行时托管。',
   }
 }
 

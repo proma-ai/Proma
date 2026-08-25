@@ -7,6 +7,8 @@ import {
   applyAgentEvent,
   clearAgentStreamError,
   isRetryEventForCurrentStream,
+  isWorkspaceComponentTab,
+  workspaceComponentTabsAtomFamily,
   type AgentStreamState,
 } from './agent-atoms'
 
@@ -21,6 +23,25 @@ function createStreamState(overrides: Partial<AgentStreamState> = {}): AgentStre
     ...overrides,
   }
 }
+
+describe('右侧工作区组件', () => {
+  test('工作区组件状态跨会话使用同一 workspace key，且不混入临时右栏状态', () => {
+    const store = createStore()
+    const atom = workspaceComponentTabsAtomFamily('workspace-a')
+
+    store.set(atom, ['todos', 'memory'])
+
+    expect(store.get(atom)).toEqual(['todos', 'memory'])
+    expect(store.get(workspaceComponentTabsAtomFamily('workspace-b'))).toEqual([])
+  })
+
+  test('只接受已注册的项目级组件类型', () => {
+    expect(isWorkspaceComponentTab('todos')).toBe(true)
+    expect(isWorkspaceComponentTab('memory')).toBe(true)
+    expect(isWorkspaceComponentTab('browser:tab-1')).toBe(false)
+    expect(isWorkspaceComponentTab('files')).toBe(false)
+  })
+})
 
 describe('Agent 上下文压缩状态', () => {
   test('given Pi 手动压缩提供预估 token when 压缩完成 then 显示预估值并清除旧明细', () => {

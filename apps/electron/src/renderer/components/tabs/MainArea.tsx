@@ -190,7 +190,7 @@ export function MainArea(): React.ReactElement {
           ) : (
             <>
               {showCenterTabBar && <TabBar />}
-              {automationFormOpen ? (
+              {automationFormOpen && activeView !== 'conversations' ? (
                 <AutomationFormView />
               ) : tabs.length === 0 ? (
                 <WelcomeView />

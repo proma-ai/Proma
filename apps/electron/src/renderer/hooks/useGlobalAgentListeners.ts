@@ -21,7 +21,6 @@ import {
   allPendingAskUserRequestsAtom,
   allPendingExitPlanRequestsAtom,
   agentPromptSuggestionsAtom,
-  agentPendingPromptAtom,
   recentlyModifiedPathsAtom,
   RECENTLY_MODIFIED_TTL_MS,
   applyAgentEvent,
@@ -51,6 +50,7 @@ import {
   agentNonGitFileChangesAtom,
   agentFileChangesCurrentRunAtom,
   agentSidePanelOpenAtomFamily,
+  openWorkspaceComponentAtom,
   agentSideDelegationMapAtom,
   getDelegationSidePanelTab,
   askUserDraftsAtom,
@@ -79,11 +79,11 @@ import {
   notifyAgentCompletion,
 } from '@/lib/agent-completion-presence'
 import { getPlanModeChangeFromToolName, updatePlanModeSessionSet } from '@/lib/agent-plan-mode'
-import { buildTodoAgentPrompt } from '@/lib/todo-agent-prompt'
 import { detectIsWindows } from '@/lib/platform'
 import { getSessionFileChangeKind, getOwnedSessionWatcherPaths, upsertSessionFileChange } from '@/lib/session-file-changes'
 import { removeQueuedMessage, createQueuedAgentStreamState } from '@/lib/agent-message-queue'
 import { createAgentStreamEventBatcher } from '@/lib/agent-stream-event-batcher'
+import { getChangedWorkspaceComponentFromSdkMessage } from '@/lib/agent-component-activation'
 
 /** 触发右侧文件浏览器自动定位的写入类工具集合 */
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Update'])
@@ -1062,6 +1062,21 @@ export function useGlobalAgentListeners(): void {
 
         if (payload.kind === 'sdk_message') {
           const msgRecord = payload.message as Record<string, unknown>
+          // 仅在 Agent 发出变更工具调用时展示对应项目组件；同项目的当前会话可承接
+          // 后台/子会话变更，其他项目绝不抢走用户正在查看的工作区。
+          if (!msgRecord.isReplay) {
+            const changedComponent = getChangedWorkspaceComponentFromSdkMessage(payload.message)
+            if (changedComponent) {
+              const activeSessionId = store.get(currentAgentSessionIdAtom)
+              const sessions = store.get(agentSessionsAtom)
+              const activeWorkspaceId = sessions.find((session) => session.id === activeSessionId)?.workspaceId
+              const sourceWorkspaceId = sessions.find((session) => session.id === sessionId)?.workspaceId
+              if (activeSessionId === sessionId || (activeWorkspaceId && activeWorkspaceId === sourceWorkspaceId)) {
+                store.set(openWorkspaceComponentAtom, changedComponent)
+              }
+            }
+          }
+
           // prompt_suggestion 不是对话转录消息，不能进入 liveMessages（会被错误渲染到最后一条助手消息中）
           // 它通过下方 legacyEvents 分支写入 agentPromptSuggestionsAtom，显示在输入框上方
           if (msgRecord.type === 'prompt_suggestion') {
@@ -1670,28 +1685,7 @@ export function useGlobalAgentListeners(): void {
       }
     )
 
-    // ===== 4. 独立规划窗口 → 主窗口 Todo Agent 接力 =====
-    const cleanupTodoAgentSessionReady = window.electronAPI.onTodoAgentSessionReady(({ todo, session }) => {
-      unstable_batchedUpdates(() => {
-        store.set(agentSessionsAtom, (prev) => upsertAgentSession(prev, session))
-        const result = openTab(store.get(tabsAtom), { type: 'agent', sessionId: session.id, title: session.title })
-        store.set(tabsAtom, result.tabs)
-        store.set(activeTabIdAtom, result.activeTabId)
-        store.set(appModeAtom, 'agent')
-        store.set(currentAgentSessionIdAtom, session.id)
-        if (session.workspaceId) {
-          store.set(currentAgentWorkspaceIdAtom, session.workspaceId)
-          void window.electronAPI.updateSettings({ agentWorkspaceId: session.workspaceId }).catch(console.error)
-        }
-        store.set(agentPendingPromptAtom, {
-          sessionId: session.id,
-          message: buildTodoAgentPrompt(todo.id, true),
-          mentionedTodoIds: [todo.id],
-        })
-      })
-    })
-
-    // ===== 5. 标题更新 =====
+    // ===== 4. 标题更新 =====
     const cleanupTitleUpdated = window.electronAPI.onAgentTitleUpdated(({ sessionId, title }) => {
       // 先使用事件 payload 立即同步标签页，避免依赖会话列表旧快照比较。
       store.set(tabsAtom, (tabs) => updateTabTitle(tabs, sessionId, title))
@@ -1713,7 +1707,7 @@ export function useGlobalAgentListeners(): void {
         .catch(console.error)
     })
 
-    // ===== 6. Windows Agent Island 提示音委托 =====
+    // ===== 5. Windows Agent Island 提示音委托 =====
     const cleanupPlaySound = window.electronAPI.onWindowsAgentIslandPlaySound(({ type }) => {
       const sounds = store.get(notificationSoundsAtom)
       void playNotificationSoundForType(type, sounds)
@@ -1828,7 +1822,6 @@ export function useGlobalAgentListeners(): void {
       unsubscribeVisibleSession()
       cleanupComplete()
       cleanupError()
-      cleanupTodoAgentSessionReady()
       cleanupTitleUpdated()
       cleanupPlaySound()
       cleanupWatchedFileChanges()
