@@ -606,7 +606,7 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
               </MessageAction>
             )}
             {onFork && lastUuid && (
-              <MessageAction tooltip="按当前模型从此处分叉" onClick={() => onFork(lastUuid)}>
+              <MessageAction tooltip="从此处探索（保留主线，结论可带回）" onClick={() => onFork(lastUuid)}>
                 <Split className="size-3.5" />
               </MessageAction>
             )}

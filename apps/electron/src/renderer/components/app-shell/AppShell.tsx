@@ -28,16 +28,23 @@ import { cn } from '@/lib/utils'
 import { Toaster } from '@/components/ui/sonner'
 
 const MIN_RIGHT_PANEL_WIDTH = 360
+// 探索/委派 Agent 需要同时容纳消息正文、工具活动和输入区；略宽于普通文件栏，
+// 但显著小于浏览器/预览的半屏宽视图。
+const MIN_AGENT_SESSION_PANEL_WIDTH = 480
 const RIGHT_PANEL_MAX_VIEWPORT_RATIO = 3 / 5
 const WIDE_RIGHT_PANEL_DEFAULT_VIEWPORT_RATIO = 1 / 2
 
-function getRightPanelMaxWidth(viewportWidth: number): number {
-  return Math.max(MIN_RIGHT_PANEL_WIDTH, Math.floor(viewportWidth * RIGHT_PANEL_MAX_VIEWPORT_RATIO))
+function getRightPanelMinWidth(isAgentSessionTab: boolean): number {
+  return isAgentSessionTab ? MIN_AGENT_SESSION_PANEL_WIDTH : MIN_RIGHT_PANEL_WIDTH
 }
 
-function clampRightPanelWidth(width: number, viewportWidth: number): number {
+function getRightPanelMaxWidth(viewportWidth: number, minimumWidth: number): number {
+  return Math.max(minimumWidth, Math.floor(viewportWidth * RIGHT_PANEL_MAX_VIEWPORT_RATIO))
+}
+
+function clampRightPanelWidth(width: number, viewportWidth: number, minimumWidth = MIN_RIGHT_PANEL_WIDTH): number {
   // 工作区可占整个应用的 3/5；避免窄窗口下最小宽度反而超过可用界面。
-  return Math.max(MIN_RIGHT_PANEL_WIDTH, Math.min(getRightPanelMaxWidth(viewportWidth), width))
+  return Math.max(minimumWidth, Math.min(getRightPanelMaxWidth(viewportWidth, minimumWidth), width))
 }
 
 const MIN_LEFT_SIDEBAR_WIDTH = 240
@@ -129,7 +136,11 @@ export function AppShell(): React.ReactElement {
   const rightPanelDragCleanup = React.useRef<(() => void) | null>(null)
   const [draggedRightPanelWidth, setDraggedRightPanelWidth] = React.useState<number | null>(null)
   currentSessionIdRef.current = currentSessionId
-  const clampedRightPanelWidth = clampRightPanelWidth(rightPanelLayout.width, viewportWidth)
+  const isAgentSessionRightTab = Boolean(
+    activeRightPanelTab?.startsWith('exploration:') || activeRightPanelTab?.startsWith('delegation:'),
+  )
+  const rightPanelMinimumWidth = getRightPanelMinWidth(isAgentSessionRightTab)
+  const clampedRightPanelWidth = clampRightPanelWidth(rightPanelLayout.width, viewportWidth, rightPanelMinimumWidth)
   const isWideRightWorkspace = Boolean(
     activeRightPanelTab?.startsWith('preview:') || activeRightPanelTab?.startsWith('browser:'),
   )
@@ -137,7 +148,10 @@ export function AppShell(): React.ReactElement {
   const effectiveWidePanelWidth = rightPanelLayout.widePanelWidthOverride === null
     ? clampRightPanelWidth(Math.floor(viewportWidth * WIDE_RIGHT_PANEL_DEFAULT_VIEWPORT_RATIO), viewportWidth)
     : clampRightPanelWidth(rightPanelLayout.widePanelWidthOverride, viewportWidth)
-  const persistedRightPanelWidth = rightPanelLayout.hasOpenedWideWorkspace ? effectiveWidePanelWidth : clampedRightPanelWidth
+  // 浏览器/预览打开过的会话可继续在文件页保留宽视图；探索和子 Agent
+  // 始终回到适中的 Agent 工作宽度，避免挤占主会话阅读区。
+  const usesWidePanelLayout = rightPanelLayout.hasOpenedWideWorkspace && !isAgentSessionRightTab
+  const persistedRightPanelWidth = usesWidePanelLayout ? effectiveWidePanelWidth : clampedRightPanelWidth
   const displayedRightPanelWidth = draggedRightPanelWidth ?? persistedRightPanelWidth
 
   React.useEffect(() => {
@@ -175,7 +189,7 @@ export function AppShell(): React.ReactElement {
     const dragSessionId = currentSessionId
     const startX = e.clientX
     const startWidth = displayedRightPanelWidth
-    const isWideWorkspace = rightPanelLayout.hasOpenedWideWorkspace
+    const isWideWorkspace = usesWidePanelLayout
     // 记录最新光标位置，rAF 回调读取它而非调度时捕获的旧事件，避免快拖时坐标滞后
     let latestClientX = startX
     let latestWidth = startWidth
@@ -184,7 +198,7 @@ export function AppShell(): React.ReactElement {
 
     const applyWidth = () => {
       const delta = startX - latestClientX
-      latestWidth = clampRightPanelWidth(startWidth + delta, viewportWidth)
+      latestWidth = clampRightPanelWidth(startWidth + delta, viewportWidth, rightPanelMinimumWidth)
       setDraggedRightPanelWidth(latestWidth)
     }
 
@@ -227,7 +241,7 @@ export function AppShell(): React.ReactElement {
     rightPanelDragCleanup.current = cancelDrag
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp)
-  }, [currentSessionId, displayedRightPanelWidth, rightPanelLayout.hasOpenedWideWorkspace, setRightPanelLayout, viewportWidth])
+  }, [currentSessionId, displayedRightPanelWidth, rightPanelMinimumWidth, setRightPanelLayout, usesWidePanelLayout, viewportWidth])
 
   return (
     <>

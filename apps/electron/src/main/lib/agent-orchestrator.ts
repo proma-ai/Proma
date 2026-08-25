@@ -397,9 +397,10 @@ export class AgentOrchestrator {
   }
 
   /**
-   * 流完成后自动生成标题
+   * 流开始后自动生成标题。
    *
-   * 如果会话标题仍为默认值，自动调用标题生成并通过回调通知。
+   * 默认会话沿用首条消息自动命名；Pi `/tree` 探索分支则在首条**新增**用户消息时
+   * 重命名一次，摆脱「原标题 (fork)」，之后不再覆盖用户或分支自己的语义标题。
    */
   private async autoGenerateTitle(
     sessionId: string,
@@ -412,14 +413,34 @@ export class AgentOrchestrator {
     if (signal?.aborted) return
     try {
       const meta = getAgentSessionMeta(sessionId)
-      if (!meta || meta.title !== DEFAULT_SESSION_TITLE) return
+      if (!meta) return
+      const isDefaultSessionTitle = meta.title === DEFAULT_SESSION_TITLE
+      const isFirstExplorationMessage = Boolean(
+        meta.explorationParentSessionId
+        && !meta.explorationTitleInitializedAt,
+      )
+      if (!isDefaultSessionTitle && !isFirstExplorationMessage) return
+
+      // 分支的历史被 Pi fork 复制，不能按「第一条历史消息」命名；以首次继续发送的消息
+      // 作为唯一的命名信号。先持久化守卫，避免用户连发时启动多个竞争标题请求。
+      const explorationTitleInitializedAt = isFirstExplorationMessage ? Date.now() : undefined
+      if (explorationTitleInitializedAt) {
+        updateAgentSessionMeta(sessionId, { explorationTitleInitializedAt })
+      }
 
       const title = await this.generateTitle({ userMessage, channelId, modelId }, signal)
+        ?? (isFirstExplorationMessage ? createFallbackTitle(userMessage) : null)
       if (!title || signal?.aborted) return
 
       // 标题请求是异步的；请求期间用户可能已手动重命名，不能用旧结果覆盖。
       const latestMeta = getAgentSessionMeta(sessionId)
-      if (!latestMeta || latestMeta.title !== DEFAULT_SESSION_TITLE) return
+      const canApplyDefaultTitle = isDefaultSessionTitle && latestMeta?.title === DEFAULT_SESSION_TITLE
+      const canApplyExplorationTitle = Boolean(
+        isFirstExplorationMessage
+        && latestMeta?.title === meta.title
+        && latestMeta.explorationTitleInitializedAt === explorationTitleInitializedAt,
+      )
+      if (!latestMeta || (!canApplyDefaultTitle && !canApplyExplorationTitle)) return
 
       updateAgentSessionMeta(sessionId, { title })
       callbacks.onTitleUpdated(title)

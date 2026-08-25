@@ -55,6 +55,8 @@ import {
   agentDiffDataAtom,
   agentSidePanelOpenMapAtom,
   agentSidePanelOpenAtomFamily,
+  agentSideDelegationMapAtom,
+  getDelegationSidePanelTab,
   agentStreamingStatesAtom,
   liveMessagesMapAtom,
   agentSessionPendingFilesAtom,
@@ -916,6 +918,19 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       }
       return changed ? map : prev
     })
+    store.set(agentSideDelegationMapAtom, (prev) => {
+      let changed = false
+      const next = new Map(prev)
+      if (next.delete(id)) changed = true
+      for (const [parentSessionId, childSessionIds] of next) {
+        const remaining = childSessionIds.filter((childSessionId) => childSessionId !== id)
+        if (remaining.length === childSessionIds.length) continue
+        changed = true
+        if (remaining.length > 0) next.set(parentSessionId, remaining)
+        else next.delete(parentSessionId)
+      }
+      return changed ? next : prev
+    })
     setDiffPanelTab(deleteKey)
     setDiffRefreshVersion(deleteKey)
     setDiffUnseen(deleteKey)
@@ -1731,8 +1746,37 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     }
   }, [agentChannelId, agentModelId, openSession, setAgentSessions, setCurrentWorkspaceId, setWorkspaces])
 
-  /** 选择 Agent 会话（打开或聚焦标签页） */
+  /** 选择 Agent 会话（打开或聚焦标签页）。协作子 Agent 保持左侧树形条目，但在父会话右侧查看。 */
   const handleSelectAgentSession = React.useCallback((id: string, title: string): void => {
+    const selectedSession = agentSessions.find((session) => session.id === id)
+    if (selectedSession?.sourceDelegationId && selectedSession.parentSessionId) {
+      const parentSession = agentSessions.find((session) => session.id === selectedSession.parentSessionId)
+      if (parentSession) {
+        openSession('agent', parentSession.id, parentSession.title)
+        store.set(agentSideDelegationMapAtom, (previous) => {
+          const openChildIds = previous.get(parentSession.id) ?? []
+          if (openChildIds.includes(selectedSession.id)) return previous
+          const next = new Map(previous)
+          next.set(parentSession.id, [...openChildIds, selectedSession.id])
+          return next
+        })
+        store.set(agentSidePanelOpenAtomFamily(parentSession.id), true)
+        store.set(agentDiffPanelTabAtom, (previous) => {
+          const next = new Map(previous)
+          next.set(parentSession.id, getDelegationSidePanelTab(selectedSession.id))
+          return next
+        })
+        setActiveView('conversations')
+        setUnviewedCompleted((prev: Set<string>) => {
+          if (!prev.has(id)) return prev
+          const next = new Set(prev)
+          next.delete(id)
+          return next
+        })
+        return
+      }
+    }
+
     openSession('agent', id, title)
     setActiveView('conversations')
     // 清除该会话的"已完成未查看"标记
@@ -1742,7 +1786,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       next.delete(id)
       return next
     })
-  }, [openSession, setActiveView, setUnviewedCompleted])
+  }, [agentSessions, openSession, setActiveView, setUnviewedCompleted, store])
 
   const clearQuickSwitchHints = React.useCallback((): void => {
     for (const row of quickSwitchHintRowsRef.current) {

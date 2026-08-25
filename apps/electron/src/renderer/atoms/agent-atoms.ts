@@ -604,9 +604,52 @@ export const agentFileSourceFilterMapAtom = atomWithStorage<Record<string, Agent
   { getOnInit: true },
 )
 
-export type AgentSidePanelBaseTab = 'files' | 'changes' | 'memory' | 'chat'
-/** 项目记忆、每个浏览器网页和文件预览都处于右侧工作区顶栏。 */
-export type AgentSidePanelTab = AgentSidePanelBaseTab | `browser:${string}` | `preview:${string}`
+export type AgentSidePanelBaseTab = 'files' | 'changes' | 'memory' | 'chat' | 'temporary-agent'
+/** 项目记忆、每个 Pi 探索分支、协作子 Agent、浏览器网页和文件预览都处于右侧工作区顶栏。 */
+export type AgentSidePanelTab = AgentSidePanelBaseTab | `exploration:${string}` | `delegation:${string}` | `browser:${string}` | `preview:${string}`
+
+/** Pi `/tree` 探索分支在右侧工作区的展示信息。 */
+export interface AgentExplorationBranchTab {
+  /** Pi 原生 fork 生成的独立 Proma session。 */
+  sessionId: string
+  /** 作为分叉锚点的 Proma assistant message UUID。 */
+  sourceMessageId: string
+  /** 给用户看的分叉来源。 */
+  sourceLabel: string
+}
+
+/**
+ * 右侧探索分支：key 为主线 Agent sessionId，value 为从其 Pi session tree 分叉出的已打开分支。
+ * 仅管理右侧展示；branch artifact 本身持久化在普通 Agent session 中，关闭 Tab 不会删除它。
+ */
+export const agentSideTemporaryAgentMapAtom = atom<Map<string, AgentExplorationBranchTab[]>>(new Map())
+
+export function getExplorationSidePanelTab(branchSessionId: string): AgentSidePanelTab {
+  return `exploration:${branchSessionId}`
+}
+
+/** 已在右侧打开的协作子 Agent：key 为父会话 ID，value 为子会话 ID 列表。 */
+export const agentSideDelegationMapAtom = atom<Map<string, string[]>>(new Map())
+
+export function getDelegationSidePanelTab(childSessionId: string): AgentSidePanelTab {
+  return `delegation:${childSessionId}`
+}
+
+export function getDelegationSessionIdFromSidePanelTab(tab: AgentSidePanelTab | 'delegation'): string | null {
+  return tab.startsWith('delegation:') ? tab.slice('delegation:'.length) : null
+}
+
+export function isDelegationSidePanelTab(tab: AgentSidePanelTab | 'delegation'): tab is `delegation:${string}` {
+  return tab.startsWith('delegation:')
+}
+
+export function getExplorationSessionIdFromSidePanelTab(tab: AgentSidePanelTab | 'exploration'): string | null {
+  return tab.startsWith('exploration:') ? tab.slice('exploration:'.length) : null
+}
+
+export function isExplorationSidePanelTab(tab: AgentSidePanelTab | 'exploration'): tab is `exploration:${string}` {
+  return tab.startsWith('exploration:')
+}
 
 export function getBrowserSidePanelTab(tabId: string): AgentSidePanelTab {
   return `browser:${tabId}`

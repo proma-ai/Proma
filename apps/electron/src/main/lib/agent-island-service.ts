@@ -13,9 +13,7 @@
  * 本服务只负责 Agent 会话状态，保持职责单一。
  */
 
-import { ipcMain } from 'electron'
 import {
-  AGENT_ISLAND_IPC_CHANNELS,
   type AgentIslandActivityLine,
   type AgentIslandPillSnapshot,
   type AgentIslandSessionSnapshot,
@@ -807,12 +805,6 @@ export function initAgentIslandService(deps: AgentIslandServiceDeps): void {
   disposeEventBus = agentEventBus.on((sessionId, payload) => {
     handleAgentEvent(sessionId, payload)
     schedulePush(requiresImmediateAgentIslandPush(payload) ? PUSH_THROTTLE_MS : AGENT_STREAM_PUSH_THROTTLE_MS)
-  })
-
-  // 仅保留主应用用于确认“完成会话已查看”的 IPC。
-  ipcMain.handle(AGENT_ISLAND_IPC_CHANNELS.MARK_SESSION_VIEWED, (_event, sessionId: unknown) => {
-    if (typeof sessionId !== 'string' || sessionId.length === 0) return
-    markAgentIslandSessionViewed(sessionId)
   })
 }
 

@@ -37,6 +37,8 @@ interface DiffPanelTabBarProps {
   onOpenFile: () => void
   onOpenMemory?: () => void
   onOpenChat?: () => void
+  /** 仅当前右侧 Tab 需要的紧凑动作，渲染于标签列表之后，不影响内容区布局。 */
+  activeTabAction?: React.ReactNode
   onClose?: () => void
   isWindows?: boolean
 }
@@ -50,6 +52,7 @@ export function DiffPanelTabBar({
   onOpenFile,
   onOpenMemory,
   onOpenChat,
+  activeTabAction,
   onClose,
   isWindows = false,
 }: DiffPanelTabBarProps): React.ReactElement {
@@ -121,6 +124,7 @@ export function DiffPanelTabBar({
             )
           })}
         </div>
+        {activeTabAction && <div className="ml-1 flex shrink-0 items-center titlebar-no-drag">{activeTabAction}</div>}
         <DropdownMenu>
           <Tooltip>
             <TooltipTrigger asChild>

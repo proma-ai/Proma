@@ -107,6 +107,9 @@ import {
   allPendingPermissionRequestsAtom,
   allPendingExitPlanRequestsAtom,
   agentDiffPanelTabAtom,
+  agentSidePanelOpenAtomFamily,
+  agentSideTemporaryAgentMapAtom,
+  getExplorationSidePanelTab,
 } from '@/atoms/agent-atoms'
 import { settingsOpenAtom } from '@/atoms/settings-tab'
 import { longTextPasteAsAttachmentEnabledAtom } from '@/atoms/ui-preferences'
@@ -425,7 +428,13 @@ function AgentThinkingPopover({ agentThinking, onToggle, codexConfig }: AgentThi
   )
 }
 
-export function AgentView({ sessionId }: { sessionId: string }): React.ReactElement {
+interface AgentViewProps {
+  sessionId: string
+  /** 右侧临时 Agent Tab：保留完整对话与输入能力，但不重复渲染全局会话标题栏。 */
+  embedded?: boolean
+}
+
+export function AgentView({ sessionId, embedded = false }: AgentViewProps): React.ReactElement {
   const store = useStore()
   const initialCachedMessages = store.get(agentSDKMessagesCacheAtom).get(sessionId)
   const [persistedSDKMessages, setPersistedSDKMessages] = React.useState<SDKMessage[]>(
@@ -571,6 +580,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const suggestion = suggestionsMap.get(sessionId) ?? null
   const setPromptSuggestions = useSetAtom(agentPromptSuggestionsAtom)
   const setAgentSessions = useSetAtom(agentSessionsAtom)
+  const setSidePanelTabMap = useSetAtom(agentDiffPanelTabAtom)
+  const setSidePanelOpen = useSetAtom(agentSidePanelOpenAtomFamily(sessionId))
+  const setSideTemporaryAgentMap = useSetAtom(agentSideTemporaryAgentMapAtom)
   const openSession = useOpenSession()
   const setAttachedDirsMap = useSetAtom(agentAttachedDirectoriesMapAtom)
   const attachedDirsMap = useAtomValue(agentAttachedDirectoriesMapAtom)
@@ -2493,43 +2505,42 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     }
   }, [sessionId, agentChannelId, agentModelId, currentWorkspaceId, openSession, setAgentSessions, setStreamingStates, permissionMode])
 
-  /** 分叉会话：从指定消息处创建新会话并自动切换 */
+  /** 从回复节点创建 Pi `/tree` 探索分支，并在当前主线的右侧工作区继续。 */
   const handleFork = React.useCallback(async (upToMessageUuid: string): Promise<void> => {
-    if (agentModelId && agentChannelId && sessionMetaChannelId && agentChannelId !== sessionMetaChannelId) {
-      toast.error('分叉会话失败', {
-        description: '分叉只能使用源会话同一渠道下的模型，请切回当前会话渠道后再试。',
-      })
-      return
-    }
-    const forkModelId = agentChannelId === sessionMetaChannelId ? agentModelId || undefined : undefined
-
     try {
+      // 不传 modelId：探索必须继承分叉点的渠道与模型，不受当前全局选择器影响。
       const meta = await window.electronAPI.forkAgentSession({
         sessionId,
         upToMessageUuid,
-        modelId: forkModelId,
+        explorationSourceLabel: '这条 Agent 回复',
       })
-      setAgentSessions((prev) => [meta, ...prev])
-
-      // 切换到新会话 tab
-      openSession('agent', meta.id, meta.title)
-
-      toast.success('已创建分叉会话', {
-        description: meta.title,
+      setAgentSessions((prev) => prev.some((item) => item.id === meta.id) ? prev : [meta, ...prev])
+      setSideTemporaryAgentMap((prev) => {
+        const openBranches = prev.get(sessionId) ?? []
+        const next = new Map(prev)
+        next.set(sessionId, openBranches.some((item) => item.sessionId === meta.id)
+          ? openBranches
+          : [...openBranches, {
+              sessionId: meta.id,
+              sourceMessageId: upToMessageUuid,
+              sourceLabel: '这条 Agent 回复',
+            }])
+        return next
+      })
+      setSidePanelOpen(true)
+      setSidePanelTabMap((prev) => new Map(prev).set(sessionId, getExplorationSidePanelTab(meta.id)))
+      toast.success('已创建探索分支', {
+        description: '分支继承此处之前的完整上下文；结论可带回主线。',
       })
     } catch (error) {
-      console.error('[AgentView] 分叉会话失败:', error)
+      console.error('[AgentView] 创建探索分支失败:', error)
       const rawMsg = error instanceof Error ? error.message : '未知错误'
-      // SDK 偶尔会因为 sidechain/消息归属问题抛 "not found in session"，
-      // 这里给出更可操作的中文提示，而不是把 SDK 内部英文报错直接透传给用户
       const friendlyDesc = /not found in session/i.test(rawMsg)
-        ? '该消息无法作为分叉起点（可能属于子代理执行过程或已被清理）。请选择主对话中的其他消息再试。'
+        ? '该消息无法作为探索起点（可能属于子代理执行过程或已被清理）。请选择主对话中的其他回复再试。'
         : rawMsg
-      toast.error('分叉会话失败', {
-        description: friendlyDesc,
-      })
+      toast.error('创建探索分支失败', { description: friendlyDesc })
     }
-  }, [sessionId, agentChannelId, agentModelId, sessionMetaChannelId, openSession, setAgentSessions])
+  }, [sessionId, setAgentSessions, setSidePanelOpen, setSidePanelTabMap, setSideTemporaryAgentMap])
 
   /** 快照回退：同一会话内回退到指定消息点，恢复文件 + 截断对话 */
   const [rewindTargetUuid, setRewindTargetUuid] = React.useState<string | null>(null)
@@ -2727,7 +2738,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
   // ===== 预览 Tab 快捷键 =====
   const setPreviewOpenMap = useSetAtom(previewPanelOpenMapAtom)
-  const setSidePanelTabMap = useSetAtom(agentDiffPanelTabAtom)
 
   const togglePreviewPanel = React.useCallback(() => {
     const nextOpen = !(store.get(previewPanelOpenMapAtom).get(sessionId) ?? false)
@@ -2939,10 +2949,13 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   return (
     <>
       <div className="flex h-full min-h-0 flex-1 min-w-0 flex-col overflow-hidden">
-        {/* 头部保持全宽，宽屏时让标题与右侧工作区开关贴近主区域两端；历史和输入仍限制可读宽度。 */}
-        <AgentHeader sessionId={sessionId} />
+        {/* 临时 Agent 已由右侧 Tab 表明归属，避免在窄面板重复渲染全局标题栏。 */}
+        {!embedded && <AgentHeader sessionId={sessionId} />}
 
-        <div className="flex min-h-0 flex-1 w-full max-w-[min(72rem,100%)] flex-col overflow-hidden mx-auto">
+        <div className={cn(
+          'flex min-h-0 flex-1 w-full flex-col overflow-hidden',
+          embedded ? 'max-w-none' : 'max-w-[min(72rem,100%)] mx-auto',
+        )}>
         {/* 消息区域 */}
         <AgentMessages
           sessionId={sessionId}
@@ -2956,11 +2969,12 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           onRetryInNewSession={handleRetryInNewSession}
           onRelinkProjectRoot={handleRelinkProjectRoot}
           onRestoreProjectRoot={handleOpenRestoreProjectRootDialog}
-          onFork={isLegacyTranscript ? undefined : handleFork}
+          onFork={embedded || isLegacyTranscript ? undefined : handleFork}
           onRewind={isLegacyTranscript ? undefined : handleRewindRequest}
           onCreateTodo={handleOpenReplyTodoDialog}
           onCompact={handleCompact}
           onAddHistoryQuote={handleAddHistoryQuote}
+          explorationEnabled={!embedded}
           onAgentHistoryQuoteClick={handleAgentHistoryQuoteClick}
           historyQuoteNavigation={historyQuoteNavigation}
         />

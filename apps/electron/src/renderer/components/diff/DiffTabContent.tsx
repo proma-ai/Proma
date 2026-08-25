@@ -17,15 +17,12 @@ import {
   agentDiffViewModeAtom,
   agentDiffRefreshVersionAtom,
   agentSidePanelOpenAtomFamily,
+  agentSessionsAtom,
+  agentSideTemporaryAgentMapAtom,
+  getExplorationSidePanelTab,
 } from '@/atoms/agent-atoms'
 import { resolvedThemeAtom } from '@/atoms/theme'
 import { previewCodeWrapAtom, quotedSelectionMapAtom } from '@/atoms/preview-atoms'
-import {
-  agentSideChatMapAtom,
-  conversationsAtom,
-  conversationDraftsAtom,
-  selectedModelAtom,
-} from '@/atoms/chat-atoms'
 import { markdownTocOpenAtom } from '@/atoms/markdown-toc'
 import { useFocusAgentSessionInput } from '@/hooks/useFocusAgentSessionInput'
 import { useShortcut } from '@/hooks/useShortcut'
@@ -422,10 +419,9 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   // ===== 选中文本引用（Quoted Selection）=====
 
   const setQuotedSelectionMap = useSetAtom(quotedSelectionMapAtom)
-  const selectedChatModel = useAtomValue(selectedModelAtom)
-  const setConversations = useSetAtom(conversationsAtom)
-  const setConversationDrafts = useSetAtom(conversationDraftsAtom)
-  const setSideChatMap = useSetAtom(agentSideChatMapAtom)
+  const agentSessions = useAtomValue(agentSessionsAtom)
+  const setAgentSessions = useSetAtom(agentSessionsAtom)
+  const setSideTemporaryAgentMap = useSetAtom(agentSideTemporaryAgentMapAtom)
   const setSidePanelOpen = useSetAtom(agentSidePanelOpenAtomFamily(sessionId))
   const setSidePanelTabMap = useSetAtom(agentDiffPanelTabAtom)
   const focusAgentSessionInput = useFocusAgentSessionInput()
@@ -435,7 +431,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   const shadowRootsRef = React.useRef<Set<ShadowRoot>>(new Set())
   const pointerSelectingRef = React.useRef(false)
   const captureTimerRef = React.useRef<number | null>(null)
-  const openSelectionChatPendingRef = React.useRef(false)
+  const openTemporaryAgentPendingRef = React.useRef(false)
   /** 当前正在展示的截断 toast id；选中回落到上限内或选区消失时主动 dismiss */
   const lastToastIdRef = React.useRef<string | null>(null)
 
@@ -1347,67 +1343,55 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     focusAgentSessionInput(sessionId)
   }, [clearPreviewSelection, focusAgentSessionInput, previewSelection, sessionId, setQuotedSelectionMap])
 
-  const handleOpenSelectionChat = React.useCallback(async (): Promise<void> => {
-    if (!previewSelection) return
-    if (openSelectionChatPendingRef.current) return
-    openSelectionChatPendingRef.current = true
+  const handleOpenExplorationBranch = React.useCallback(async (): Promise<void> => {
+    if (!previewSelection || openTemporaryAgentPendingRef.current) return
+    const parentSession = agentSessions.find((item) => item.id === sessionId)
+    // 文件预览不是一条对话消息；从当前主线最近一个可恢复的 Pi 节点分叉。
+    const sourceMessageId = Object.keys(parentSession?.piEntryBindings ?? {}).at(-1)
+    if (!sourceMessageId) {
+      toast.info('当前还没有可探索的 Agent 回复，请先完成一轮对话')
+      return
+    }
+
+    openTemporaryAgentPendingRef.current = true
     try {
-      const conversation = await window.electronAPI.createConversation(
-        '预览选区问答',
-        selectedChatModel?.modelId,
-        selectedChatModel?.channelId,
-      )
-      setConversations((prev) => {
-        if (prev.some((item) => item.id === conversation.id)) return prev
-        return [conversation, ...prev]
+      const branch = await window.electronAPI.forkAgentSession({
+        sessionId,
+        upToMessageUuid: sourceMessageId,
+        explorationSourceLabel: `当前节点 · ${getPreviewPathLabel(previewSelection.filePath)}`,
       })
-      setConversationDrafts((prev) => {
+      setAgentSessions((prev) => prev.some((item) => item.id === branch.id) ? prev : [branch, ...prev])
+      setQuotedSelectionMap((prev) => new Map(prev).set(branch.id, {
+        text: previewSelection.text,
+        filePath: previewSelection.filePath,
+        sourceType: 'file',
+        sourceLabel: previewSelection.filePath,
+        capturedAt: Date.now(),
+      }))
+      setSideTemporaryAgentMap((prev) => {
+        const openBranches = prev.get(sessionId) ?? []
         const next = new Map(prev)
-        next.set(conversation.id, '我的问题：')
-        return next
-      })
-      setQuotedSelectionMap((prev) => {
-        const next = new Map(prev)
-        next.set(conversation.id, {
-          text: previewSelection.text,
-          filePath: previewSelection.filePath,
-          sourceType: 'file',
-          sourceLabel: previewSelection.filePath,
-          capturedAt: Date.now(),
-        })
-        return next
-      })
-      setSideChatMap((prev) => {
-        const next = new Map(prev)
-        next.set(sessionId, conversation.id)
+        next.set(sessionId, openBranches.some((item) => item.sessionId === branch.id)
+          ? openBranches
+          : [...openBranches, {
+              sessionId: branch.id,
+              sourceMessageId,
+              sourceLabel: `当前节点 · ${getPreviewPathLabel(previewSelection.filePath)}`,
+            }])
         return next
       })
       setSidePanelOpen(true)
-      setSidePanelTabMap((prev) => {
-        const next = new Map(prev)
-        next.set(sessionId, 'chat')
-        return next
-      })
+      setSidePanelTabMap((prev) => new Map(prev).set(sessionId, getExplorationSidePanelTab(branch.id)))
       window.getSelection()?.removeAllRanges()
       clearPreviewSelection()
+      toast.success('已从当前节点创建探索分支', { description: '文件选区已带入分支；结论可回到主线输入框。' })
     } catch (error) {
-      console.error('[DiffTabContent] 打开预览选区聊天标签失败:', error)
-      toast.error('打开聊天标签失败')
+      console.error('[DiffTabContent] 创建文件探索分支失败:', error)
+      toast.error('创建探索分支失败', { description: error instanceof Error ? error.message : undefined })
     } finally {
-      openSelectionChatPendingRef.current = false
+      openTemporaryAgentPendingRef.current = false
     }
-  }, [
-    clearPreviewSelection,
-    previewSelection,
-    selectedChatModel,
-    sessionId,
-    setConversationDrafts,
-    setConversations,
-    setQuotedSelectionMap,
-    setSideChatMap,
-    setSidePanelOpen,
-    setSidePanelTabMap,
-  ])
+  }, [agentSessions, clearPreviewSelection, previewSelection, sessionId, setAgentSessions, setQuotedSelectionMap, setSidePanelOpen, setSidePanelTabMap, setSideTemporaryAgentMap])
 
   // persistRef 始终持有最新 persistMarkdownDraft，供 setTimeout / unmount cleanup 调用。
   // 用 effect 而非渲染期赋值，避免 React 19 严格模式下并发渲染中途读到中间态。
@@ -1920,7 +1904,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
             x={previewSelection.x}
             y={previewSelection.y}
             onAddToAgent={handleAddSelectionToAgent}
-            onOpenChat={handleOpenSelectionChat}
+            onOpenExplorationBranch={handleOpenExplorationBranch}
           />
         )}
       </div>

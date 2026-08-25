@@ -51,6 +51,8 @@ import {
   agentNonGitFileChangesAtom,
   agentFileChangesCurrentRunAtom,
   agentSidePanelOpenAtomFamily,
+  agentSideDelegationMapAtom,
+  getDelegationSidePanelTab,
   askUserDraftsAtom,
 } from '@/atoms/agent-atoms'
 import {
@@ -698,6 +700,26 @@ export function useGlobalAgentListeners(): void {
           map.set(event.sessionId, activation.streamState)
           return map
         })
+
+        // 协作子 Agent 是用户可检查的独立执行单元：启动时保持左侧树不变，
+        // 但将其自动聚焦到父会话右侧工作区，直接观察流式输出。
+        if (upserted.sourceDelegationId && upserted.parentSessionId) {
+          const parentSession = store.get(agentSessionsAtom).find((item) => item.id === upserted.parentSessionId)
+          makeNavigateToSession(upserted.parentSessionId, parentSession?.title ?? '父会话')()
+          store.set(agentSideDelegationMapAtom, (previous) => {
+            const openChildIds = previous.get(upserted.parentSessionId!) ?? []
+            if (openChildIds.includes(upserted.id)) return previous
+            const next = new Map(previous)
+            next.set(upserted.parentSessionId!, [...openChildIds, upserted.id])
+            return next
+          })
+          store.set(agentSidePanelOpenAtomFamily(upserted.parentSessionId), true)
+          store.set(agentDiffPanelTabAtom, (previous) => {
+            const next = new Map(previous)
+            next.set(upserted.parentSessionId!, getDelegationSidePanelTab(upserted.id))
+            return next
+          })
+        }
       }
 
       if (event.session) {

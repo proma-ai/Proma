@@ -6,8 +6,8 @@
 
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
-import { Check, ChevronDown, PanelRight, Pencil, X } from 'lucide-react'
-import { agentSessionsAtom, currentSessionSidePanelOpenAtom } from '@/atoms/agent-atoms'
+import { Check, ChevronDown, PanelRight, Pencil, Split, X } from 'lucide-react'
+import { agentSessionsAtom, agentSideTemporaryAgentMapAtom, agentDiffPanelTabAtom, currentSessionSidePanelOpenAtom, getExplorationSidePanelTab } from '@/atoms/agent-atoms'
 import { tabsAtom, updateTabTitle } from '@/atoms/tab-atoms'
 import { replaceAgentSessionInFreshnessOrder } from '@/lib/agent-session-list'
 import { detectIsWindows, WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
@@ -30,10 +30,34 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
   const session = sessions.find((s) => s.id === sessionId) ?? null
   const setAgentSessions = useSetAtom(agentSessionsAtom)
   const setTabs = useSetAtom(tabsAtom)
+  const setSideTemporaryAgentMap = useSetAtom(agentSideTemporaryAgentMapAtom)
+  const setSidePanelTabMap = useSetAtom(agentDiffPanelTabAtom)
   const [isRightPanelOpen, setRightPanelOpen] = useAtom(currentSessionSidePanelOpenAtom)
   const [editing, setEditing] = React.useState(false)
   const [editTitle, setEditTitle] = React.useState('')
   const inputRef = React.useRef<HTMLInputElement>(null)
+
+  const explorationBranches = React.useMemo(() => sessions
+    .filter((item) => item.explorationParentSessionId === sessionId && item.explorationSourceMessageId)
+    .sort((a, b) => b.updatedAt - a.updatedAt), [sessionId, sessions])
+
+  const reopenExploration = React.useCallback((branch: typeof explorationBranches[number]): void => {
+    const sourceMessageId = branch.explorationSourceMessageId
+    if (!sourceMessageId) return
+    setSideTemporaryAgentMap((prev) => {
+      const openBranches = prev.get(sessionId) ?? []
+      if (openBranches.some((item) => item.sessionId === branch.id)) return prev
+      const next = new Map(prev)
+      next.set(sessionId, [...openBranches, {
+        sessionId: branch.id,
+        sourceMessageId,
+        sourceLabel: branch.explorationSourceLabel || '主线探索节点',
+      }])
+      return next
+    })
+    setRightPanelOpen(true)
+    setSidePanelTabMap((prev) => new Map(prev).set(sessionId, getExplorationSidePanelTab(branch.id)))
+  }, [sessionId, setRightPanelOpen, setSidePanelTabMap, setSideTemporaryAgentMap])
 
   if (!session) return null
 
@@ -123,6 +147,35 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
               <Pencil className="size-3.5" />
               重命名
             </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+      {explorationBranches.length > 0 && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="titlebar-no-drag inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground transition-[background-color,color,transform] hover:bg-muted hover:text-foreground active:scale-[0.96]"
+              aria-label={`打开 ${explorationBranches.length} 个探索分支`}
+              title={`打开探索分支（${explorationBranches.length}）`}
+            >
+              <Split className="size-3.5" />
+              <span className="hidden sm:inline">探索</span>
+              {explorationBranches.length > 1 && <span className="tabular-nums">{explorationBranches.length}</span>}
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            className="z-[100] w-64 titlebar-no-drag"
+            // 选择或失焦关闭后不要把焦点回跳到「探索」触发器，避免出现残留 focus 框。
+            onCloseAutoFocus={(event) => event.preventDefault()}
+          >
+            {explorationBranches.map((branch) => (
+              <DropdownMenuItem key={branch.id} onSelect={() => reopenExploration(branch)} className="flex items-center gap-2 py-2">
+                <Split className="size-3.5 shrink-0" />
+                <span className="min-w-0 truncate">{branch.title}</span>
+              </DropdownMenuItem>
+            ))}
           </DropdownMenuContent>
         </DropdownMenu>
       )}
