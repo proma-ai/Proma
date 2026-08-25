@@ -38,6 +38,7 @@ import type {
   RecentMessagesResult,
   MessageSearchResult,
   AgentSessionMeta,
+  AgentActiveSessionSnapshot,
   SetAgentSessionActiveWorktreeInput,
   SDKMessage,
   AgentSendInput,
@@ -518,6 +519,9 @@ export interface ElectronAPI {
 
   /** 创建 Agent 会话 */
   createAgentSession: (title?: string, channelId?: string, workspaceId?: string, modelId?: string) => Promise<AgentSessionMeta>
+
+  /** 获取当前主进程仍在执行的 Agent 会话，供 renderer 重载后恢复运行态 */
+  listActiveAgentSessionSnapshots: () => Promise<AgentActiveSessionSnapshot[]>
 
   /** 获取 Agent 会话 SDKMessage（Phase 4 新格式） */
   getAgentSessionSDKMessages: (id: string) => Promise<SDKMessage[]>
@@ -1717,6 +1721,10 @@ const electronAPI: ElectronAPI = {
 
   createAgentSession: (title?: string, channelId?: string, workspaceId?: string, modelId?: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.CREATE_SESSION, title, channelId, workspaceId, modelId)
+  },
+
+  listActiveAgentSessionSnapshots: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.ACTIVE_SESSIONS_SNAPSHOT)
   },
 
   getAgentSessionSDKMessages: (id: string) => {

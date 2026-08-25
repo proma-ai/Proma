@@ -32,6 +32,7 @@ import type {
   AgentMoveQueuedMessageInput,
   PromaPermissionMode,
   AgentExternalRunSource,
+  AgentActiveSessionSnapshot,
   AgentMessage,
 } from '@proma/shared'
 import { PiAgentAdapter } from './adapters/pi-agent-adapter'
@@ -488,6 +489,10 @@ export function isAgentSessionActive(sessionId: string): boolean {
 /** 是否存在任意运行中 Agent，供更新器等全局生命周期服务安全判断。 */
 export function hasActiveAgentSessions(): boolean {
   return orchestrator.hasActiveSessions()
+}
+
+export function listActiveAgentSessionSnapshots(): AgentActiveSessionSnapshot[] {
+  return orchestrator.listActiveSessionSnapshots()
 }
 
 /** 中止所有活跃的 Agent 会话（应用退出时调用） */

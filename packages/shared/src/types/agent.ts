@@ -1328,6 +1328,12 @@ export interface AgentStreamEvent {
   event?: AgentEvent
 }
 
+export interface AgentActiveSessionSnapshot {
+  sessionId: string
+  /** 对应当前运行实例的启动时间，用于拒绝陈旧的 renderer 恢复快照。 */
+  startedAt: number
+}
+
 /**
  * Agent 流式完成事件载荷（主进程 → 渲染进程）
  * 包含已持久化的消息列表，避免异步重新加载的竞态窗口。
@@ -1655,6 +1661,8 @@ export const AGENT_IPC_CHANNELS = {
   COUNT_ARCHIVED_SESSIONS: 'agent:count-archived-sessions',
   /** 创建会话 */
   CREATE_SESSION: 'agent:create-session',
+  /** 获取当前主进程仍在执行的 Agent 会话快照 */
+  ACTIVE_SESSIONS_SNAPSHOT: 'agent:active-sessions-snapshot',
   /** 获取会话 SDKMessage（Phase 4 新格式） */
   GET_SDK_MESSAGES: 'agent:get-sdk-messages',
   /** 更新会话标题 */

@@ -47,6 +47,7 @@ import type {
   FileOrFolderDialogResult,
   RecentMessagesResult,
   AgentSessionMeta,
+  AgentActiveSessionSnapshot,
   SetAgentSessionActiveWorktreeInput,
   AgentSendInput,
   AgentThinkingLevel,
@@ -278,7 +279,7 @@ import {
   searchAgentSessionMessages,
   searchAgentSessionReferences,
 } from './lib/agent-session-manager'
-import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive, isAgentSessionBusy, reserveAgentSessionStart, queueAgentMessage, submitOrEnqueueAgentMessage, enqueueAgentQueuedMessage, cancelAgentQueuedMessage, moveAgentQueuedMessage, clearAgentQueuedMessages, updateAgentPermissionMode, rewindAgentSession, setVisibleAgentSession } from './lib/agent-service'
+import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive, isAgentSessionBusy, listActiveAgentSessionSnapshots, reserveAgentSessionStart, queueAgentMessage, submitOrEnqueueAgentMessage, enqueueAgentQueuedMessage, cancelAgentQueuedMessage, moveAgentQueuedMessage, clearAgentQueuedMessages, updateAgentPermissionMode, rewindAgentSession, setVisibleAgentSession } from './lib/agent-service'
 import { permissionService } from './lib/agent-permission-service'
 import { askUserService } from './lib/agent-ask-user-service'
 import { exitPlanService } from './lib/agent-exit-plan-service'
@@ -2059,6 +2060,12 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.LIST_ACTIVE_SESSIONS,
     async (): Promise<AgentSessionMeta[]> => listActiveAgentSessions(),
+  )
+
+  // 获取当前主进程仍在执行的 Agent 会话快照，供 renderer 重载后恢复运行态
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.ACTIVE_SESSIONS_SNAPSHOT,
+    async (): Promise<AgentActiveSessionSnapshot[]> => listActiveAgentSessionSnapshots(),
   )
 
   // 获取归档会话列表（进入归档视图时按需加载）

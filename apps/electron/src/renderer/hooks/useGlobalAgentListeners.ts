@@ -84,6 +84,7 @@ import { getSessionFileChangeKind, getOwnedSessionWatcherPaths, upsertSessionFil
 import { removeQueuedMessage, createQueuedAgentStreamState } from '@/lib/agent-message-queue'
 import { createAgentStreamEventBatcher } from '@/lib/agent-stream-event-batcher'
 import { getChangedWorkspaceComponentFromSdkMessage } from '@/lib/agent-component-activation'
+import { mergeActiveAgentSessionSnapshot } from '@/lib/agent-active-session-snapshot'
 
 /** 触发右侧文件浏览器自动定位的写入类工具集合 */
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Update'])
@@ -935,7 +936,19 @@ export function useGlobalAgentListeners(): void {
       })().catch(() => { /* 文件监听不应影响会话流 */ })
     })
 
-    // ===== 0. 初始化：从持久化 meta 恢复 stoppedByUser 状态 =====
+    // ===== 0. 初始化：恢复 stoppedByUser 与主进程真实运行态 =====
+    // 运行态不落盘，窗口重载或 renderer 晚订阅时必须从主进程 activeSessions
+    // 补一份快照；快照只提升缺失/更旧的状态，不覆盖已收到的完成态。
+    window.electronAPI.listActiveAgentSessionSnapshots().then((snapshots) => {
+      unstable_batchedUpdates(() => {
+        for (const snapshot of snapshots) {
+          store.set(agentSessionStreamingStateAtomFamily(snapshot.sessionId), (existing) => {
+            return mergeActiveAgentSessionSnapshot(existing, snapshot)
+          })
+        }
+      })
+    }).catch(console.error)
+
     window.electronAPI.listActiveAgentSessions().then((sessions) => {
       const stoppedIds = new Set<string>(
         sessions.filter((s) => s.stoppedByUser).map((s) => s.id)
