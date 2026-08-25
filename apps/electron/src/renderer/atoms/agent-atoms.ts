@@ -551,7 +551,10 @@ export function pruneAgentSidePanelLayouts(
 
   if (activeSessionId && !retainedIds.has(activeSessionId)) {
     if (retainedIds.size === MAX_PERSISTED_AGENT_SIDE_PANEL_LAYOUTS) {
-      retainedIds.delete(recentSessionIds.at(-1)!)
+      const oldestRetainedId = sessions.length === 0
+        ? recentSessionIds[0]
+        : recentSessionIds.at(-1)
+      retainedIds.delete(oldestRetainedId!)
     }
     retainedIds.add(activeSessionId)
   }
