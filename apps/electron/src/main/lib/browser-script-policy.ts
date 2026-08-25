@@ -201,33 +201,56 @@ export function buildBrowserExtractExpression(input: BrowserExtractInput): strin
     const root = input.selector ? findElement(document, input.selector) : document.body;
     if (!root) return { ok: false, error: '未找到可抽取内容。' };
     const maxChars = Math.floor(input.maxChars || ${MAX_BROWSER_EXTRACT_CHARS});
+    // Keep both page work and returned/intermediate strings bounded even when a single text node is huge.
+    const workCharLimit = maxChars + 1_024;
     const maxNodes = 10_000;
+    const maxDepth = 64;
+    let remainingRawChars = workCharLimit;
+    let remainingOutputChars = workCharLimit;
     let visitedNodes = 0;
     let stoppedEarly = false;
-    const clean = (text) => text.replace(/\\s+/g, ' ').trim();
-    const safeLink = (href) => { try { const url = new URL(href, location.href); return url.protocol === 'http:' || url.protocol === 'https:' ? url.origin + url.pathname : ''; } catch { return ''; } };
-    const markdown = (node) => {
-      if (++visitedNodes > maxNodes) { stoppedEarly = true; return ''; }
-      if (node.nodeType === Node.TEXT_NODE) return clean(node.nodeValue || '');
+    const emit = (value) => {
+      if (!value || remainingOutputChars <= 0) { if (value) stoppedEarly = true; return ''; }
+      const bounded = value.slice(0, remainingOutputChars);
+      if (bounded.length < value.length) stoppedEarly = true;
+      remainingOutputChars -= bounded.length;
+      return bounded;
+    };
+    const cleanText = (value) => {
+      if (!value || remainingRawChars <= 0) { if (value) stoppedEarly = true; return ''; }
+      const raw = String(value);
+      const bounded = raw.slice(0, remainingRawChars);
+      if (bounded.length < raw.length) stoppedEarly = true;
+      remainingRawChars -= bounded.length;
+      return emit(bounded.replace(/\\s+/g, ' ').trim());
+    };
+    const safeLink = (href) => { try { const url = new URL(String(href).slice(0, 2_048), location.href); return url.protocol === 'http:' || url.protocol === 'https:' ? url.origin + url.pathname : ''; } catch { return ''; } };
+    const markdown = (node, depth = 0) => {
+      if (++visitedNodes > maxNodes || depth > maxDepth) { stoppedEarly = true; return ''; }
+      if (node.nodeType === Node.TEXT_NODE) return cleanText(node.nodeValue || '');
       if (node.nodeType !== Node.ELEMENT_NODE) return '';
       const element = node;
       const tag = element.tagName.toLowerCase();
       if (element.hidden || ['script', 'style', 'noscript', 'template', 'svg'].includes(tag) || element.getAttribute('aria-hidden') === 'true') return '';
-      let children = '';
+      const parts = [];
       for (const child of element.childNodes) {
-        if (visitedNodes >= maxNodes || children.length > maxChars + 1_000) { stoppedEarly = true; break; }
-        const childContent = markdown(child);
-        if (childContent) children += (children ? ' ' : '') + childContent;
+        if (visitedNodes >= maxNodes || remainingOutputChars <= 0) { stoppedEarly = true; break; }
+        const childContent = markdown(child, depth + 1);
+        if (childContent) {
+          if (parts.length) parts.push(emit(' '));
+          parts.push(childContent);
+        }
       }
+      const children = parts.length === 1 ? parts[0] : parts.join('');
       if (!children && tag !== 'img' && tag !== 'br') return '';
-      if (/^h[1-6]$/.test(tag)) return '\\n\\n' + '#'.repeat(Number(tag[1])) + ' ' + children + '\\n\\n';
-      if (tag === 'p' || tag === 'section' || tag === 'article' || tag === 'blockquote') return '\\n\\n' + children + '\\n\\n';
-      if (tag === 'li') return '\\n- ' + children;
-      if (tag === 'br') return '\\n';
-      if (tag === 'pre') { const fence = String.fromCharCode(96).repeat(3); return '\\n\\n' + fence + '\\n' + (element.innerText || element.textContent || '') + '\\n' + fence + '\\n\\n'; }
-      if (tag === 'code') { const tick = String.fromCharCode(96); return tick + children + tick; }
-      if (tag === 'a') { const href = safeLink(element.getAttribute('href') || ''); return href ? '[' + (children || href) + '](' + href + ')' : children; }
-      if (tag === 'img') return element.getAttribute('alt') ? ' ![' + clean(element.getAttribute('alt')) + ']' : '';
+      if (/^h[1-6]$/.test(tag)) return emit('\\n\\n' + '#'.repeat(Number(tag[1])) + ' ') + children + emit('\\n\\n');
+      if (tag === 'p' || tag === 'section' || tag === 'article' || tag === 'blockquote') return emit('\\n\\n') + children + emit('\\n\\n');
+      if (tag === 'li') return emit('\\n- ') + children;
+      if (tag === 'br') return emit('\\n');
+      if (tag === 'pre') { const fence = String.fromCharCode(96).repeat(3); return emit('\\n\\n' + fence + '\\n') + children + emit('\\n' + fence + '\\n\\n'); }
+      if (tag === 'code') { const tick = String.fromCharCode(96); return emit(tick) + children + emit(tick); }
+      if (tag === 'a') { const href = safeLink(element.getAttribute('href') || ''); return href ? emit('[') + (children || emit(href)) + emit('](' + href + ')') : children; }
+      if (tag === 'img') { const alt = cleanText(element.getAttribute('alt') || ''); return alt ? emit(' ![') + alt + emit(']') : ''; }
       return children;
     };
     const rendered = markdown(root);

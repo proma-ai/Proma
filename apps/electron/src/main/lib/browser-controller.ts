@@ -410,11 +410,8 @@ export class BrowserController {
     if (browserSession.agentAbortController.signal.aborted) browserSession.agentAbortController = new AbortController()
     if (!signal) return browserSession.agentAbortController.signal
     if (signal.aborted) return signal
-    const merged = new AbortController()
-    const abort = () => merged.abort()
-    signal.addEventListener('abort', abort, { once: true })
-    browserSession.agentAbortController.signal.addEventListener('abort', abort, { once: true })
-    return merged.signal
+    // Native signal composition avoids retaining a per-operation closure on the session signal until Stop Agent.
+    return AbortSignal.any([signal, browserSession.agentAbortController.signal])
   }
 
   private runTabOperation<T>(browserSession: BrowserSessionRecord, tab: BrowserTabRecord, signal: AbortSignal | undefined, task: (operationSignal: AbortSignal | undefined) => Promise<T>, operationLease?: () => void): Promise<T> {
@@ -1276,16 +1273,43 @@ export class BrowserController {
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
     return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
-      // Use the extended AX depth once, then return only matching nodes to avoid consuming model context.
-      const observation = await this.observeInternal(browserSession, tab, 400, operationSignal)
-      const matches = observation.elements.filter((element) => {
-        const roleMatches = !role || element.role.toLowerCase() === role
-        const normalizedName = element.name.toLowerCase()
+      // Filter the AX tree before applying the observation ranking/cap so Find can discover a matching
+      // element that was absent from the compact BrowserObserve output.
+      const response = await this.cdp(tab, 'Accessibility.getFullAXTree', { depth: resolveBrowserObserveAxDepth(400) }, BROWSER_OBSERVE_TIMEOUT_MS, operationSignal)
+      throwIfBrowserOperationAborted(operationSignal)
+      const nodes = Array.isArray(response.nodes) ? response.nodes : []
+      const candidates: Array<{ backendNodeId: number; role: string; name: string; editable: boolean }> = []
+      for (const node of nodes) {
+        if (!node || typeof node !== 'object') continue
+        const ax = node as Record<string, unknown>
+        const backendNodeId = typeof ax.backendDOMNodeId === 'number' ? ax.backendDOMNodeId : 0
+        const candidateRole = textValue(ax.role)
+        const candidateName = textValue(ax.name)
+        const editable = isEditableAxNode(ax)
+        if (!backendNodeId || !candidateRole || (!candidateName && !editable && !['button', 'textbox', 'link', 'checkbox', 'combobox'].includes(candidateRole))) continue
+        const roleMatches = !role || candidateRole.toLowerCase() === role
+        const normalizedName = candidateName.toLowerCase()
         const nameMatches = !name || (query.exact ? normalizedName === name : normalizedName.includes(name))
-        return roleMatches && nameMatches
-      }).slice(0, maxResults)
-      this.trace(browserSession, tab, 'find', `语义定位到 ${matches.length} 个元素`, 'verified')
-      return { ...observation, elements: matches }
+        if (!roleMatches || !nameMatches) continue
+        candidates.push({ backendNodeId, role: candidateRole, name: candidateName.slice(0, browserObservationNameLimit(candidateRole)), editable })
+        if (candidates.length >= maxResults) break
+      }
+      tab.generation++
+      tab.refs.clear()
+      const elements: BrowserObservation['elements'] = []
+      for (const candidate of candidates) {
+        const ref = `r${tab.generation}-${elements.length + 1}`
+        tab.refs.set(ref, {
+          backendNodeId: candidate.backendNodeId,
+          generation: tab.generation,
+          label: candidate.name ? `${candidate.role}「${candidate.name.slice(0, 80)}」` : candidate.role,
+          editable: candidate.editable,
+        })
+        elements.push({ ref, role: candidate.role, name: candidate.name, editable: candidate.editable })
+      }
+      this.updateNavigationState(browserSession, tab)
+      this.trace(browserSession, tab, 'find', `语义定位到 ${elements.length} 个元素（AX 深度 ${resolveBrowserObserveAxDepth(400)}）`, 'verified')
+      return { tabId: tab.tabId, url: tab.state.url, title: tab.state.title, generation: tab.generation, elements }
     })
   }
 
