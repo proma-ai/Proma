@@ -5,16 +5,10 @@ import type { WorkspaceMemoryFileChange } from '@proma/shared'
 import { Button } from '@/components/ui/button'
 import { workspaceMemoryEditingStateAtomFamily } from '@/atoms/memory-change-atoms'
 
-interface MemoryFileListItem {
-  relativePath: string
-  modifiedAt?: number
-}
-
 interface WorkspaceMemoryChangeShelfProps {
   workspaceSlug: string
   sessionId: string
   changes: WorkspaceMemoryFileChange[]
-  memoryFiles: MemoryFileListItem[]
   className?: string
 }
 
@@ -24,18 +18,8 @@ function formatKind(kind: WorkspaceMemoryFileChange['kind']): string {
   return '更新'
 }
 
-function formatUpdatedAt(updatedAt?: number): string {
-  if (!updatedAt) return '最近更新未知'
-  return new Date(updatedAt).toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
 /** 项目记忆的紧凑 Diff 预览；文件可直接在右侧工作区 Tab 内编辑和保存。 */
-export function WorkspaceMemoryChangeShelf({ workspaceSlug, sessionId, changes, memoryFiles, className }: WorkspaceMemoryChangeShelfProps): React.ReactElement {
+export function WorkspaceMemoryChangeShelf({ workspaceSlug, sessionId, changes, className }: WorkspaceMemoryChangeShelfProps): React.ReactElement | null {
   const [index, setIndex] = React.useState(0)
   const [editingPath, setEditingPath] = React.useState<string | null>(null)
   const [editText, setEditText] = React.useState('')
@@ -159,77 +143,47 @@ export function WorkspaceMemoryChangeShelf({ workspaceSlug, sessionId, changes, 
     )
   }
 
+  if (!change) return null
+
   return (
-    <section className={className ?? 'h-full overflow-auto bg-content-area p-3'} aria-label="项目记忆">
+    <section className={className ?? 'h-full overflow-auto bg-content-area p-3'} aria-label="项目记忆更新">
       {loadingEditor && (
         <div className="mb-3 flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />正在打开编辑器…</div>
       )}
       {error && <div className="mb-3 flex items-center justify-between gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive"><span>{error}</span><Button size="icon" variant="ghost" className="size-6 text-destructive" onClick={() => setError(null)} aria-label="关闭错误提示"><X size={14} /></Button></div>}
-      {change ? (
-        <div className="space-y-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-foreground">项目记忆已更新</h2>
-              <p className="mt-1 truncate font-mono text-xs text-muted-foreground" title={change.relativePath}>{change.relativePath}</p>
-            </div>
-            <span className="shrink-0 text-xs text-muted-foreground">{formatKind(change.kind)} · {index + 1}/{changes.length}</span>
+      <div className="space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold text-foreground">项目记忆已更新</h2>
+            <p className="mt-1 truncate font-mono text-xs text-muted-foreground" title={change.relativePath}>{change.relativePath}</p>
           </div>
-
-          {changes.length > 1 && (
-            <div className="flex justify-end gap-1">
-              <Button size="icon" variant="ghost" className="size-7" aria-label="上一条记忆更新" onClick={() => setIndex((value) => (value - 1 + changes.length) % changes.length)}><ChevronLeft size={15} /></Button>
-              <Button size="icon" variant="ghost" className="size-7" aria-label="下一条记忆更新" onClick={() => setIndex((value) => (value + 1) % changes.length)}><ChevronRight size={15} /></Button>
-            </div>
-          )}
-
-          {hasDiff ? (
-            <pre className="max-h-[min(520px,calc(100vh-220px))] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/50 p-3 font-mono text-xs leading-5">
-              {change.diff?.context.map((line, lineIndex) => <div key={`context-${lineIndex}`} className="text-muted-foreground">  {line || ' '}</div>)}
-              {change.diff?.removed.map((line, lineIndex) => <div key={`removed-${lineIndex}`} className="bg-red-500/10 px-1 text-red-700 dark:text-red-300">- {line || ' '}</div>)}
-              {change.diff?.added.map((line, lineIndex) => <div key={`added-${lineIndex}`} className="bg-emerald-500/10 px-1 text-emerald-700 dark:text-emerald-300">+ {line || ' '}</div>)}
-              {change.diff?.truncated && <div className="mt-1 text-muted-foreground">… 其余变更请打开文件查看</div>}
-            </pre>
-          ) : (
-            <p className="rounded-lg bg-muted/50 p-3 text-xs leading-relaxed text-muted-foreground">该文件已变化，但无法生成受限文本 Diff。</p>
-          )}
-
-          {change.kind !== 'deleted' && (
-            <div className="flex justify-end">
-              <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => void startEditing(change.relativePath)} disabled={loadingEditor}><FileText size={13} className="mr-1" />编辑文件</Button>
-            </div>
-          )}
+          <span className="shrink-0 text-xs text-muted-foreground">{formatKind(change.kind)} · {index + 1}/{changes.length}</span>
         </div>
-      ) : (
-        <div className="space-y-3">
-          <div>
-            <h2 className="text-sm font-semibold text-foreground">项目记忆</h2>
-            <p className="mt-1 text-xs text-muted-foreground">{memoryFiles.length} 个文件 · 点击即可编辑</p>
+
+        {changes.length > 1 && (
+          <div className="flex justify-end gap-1">
+            <Button size="icon" variant="ghost" className="size-7" aria-label="上一条记忆更新" onClick={() => setIndex((value) => (value - 1 + changes.length) % changes.length)}><ChevronLeft size={15} /></Button>
+            <Button size="icon" variant="ghost" className="size-7" aria-label="下一条记忆更新" onClick={() => setIndex((value) => (value + 1) % changes.length)}><ChevronRight size={15} /></Button>
           </div>
-          {memoryFiles.length > 0 ? (
-            <div className="overflow-hidden rounded-lg border border-border/60">
-              {memoryFiles.map((file) => (
-                <button key={file.relativePath} type="button" className="flex w-full items-center gap-2 border-b border-border/50 px-3 py-2.5 text-left text-xs transition-colors last:border-b-0 hover:bg-accent" onClick={() => void startEditing(file.relativePath)} disabled={loadingEditor}>
-                  <FileText size={14} className="shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 flex-1 truncate font-mono text-foreground">{file.relativePath}</span>
-                  <span className="shrink-0 text-[11px] text-muted-foreground">{formatUpdatedAt(file.modifiedAt)}</span>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className="rounded-lg bg-muted/50 p-3 text-xs leading-relaxed text-muted-foreground">
-              <p>还没有记忆文件。</p>
-              <Button size="sm" variant="ghost" className="mt-2 h-8 px-2 text-xs" onClick={() => {
-                const initial = '# 项目记忆\n\n'
-                openedAtRef.current = Date.now()
-                setEditingPath('MEMORY.md')
-                setEditText(initial)
-                setInitialText(initial)
-                setEditingState({ editingPath: 'MEMORY.md', dirty: true, remoteChanged: false })
-              }}>创建 MEMORY.md</Button>
-            </div>
-          )}
-        </div>
-      )}
+        )}
+
+        {hasDiff ? (
+          <pre className="max-h-[min(520px,calc(100vh-220px))] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/50 p-3 font-mono text-xs leading-5">
+            {change.diff?.context.map((line, lineIndex) => <div key={`context-${lineIndex}`} className="text-muted-foreground">  {line || ' '}</div>)}
+            {change.diff?.removed.map((line, lineIndex) => <div key={`removed-${lineIndex}`} className="bg-red-500/10 px-1 text-red-700 dark:text-red-300">- {line || ' '}</div>)}
+            {change.diff?.added.map((line, lineIndex) => <div key={`added-${lineIndex}`} className="bg-emerald-500/10 px-1 text-emerald-700 dark:text-emerald-300">+ {line || ' '}</div>)}
+            {change.diff?.truncated && <div className="mt-1 text-muted-foreground">… 其余变更请打开文件查看</div>}
+          </pre>
+        ) : (
+          <p className="rounded-lg bg-muted/50 p-3 text-xs leading-relaxed text-muted-foreground">该文件已变化，但无法生成受限文本 Diff。</p>
+        )}
+
+        {change.kind !== 'deleted' && (
+          <div className="flex justify-end">
+            <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => void startEditing(change.relativePath)} disabled={loadingEditor}><FileText size={13} className="mr-1" />编辑文件</Button>
+          </div>
+        )}
+      </div>
     </section>
   )
 }
