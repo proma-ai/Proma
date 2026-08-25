@@ -12,7 +12,7 @@ import { createRequire } from 'node:module'
 import { createHash } from 'node:crypto'
 import AdmZip from 'adm-zip'
 import { DOMParser } from '@xmldom/xmldom'
-import type { OfficePreviewResult } from '@proma/shared'
+import type { FilePreviewReadResult, OfficePreviewResult } from '@proma/shared'
 
 const require = createRequire(__filename)
 const PDFJS_PACKAGE = 'pdfjs-dist'
@@ -570,20 +570,26 @@ function readSafeText(content: Buffer): string | null {
 }
 
 /** 解析文件路径并读取内容（供内联文本/代码预览使用） */
-export function resolveAndReadFile(filePath: string, basePaths?: string[]): { resolvedPath: string; content: string; isBinary: boolean; isTooLarge: boolean } | null {
+export function resolveAndReadFile(filePath: string, basePaths?: string[]): FilePreviewReadResult | null {
   const safePath = resolveTargetPath(filePath, basePaths)
   if (!existsSync(safePath)) return null
   try {
     const st = statSync(safePath)
+    const metadata = {
+      name: basename(safePath),
+      extension: extname(safePath).toLowerCase(),
+      size: st.size,
+      modifiedAt: st.mtimeMs,
+    }
     if (st.size > MAX_TEXT_PREVIEW_SIZE) {
-      return { resolvedPath: safePath, content: '', isBinary: false, isTooLarge: true }
+      return { resolvedPath: safePath, content: '', isBinary: false, isTooLarge: true, metadata }
     }
     const rawContent = readFileSync(safePath)
     const content = readSafeText(rawContent)
     if (content === null) {
-      return { resolvedPath: safePath, content: '', isBinary: true, isTooLarge: false }
+      return { resolvedPath: safePath, content: '', isBinary: true, isTooLarge: false, metadata }
     }
-    return { resolvedPath: safePath, content, isBinary: false, isTooLarge: false }
+    return { resolvedPath: safePath, content, isBinary: false, isTooLarge: false, metadata }
   } catch {
     return null
   }

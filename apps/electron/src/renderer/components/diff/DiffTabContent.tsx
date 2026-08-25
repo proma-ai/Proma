@@ -11,6 +11,7 @@ import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import DOMPurify from 'dompurify'
 import { File as PierreFile } from '@pierre/diffs/react'
 import { toast } from 'sonner'
+import type { FilePreviewMetadata } from '@proma/shared'
 import { cn } from '@/lib/utils'
 import {
   agentDiffPanelTabAtom,
@@ -31,6 +32,7 @@ import { DiffView } from './DiffView'
 import { MarkdownRichEditor } from './MarkdownRichEditor'
 import { getPreviewCandidateBasePaths, isAbsoluteFilePath } from './preview-open-path'
 import { DefaultAppOpenButton } from './DefaultAppOpenButton'
+import { UnsupportedFilePreview } from './UnsupportedFilePreview'
 import { PreviewFindBar } from './PreviewFindBar'
 import { MarkdownToc } from './MarkdownToc'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -98,6 +100,8 @@ type CacheEntry = {
   htmlPreviewUrl?: string
   /** 二进制或其他不可安全内联渲染的文件提示 */
   unsupportedPreviewReason?: string
+  /** 无法内联预览时由主进程返回的安全基础元数据。 */
+  previewMetadata?: FilePreviewMetadata
 }
 
 interface DeepSelection {
@@ -296,6 +300,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   const [oldContent, setOldContent] = React.useState('')
   const [newContent, setNewContent] = React.useState('')
   const [unsupportedPreviewReason, setUnsupportedPreviewReason] = React.useState('')
+  const [previewMetadata, setPreviewMetadata] = React.useState<FilePreviewMetadata | undefined>()
   const [markdownEditing, setMarkdownEditing] = React.useState(
     () => Boolean(initialMarkdownEditorState?.editing),
   )
@@ -810,6 +815,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
       setOfficeText(cached.officeText ?? '')
       setHtmlPreviewUrl(cached.htmlPreviewUrl ?? '')
       setUnsupportedPreviewReason(cached.unsupportedPreviewReason ?? '')
+      setPreviewMetadata(cached.previewMetadata)
       setPdfSrc(cached.pdfSrc ?? '')
       setPdfZoom(100)
       setImagePath(cached.imagePath ?? '')
@@ -832,6 +838,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
         setOfficeText('')
         setHtmlPreviewUrl('')
         setUnsupportedPreviewReason('')
+        setPreviewMetadata(undefined)
         setPdfSrc('')
         setPdfZoom(100)
         setImagePath('')
@@ -907,7 +914,13 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
                 ? '此文本文件超过 5 MB，无法安全进行内联预览，请使用默认应用打开。'
                 : '此二进制或编码异常文件暂不支持内联预览，请使用默认应用打开。'
               setUnsupportedPreviewReason(reason)
-              cacheSet(cacheKey, { oldContent: '', newContent: '', unsupportedPreviewReason: reason })
+              setPreviewMetadata(result.metadata)
+              cacheSet(cacheKey, {
+                oldContent: '',
+                newContent: '',
+                unsupportedPreviewReason: reason,
+                previewMetadata: result.metadata,
+              })
               return
             }
             content = result?.content ?? ''
@@ -1706,9 +1719,12 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
             <div className="flex items-center justify-center h-full text-muted-foreground text-[12px]">加载中...</div>
           ) : (previewOnly || isOfficePreview) ? (
             unsupportedPreviewReason ? (
-              <div className="flex h-full items-center justify-center px-6 text-center text-[13px] text-muted-foreground">
-                {unsupportedPreviewReason}
-              </div>
+              <UnsupportedFilePreview
+                filePath={previewTargetPath}
+                access={fileAccess}
+                reason={unsupportedPreviewReason}
+                metadata={previewMetadata}
+              />
             ) : isPdf ? (
               pdfSrc ? (
                 <div className="relative h-full">
