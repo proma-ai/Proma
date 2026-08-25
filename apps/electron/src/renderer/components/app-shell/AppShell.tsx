@@ -12,7 +12,7 @@ import { LeftSidebar } from './LeftSidebar'
 import { RightSidePanel } from './RightSidePanel'
 import { MainArea } from '@/components/tabs/MainArea'
 import { appModeAtom } from '@/atoms/app-mode'
-import { agentDiffPanelTabAtom, agentSidePanelWidthAtom, currentAgentSessionIdAtom, currentSessionSidePanelOpenAtom } from '@/atoms/agent-atoms'
+import { agentDiffPanelTabAtom, agentSessionsAtom, agentSidePanelLayoutAtomFamily, agentSidePanelLayoutMapAtom, currentAgentSessionIdAtom, currentSessionSidePanelOpenAtom, pruneAgentSidePanelLayouts } from '@/atoms/agent-atoms'
 import { leftSidebarWidthAtom } from '@/atoms/sidebar-atoms'
 import { sidebarCollapsedAtom } from '@/atoms/tab-atoms'
 import { automationFormAtom } from '@/atoms/automation-atoms'
@@ -118,25 +118,32 @@ export function AppShell(): React.ReactElement {
     document.addEventListener('mouseup', onMouseUp)
   }, [clampedLeftSidebarWidth, setLeftSidebarWidth])
 
-  // 右侧工作区可拖拽到应用视口的 3/5，窗口尺寸变化时重新收敛持久化宽度。
-  const [rightPanelWidth, setRightPanelWidth] = useAtom(agentSidePanelWidthAtom)
+  // 右侧工作区可拖拽到应用视口的 3/5；每个 Session 恢复自己的普通与宽视图布局。
+  const agentSessions = useAtomValue(agentSessionsAtom)
+  const setRightPanelLayouts = useSetAtom(agentSidePanelLayoutMapAtom)
+  const [rightPanelLayout, setRightPanelLayout] = useAtom(agentSidePanelLayoutAtomFamily(currentSessionId ?? ''))
   const [viewportWidth, setViewportWidth] = React.useState(() => window.innerWidth)
   const dragging = React.useRef(false)
-  const clampedRightPanelWidth = clampRightPanelWidth(rightPanelWidth, viewportWidth)
+  const clampedRightPanelWidth = clampRightPanelWidth(rightPanelLayout.width, viewportWidth)
   const isWideRightWorkspace = Boolean(
     activeRightPanelTab?.startsWith('preview:') || activeRightPanelTab?.startsWith('browser:'),
   )
   // 首次打开预览/浏览器后，工作区维持宽视图；切回文件/改动不会自动收窄，交给用户拖拽决定。
-  const [hasOpenedWideWorkspace, setHasOpenedWideWorkspace] = React.useState(false)
-  const [widePanelWidthOverride, setWidePanelWidthOverride] = React.useState<number | null>(null)
-  const effectiveWidePanelWidth = widePanelWidthOverride === null
+  const effectiveWidePanelWidth = rightPanelLayout.widePanelWidthOverride === null
     ? clampRightPanelWidth(Math.floor(viewportWidth * WIDE_RIGHT_PANEL_DEFAULT_VIEWPORT_RATIO), viewportWidth)
-    : clampRightPanelWidth(widePanelWidthOverride, viewportWidth)
-  const displayedRightPanelWidth = hasOpenedWideWorkspace ? effectiveWidePanelWidth : clampedRightPanelWidth
+    : clampRightPanelWidth(rightPanelLayout.widePanelWidthOverride, viewportWidth)
+  const displayedRightPanelWidth = rightPanelLayout.hasOpenedWideWorkspace ? effectiveWidePanelWidth : clampedRightPanelWidth
 
   React.useEffect(() => {
-    if (isWideRightWorkspace) setHasOpenedWideWorkspace(true)
-  }, [isWideRightWorkspace])
+    if (agentSessions.length === 0) return
+    setRightPanelLayouts((previous) => pruneAgentSidePanelLayouts(previous, agentSessions, currentSessionId ?? undefined))
+  }, [agentSessions, currentSessionId, setRightPanelLayouts])
+
+  React.useEffect(() => {
+    if (isWideRightWorkspace && currentSessionId && !rightPanelLayout.hasOpenedWideWorkspace) {
+      setRightPanelLayout((previous) => ({ ...previous, hasOpenedWideWorkspace: true }))
+    }
+  }, [currentSessionId, isWideRightWorkspace, rightPanelLayout.hasOpenedWideWorkspace, setRightPanelLayout])
 
   React.useEffect(() => {
     const updateViewportWidth = () => setViewportWidth(window.innerWidth)
@@ -145,10 +152,10 @@ export function AppShell(): React.ReactElement {
   }, [])
 
   React.useEffect(() => {
-    if (clampedRightPanelWidth !== rightPanelWidth) {
-      setRightPanelWidth(clampedRightPanelWidth)
+    if (currentSessionId && clampedRightPanelWidth !== rightPanelLayout.width) {
+      setRightPanelLayout((previous) => ({ ...previous, width: clampedRightPanelWidth }))
     }
-  }, [clampedRightPanelWidth, rightPanelWidth, setRightPanelWidth])
+  }, [clampedRightPanelWidth, currentSessionId, rightPanelLayout.width, setRightPanelLayout])
 
   const handleMouseDown = React.useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -162,8 +169,11 @@ export function AppShell(): React.ReactElement {
     const applyWidth = () => {
       const delta = startX - latestClientX
       const nextWidth = clampRightPanelWidth(startWidth + delta, viewportWidth)
-      if (hasOpenedWideWorkspace) setWidePanelWidthOverride(nextWidth)
-      else setRightPanelWidth(nextWidth)
+      if (rightPanelLayout.hasOpenedWideWorkspace) {
+        setRightPanelLayout((previous) => ({ ...previous, widePanelWidthOverride: nextWidth }))
+      } else {
+        setRightPanelLayout((previous) => ({ ...previous, width: nextWidth }))
+      }
     }
 
     const onMouseMove = (ev: MouseEvent) => {
@@ -190,7 +200,7 @@ export function AppShell(): React.ReactElement {
 
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp)
-  }, [displayedRightPanelWidth, hasOpenedWideWorkspace, setRightPanelWidth, viewportWidth])
+  }, [displayedRightPanelWidth, rightPanelLayout.hasOpenedWideWorkspace, setRightPanelLayout, viewportWidth])
 
   return (
     <>
