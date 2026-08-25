@@ -9,7 +9,11 @@ import { createQueuedAgentStreamState } from './agent-message-queue'
 export function mergeActiveAgentSessionSnapshot(
   current: AgentStreamState | undefined,
   snapshot: AgentActiveSessionSnapshot,
+  latestTerminalStartedAt?: number,
 ): AgentStreamState | undefined {
+  // 完成处理可能已回收 state.startedAt；单独保留本次挂载期间收到的终态标记，
+  // 防止 IPC 快照先在主进程取到、却在完成事件之后才抵达 renderer 时复活旧 run。
+  if (latestTerminalStartedAt != null && latestTerminalStartedAt >= snapshot.startedAt) return current
   if (current?.startedAt != null && current.startedAt >= snapshot.startedAt) return current
   return createQueuedAgentStreamState(current, snapshot.startedAt)
 }

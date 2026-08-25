@@ -24,4 +24,8 @@ describe('mergeActiveAgentSessionSnapshot', () => {
 
     expect(mergeActiveAgentSessionSnapshot(current, snapshot)).toBe(current)
   })
+
+  test('does not resurrect a completed run after its renderer state was reclaimed', () => {
+    expect(mergeActiveAgentSessionSnapshot(undefined, snapshot, 100)).toBeUndefined()
+  })
 })

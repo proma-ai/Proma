@@ -851,6 +851,9 @@ export function useGlobalAgentListeners(): void {
     }
 
     const isWindows = detectIsWindows()
+    // 初始化快照与 STREAM_COMPLETE 可跨 IPC channel 乱序抵达。完成处理回收
+    // startedAt 后仍需保留一个短生命周期的终态标记，避免迟到快照复活旧 run。
+    const latestTerminalRunStartedAt = new Map<string, number>()
 
     /**
      * 当前前台会话在本轮首次产生文件改动时，自动展开右侧工作区并切到「改动」。
@@ -943,7 +946,11 @@ export function useGlobalAgentListeners(): void {
       unstable_batchedUpdates(() => {
         for (const snapshot of snapshots) {
           store.set(agentSessionStreamingStateAtomFamily(snapshot.sessionId), (existing) => {
-            return mergeActiveAgentSessionSnapshot(existing, snapshot)
+            return mergeActiveAgentSessionSnapshot(
+              existing,
+              snapshot,
+              latestTerminalRunStartedAt.get(snapshot.sessionId),
+            )
           })
         }
       })
@@ -972,6 +979,10 @@ export function useGlobalAgentListeners(): void {
           ? payload.event
           : null
         if (runStartedEvent) {
+          const latestTerminalStartedAt = latestTerminalRunStartedAt.get(sessionId)
+          if (latestTerminalStartedAt != null && runStartedEvent.startedAt > latestTerminalStartedAt) {
+            latestTerminalRunStartedAt.delete(sessionId)
+          }
           // 队列 run 会先通过独立 IPC 发送 started 投影，但该投影可能在窗口
           // 重载或跨 renderer 路由时丢失。run_started 是同一轮的第二个权威启动信号，
           // 必须在首个 SDK/tool 事件之前恢复 running、startedAt 和正常的 live UI。
@@ -1461,6 +1472,12 @@ export function useGlobalAgentListeners(): void {
         // 不发"任务已完成"通知（任务并未真正完成）、不清后台任务列表、不重载消息——
         // 等后台任务完成时 Agent 会自动唤醒续轮。
         const backgroundTasksPending = data.backgroundTasksPending === true
+        if (!backgroundTasksPending && data.startedAt != null) {
+          const previousTerminalStartedAt = latestTerminalRunStartedAt.get(data.sessionId)
+          if (previousTerminalStartedAt == null || data.startedAt > previousTerminalStartedAt) {
+            latestTerminalRunStartedAt.set(data.sessionId, data.startedAt)
+          }
+        }
         const hasStreamError = store.get(agentStreamErrorsAtom).has(data.sessionId)
 
         // 主进程随完成事件携带刚落盘的单条 meta；不要为此重新拉取整个会话索引。
