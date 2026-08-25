@@ -1,19 +1,27 @@
 import * as React from 'react'
-import { Bot, MessageCircle } from 'lucide-react'
+import { Bot, MessageSquarePlus } from 'lucide-react'
 
 interface SelectionActionPopoverProps {
   x: number
   y: number
   onAddToAgent: () => void
-  onOpenChat: () => void | Promise<void>
+  /** Pi `/tree`：从当前 Agent 历史节点创建右侧探索分支。 */
+  onOpenExplorationBranch?: () => void | Promise<void>
+  /** 兼容尚未迁移的临时 Agent 入口。 */
+  onOpenTemporaryAgent?: () => void | Promise<void>
+  /** 兼容尚未迁移的文件 / Scratch 选区入口。 */
+  onOpenChat?: () => void | Promise<void>
 }
 
 export function SelectionActionPopover({
   x,
   y,
   onAddToAgent,
+  onOpenExplorationBranch,
+  onOpenTemporaryAgent,
   onOpenChat,
 }: SelectionActionPopoverProps): React.ReactElement {
+  const openSideAssistant = onOpenExplorationBranch ?? onOpenTemporaryAgent ?? onOpenChat
   return (
     <div
       data-selection-action-popover
@@ -30,16 +38,18 @@ export function SelectionActionPopover({
           <Bot className="size-4" />
           为 Agent 引用
         </button>
-        <button
-          type="button"
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium transition-colors hover:bg-muted"
-          onClick={() => {
-            void onOpenChat()
-          }}
-        >
-          <MessageCircle className="size-4" />
-          打开右侧问答
-        </button>
+        {openSideAssistant && (
+          <button
+            type="button"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium transition-colors hover:bg-muted"
+            onClick={() => {
+              void openSideAssistant()
+            }}
+          >
+            <MessageSquarePlus className="size-4" />
+            {onOpenExplorationBranch ? '探索此分支' : onOpenTemporaryAgent ? '打开临时 Agent' : '打开右侧问答'}
+          </button>
+        )}
       </div>
     </div>
   )

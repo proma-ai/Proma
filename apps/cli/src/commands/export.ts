@@ -5,7 +5,7 @@
  * 拒绝直接灌 stdout，改为落盘并回执路径，提示用 --turns/--head/--tail 取片段。
  * 这样 Agent 不会因为一句 `export <id>` 就把一个 50MB 会话的清洗结果塞满上下文。
  *
- * 窗口优先级（见 selectTurns）：--turns > --head > --tail > --offset/--limit。
+ * 窗口优先级（见 selectTurns）：--after-message > --turns > --head > --tail > --offset/--limit。
  * --out FILE 显式落盘（存档用途，不受 max-bytes 护栏限制）。
  */
 import { mkdirSync, writeFileSync } from 'node:fs'
@@ -14,7 +14,7 @@ import { register } from '../registry'
 import { resolveSession } from '../sessions'
 import { emitJson, emitText, errorLine, info, EXIT_OK, EXIT_ERROR, UsageError } from '../output'
 import { readSessionMessages } from '@proma/session-core/node'
-import { groupIntoTurns, toTranscript, selectTurns, renderTranscriptMarkdown } from '@proma/session-core'
+import { groupIntoTurns, toTranscript, selectTurns, renderTranscriptMarkdown, type MessageGroup } from '@proma/session-core'
 import { numFlag, strFlag, boolFlag, parseRange } from '../args'
 
 const DEFAULT_MAX_BYTES = 51200 // 50KB
@@ -22,7 +22,7 @@ const DEFAULT_MAX_BYTES = 51200 // 50KB
 register({
   name: 'export',
   summary: '把会话或 turn 子集渲染为干净 Markdown（含超预算落盘护栏）',
-  usage: 'session export <id|path> [--turns A-B | --head N | --tail N | --offset K --limit N] [--out FILE] [--stdout] [--max-bytes N] [--json]',
+  usage: 'session export <id|path> [--after-message UUID | --turns A-B | --head N | --tail N | --offset K --limit N] [--out FILE] [--stdout] [--max-bytes N] [--json]',
   run: (ctx) => {
     const target = ctx.args.positionals[0]
     if (!target) throw new UsageError('缺少会话 id 或路径')
@@ -32,17 +32,25 @@ register({
       return EXIT_ERROR
     }
 
-    const allTurns = toTranscript(groupIntoTurns(readSessionMessages(resolved.filePath)))
+    const groups = groupIntoTurns(readSessionMessages(resolved.filePath))
+    const allTurns = toTranscript(groups)
 
     // 解析窗口
+    const afterMessageId = strFlag(ctx.args.flags, 'after-message')
     const range = parseRange(strFlag(ctx.args.flags, 'turns'))
     const head = numFlag(ctx.args.flags, 'head')
     const tail = numFlag(ctx.args.flags, 'tail')
     const offset = numFlag(ctx.args.flags, 'offset')
     const limit = numFlag(ctx.args.flags, 'limit')
-    const hasWindow = range !== undefined || head !== undefined || tail !== undefined || offset !== undefined || limit !== undefined
+    const hasWindow = afterMessageId !== undefined || range !== undefined || head !== undefined || tail !== undefined || offset !== undefined || limit !== undefined
+    const anchorTurnIndex = afterMessageId ? findAssistantAnchorTurnIndex(groups, afterMessageId) : undefined
+    if (afterMessageId && anchorTurnIndex === undefined) {
+      throw new UsageError(`找不到 assistant 消息锚点: ${afterMessageId}`)
+    }
 
-    const turns = hasWindow ? selectTurns(allTurns, { range, head, tail, offset, limit }) : allTurns
+    const turns = anchorTurnIndex !== undefined
+      ? allTurns.slice(anchorTurnIndex + 1)
+      : hasWindow ? selectTurns(allTurns, { range, head, tail, offset, limit }) : allTurns
     // 截取片段时省略顶部标题，便于直接拼接阅读
     const md = renderTranscriptMarkdown(turns, { sessionId: resolved.id, header: !hasWindow })
     const bytes = Buffer.byteLength(md, 'utf-8')
@@ -87,6 +95,12 @@ register({
     return EXIT_OK
   },
 })
+
+function findAssistantAnchorTurnIndex(groups: MessageGroup[], messageId: string): number | undefined {
+  const index = groups.findIndex((group) => group.type === 'assistant-turn'
+    && group.assistantMessages.some((message) => (message as { uuid?: unknown }).uuid === messageId))
+  return index >= 0 ? index : undefined
+}
 
 function writeFileTo(path: string, content: string): void {
   const dir = dirname(path)

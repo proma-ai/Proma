@@ -3,21 +3,15 @@
  *
  * 在 Agent 历史消息里划选文本后，提供两个轻量动作：
  * 1. 添加到当前 Agent 输入框引用
- * 2. 打开 Agent 右侧问答 Tab，用选区作为上下文提问
+ * 2. 从当前 assistant 节点创建 Pi `/tree` 探索分支，并在右侧继续工作
  */
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { toast } from 'sonner'
-import {
-  agentSideChatMapAtom,
-  conversationsAtom,
-  conversationDraftsAtom,
-  selectedModelAtom,
-} from '@/atoms/chat-atoms'
+import { agentSessionsAtom, agentSideTemporaryAgentMapAtom, agentDiffPanelTabAtom, agentSidePanelOpenAtomFamily, getExplorationSidePanelTab } from '@/atoms/agent-atoms'
 import { quotedSelectionMapAtom } from '@/atoms/preview-atoms'
 import type { QuotedSelection } from '@/atoms/preview-atoms'
-import { agentDiffPanelTabAtom, agentSidePanelOpenAtomFamily } from '@/atoms/agent-atoms'
 import { SelectionActionPopover } from '@/components/selection/SelectionActionPopover'
 import { useFocusAgentSessionInput } from '@/hooks/useFocusAgentSessionInput'
 import { SELECTION_ACTION_POPOVER_SELECTOR } from '@/lib/quoted-selection'
@@ -47,6 +41,8 @@ interface AgentHistorySelectionLayerProps {
   rootRef: React.RefObject<HTMLDivElement>
   /** 同一消息内的历史选区优先插入当前 Agent 富文本输入框。 */
   onAddToAgent?: (quote: QuotedSelection) => boolean
+  /** 嵌入的探索分支自身不能继续在没有 SidePanel 容器的位置嵌套分叉。 */
+  explorationEnabled?: boolean
 }
 
 function getElementFromNode(node: Node | null): Element | null {
@@ -204,12 +200,12 @@ export function AgentHistorySelectionLayer({
   sessionId,
   rootRef,
   onAddToAgent,
+  explorationEnabled = true,
 }: AgentHistorySelectionLayerProps): React.ReactElement | null {
   const setQuotedSelectionMap = useSetAtom(quotedSelectionMapAtom)
-  const selectedChatModel = useAtomValue(selectedModelAtom)
-  const setConversations = useSetAtom(conversationsAtom)
-  const setConversationDrafts = useSetAtom(conversationDraftsAtom)
-  const setSideChatMap = useSetAtom(agentSideChatMapAtom)
+  const agentSessions = useAtomValue(agentSessionsAtom)
+  const setAgentSessions = useSetAtom(agentSessionsAtom)
+  const setSideTemporaryAgentMap = useSetAtom(agentSideTemporaryAgentMapAtom)
   const setSidePanelOpen = useSetAtom(agentSidePanelOpenAtomFamily(sessionId))
   const setSidePanelTabMap = useSetAtom(agentDiffPanelTabAtom)
   const focusAgentSessionInput = useFocusAgentSessionInput()
@@ -217,7 +213,7 @@ export function AgentHistorySelectionLayer({
   const selectionRef = React.useRef<AgentHistorySelection | null>(null)
   const pointerSelectingRef = React.useRef(false)
   const captureTimerRef = React.useRef<number | null>(null)
-  const openChatPendingRef = React.useRef(false)
+  const openTemporaryAgentPendingRef = React.useRef(false)
 
   const clearSelection = React.useCallback((): void => {
     selectionRef.current = null
@@ -402,40 +398,63 @@ export function AgentHistorySelectionLayer({
     toast.success('已添加到 Agent 引用')
   }, [clearSelection, createQuotedSelection, focusAgentSessionInput, onAddToAgent, sessionId, setQuotedSelectionMap])
 
-  const handleOpenChatTab = React.useCallback(async (): Promise<void> => {
+  const handleOpenExplorationBranch = React.useCallback(async (): Promise<void> => {
     const candidate = selectionRef.current
-    if (!candidate || openChatPendingRef.current) return
-    openChatPendingRef.current = true
+    if (!candidate || openTemporaryAgentPendingRef.current) return
+    if (candidate.messageRole !== 'assistant' || !candidate.messageId) {
+      toast.info('请在一条已完成的 Agent 回复中选择内容，再从该节点探索')
+      return
+    }
+
+    const parentSession = agentSessions.find((item) => item.id === sessionId)
+    if (!parentSession?.piEntryBindings?.[candidate.messageId]) {
+      toast.warning('这个回复没有可用的 Pi 分叉节点，暂时无法从这里探索')
+      return
+    }
+
+    openTemporaryAgentPendingRef.current = true
     try {
-      const conversation = await window.electronAPI.createConversation(
-        '历史选区问答',
-        selectedChatModel?.modelId,
-        selectedChatModel?.channelId,
-      )
+      // 必须使用 Pi 的 SessionManager 分叉，才能继承节点此前完整上下文与工具轨迹。
+      const branch = await window.electronAPI.forkAgentSession({
+        sessionId,
+        upToMessageUuid: candidate.messageId,
+        explorationSourceLabel: candidate.text.slice(0, 80),
+      })
       const quotedSelection = createQuotedSelection(candidate)
-      setConversations((prev) => prev.some((item) => item.id === conversation.id) ? prev : [conversation, ...prev])
-      setConversationDrafts((prev) => new Map(prev).set(conversation.id, '我的问题：'))
-      // 打开问答 Tab 同样是用户确认动作，允许写入目标会话的待引用 atom。
-      setQuotedSelectionMap((prev) => new Map(prev).set(conversation.id, quotedSelection))
-      setSideChatMap((prev) => new Map(prev).set(sessionId, conversation.id))
+      setAgentSessions((prev) => prev.some((item) => item.id === branch.id) ? prev : [branch, ...prev])
+      setQuotedSelectionMap((prev) => new Map(prev).set(branch.id, quotedSelection))
+      setSideTemporaryAgentMap((prev) => {
+        const openBranches = prev.get(sessionId) ?? []
+        const next = new Map(prev)
+        next.set(sessionId, openBranches.some((item) => item.sessionId === branch.id)
+          ? openBranches
+          : [...openBranches, {
+              sessionId: branch.id,
+              sourceMessageId: candidate.messageId!,
+              sourceLabel: candidate.text.slice(0, 80),
+            }])
+        return next
+      })
       setSidePanelOpen(true)
-      setSidePanelTabMap((prev) => new Map(prev).set(sessionId, 'chat'))
+      setSidePanelTabMap((prev) => new Map(prev).set(sessionId, getExplorationSidePanelTab(branch.id)))
       window.getSelection()?.removeAllRanges()
       clearSelection()
+      toast.success('已创建探索分支', { description: '它继承此回复之前的完整上下文；探索结论可带回主线。' })
     } catch (error) {
-      console.error('[AgentMessages] 打开历史选区聊天标签失败:', error)
-      toast.error('打开聊天标签失败')
+      console.error('[AgentHistorySelectionLayer] 创建探索分支失败:', error)
+      toast.error('创建探索分支失败', { description: error instanceof Error ? error.message : undefined })
     } finally {
-      openChatPendingRef.current = false
+      openTemporaryAgentPendingRef.current = false
     }
-  }, [clearSelection, createQuotedSelection, selectedChatModel, sessionId, setConversationDrafts, setConversations, setQuotedSelectionMap, setSideChatMap, setSidePanelOpen, setSidePanelTabMap])
+  }, [agentSessions, clearSelection, createQuotedSelection, sessionId, setAgentSessions, setQuotedSelectionMap, setSidePanelOpen, setSidePanelTabMap, setSideTemporaryAgentMap])
 
+  const canExplore = explorationEnabled && selection?.messageRole === 'assistant' && Boolean(selection.messageId)
   return selection && (
     <SelectionActionPopover
       x={selection.x}
       y={selection.y}
       onAddToAgent={handleAddToAgent}
-      onOpenChat={handleOpenChatTab}
+      {...(canExplore ? { onOpenExplorationBranch: handleOpenExplorationBranch } : {})}
     />
   )
 }

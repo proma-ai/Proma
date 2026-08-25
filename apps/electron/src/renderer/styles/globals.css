@@ -551,6 +551,12 @@ body {
   }
 }
 
+/* 主窗口全局 Toast 只占用 Agent 历史主区，避免覆盖右侧原生浏览器面板。 */
+.agent-history-toaster[data-sonner-toaster] {
+  position: absolute;
+  bottom: auto;
+}
+
 /* Draggable title bar region for Electron window */
 .titlebar-drag-region,
 .app-drag-region {

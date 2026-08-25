@@ -7,8 +7,9 @@
 
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
-import { X, ExternalLink, ChevronRight, MoreHorizontal, FolderSearch, Pencil, FolderInput, MessageSquarePlus, FileDiff, FileText, FolderOpen, Globe, MessageCircle, Brain } from 'lucide-react'
+import { X, ExternalLink, ChevronRight, MoreHorizontal, FolderSearch, Pencil, FolderInput, GitBranch, GitMerge, MessageSquarePlus, FileDiff, FileText, FolderOpen, Globe, MessageCircle, Brain, Split } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { toast } from 'sonner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   DropdownMenu,
@@ -17,11 +18,13 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
+import { markdownToHtml } from '@/lib/markdown-rich-text'
 import { FileBrowser, FileDropZone, FileTypeIcon, FileSearchBar, computeRevealAncestors, isPathUnderRoot, computeTreeRowLayout, AncestorGuides, STICKY_ROW_BASE_CLASS, canBeSticky } from '@/components/file-browser'
 import { DiffPanelTabBar } from '@/components/diff/DiffPanelTabBar'
 import type { WorkspacePanelTab } from '@/components/diff/DiffPanelTabBar'
 import { DiffChangesList } from '@/components/diff/DiffChangesList'
 import { ChatView } from '@/components/chat/ChatView'
+import { AgentView } from '@/components/agent/AgentView'
 import {
   currentSessionSidePanelOpenAtom,
   agentFileSourceFilterMapAtom,
@@ -41,14 +44,25 @@ import {
   agentSessionStreamingStateAtomFamily,
   fileBrowserAutoRevealAtom,
   agentSelectedWorktreeAtom,
+  agentSideTemporaryAgentMapAtom,
+  agentSideDelegationMapAtom,
+  agentSDKMessagesCacheAtom,
+  agentLiveMessagesAtomFamily,
+  agentSessionDraftsAtom,
+  agentSessionDraftSyncVersionsAtom,
+  agentSessionDraftHtmlAtom,
 } from '@/atoms/agent-atoms'
 import {
   getBrowserSidePanelTab,
   getBrowserTabIdFromSidePanelTab,
+  getDelegationSessionIdFromSidePanelTab,
+  getDelegationSidePanelTab,
+  getExplorationSessionIdFromSidePanelTab,
+  getExplorationSidePanelTab,
   getPreviewIdFromSidePanelTab,
   getPreviewSidePanelTab,
 } from '@/atoms/agent-atoms'
-import type { AgentSidePanelTab, AgentFileSourceFilter } from '@/atoms/agent-atoms'
+import type { AgentSidePanelTab, AgentFileSourceFilter, AgentExplorationBranchTab } from '@/atoms/agent-atoms'
 import { WorkspaceMemoryChangeDock } from '@/components/agent-skills/WorkspaceMemoryChangeDock'
 import { workspaceMemoryChangesAtom, workspaceMemoryEditingStateAtomFamily } from '@/atoms/memory-change-atoms'
 import { agentSideChatMapAtom } from '@/atoms/chat-atoms'
@@ -64,7 +78,7 @@ import { getPreviewFileId, previewFileMapAtom, previewFilesMapAtom, previewPanel
 import { PreviewPanel } from '@/components/diff/PreviewPanel'
 import { useOpenPreview } from '@/components/diff/preview-opener'
 import { detectIsWindows } from '@/lib/platform'
-import type { FileEntry, AgentPendingFile } from '@proma/shared'
+import type { FileEntry, AgentPendingFile, AgentSessionMeta, SDKMessage } from '@proma/shared'
 import { setFilePanelDragData, getMediaTypeFromFilename, dispatchInsertFileMention } from '@/lib/file-panel-drag'
 import { CLOSE_ACTIVE_RIGHT_WORKSPACE_TAB_EVENT } from '@/lib/right-workspace-events'
 
@@ -81,6 +95,139 @@ function getPathDirname(filePath: string): string {
 function joinPath(parentDir: string, name: string): string {
   const separator = parentDir.includes('\\') && !parentDir.includes('/') ? '\\' : '/'
   return parentDir ? `${parentDir}${separator}${name}` : name
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[char] ?? char)
+}
+
+function getLatestExplorationConclusion(messages: SDKMessage[], sourceMessageId: string): string {
+  // fork 会复制分叉点之前的完整历史；只能带回锚点之后的新 assistant 回复，
+  // 否则刚打开分支就会把主线已有结论误当作探索结果。
+  let sourceIndex = -1
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index] as { uuid?: unknown }
+    if (message.uuid === sourceMessageId) {
+      sourceIndex = index
+      break
+    }
+  }
+  if (sourceIndex < 0) return ''
+
+  for (let index = messages.length - 1; index > sourceIndex; index -= 1) {
+    const message = messages[index] as { type?: unknown; message?: { content?: unknown } }
+    if (message.type !== 'assistant' || !Array.isArray(message.message?.content)) continue
+    const text = message.message.content
+      .flatMap((block) => {
+        if (!block || typeof block !== 'object') return []
+        const record = block as { type?: unknown; text?: unknown }
+        return record.type === 'text' && typeof record.text === 'string' ? [record.text] : []
+      })
+      .join('\n')
+      .trim()
+    if (text) return text
+  }
+  return ''
+}
+
+/**
+ * 右侧嵌入 Agent 在切换时轻微淡入并横移 1px，缓和不同消息高度瞬间替换的视觉跳变。
+ * 首次打开不播放，且尊重系统的减少动态效果偏好。
+ */
+function SideAgentSessionContent({ contentKey, children }: { contentKey: string; children: React.ReactNode }): React.ReactElement {
+  const previousContentKeyRef = React.useRef<string | null>(null)
+  const shouldAnimate = previousContentKeyRef.current !== null && previousContentKeyRef.current !== contentKey
+
+  React.useEffect(() => {
+    previousContentKeyRef.current = contentKey
+  }, [contentKey])
+
+  return (
+    <div
+      key={contentKey}
+      className={cn(
+        'min-h-0 flex-1 overflow-hidden',
+        shouldAnimate && 'animate-in fade-in-0 slide-in-from-right-1 duration-150 motion-reduce:animate-none',
+      )}
+    >
+      {children}
+    </div>
+  )
+}
+
+/**
+ * 探索分支正在流式输出时，只有带回按钮需要知道“是否已有新增 assistant 内容”。
+ * 将该订阅隔离在小组件中，避免每个 token 都重渲染整块文件/Tab 侧栏。
+ */
+function ExplorationBringBackAction({
+  parentSessionId,
+  branch,
+  sessions,
+}: {
+  parentSessionId: string
+  branch: AgentExplorationBranchTab
+  sessions: AgentSessionMeta[]
+}): React.ReactElement {
+  const explorationMessagesCache = useAtomValue(agentSDKMessagesCacheAtom)
+  const explorationLiveMessages = useAtomValue(agentLiveMessagesAtomFamily(branch.sessionId))
+  const parentDrafts = useAtomValue(agentSessionDraftsAtom)
+  const parentDraftHtml = useAtomValue(agentSessionDraftHtmlAtom)
+  const setParentDrafts = useSetAtom(agentSessionDraftsAtom)
+  const setParentDraftSyncVersions = useSetAtom(agentSessionDraftSyncVersionsAtom)
+  const setParentDraftHtml = useSetAtom(agentSessionDraftHtmlAtom)
+  const latestExplorationConclusion = React.useMemo(
+    () => getLatestExplorationConclusion(
+      [...(explorationMessagesCache.get(branch.sessionId) ?? []), ...explorationLiveMessages],
+      branch.sourceMessageId,
+    ),
+    [branch.sessionId, branch.sourceMessageId, explorationLiveMessages, explorationMessagesCache],
+  )
+  const handleBringExplorationBack = React.useCallback(() => {
+    if (!latestExplorationConclusion) {
+      toast.info('探索分支还没有可带回的 Agent 结论')
+      return
+    }
+    const branchTitle = sessions.find((item) => item.id === branch.sessionId)?.title || '探索分支'
+    const referenceLabel = `探索后新增内容 · ${branchTitle}`
+    const referenceMarkdown = `这是探索后的新增内容：&session:${branch.sessionId}::${encodeURIComponent(referenceLabel)}`
+    const referenceHtml = `<p>这是探索后的新增内容：<span data-type="mention" data-id="${escapeHtml(branch.sessionId)}" data-label="${escapeHtml(referenceLabel)}" data-mention-suggestion-char="&">${escapeHtml(referenceLabel)}</span></p>`
+    setParentDraftSyncVersions((previous) => {
+      const next = new Map(previous)
+      next.set(parentSessionId, (next.get(parentSessionId) ?? 0) + 1)
+      return next
+    })
+    setParentDrafts((previous) => {
+      const next = new Map(previous)
+      const current = parentDrafts.get(parentSessionId)?.trim() ?? ''
+      next.set(parentSessionId, current ? `${current}\n\n${referenceMarkdown}` : referenceMarkdown)
+      return next
+    })
+    setParentDraftHtml((previous) => {
+      const currentHtml = parentDraftHtml.get(parentSessionId) || markdownToHtml(parentDrafts.get(parentSessionId) ?? '')
+      const nextHtml = currentHtml ? `${currentHtml}<p></p>${referenceHtml}` : referenceHtml
+      const next = new Map(previous)
+      next.set(parentSessionId, nextHtml)
+      return next
+    })
+    toast.success('已添加探索引用', { description: '探索 Tab 保持打开；主会话发送后 Agent 会读取该标记。' })
+  }, [branch.sessionId, latestExplorationConclusion, parentDraftHtml, parentDrafts, parentSessionId, sessions, setParentDraftHtml, setParentDrafts, setParentDraftSyncVersions])
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant="ghost" size="icon" className="size-7 active:scale-[0.96]" onClick={handleBringExplorationBack} disabled={!latestExplorationConclusion} aria-label="添加探索引用">
+          <GitMerge className="size-3.5" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{latestExplorationConclusion ? '将探索后新增内容作为会话引用添加到主线草稿；探索 Tab 保持打开，不会自动发送' : '完成一轮新的探索回复后即可添加引用'}</TooltipContent>
+    </Tooltip>
+  )
 }
 
 interface SidePanelProps {
@@ -458,6 +605,20 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   const sideChatMap = useAtomValue(agentSideChatMapAtom)
   const setSideChatMap = useSetAtom(agentSideChatMapAtom)
   const sideChatConversationId = sideChatMap.get(sessionId) ?? null
+  const sideTemporaryAgentMap = useAtomValue(agentSideTemporaryAgentMapAtom)
+  const setSideTemporaryAgentMap = useSetAtom(agentSideTemporaryAgentMapAtom)
+  const sideTemporaryAgents = sideTemporaryAgentMap.get(sessionId) ?? []
+  const sideDelegationMap = useAtomValue(agentSideDelegationMapAtom)
+  const setSideDelegationMap = useSetAtom(agentSideDelegationMapAtom)
+  const sideDelegationSessionIds = sideDelegationMap.get(sessionId) ?? []
+  const activeDelegationSessionId = getDelegationSessionIdFromSidePanelTab(activeTab)
+  const activeDelegationSession = activeDelegationSessionId
+    ? sessions.find((item) => item.id === activeDelegationSessionId && item.parentSessionId === sessionId && !!item.sourceDelegationId) ?? null
+    : null
+  const activeExplorationSessionId = getExplorationSessionIdFromSidePanelTab(activeTab)
+  const activeExplorationBranch = activeExplorationSessionId
+    ? sideTemporaryAgents.find((branch) => branch.sessionId === activeExplorationSessionId) ?? null
+    : null
   const [memoryTabOpen, setMemoryTabOpen] = useAtom(agentMemoryPanelOpenAtomFamily(sessionId))
   const isAgentRunning = useAtomValue(agentSessionStreamingStateAtomFamily(sessionId))?.running === true
   const memoryChangesMap = useAtomValue(workspaceMemoryChangesAtom)
@@ -467,9 +628,12 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   const lastActivatedMemoryChangeRef = React.useRef<string | null>(null)
   const effectiveActiveTab: AgentSidePanelTab = activeTab === 'chat' && !sideChatConversationId
     ? 'files'
-    : activeTab === 'memory' && (!workspaceSlug || !memoryTabOpen)
+    // `temporary-agent` 是旧的单分支内存状态；新状态使用 exploration:<sessionId>。
+    : activeTab === 'temporary-agent' || (activeExplorationSessionId !== null && !activeExplorationBranch) || (activeDelegationSessionId !== null && !activeDelegationSession)
       ? 'files'
-      : activeTab
+      : activeTab === 'memory' && (!workspaceSlug || !memoryTabOpen)
+        ? 'files'
+        : activeTab
 
   // Agent 对当前项目记忆写入后，自动展开并激活完整编辑器这个独立工作区 Tab。
   // Watcher 同一事件可因重新挂载被读到多次，按路径和时间戳去重；仅流式 Agent 运行中
@@ -512,6 +676,68 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       onTabChange('files')
     }
   }, [activeTab, onTabChange, sessionId, setSideChatMap])
+
+  const handleCloseExplorationTab = React.useCallback((branchSessionId: string) => {
+    setSideTemporaryAgentMap((prev) => {
+      const openBranches = prev.get(sessionId) ?? []
+      const remaining = openBranches.filter((branch) => branch.sessionId !== branchSessionId)
+      if (remaining.length === openBranches.length) return prev
+      const next = new Map(prev)
+      if (remaining.length > 0) next.set(sessionId, remaining)
+      else next.delete(sessionId)
+      return next
+    })
+    if (getExplorationSessionIdFromSidePanelTab(activeTab) === branchSessionId) onTabChange('files')
+  }, [activeTab, onTabChange, sessionId, setSideTemporaryAgentMap])
+
+  const handleCloseDelegationTab = React.useCallback((childSessionId: string) => {
+    setSideDelegationMap((prev) => {
+      const openChildIds = prev.get(sessionId) ?? []
+      const remaining = openChildIds.filter((id) => id !== childSessionId)
+      if (remaining.length === openChildIds.length) return prev
+      const next = new Map(prev)
+      if (remaining.length > 0) next.set(sessionId, remaining)
+      else next.delete(sessionId)
+      return next
+    })
+    if (getDelegationSessionIdFromSidePanelTab(activeTab) === childSessionId) onTabChange('files')
+  }, [activeTab, onTabChange, sessionId, setSideDelegationMap])
+
+  // 分支是正常持久化会话，但若用户从左侧删除了它，右侧不能保留悬空 Tab。
+  React.useEffect(() => {
+    const validBranchIds = new Set(sessions.map((item) => item.id))
+    const remaining = sideTemporaryAgents.filter((branch) => validBranchIds.has(branch.sessionId))
+    if (remaining.length === sideTemporaryAgents.length) return
+    setSideTemporaryAgentMap((prev) => {
+      const current = prev.get(sessionId) ?? []
+      const nextRemaining = current.filter((branch) => validBranchIds.has(branch.sessionId))
+      if (nextRemaining.length === current.length) return prev
+      const next = new Map(prev)
+      if (nextRemaining.length > 0) next.set(sessionId, nextRemaining)
+      else next.delete(sessionId)
+      return next
+    })
+    if (activeExplorationSessionId && !validBranchIds.has(activeExplorationSessionId)) onTabChange('files')
+  }, [activeExplorationSessionId, onTabChange, sessionId, sessions, setSideTemporaryAgentMap, sideTemporaryAgents])
+
+  // 子 Agent 被从左侧删除后，同样移除右侧的悬空观察 Tab；不改变左侧树的现有渲染与排序。
+  React.useEffect(() => {
+    const validChildIds = new Set(sessions
+      .filter((item) => item.parentSessionId === sessionId && !!item.sourceDelegationId)
+      .map((item) => item.id))
+    const remaining = sideDelegationSessionIds.filter((id) => validChildIds.has(id))
+    if (remaining.length === sideDelegationSessionIds.length) return
+    setSideDelegationMap((prev) => {
+      const current = prev.get(sessionId) ?? []
+      const nextRemaining = current.filter((id) => validChildIds.has(id))
+      if (nextRemaining.length === current.length) return prev
+      const next = new Map(prev)
+      if (nextRemaining.length > 0) next.set(sessionId, nextRemaining)
+      else next.delete(sessionId)
+      return next
+    })
+    if (activeDelegationSessionId && !validChildIds.has(activeDelegationSessionId)) onTabChange('files')
+  }, [activeDelegationSessionId, onTabChange, sessionId, sessions, setSideDelegationMap, sideDelegationSessionIds])
 
   // 浏览器状态由 MainArea 的全局订阅同步到 atom；右侧工作区只负责呈现和显式打开。
   // 这样切换文件/改动时 BrowserSlot 会正确隐藏原生 WebContentsView，而不会销毁网页会话。
@@ -669,6 +895,23 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       closable: true,
     })),
     ...(sideChatConversationId ? [{ id: 'chat' as const, label: '问答', icon: <MessageCircle className="size-3.5" />, closable: true }] : []),
+    ...sideTemporaryAgents.map((branch) => ({
+      id: getExplorationSidePanelTab(branch.sessionId),
+      label: sessions.find((item) => item.id === branch.sessionId)?.title || '探索分支',
+      icon: <Split className="size-3.5" />,
+      closable: true,
+    })),
+    ...sideDelegationSessionIds.flatMap((childSessionId) => {
+      const child = sessions.find((item) => (
+        item.id === childSessionId && item.parentSessionId === sessionId && !!item.sourceDelegationId
+      ))
+      return child ? [{
+        id: getDelegationSidePanelTab(child.id),
+        label: child.title,
+        icon: <GitBranch className="size-3.5" />,
+        closable: true,
+      }] : []
+    }),
     ...(browserState?.tabs.map((tab) => ({
       id: getBrowserSidePanelTab(tab.tabId),
       label: tab.title || '新建标签页',
@@ -677,7 +920,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       closable: tab.tabId !== browserState.agentTabId,
       activity: showBrowserActivity && activeBrowserTabId !== tab.tabId && browserState.activeTabId === tab.tabId,
     })) ?? []),
-  ], [activeBrowserTabId, browserState, memoryTabOpen, previewFiles, showBrowserActivity, sideChatConversationId, workspaceSlug])
+  ], [activeBrowserTabId, browserState, memoryTabOpen, previewFiles, sessions, sessionId, showBrowserActivity, sideChatConversationId, sideDelegationSessionIds, sideTemporaryAgents, workspaceSlug])
 
   const handleCloseWorkspaceTab = React.useCallback((tab: AgentSidePanelTab) => {
     if (tab === 'memory') {
@@ -690,9 +933,13 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     const previewId = getPreviewIdFromSidePanelTab(tab)
     if (previewId) { handleClosePreviewTab(previewId); return }
     if (tab === 'chat') { handleCloseChatTab(); return }
+    const explorationSessionId = getExplorationSessionIdFromSidePanelTab(tab)
+    if (explorationSessionId) { handleCloseExplorationTab(explorationSessionId); return }
+    const delegationSessionId = getDelegationSessionIdFromSidePanelTab(tab)
+    if (delegationSessionId) { handleCloseDelegationTab(delegationSessionId); return }
     const browserTabId = getBrowserTabIdFromSidePanelTab(tab)
     if (browserTabId && browserTabId !== browserState?.agentTabId) void handleCloseBrowserTab(browserTabId)
-  }, [activeTab, browserState?.agentTabId, handleCloseBrowserTab, handleCloseChatTab, handleClosePreviewTab, memoryEditingState.dirty, onTabChange, setMemoryEditingState, setMemoryTabOpen])
+  }, [activeTab, browserState?.agentTabId, handleCloseBrowserTab, handleCloseChatTab, handleCloseDelegationTab, handleCloseExplorationTab, handleClosePreviewTab, memoryEditingState.dirty, onTabChange, setMemoryEditingState, setMemoryTabOpen])
 
   React.useEffect(() => {
     const handleCloseActiveWorkspaceTab = (event: Event) => {
@@ -733,6 +980,9 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
               setMemoryTabOpen(true)
               onTabChange('memory')
             }}
+            activeTabAction={activeExplorationBranch ? (
+              <ExplorationBringBackAction parentSessionId={sessionId} branch={activeExplorationBranch} sessions={sessions} />
+            ) : undefined}
             onClose={() => setIsOpen(false)}
             isWindows={isWindows}
           />
@@ -755,6 +1005,14 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
             ) : (
               <div className="flex-1 flex items-center justify-center text-muted-foreground text-xs">暂无问答会话</div>
             )
+          ) : activeExplorationBranch ? (
+            <SideAgentSessionContent contentKey={`exploration:${activeExplorationBranch.sessionId}`}>
+              <AgentView sessionId={activeExplorationBranch.sessionId} embedded />
+            </SideAgentSessionContent>
+          ) : activeDelegationSession ? (
+            <SideAgentSessionContent contentKey={`delegation:${activeDelegationSession.id}`}>
+              <AgentView sessionId={activeDelegationSession.id} embedded />
+            </SideAgentSessionContent>
           ) : effectiveActiveTab === 'memory' ? (
             workspaceSlug ? (
               <div className="min-h-0 flex-1 overflow-auto p-2">

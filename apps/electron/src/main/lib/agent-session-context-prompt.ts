@@ -198,11 +198,19 @@ export function buildReferencedSessionsPrompt(
 
     const title = escapeContextAttr(meta.title)
     const historyPath = getSessionHistoryPath(referencedSessionId)
+    const explorationBoundary = meta.explorationParentSessionId && meta.explorationSourceMessageId
+      ? `\n<exploration_delta parentSessionId="${escapeContextAttr(meta.explorationParentSessionId)}" sourceMessageId="${escapeContextAttr(meta.explorationSourceMessageId)}">\n` +
+        '此会话是从主线分叉的探索分支；用户引用的仅是 sourceMessageId 之后新增的探索内容。\n' +
+        '分叉前复制的主线历史不是本次引用内容：不要读取、总结或重复处理它。\n' +
+        `请先用 ${getSessionCliCommandPrefix()} session export ${referencedSessionId} --after-message ${meta.explorationSourceMessageId} 精确读取分叉后的内容。\n` +
+        '仅当必须核验分支内更早的新增内容时，才在该边界之后渐进读取；不要导出完整 fork 历史。\n' +
+        '</exploration_delta>'
+      : ''
     sessionBlocks.push(
       `<session id="${referencedSessionId}" title="${title}" updatedAt="${meta.updatedAt}">\n` +
       `CLI target: ${referencedSessionId}\n` +
       `History path: ${historyPath}\n` +
-      '</session>',
+      `</session>${explorationBoundary}`,
     )
   }
 

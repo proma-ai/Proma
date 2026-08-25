@@ -1,8 +1,8 @@
 /**
- * ModelSelector - 模型选择器（Dialog + Command 搜索）
+ * ModelSelector - 模型选择器（锚定 Popover + 搜索）
  *
  * 现代化设计：
- * - 大尺寸 Dialog，宽敞易读
+ * - 非模态 Popover 锚定触发按钮，向上展开（右对齐），避免 Dialog 全屏遮罩
  * - 按渠道分组，标题与模型项使用统一栅格对齐
  * - 选中项使用柔和底色与右侧勾选标记
  * - 触发按钮：模型 logo + 模型名 + Chevron
@@ -12,11 +12,10 @@ import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { Check, ChevronDown, Cpu, Search } from 'lucide-react'
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
 import {
   Tooltip,
   TooltipContent,
@@ -34,10 +33,10 @@ import { useConversationIdOptional } from '@/contexts/session-context'
 import { inputToolbarControlHeightClass } from '@/components/ai-elements/input-toolbar-styles'
 import { getModelLogo, getChannelLogo, DefaultLogo } from '@/lib/model-logo'
 import { cn } from '@/lib/utils'
-import { ModelHealthIndicator } from './ModelHealthIndicator'
 import { PROMA_OFFICIAL_CHANNEL_ID } from '@proma/shared'
 import type { Channel, ModelOption, ProviderType } from '@proma/shared'
 import { ChannelPlanQuotaBadge } from './ChannelPlanQuotaBadge'
+import { ModelHealthIndicator } from './ModelHealthIndicator'
 import { getModelSelectorOptionVisualState } from './model-selector-visual-state'
 
 /** 渠道标题与模型项共享的三列栅格，确保左右边距和文字起点一致。 */
@@ -70,11 +69,11 @@ export function buildModelOptions(
 ): ModelOption[] {
   const options: ModelOption[] = []
 
-  // Proma 官方渠道置顶（若已启用且未被过滤掉），其余保持原有相对顺序
-  const ordered = channels.some((c) => c.id === PROMA_OFFICIAL_CHANNEL_ID && c.enabled)
+  // Proma 官方渠道置顶（若已启用且未被过滤掉），其余保持原有相对顺序。
+  const ordered = channels.some((channel) => channel.id === PROMA_OFFICIAL_CHANNEL_ID && channel.enabled)
     ? [
-        ...channels.filter((c) => c.id === PROMA_OFFICIAL_CHANNEL_ID),
-        ...channels.filter((c) => c.id !== PROMA_OFFICIAL_CHANNEL_ID),
+        ...channels.filter((channel) => channel.id === PROMA_OFFICIAL_CHANNEL_ID),
+        ...channels.filter((channel) => channel.id !== PROMA_OFFICIAL_CHANNEL_ID),
       ]
     : channels
 
@@ -84,10 +83,14 @@ export function buildModelOptions(
     if (filterChannelIds && !filterChannelIds.includes(channel.id)) continue
     if (excludedProviders?.includes(channel.provider)) continue
 
-    const modelList = (useAgentModels && channel.agentModels) ? channel.agentModels : channel.models
-
+    // Agent 专用模型清单只能由 Proma 官方渠道提供；第三方渠道即使异常带有
+    // agentModels 也继续使用其普通模型清单，避免错误改变其可选模型集。
+    const modelList = useAgentModels && channel.id === PROMA_OFFICIAL_CHANNEL_ID
+      ? (channel.agentModels ?? channel.models)
+      : channel.models
     for (const model of modelList) {
       if (!model.enabled) continue
+
       options.push({
         channelId: channel.id,
         channelName: channel.name,
@@ -161,7 +164,7 @@ export function ModelSelector({
   // 外部模型优先 → per-conversation 模型
   const selectedModel = externalSelectedModel !== undefined ? externalSelectedModel : conversationModel
 
-  // 每次打开 Dialog 时刷新渠道列表，确保最新
+  // 每次打开 Popover 时刷新渠道列表，确保最新
   React.useEffect(() => {
     if (open) {
       window.electronAPI.listChannels().then(setChannels).catch(console.error)
@@ -170,13 +173,7 @@ export function ModelSelector({
   }, [open, setChannels])
 
   const modelOptions = React.useMemo(
-    () => buildModelOptions(
-      channels,
-      filterChannelId,
-      filterChannelIds,
-      useAgentModels,
-          excludedProviders,
-    ),
+    () => buildModelOptions(channels, filterChannelId, filterChannelIds, useAgentModels, excludedProviders),
     [channels, filterChannelId, filterChannelIds, useAgentModels, excludedProviders],
   )
   const grouped = React.useMemo(() => groupByChannel(modelOptions), [modelOptions])
@@ -295,149 +292,151 @@ export function ModelSelector({
   }
 
   return (
-    <>
+    <Popover open={open} onOpenChange={setOpen}>
       {/* 触发按钮 */}
       <Tooltip open={open || !displayModelInfo ? false : undefined}>
         <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={() => setOpen(true)}
-            className={cn(
-              'model-selector-trigger flex items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors',
-              'hover:bg-accent hover:text-foreground focus:outline-none focus-visible:bg-accent focus-visible:text-foreground',
-              inputToolbarControlHeightClass,
-            )}
-          >
-            {displayModelInfo ? (
-              <img
-                src={getModelLogo(displayModelInfo.modelId, displayModelInfo.provider)}
-                alt={displayModelInfo.modelName}
-                className="size-4 rounded object-cover"
-              />
-            ) : (
-              <Cpu className="size-3.5" />
-            )}
-            <span className="max-w-[200px] truncate">
-              {displayModelInfo
-                ? (showChannelInTrigger ? `${displayModelInfo.channelName} · ${displayModelInfo.modelName}` : displayModelInfo.modelName)
-                : '选择模型'}
-            </span>
-            <ChevronDown className="size-3" />
-          </button>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className={cn(
+                'model-selector-trigger flex items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors',
+                'hover:bg-accent hover:text-foreground focus:outline-none focus-visible:bg-accent focus-visible:text-foreground',
+                inputToolbarControlHeightClass,
+              )}
+            >
+              {displayModelInfo ? (
+                <img
+                  src={getModelLogo(displayModelInfo.modelId, displayModelInfo.provider)}
+                  alt={displayModelInfo.modelName}
+                  className="size-4 rounded object-cover"
+                />
+              ) : (
+                <Cpu className="size-3.5" />
+              )}
+              <span className="max-w-[200px] truncate">
+                {displayModelInfo
+                  ? (showChannelInTrigger ? `${displayModelInfo.channelName} · ${displayModelInfo.modelName}` : displayModelInfo.modelName)
+                  : '选择模型'}
+              </span>
+              <ChevronDown className="size-3" />
+            </button>
+          </PopoverTrigger>
         </TooltipTrigger>
         <TooltipContent side="top">渠道：{displayModelInfo?.channelName}</TooltipContent>
       </Tooltip>
 
-      {/* 模型选择 Dialog */}
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="p-0 gap-0 max-w-lg" aria-describedby={undefined}>
-          <DialogHeader className="sr-only">
-            <DialogTitle>选择模型</DialogTitle>
-          </DialogHeader>
+      {/* 模型选择 Popover — 锚定触发按钮，向上展开（end 对齐，内容向左上延伸） */}
+      <PopoverContent
+        side="top"
+        align="end"
+        sideOffset={8}
+        collisionPadding={12}
+        className="w-[320px] p-0"
+        aria-label="选择模型"
+      >
+        {/* 搜索栏 */}
+        <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-border/60">
+          <Search className="size-4 text-muted-foreground/60 flex-shrink-0" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
+            placeholder="搜索模型..."
+            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/50"
+            autoFocus
+          />
+        </div>
 
-          {/* 搜索栏 */}
-          <div className="flex items-center gap-2.5 px-4 py-3 border-b border-border/60">
-            <Search className="size-5 text-muted-foreground/60 flex-shrink-0" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={handleSearchKeyDown}
-              placeholder="搜索模型..."
-              className="flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground/50"
-              autoFocus
-            />
-          </div>
+        {/* 模型列表 */}
+        <div className="max-h-[min(360px,55vh)] overflow-y-auto scrollbar-thin">
+          {filteredGrouped.size === 0 ? (
+            <div className="py-8 text-center text-sm text-muted-foreground">
+              未找到模型
+            </div>
+          ) : (
+            (() => {
+              let flatIndex = 0
+              return Array.from(filteredGrouped.entries()).map(([channelId, options]) => {
+                const first = options[0]
+                if (!first) return null
+                const channel = channels.find((c) => c.id === channelId)
 
-          {/* 模型列表 */}
-          <div className="max-h-[420px] overflow-y-auto scrollbar-thin">
-            {filteredGrouped.size === 0 ? (
-              <div className="py-10 text-center text-sm text-muted-foreground">
-                未找到模型
-              </div>
-            ) : (
-              (() => {
-                let flatIndex = 0
-                return Array.from(filteredGrouped.entries()).map(([channelId, options]) => {
-                  const first = options[0]
-                  if (!first) return null
-                  const channel = channels.find((c) => c.id === channelId)
-
-                  return (
-                    <div
-                      key={channelId}
-                      role="group"
-                      aria-label={first.channelName}
-                      className="border-b border-border/40 py-1.5 last:border-b-0"
-                    >
-                      {/* 渠道标题与模型行共用栅格，仅通过字号和色阶区分层级。 */}
-                      <div className={cn(MODEL_SELECTOR_ROW_LAYOUT, 'min-h-8 py-1')}>
-                        <ModelSelectorListIcon
-                          src={channel ? getChannelLogo(channel) : DefaultLogo}
-                        />
-                        <span className="min-w-0 truncate text-xs font-medium text-muted-foreground/80">
-                          {first.channelName}
-                        </span>
-                        {channel ? <ChannelPlanQuotaBadge channel={channel} /> : null}
-                      </div>
-
-                      {/* 该渠道下的模型列表 */}
-                      {options.map((option) => {
-                        const isSelected =
-                          selectedModel?.channelId === option.channelId &&
-                          selectedModel?.modelId === option.modelId
-                        const currentFlatIndex = flatIndex++
-                        const isHighlighted = currentFlatIndex === highlightIndex
-                        const visualState = getModelSelectorOptionVisualState(isSelected, isHighlighted)
-
-                        return (
-                          <button
-                            key={`${option.channelId}:${option.modelId}`}
-                            ref={(el) => {
-                              if (el) itemRefs.current.set(currentFlatIndex, el)
-                              else itemRefs.current.delete(currentFlatIndex)
-                            }}
-                            type="button"
-                            aria-pressed={isSelected}
-                            onClick={() => handleSelect(option)}
-                            onMouseEnter={() => setHighlightIndex(currentFlatIndex)}
-                            className={cn(
-                              MODEL_SELECTOR_ROW_LAYOUT,
-                              'min-h-10 rounded-lg py-2 text-left transition-colors',
-                              'hover:bg-accent/60 focus:outline-none focus-visible:bg-accent/70',
-                              visualState === 'highlighted' && 'bg-accent/60',
-                              visualState === 'selected' && 'bg-accent',
-                            )}
-                          >
-                            <ModelSelectorListIcon
-                              src={getModelLogo(option.modelId, option.provider)}
-                            />
-                            <span className={cn(
-                              'min-w-0 truncate text-sm',
-                              isSelected ? 'font-medium text-foreground' : 'text-foreground/80',
-                            )}>
-                              {option.modelName}
-                            </span>
-                            <span className="flex items-center gap-2 justify-self-end">
-                              {/* 健康指示器仅显示官方渠道数据，避免将官方健康状态误配到同名第三方模型。 */}
-                              {option.channelId === PROMA_OFFICIAL_CHANNEL_ID ? (
-                                <ModelHealthIndicator modelId={option.modelId} />
-                              ) : null}
-                              <span className="flex size-5 items-center justify-center" aria-hidden="true">
-                                {isSelected ? <Check className="size-4 text-primary" strokeWidth={2.5} /> : null}
-                              </span>
-                            </span>
-                          </button>
-                        )
-                      })}
+                return (
+                  <div
+                    key={channelId}
+                    role="group"
+                    aria-label={first.channelName}
+                    className="border-b border-border/40 py-1 last:border-b-0"
+                  >
+                    {/* 渠道标题与模型行共用栅格，仅通过字号和色阶区分层级。 */}
+                    <div className={cn(MODEL_SELECTOR_ROW_LAYOUT, 'min-h-7 py-0.5')}>
+                      <ModelSelectorListIcon
+                        src={channel ? getChannelLogo(channel) : DefaultLogo}
+                      />
+                      <span className="min-w-0 truncate text-xs font-medium text-muted-foreground/80">
+                        {first.channelName}
+                      </span>
+                      {channel ? <ChannelPlanQuotaBadge channel={channel} /> : null}
                     </div>
-                  )
-                })
-              })()
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-    </>
+
+                    {/* 该渠道下的模型列表 */}
+                    {options.map((option) => {
+                      const isSelected =
+                        selectedModel?.channelId === option.channelId &&
+                        selectedModel?.modelId === option.modelId
+                      const currentFlatIndex = flatIndex++
+                      const isHighlighted = currentFlatIndex === highlightIndex
+                      const visualState = getModelSelectorOptionVisualState(isSelected, isHighlighted)
+
+                      return (
+                        <button
+                          key={`${option.channelId}:${option.modelId}`}
+                          ref={(el) => {
+                            if (el) itemRefs.current.set(currentFlatIndex, el)
+                            else itemRefs.current.delete(currentFlatIndex)
+                          }}
+                          type="button"
+                          aria-pressed={isSelected}
+                          onClick={() => handleSelect(option)}
+                          onMouseEnter={() => setHighlightIndex(currentFlatIndex)}
+                          className={cn(
+                            MODEL_SELECTOR_ROW_LAYOUT,
+                            'min-h-9 rounded-lg py-1.5 text-left transition-colors',
+                            'hover:bg-accent/60 focus:outline-none focus-visible:bg-accent/70',
+                            visualState === 'highlighted' && 'bg-accent/60',
+                            visualState === 'selected' && 'bg-accent',
+                          )}
+                        >
+                          <ModelSelectorListIcon
+                            src={getModelLogo(option.modelId, option.provider)}
+                          />
+                          <span className={cn(
+                            'min-w-0 truncate text-sm',
+                            isSelected ? 'font-medium text-foreground' : 'text-foreground/80',
+                          )}>
+                            {option.modelName}
+                          </span>
+                          <span className="flex items-center gap-2 justify-self-end">
+                            {/* 官方健康状态不得映射到同名第三方渠道模型。 */}
+                            {option.channelId === PROMA_OFFICIAL_CHANNEL_ID ? (
+                              <ModelHealthIndicator modelId={option.modelId} />
+                            ) : null}
+                            <span className="flex size-5 items-center justify-center" aria-hidden="true">
+                              {isSelected ? <Check className="size-4 text-primary" strokeWidth={2.5} /> : null}
+                            </span>
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )
+              })
+            })()
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
   )
 }

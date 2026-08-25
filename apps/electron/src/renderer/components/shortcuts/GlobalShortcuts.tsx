@@ -135,7 +135,7 @@ export function GlobalShortcuts(): null {
       if (
         isActiveAgentSidePanelOpen
         && activeAgentSidePanelTab
-        && (activeAgentSidePanelTab === 'memory' || activeAgentSidePanelTab.startsWith('preview:') || activeAgentSidePanelTab.startsWith('browser:'))
+        && (activeAgentSidePanelTab === 'memory' || activeAgentSidePanelTab.startsWith('preview:') || activeAgentSidePanelTab.startsWith('browser:') || activeAgentSidePanelTab.startsWith('exploration:') || activeAgentSidePanelTab.startsWith('delegation:'))
       ) {
         window.dispatchEvent(new CustomEvent(CLOSE_ACTIVE_RIGHT_WORKSPACE_TAB_EVENT, {
           detail: { sessionId: activeTab.sessionId },

@@ -1214,7 +1214,7 @@ if (isQuickTaskWindow) {
         <ThemeInitializer />
         <MarkdownFontSizeInitializer />
         <DetachedPreviewApp />
-        <Toaster position="bottom-right" />
+        <Toaster position="top-right" offset={{ top: 58, right: 12 }} />
       </React.StrictMode>
     )
   })
@@ -1228,7 +1228,7 @@ if (isQuickTaskWindow) {
         <AutomationInitializer />
         <PlanningInitializer />
         <PlanningWindowApp />
-        <Toaster position="bottom-right" />
+        <Toaster position="top-right" offset={{ top: 58, right: 12 }} />
       </React.StrictMode>
     )
   })
@@ -1238,7 +1238,7 @@ if (isQuickTaskWindow) {
       <React.StrictMode>
         <ThemeInitializer />
         <WorkspaceMemoryWindowApp />
-        <Toaster position="bottom-right" />
+        <Toaster position="top-right" offset={{ top: 58, right: 12 }} />
       </React.StrictMode>
     )
   })
@@ -1278,7 +1278,6 @@ if (isQuickTaskWindow) {
       <GlobalShortcuts />
       <TabSwitcher />
       <App />
-      <Toaster position="bottom-right" />
     </React.StrictMode>
   )
 }
