@@ -35,6 +35,8 @@ const RIGHT_PANEL_MAX_VIEWPORT_RATIO = 3 / 5
 const WIDE_RIGHT_PANEL_DEFAULT_VIEWPORT_RATIO = 1 / 2
 // 窄窗口时优先保留主会话的最小可读宽度；Agent 侧栏的 480px 仅在空间足够时强制。
 const MIN_MAIN_AREA_WIDTH = 320
+const COLLAPSED_LEFT_SIDEBAR_WIDTH = 60
+const CLASSIC_LEFT_SIDEBAR_LEADING_PADDING = 8
 
 function getRightPanelMinWidth(isAgentSessionTab: boolean): number {
   return isAgentSessionTab ? MIN_AGENT_SESSION_PANEL_WIDTH : MIN_RIGHT_PANEL_WIDTH
@@ -153,7 +155,8 @@ export function AppShell(): React.ReactElement {
     activeRightPanelTab?.startsWith('exploration:') || activeRightPanelTab?.startsWith('delegation:'),
   )
   const rightPanelMinimumWidth = getRightPanelMinWidth(isAgentSessionRightTab)
-  const leftSidebarOccupiedWidth = sidebarCollapsed ? 0 : clampedLeftSidebarWidth + (isClassic ? 0 : 1)
+  const leftSidebarContentWidth = sidebarCollapsed ? COLLAPSED_LEFT_SIDEBAR_WIDTH : clampedLeftSidebarWidth
+  const leftSidebarOccupiedWidth = leftSidebarContentWidth + (isClassic ? CLASSIC_LEFT_SIDEBAR_LEADING_PADDING : 1)
   const clampedRightPanelWidth = clampRightPanelWidth(
     rightPanelLayout.width,
     viewportWidth,
