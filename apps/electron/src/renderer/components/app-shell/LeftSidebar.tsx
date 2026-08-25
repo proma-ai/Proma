@@ -3205,12 +3205,6 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                 badge={(capabilities?.skills.filter((skill) => skill.hasUpdate).length ?? 0) > 0 ? <span className="absolute -right-1 -top-1 size-2.5 rounded-full bg-blue-500" /> : undefined}
               />
               <WorkspaceComponentRailButton
-                label="企业 Skills 库"
-                icon={<Building2 size={16} />}
-                active={isWorkspaceComponentActive('enterprise')}
-                onClick={() => handleOpenCapabilityComponent('enterprise')}
-              />
-              <WorkspaceComponentRailButton
                 label="MCP"
                 icon={<ServerCog size={16} />}
                 active={isWorkspaceComponentActive('mcp')}
@@ -3236,6 +3230,14 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
               )}>{formatAutomationCount(automationCount)}</span>
             ) : undefined}
           />
+          {mode === 'agent' && (
+            <WorkspaceComponentRailButton
+              label="企业 Skills 库"
+              icon={<Building2 size={16} />}
+              active={isWorkspaceComponentActive('enterprise')}
+              onClick={() => handleOpenCapabilityComponent('enterprise')}
+            />
+          )}
         </div>
 
         <div className="my-3 h-px w-8 bg-border/70" />
@@ -3408,12 +3410,6 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
             badge={(capabilities?.skills.filter((skill) => skill.hasUpdate).length ?? 0) > 0 ? <span className="size-2.5 rounded-full bg-blue-500" /> : undefined}
           />
           <WorkspaceComponentSidebarEntry
-            label="企业 Skills 库"
-            icon={<Building2 size={16} />}
-            active={isWorkspaceComponentActive('enterprise')}
-            onClick={() => handleOpenCapabilityComponent('enterprise')}
-          />
-          <WorkspaceComponentSidebarEntry
             label="MCP"
             icon={<ServerCog size={16} />}
             active={isWorkspaceComponentActive('mcp')}
@@ -3442,6 +3438,14 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
             )}>{formatAutomationCount(automationCount)}</span>
           ) : undefined}
         />
+        {mode === 'agent' && (
+          <WorkspaceComponentSidebarEntry
+            label="企业 Skills 库"
+            icon={<Building2 size={16} />}
+            active={isWorkspaceComponentActive('enterprise')}
+            onClick={() => handleOpenCapabilityComponent('enterprise')}
+          />
+        )}
       </div>
 
       {/* Chat 模式 active 视图：置顶 + 对话历史，结构与 Agent active 视图保持一致 */}
