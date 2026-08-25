@@ -16,7 +16,7 @@ export function buildPromaOfficialQuotaSnapshot(billing: BillingInfo): AgentIsla
       windowLabel: '可用',
       // 官方积分是余额而非固定周期的百分比额度；Swift UI 优先显示 remainingLabel。
       remainingPercent: 0,
-      remainingLabel: `${calcTotalAvailable(billing).toFixed(2)} 积分`,
+      remainingLabel: `${calcTotalAvailable(billing).toFixed(0)} 积分`,
     }],
   }
 }
