@@ -1,5 +1,6 @@
 import { app, BrowserWindow, WebContentsView, session as electronSession, type DownloadItem, type Session, type WebContents } from 'electron'
 import path from 'node:path'
+import { realpath, stat } from 'node:fs/promises'
 import type { BrowserExecutionSource, BrowserOperationStatus, BrowserSessionClosed, BrowserTraceAction, BrowserTraceItem, BrowserViewLayout, BrowserViewState, BrowserTabState } from '@proma/shared'
 import { AGENT_IPC_CHANNELS } from '@proma/shared'
 import { assertSafeBrowserDestination, assertSafeBrowserDestinationWithFallback, assertSafeBrowserDownloadUrl, assertSafeBrowserUrl, isSupportedBrowserPopupUrl, isTransientBrowserPopupUrl, USER_NEW_TAB_URL } from './browser-policy'
@@ -11,7 +12,20 @@ import { browserObservationNameLimit, prioritizeBrowserObservationCandidates, re
 import { buildPersistentBrowserPartition, resolveBrowserProfileKey } from './browser-profile-policy'
 import { hasAcknowledgedBrowserRiskDisclaimer } from './browser-risk-disclaimer'
 import { buildPromaBrowserUserAgent } from './browser-identity'
-import { assertBrowserScript, buildBrowserDomActionExpression, type BrowserDomActionInput } from './browser-script-policy'
+import {
+  assertBrowserExtract,
+  assertBrowserScript,
+  assertBrowserScroll,
+  assertBrowserSelectOption,
+  buildBrowserDomActionExpression,
+  buildBrowserExtractExpression,
+  buildBrowserScrollExpression,
+  buildBrowserSelectOptionExpression,
+  type BrowserDomActionInput,
+  type BrowserExtractInput,
+  type BrowserScrollInput,
+  type BrowserSelectOptionInput,
+} from './browser-script-policy'
 import { getSettings } from './settings-service'
 import { isValidImageBytes } from './image-content-validation'
 
@@ -35,6 +49,7 @@ function sanitizeDownloadFilename(raw: string): string {
 
 type CdpResponse = Record<string, unknown>
 type RefEntry = { backendNodeId: number; generation: number; label: string; editable: boolean }
+type BrowserWaitCondition = { kind: 'url' | 'text' | 'selector'; value: string }
 type BrowserTabRecord = {
   tabId: string
   view: WebContentsView
@@ -395,11 +410,8 @@ export class BrowserController {
     if (browserSession.agentAbortController.signal.aborted) browserSession.agentAbortController = new AbortController()
     if (!signal) return browserSession.agentAbortController.signal
     if (signal.aborted) return signal
-    const merged = new AbortController()
-    const abort = () => merged.abort()
-    signal.addEventListener('abort', abort, { once: true })
-    browserSession.agentAbortController.signal.addEventListener('abort', abort, { once: true })
-    return merged.signal
+    // Native signal composition avoids retaining a per-operation closure on the session signal until Stop Agent.
+    return AbortSignal.any([signal, browserSession.agentAbortController.signal])
   }
 
   private runTabOperation<T>(browserSession: BrowserSessionRecord, tab: BrowserTabRecord, signal: AbortSignal | undefined, task: (operationSignal: AbortSignal | undefined) => Promise<T>, operationLease?: () => void): Promise<T> {
@@ -1250,6 +1262,57 @@ export class BrowserController {
     }
   }
 
+  /** Find fresh semantic refs without returning a full accessibility snapshot to the model. */
+  async find(sessionId: string, query: { role?: string; name?: string; exact?: boolean; maxResults?: number }, tabId?: string, signal?: AbortSignal): Promise<{ tabId: string; url: string; title: string; generation: number; elements: BrowserObservation['elements'] }> {
+    const role = query.role?.trim().toLowerCase()
+    const name = query.name?.trim().toLowerCase()
+    const maxResults = query.maxResults ?? 20
+    if (!role && !name) throw new Error('语义定位至少需要 role 或 name。')
+    if (!Number.isInteger(maxResults) || maxResults < 1 || maxResults > 50) throw new Error('maxResults 必须是 1 到 50 的整数。')
+    const browserSession = this.getOrCreateSession(sessionId)
+    this.assertRiskDisclaimerAcknowledged()
+    const tab = this.getAgentTab(browserSession, tabId)
+    return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
+      // Filter the AX tree before applying the observation ranking/cap so Find can discover a matching
+      // element that was absent from the compact BrowserObserve output.
+      const response = await this.cdp(tab, 'Accessibility.getFullAXTree', { depth: resolveBrowserObserveAxDepth(400) }, BROWSER_OBSERVE_TIMEOUT_MS, operationSignal)
+      throwIfBrowserOperationAborted(operationSignal)
+      const nodes = Array.isArray(response.nodes) ? response.nodes : []
+      const candidates: Array<{ backendNodeId: number; role: string; name: string; editable: boolean }> = []
+      for (const node of nodes) {
+        if (!node || typeof node !== 'object') continue
+        const ax = node as Record<string, unknown>
+        const backendNodeId = typeof ax.backendDOMNodeId === 'number' ? ax.backendDOMNodeId : 0
+        const candidateRole = textValue(ax.role)
+        const candidateName = textValue(ax.name)
+        const editable = isEditableAxNode(ax)
+        if (!backendNodeId || !candidateRole || (!candidateName && !editable && !['button', 'textbox', 'link', 'checkbox', 'combobox'].includes(candidateRole))) continue
+        const roleMatches = !role || candidateRole.toLowerCase() === role
+        const normalizedName = candidateName.toLowerCase()
+        const nameMatches = !name || (query.exact ? normalizedName === name : normalizedName.includes(name))
+        if (!roleMatches || !nameMatches) continue
+        candidates.push({ backendNodeId, role: candidateRole, name: candidateName.slice(0, browserObservationNameLimit(candidateRole)), editable })
+        if (candidates.length >= maxResults) break
+      }
+      tab.generation++
+      tab.refs.clear()
+      const elements: BrowserObservation['elements'] = []
+      for (const candidate of candidates) {
+        const ref = `r${tab.generation}-${elements.length + 1}`
+        tab.refs.set(ref, {
+          backendNodeId: candidate.backendNodeId,
+          generation: tab.generation,
+          label: candidate.name ? `${candidate.role}「${candidate.name.slice(0, 80)}」` : candidate.role,
+          editable: candidate.editable,
+        })
+        elements.push({ ref, role: candidate.role, name: candidate.name, editable: candidate.editable })
+      }
+      this.updateNavigationState(browserSession, tab)
+      this.trace(browserSession, tab, 'find', `语义定位到 ${elements.length} 个元素（AX 深度 ${resolveBrowserObserveAxDepth(400)}）`, 'verified')
+      return { tabId: tab.tabId, url: tab.state.url, title: tab.state.title, generation: tab.generation, elements }
+    })
+  }
+
   private resolveRef(tab: BrowserTabRecord, ref: string): RefEntry {
     const entry = tab.refs.get(ref)
     if (!entry || entry.generation !== tab.generation) throw new Error('元素引用已失效，请先重新调用 browser_observe。')
@@ -1270,7 +1333,31 @@ export class BrowserController {
     return { x: ((quad[0] as number) + (quad[2] as number) + (quad[4] as number) + (quad[6] as number)) / 4, y: ((quad[1] as number) + (quad[3] as number) + (quad[5] as number) + (quad[7] as number)) / 4 }
   }
 
+  private async clickRef(browserSession: BrowserSessionRecord, tab: BrowserTabRecord, ref: string, signal?: AbortSignal): Promise<RefEntry> {
+    const generation = tab.generation
+    const target = this.resolveRef(tab, ref)
+    const { x, y } = await this.centerForRef(tab, ref, signal, generation)
+    this.assertCurrentDocument(tab, generation, signal)
+    await this.highlightAgentTarget(tab, target.backendNodeId)
+    this.assertCurrentDocument(tab, generation, signal)
+    await this.cdp(tab, 'Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 }, undefined, signal)
+    this.assertCurrentDocument(tab, generation, signal)
+    await this.cdp(tab, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 }, undefined, signal)
+    this.trace(browserSession, tab, 'click', `点击 ${target.label}`, 'dispatched')
+    return target
+  }
+
   async click(sessionId: string, ref: string, tabId?: string, signal?: AbortSignal): Promise<BrowserViewState> {
+    const browserSession = this.getOrCreateSession(sessionId)
+    this.assertRiskDisclaimerAcknowledged()
+    const tab = this.getAgentTab(browserSession, tabId)
+    return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
+      await this.clickRef(browserSession, tab, ref, operationSignal)
+      return structuredClone(this.buildState(browserSession))
+    })
+  }
+
+  async hover(sessionId: string, ref: string, tabId?: string, signal?: AbortSignal): Promise<BrowserViewState> {
     const browserSession = this.getOrCreateSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
@@ -1278,13 +1365,40 @@ export class BrowserController {
       const generation = tab.generation
       const target = this.resolveRef(tab, ref)
       const { x, y } = await this.centerForRef(tab, ref, operationSignal, generation)
-      this.assertCurrentDocument(tab, generation, operationSignal)
       await this.highlightAgentTarget(tab, target.backendNodeId)
       this.assertCurrentDocument(tab, generation, operationSignal)
-      await this.cdp(tab, 'Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 }, undefined, operationSignal)
+      await this.cdp(tab, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y }, undefined, operationSignal)
+      this.trace(browserSession, tab, 'hover', `悬停 ${target.label}`, 'dispatched')
+      return structuredClone(this.buildState(browserSession))
+    })
+  }
+
+  /** Native pointer drag. It intentionally does not synthesize page JavaScript DragEvent/DataTransfer objects. */
+  async drag(sessionId: string, sourceRef: string, targetRef: string, tabId?: string, signal?: AbortSignal): Promise<BrowserViewState> {
+    if (!sourceRef || !targetRef) throw new Error('拖拽需要源元素和目标元素。')
+    if (sourceRef === targetRef) throw new Error('拖拽源元素和目标元素不能相同。')
+    const browserSession = this.getOrCreateSession(sessionId)
+    this.assertRiskDisclaimerAcknowledged()
+    const tab = this.getAgentTab(browserSession, tabId)
+    return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
+      const generation = tab.generation
+      const source = this.resolveRef(tab, sourceRef)
+      const target = this.resolveRef(tab, targetRef)
+      const start = await this.centerForRef(tab, sourceRef, operationSignal, generation)
+      await this.highlightAgentTarget(tab, source.backendNodeId)
       this.assertCurrentDocument(tab, generation, operationSignal)
-      await this.cdp(tab, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 }, undefined, operationSignal)
-      this.trace(browserSession, tab, 'click', `点击 ${target.label}`, 'dispatched')
+      await this.cdp(tab, 'Input.dispatchMouseEvent', { type: 'mousePressed', x: start.x, y: start.y, button: 'left', clickCount: 1 }, undefined, operationSignal)
+      try {
+        const end = await this.centerForRef(tab, targetRef, operationSignal, generation)
+        this.assertCurrentDocument(tab, generation, operationSignal)
+        await this.cdp(tab, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x: end.x, y: end.y, button: 'left', buttons: 1 }, undefined, operationSignal)
+        await this.cdp(tab, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x: end.x, y: end.y, button: 'left', clickCount: 1 }, undefined, operationSignal)
+      } catch (error) {
+        // Best effort release avoids a stuck pointer when a page navigation invalidates the drag midway.
+        try { await this.cdp(tab, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x: start.x, y: start.y, button: 'left', clickCount: 1 }) } catch { /* 页面已关闭 */ }
+        throw error
+      }
+      this.trace(browserSession, tab, 'drag', `从 ${source.label} 拖拽到 ${target.label}`, 'dispatched')
       return structuredClone(this.buildState(browserSession))
     })
   }
@@ -1370,34 +1484,54 @@ export class BrowserController {
     }
   }
 
-  async waitFor(sessionId: string, condition: { kind: 'url' | 'text' | 'selector'; value: string }, timeoutMs = 10_000, tabId?: string, signal?: AbortSignal): Promise<{ tabId: string; url: string; title: string; matched: boolean }> {
+  private assertWaitCondition(condition: BrowserWaitCondition, timeoutMs: number): void {
     if (!condition.value.trim()) throw new Error('等待条件不能为空。')
     if (!Number.isFinite(timeoutMs) || timeoutMs < 250 || timeoutMs > 30_000) throw new Error('等待超时必须在 250 到 30000 毫秒之间。')
+  }
+
+  private async waitForInternal(browserSession: BrowserSessionRecord, tab: BrowserTabRecord, condition: BrowserWaitCondition, timeoutMs: number, operationSignal?: AbortSignal): Promise<{ tabId: string; url: string; title: string; matched: boolean }> {
+    const startedAt = Date.now()
+    const payload = JSON.stringify(condition).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
+    const expression = `(() => { const condition = ${payload}; try { if (condition.kind === 'url') return location.href.includes(condition.value); if (condition.kind === 'text') return (document.body?.innerText || '').includes(condition.value); return !!document.querySelector(condition.value); } catch { return false; } })()`
+    while (Date.now() - startedAt <= timeoutMs) {
+      throwIfBrowserOperationAborted(operationSignal)
+      const result = await this.executePageExpression(tab, expression, operationSignal)
+      if (result === true) {
+        this.trace(browserSession, tab, 'wait', `已满足${condition.kind}等待条件`, 'verified')
+        return { tabId: tab.tabId, url: tab.state.url, title: tab.state.title, matched: true }
+      }
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          operationSignal?.removeEventListener('abort', abort)
+          resolve()
+        }, 250)
+        const abort = () => { clearTimeout(timer); reject(new BrowserOperationAbortedError()) }
+        operationSignal?.addEventListener('abort', abort, { once: true })
+      })
+    }
+    this.trace(browserSession, tab, 'wait', `等待${condition.kind}条件超时`, 'failed')
+    return { tabId: tab.tabId, url: tab.state.url, title: tab.state.title, matched: false }
+  }
+
+  async waitFor(sessionId: string, condition: BrowserWaitCondition, timeoutMs = 10_000, tabId?: string, signal?: AbortSignal): Promise<{ tabId: string; url: string; title: string; matched: boolean }> {
+    this.assertWaitCondition(condition, timeoutMs)
+    const browserSession = this.getOrCreateSession(sessionId)
+    this.assertRiskDisclaimerAcknowledged()
+    const tab = this.getAgentTab(browserSession, tabId)
+    return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, (operationSignal) => this.waitForInternal(browserSession, tab, condition, timeoutMs, operationSignal))
+  }
+
+  /** Perform a click and an optional bounded wait as one serialized, auditable browser operation. */
+  async act(sessionId: string, ref: string, waitFor: BrowserWaitCondition | undefined, timeoutMs = 10_000, tabId?: string, signal?: AbortSignal): Promise<{ state: BrowserViewState; wait: { tabId: string; url: string; title: string; matched: boolean } | null }> {
+    if (waitFor) this.assertWaitCondition(waitFor, timeoutMs)
     const browserSession = this.getOrCreateSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
     const tab = this.getAgentTab(browserSession, tabId)
     return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
-      const startedAt = Date.now()
-      const payload = JSON.stringify(condition).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
-      const expression = `(() => { const condition = ${payload}; try { if (condition.kind === 'url') return location.href.includes(condition.value); if (condition.kind === 'text') return (document.body?.innerText || '').includes(condition.value); return !!document.querySelector(condition.value); } catch { return false; } })()`
-      while (Date.now() - startedAt <= timeoutMs) {
-        throwIfBrowserOperationAborted(operationSignal)
-        const result = await this.executePageExpression(tab, expression, operationSignal)
-        if (result === true) {
-          this.trace(browserSession, tab, 'wait', `已满足${condition.kind}等待条件`, 'verified')
-          return { tabId: tab.tabId, url: tab.state.url, title: tab.state.title, matched: true }
-        }
-        await new Promise<void>((resolve, reject) => {
-          const timer = setTimeout(() => {
-            operationSignal?.removeEventListener('abort', abort)
-            resolve()
-          }, 250)
-          const abort = () => { clearTimeout(timer); reject(new BrowserOperationAbortedError()) }
-          operationSignal?.addEventListener('abort', abort, { once: true })
-        })
-      }
-      this.trace(browserSession, tab, 'wait', `等待${condition.kind}条件超时`, 'failed')
-      return { tabId: tab.tabId, url: tab.state.url, title: tab.state.title, matched: false }
+      await this.clickRef(browserSession, tab, ref, operationSignal)
+      const wait = waitFor ? await this.waitForInternal(browserSession, tab, waitFor, timeoutMs, operationSignal) : null
+      this.trace(browserSession, tab, 'act', wait ? `点击后等待${waitFor?.kind}条件` : '点击操作', wait?.matched === false ? 'failed' : 'verified')
+      return { state: structuredClone(this.buildState(browserSession)), wait }
     })
   }
 
@@ -1413,6 +1547,86 @@ export class BrowserController {
       const result = await this.executePageExpression(tab, buildBrowserDomActionExpression(input), operationSignal)
       this.trace(browserSession, tab, 'dom', `DOM ${input.action}：${input.selector.slice(0, 100)}`, 'dispatched')
       return { tabId: tab.tabId, url: tab.state.url, result }
+    })
+  }
+
+  async scroll(sessionId: string, input: BrowserScrollInput, tabId?: string, signal?: AbortSignal): Promise<{ tabId: string; url: string; result: unknown }> {
+    assertBrowserScroll(input)
+    const browserSession = this.getOrCreateSession(sessionId)
+    this.assertRiskDisclaimerAcknowledged()
+    const tab = this.getAgentTab(browserSession, tabId)
+    return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
+      const result = await this.executePageExpression(tab, buildBrowserScrollExpression(input), operationSignal)
+      this.trace(browserSession, tab, 'scroll', input.selector ? `滚动容器 ${input.selector.slice(0, 100)}` : '滚动页面', 'dispatched')
+      return { tabId: tab.tabId, url: tab.state.url, result }
+    })
+  }
+
+  async extract(sessionId: string, input: BrowserExtractInput, tabId?: string, signal?: AbortSignal): Promise<{ tabId: string; url: string; result: unknown }> {
+    assertBrowserExtract(input)
+    const browserSession = this.getOrCreateSession(sessionId)
+    this.assertRiskDisclaimerAcknowledged()
+    const tab = this.getAgentTab(browserSession, tabId)
+    return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
+      const result = await this.executePageExpression(tab, buildBrowserExtractExpression(input), operationSignal)
+      this.trace(browserSession, tab, 'extract', input.selector ? `抽取区域 ${input.selector.slice(0, 100)}` : '抽取页面正文', 'verified')
+      return { tabId: tab.tabId, url: tab.state.url, result }
+    })
+  }
+
+  async selectOption(sessionId: string, input: BrowserSelectOptionInput, tabId?: string, signal?: AbortSignal): Promise<{ tabId: string; url: string; result: unknown }> {
+    assertBrowserSelectOption(input)
+    const browserSession = this.getOrCreateSession(sessionId)
+    this.assertRiskDisclaimerAcknowledged()
+    const tab = this.getAgentTab(browserSession, tabId)
+    return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
+      const result = await this.executePageExpression(tab, buildBrowserSelectOptionExpression(input), operationSignal)
+      this.trace(browserSession, tab, 'select', `选择原生下拉选项 ${input.selector.slice(0, 100)}`, 'dispatched')
+      return { tabId: tab.tabId, url: tab.state.url, result }
+    })
+  }
+
+  private async assertUploadPaths(browserSession: BrowserSessionRecord, filePaths: string[]): Promise<string[]> {
+    if (filePaths.length < 1 || filePaths.length > 20) throw new Error('一次上传文件数量必须为 1 到 20。')
+    if (browserSession.allowedRoots.length === 0) throw new Error('当前会话没有获授权的文件目录，不能选择上传文件。')
+    const roots = await Promise.all(browserSession.allowedRoots.map(async (root) => realpath(root).catch(() => null)))
+    const authorizedRoots = roots.filter((root): root is string => !!root)
+    if (authorizedRoots.length === 0) throw new Error('当前会话的获授权目录不可访问，不能选择上传文件。')
+    return Promise.all(filePaths.map(async (filePath) => {
+      if (!path.isAbsolute(filePath)) throw new Error('上传文件必须使用绝对路径。')
+      const resolved = await realpath(filePath).catch(() => { throw new Error('上传文件不存在或不可访问。') })
+      const details = await stat(resolved).catch(() => { throw new Error('无法读取上传文件。') })
+      if (!details.isFile()) throw new Error('上传目标必须是普通文件。')
+      const authorized = authorizedRoots.some((root) => {
+        const relative = path.relative(root, resolved)
+        return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))
+      })
+      if (!authorized) throw new Error('上传文件不在当前会话获授权的目录内。')
+      return resolved
+    }))
+  }
+
+  async upload(sessionId: string, ref: string, filePaths: string[], tabId?: string, signal?: AbortSignal): Promise<BrowserViewState> {
+    const browserSession = this.getOrCreateSession(sessionId)
+    this.assertRiskDisclaimerAcknowledged()
+    const tab = this.getAgentTab(browserSession, tabId)
+    return this.runTabOperation(browserSession, tab, signal ?? browserSession.agentAbortController.signal, async (operationSignal) => {
+      const generation = tab.generation
+      const target = this.resolveRef(tab, ref)
+      const files = await this.assertUploadPaths(browserSession, filePaths)
+      this.assertCurrentDocument(tab, generation, operationSignal)
+      const response = await this.cdp(tab, 'DOM.describeNode', { backendNodeId: target.backendNodeId, depth: 0 }, undefined, operationSignal)
+      const node = response.node as Record<string, unknown> | undefined
+      const nodeName = typeof node?.nodeName === 'string' ? node.nodeName.toLowerCase() : ''
+      const attributes = Array.isArray(node?.attributes) ? node.attributes : []
+      const typeIndex = attributes.findIndex((value) => value === 'type')
+      const inputType = typeIndex >= 0 && typeof attributes[typeIndex + 1] === 'string' ? String(attributes[typeIndex + 1]).toLowerCase() : ''
+      if (nodeName !== 'input' || inputType !== 'file') throw new Error('目标不是 file input，请先重新观察页面并选择文件上传控件。')
+      await this.highlightAgentTarget(tab, target.backendNodeId)
+      this.assertCurrentDocument(tab, generation, operationSignal)
+      await this.cdp(tab, 'DOM.setFileInputFiles', { files, backendNodeId: target.backendNodeId }, undefined, operationSignal)
+      this.trace(browserSession, tab, 'upload', `已选择 ${files.length} 个上传文件（文件名已脱敏）`, 'dispatched')
+      return structuredClone(this.buildState(browserSession))
     })
   }
 

@@ -14,10 +14,17 @@ export const SAFE_TOOLS: readonly string[] = [
   'WebFetch',        // 网页获取
   // Pi 受管浏览器：网页隔离、下载与弹窗策略已在主进程处理，网页权限默认拒绝。
   'BrowserObserve',
+  'BrowserFind',
   'BrowserNavigate',
   'BrowserClick',
+  'BrowserAct',
   'BrowserFill',
   'BrowserPress',
+  'BrowserHover',
+  'BrowserDrag',
+  'BrowserScroll',
+  'BrowserExtract',
+  'BrowserSelectOption',
   'BrowserScreenshot',
   'BrowserListTabs',
   'BrowserNewTab',

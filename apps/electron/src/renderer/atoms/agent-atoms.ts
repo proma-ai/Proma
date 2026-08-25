@@ -510,8 +510,90 @@ export const agentSidePanelOpenAtomFamily = atomFamily((sessionId: string) => at
   },
 ))
 
-/** 侧面板宽度（全局共享，用户拖拽后持久化） */
-export const agentSidePanelWidthAtom = atomWithStorage<number>('proma-agent-workspace-width', 460)
+const DEFAULT_AGENT_SIDE_PANEL_WIDTH = 460
+
+/**
+ * 旧版全局宽度只作为尚未保存新布局的 Session 的初始基线，避免升级后尺寸回退。
+ * 新布局写入后不再与其他 Session 共享。
+ */
+const legacyAgentSidePanelWidthAtom = atomWithStorage<number>(
+  'proma-agent-workspace-width',
+  DEFAULT_AGENT_SIDE_PANEL_WIDTH,
+)
+
+export interface AgentSidePanelLayout {
+  width: number
+  hasOpenedWideWorkspace: boolean
+  widePanelWidthOverride: number | null
+}
+
+export const MAX_PERSISTED_AGENT_SIDE_PANEL_LAYOUTS = 50
+
+/**
+ * 仅保留最近活动的 Session 布局，防止 localStorage 随历史会话无限增长。
+ * 会话元数据可用时按 updatedAt 排序；冷启动尚未加载元数据时按存储顺序兜底。
+ * 正在写入的 Session 始终保留，即使其元数据尚未更新。
+ */
+export function pruneAgentSidePanelLayouts(
+  layouts: Record<string, AgentSidePanelLayout>,
+  sessions: readonly AgentSessionMeta[],
+  activeSessionId?: string,
+): Record<string, AgentSidePanelLayout> {
+  const layoutIds = Object.keys(layouts)
+  const recentSessionIds = sessions.length === 0
+    ? layoutIds.slice(-MAX_PERSISTED_AGENT_SIDE_PANEL_LAYOUTS)
+    : sessions
+      .slice()
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, MAX_PERSISTED_AGENT_SIDE_PANEL_LAYOUTS)
+      .map((session) => session.id)
+  const retainedIds = new Set(recentSessionIds)
+
+  if (activeSessionId && !retainedIds.has(activeSessionId)) {
+    if (retainedIds.size === MAX_PERSISTED_AGENT_SIDE_PANEL_LAYOUTS) {
+      const oldestRetainedId = sessions.length === 0
+        ? recentSessionIds[0]
+        : recentSessionIds.at(-1)
+      retainedIds.delete(oldestRetainedId!)
+    }
+    retainedIds.add(activeSessionId)
+  }
+
+  const entries = Object.entries(layouts).filter(([sessionId]) => retainedIds.has(sessionId))
+  if (entries.length === layoutIds.length) return layouts
+  return Object.fromEntries(entries)
+}
+
+/** 右侧工作区布局：按 Agent Session 持久化，包含普通与宽视图的尺寸。 */
+export const agentSidePanelLayoutMapAtom = atomWithStorage<Record<string, AgentSidePanelLayout>>(
+  'proma-agent-workspace-layout-by-session',
+  {},
+  undefined,
+  { getOnInit: true },
+)
+
+/** 指定 Agent Session 的右侧工作区布局。 */
+export const agentSidePanelLayoutAtomFamily = atomFamily((sessionId: string) => atom(
+  (get) => get(agentSidePanelLayoutMapAtom)[sessionId] ?? {
+    width: get(legacyAgentSidePanelWidthAtom),
+    hasOpenedWideWorkspace: false,
+    widePanelWidthOverride: null,
+  },
+  (get, set, update: AgentSidePanelLayout | ((previous: AgentSidePanelLayout) => AgentSidePanelLayout)) => {
+    set(agentSidePanelLayoutMapAtom, (previous) => {
+      const current = previous[sessionId] ?? {
+        width: get(legacyAgentSidePanelWidthAtom),
+        hasOpenedWideWorkspace: false,
+        widePanelWidthOverride: null,
+      }
+      const next = typeof update === 'function' ? update(current) : update
+      const nextLayouts = { ...previous, [sessionId]: next }
+      return Object.keys(nextLayouts).length > MAX_PERSISTED_AGENT_SIDE_PANEL_LAYOUTS
+        ? pruneAgentSidePanelLayouts(nextLayouts, get(agentSessionsAtom), sessionId)
+        : nextLayouts
+    })
+  },
+))
 
 /** 文件来源选择：按会话持久化，未存储的会话默认显示会话文件。 */
 export type AgentFileSourceFilter = 'session' | 'project'

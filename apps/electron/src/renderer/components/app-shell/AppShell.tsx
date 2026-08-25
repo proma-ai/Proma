@@ -13,7 +13,7 @@ import { RightSidePanel } from './RightSidePanel'
 import { MainArea } from '@/components/tabs/MainArea'
 import { conversationsAtom, syncProgressAtom, isSyncingAtom, lastSyncResultAtom } from '@/atoms'
 import { appModeAtom } from '@/atoms/app-mode'
-import { agentDiffPanelTabAtom, agentSidePanelWidthAtom, currentAgentSessionIdAtom, currentSessionSidePanelOpenAtom } from '@/atoms/agent-atoms'
+import { agentDiffPanelTabAtom, agentSessionsAtom, agentSidePanelLayoutAtomFamily, agentSidePanelLayoutMapAtom, currentAgentSessionIdAtom, currentSessionSidePanelOpenAtom, pruneAgentSidePanelLayouts } from '@/atoms/agent-atoms'
 import { leftSidebarWidthAtom } from '@/atoms/sidebar-atoms'
 import { sidebarCollapsedAtom } from '@/atoms/tab-atoms'
 import { automationFormAtom } from '@/atoms/automation-atoms'
@@ -156,25 +156,40 @@ export function AppShell(): React.ReactElement {
     document.addEventListener('mouseup', onMouseUp)
   }, [clampedLeftSidebarWidth, setLeftSidebarWidth])
 
-  // 右侧工作区可拖拽到应用视口的 3/5，窗口尺寸变化时重新收敛持久化宽度。
-  const [rightPanelWidth, setRightPanelWidth] = useAtom(agentSidePanelWidthAtom)
+  // 右侧工作区可拖拽到应用视口的 3/5；每个 Session 恢复自己的普通与宽视图布局。
+  const agentSessions = useAtomValue(agentSessionsAtom)
+  const setRightPanelLayouts = useSetAtom(agentSidePanelLayoutMapAtom)
+  const [rightPanelLayout, setRightPanelLayout] = useAtom(agentSidePanelLayoutAtomFamily(currentSessionId ?? ''))
   const [viewportWidth, setViewportWidth] = React.useState(() => window.innerWidth)
   const dragging = React.useRef(false)
-  const clampedRightPanelWidth = clampRightPanelWidth(rightPanelWidth, viewportWidth)
+  const currentSessionIdRef = React.useRef(currentSessionId)
+  const rightPanelDragCleanup = React.useRef<(() => void) | null>(null)
+  const [draggedRightPanelWidth, setDraggedRightPanelWidth] = React.useState<number | null>(null)
+  currentSessionIdRef.current = currentSessionId
+  const clampedRightPanelWidth = clampRightPanelWidth(rightPanelLayout.width, viewportWidth)
   const isWideRightWorkspace = Boolean(
     activeRightPanelTab?.startsWith('preview:') || activeRightPanelTab?.startsWith('browser:'),
   )
   // 首次打开预览/浏览器后，工作区维持宽视图；切回文件/改动不会自动收窄，交给用户拖拽决定。
-  const [hasOpenedWideWorkspace, setHasOpenedWideWorkspace] = React.useState(false)
-  const [widePanelWidthOverride, setWidePanelWidthOverride] = React.useState<number | null>(null)
-  const effectiveWidePanelWidth = widePanelWidthOverride === null
+  const effectiveWidePanelWidth = rightPanelLayout.widePanelWidthOverride === null
     ? clampRightPanelWidth(Math.floor(viewportWidth * WIDE_RIGHT_PANEL_DEFAULT_VIEWPORT_RATIO), viewportWidth)
-    : clampRightPanelWidth(widePanelWidthOverride, viewportWidth)
-  const displayedRightPanelWidth = hasOpenedWideWorkspace ? effectiveWidePanelWidth : clampedRightPanelWidth
+    : clampRightPanelWidth(rightPanelLayout.widePanelWidthOverride, viewportWidth)
+  const persistedRightPanelWidth = rightPanelLayout.hasOpenedWideWorkspace ? effectiveWidePanelWidth : clampedRightPanelWidth
+  const displayedRightPanelWidth = draggedRightPanelWidth ?? persistedRightPanelWidth
 
   React.useEffect(() => {
-    if (isWideRightWorkspace) setHasOpenedWideWorkspace(true)
-  }, [isWideRightWorkspace])
+    return () => rightPanelDragCleanup.current?.()
+  }, [currentSessionId])
+
+  React.useEffect(() => {
+    setRightPanelLayouts((previous) => pruneAgentSidePanelLayouts(previous, agentSessions, currentSessionId ?? undefined))
+  }, [agentSessions, currentSessionId, setRightPanelLayouts])
+
+  React.useEffect(() => {
+    if (isWideRightWorkspace && currentSessionId && !rightPanelLayout.hasOpenedWideWorkspace) {
+      setRightPanelLayout((previous) => ({ ...previous, hasOpenedWideWorkspace: true }))
+    }
+  }, [currentSessionId, isWideRightWorkspace, rightPanelLayout.hasOpenedWideWorkspace, setRightPanelLayout])
 
   React.useEffect(() => {
     const updateViewportWidth = () => setViewportWidth(window.innerWidth)
@@ -183,25 +198,50 @@ export function AppShell(): React.ReactElement {
   }, [])
 
   React.useEffect(() => {
-    if (clampedRightPanelWidth !== rightPanelWidth) {
-      setRightPanelWidth(clampedRightPanelWidth)
+    if (currentSessionId && clampedRightPanelWidth !== rightPanelLayout.width) {
+      setRightPanelLayout((previous) => ({ ...previous, width: clampedRightPanelWidth }))
     }
-  }, [clampedRightPanelWidth, rightPanelWidth, setRightPanelWidth])
+  }, [clampedRightPanelWidth, currentSessionId, rightPanelLayout.width, setRightPanelLayout])
 
   const handleMouseDown = React.useCallback((e: React.MouseEvent) => {
+    if (!currentSessionId) return
+
     e.preventDefault()
+    rightPanelDragCleanup.current?.()
     dragging.current = true
+    const dragSessionId = currentSessionId
     const startX = e.clientX
     const startWidth = displayedRightPanelWidth
+    const isWideWorkspace = rightPanelLayout.hasOpenedWideWorkspace
     // 记录最新光标位置，rAF 回调读取它而非调度时捕获的旧事件，避免快拖时坐标滞后
     let latestClientX = startX
+    let latestWidth = startWidth
     let rafId = 0
+    let cancelDrag: () => void
 
     const applyWidth = () => {
       const delta = startX - latestClientX
-      const nextWidth = clampRightPanelWidth(startWidth + delta, viewportWidth)
-      if (hasOpenedWideWorkspace) setWidePanelWidthOverride(nextWidth)
-      else setRightPanelWidth(nextWidth)
+      latestWidth = clampRightPanelWidth(startWidth + delta, viewportWidth)
+      setDraggedRightPanelWidth(latestWidth)
+    }
+
+    const finishDrag = (persist: boolean) => {
+      dragging.current = false
+      if (rafId) {
+        cancelAnimationFrame(rafId)
+        rafId = 0
+      }
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+      setDraggedRightPanelWidth(null)
+      if (rightPanelDragCleanup.current === cancelDrag) rightPanelDragCleanup.current = null
+
+      // 会话切换后取消旧拖拽，不能把旧闭包的尺寸写入先前的 Session。
+      if (persist && currentSessionIdRef.current === dragSessionId) {
+        setRightPanelLayout((previous) => isWideWorkspace
+          ? { ...previous, widePanelWidthOverride: latestWidth }
+          : { ...previous, width: latestWidth })
+      }
     }
 
     const onMouseMove = (ev: MouseEvent) => {
@@ -215,20 +255,16 @@ export function AppShell(): React.ReactElement {
     }
 
     const onMouseUp = () => {
-      dragging.current = false
-      if (rafId) {
-        cancelAnimationFrame(rafId)
-        rafId = 0
-      }
-      // 补一次最终 flush，保证落点停在光标实际位置而非上一帧
+      // 补一次最终 flush，保证落点停在光标实际位置而非上一帧。
       applyWidth()
-      document.removeEventListener('mousemove', onMouseMove)
-      document.removeEventListener('mouseup', onMouseUp)
+      finishDrag(true)
     }
 
+    cancelDrag = () => finishDrag(false)
+    rightPanelDragCleanup.current = cancelDrag
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp)
-  }, [displayedRightPanelWidth, hasOpenedWideWorkspace, setRightPanelWidth, viewportWidth])
+  }, [currentSessionId, displayedRightPanelWidth, rightPanelLayout.hasOpenedWideWorkspace, setRightPanelLayout, viewportWidth])
 
   return (
     <>
@@ -279,7 +315,7 @@ export function AppShell(): React.ReactElement {
                   isClassic
                     ? 'transition-[padding] duration-300 ease-in-out'
                     : '',
-                  isClassic && (isPanelOpen ? 'p-2 pl-0' : 'p-0')
+                  isClassic && (isPanelOpen ? 'p-2' : 'p-0')
                 )}
               >
                 {!isClassic && (
