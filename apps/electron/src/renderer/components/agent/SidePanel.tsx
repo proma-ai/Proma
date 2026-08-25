@@ -62,7 +62,7 @@ import {
   getPreviewIdFromSidePanelTab,
   getPreviewSidePanelTab,
 } from '@/atoms/agent-atoms'
-import type { AgentSidePanelTab, AgentFileSourceFilter } from '@/atoms/agent-atoms'
+import type { AgentSidePanelTab, AgentFileSourceFilter, AgentExplorationBranchTab } from '@/atoms/agent-atoms'
 import { WorkspaceMemoryChangeDock } from '@/components/agent-skills/WorkspaceMemoryChangeDock'
 import { workspaceMemoryChangesAtom, workspaceMemoryEditingStateAtomFamily } from '@/atoms/memory-change-atoms'
 import { agentSideChatMapAtom } from '@/atoms/chat-atoms'
@@ -78,7 +78,7 @@ import { getPreviewFileId, previewFileMapAtom, previewFilesMapAtom, previewPanel
 import { PreviewPanel } from '@/components/diff/PreviewPanel'
 import { useOpenPreview } from '@/components/diff/preview-opener'
 import { detectIsWindows } from '@/lib/platform'
-import type { FileEntry, AgentPendingFile, SDKMessage } from '@proma/shared'
+import type { FileEntry, AgentPendingFile, AgentSessionMeta, SDKMessage } from '@proma/shared'
 import { setFilePanelDragData, getMediaTypeFromFilename, dispatchInsertFileMention } from '@/lib/file-panel-drag'
 import { CLOSE_ACTIVE_RIGHT_WORKSPACE_TAB_EVENT } from '@/lib/right-workspace-events'
 
@@ -158,6 +158,75 @@ function SideAgentSessionContent({ contentKey, children }: { contentKey: string;
     >
       {children}
     </div>
+  )
+}
+
+/**
+ * 探索分支正在流式输出时，只有带回按钮需要知道“是否已有新增 assistant 内容”。
+ * 将该订阅隔离在小组件中，避免每个 token 都重渲染整块文件/Tab 侧栏。
+ */
+function ExplorationBringBackAction({
+  parentSessionId,
+  branch,
+  sessions,
+}: {
+  parentSessionId: string
+  branch: AgentExplorationBranchTab
+  sessions: AgentSessionMeta[]
+}): React.ReactElement {
+  const explorationMessagesCache = useAtomValue(agentSDKMessagesCacheAtom)
+  const explorationLiveMessages = useAtomValue(agentLiveMessagesAtomFamily(branch.sessionId))
+  const parentDrafts = useAtomValue(agentSessionDraftsAtom)
+  const parentDraftHtml = useAtomValue(agentSessionDraftHtmlAtom)
+  const setParentDrafts = useSetAtom(agentSessionDraftsAtom)
+  const setParentDraftSyncVersions = useSetAtom(agentSessionDraftSyncVersionsAtom)
+  const setParentDraftHtml = useSetAtom(agentSessionDraftHtmlAtom)
+  const latestExplorationConclusion = React.useMemo(
+    () => getLatestExplorationConclusion(
+      [...(explorationMessagesCache.get(branch.sessionId) ?? []), ...explorationLiveMessages],
+      branch.sourceMessageId,
+    ),
+    [branch.sessionId, branch.sourceMessageId, explorationLiveMessages, explorationMessagesCache],
+  )
+  const handleBringExplorationBack = React.useCallback(() => {
+    if (!latestExplorationConclusion) {
+      toast.info('探索分支还没有可带回的 Agent 结论')
+      return
+    }
+    const branchTitle = sessions.find((item) => item.id === branch.sessionId)?.title || '探索分支'
+    const referenceLabel = `探索后新增内容 · ${branchTitle}`
+    const referenceMarkdown = `这是探索后的新增内容：&session:${branch.sessionId}::${encodeURIComponent(referenceLabel)}`
+    const referenceHtml = `<p>这是探索后的新增内容：<span data-type="mention" data-id="${escapeHtml(branch.sessionId)}" data-label="${escapeHtml(referenceLabel)}" data-mention-suggestion-char="&">${escapeHtml(referenceLabel)}</span></p>`
+    setParentDraftSyncVersions((previous) => {
+      const next = new Map(previous)
+      next.set(parentSessionId, (next.get(parentSessionId) ?? 0) + 1)
+      return next
+    })
+    setParentDrafts((previous) => {
+      const next = new Map(previous)
+      const current = parentDrafts.get(parentSessionId)?.trim() ?? ''
+      next.set(parentSessionId, current ? `${current}\n\n${referenceMarkdown}` : referenceMarkdown)
+      return next
+    })
+    setParentDraftHtml((previous) => {
+      const currentHtml = parentDraftHtml.get(parentSessionId) || markdownToHtml(parentDrafts.get(parentSessionId) ?? '')
+      const nextHtml = currentHtml ? `${currentHtml}<p></p>${referenceHtml}` : referenceHtml
+      const next = new Map(previous)
+      next.set(parentSessionId, nextHtml)
+      return next
+    })
+    toast.success('已添加探索引用', { description: '探索 Tab 保持打开；主会话发送后 Agent 会读取该标记。' })
+  }, [branch.sessionId, latestExplorationConclusion, parentDraftHtml, parentDrafts, parentSessionId, sessions, setParentDraftHtml, setParentDrafts, setParentDraftSyncVersions])
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant="ghost" size="icon" className="size-7 active:scale-[0.96]" onClick={handleBringExplorationBack} disabled={!latestExplorationConclusion} aria-label="添加探索引用">
+          <GitMerge className="size-3.5" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{latestExplorationConclusion ? '将探索后新增内容作为会话引用添加到主线草稿；探索 Tab 保持打开，不会自动发送' : '完成一轮新的探索回复后即可添加引用'}</TooltipContent>
+    </Tooltip>
   )
 }
 
@@ -550,22 +619,6 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   const activeExplorationBranch = activeExplorationSessionId
     ? sideTemporaryAgents.find((branch) => branch.sessionId === activeExplorationSessionId) ?? null
     : null
-  const explorationMessagesCache = useAtomValue(agentSDKMessagesCacheAtom)
-  const explorationLiveMessages = useAtomValue(agentLiveMessagesAtomFamily(activeExplorationSessionId ?? ''))
-  const parentDrafts = useAtomValue(agentSessionDraftsAtom)
-  const parentDraftHtml = useAtomValue(agentSessionDraftHtmlAtom)
-  const setParentDrafts = useSetAtom(agentSessionDraftsAtom)
-  const setParentDraftSyncVersions = useSetAtom(agentSessionDraftSyncVersionsAtom)
-  const setParentDraftHtml = useSetAtom(agentSessionDraftHtmlAtom)
-  const latestExplorationConclusion = React.useMemo(
-    () => activeExplorationBranch
-      ? getLatestExplorationConclusion(
-          [...(explorationMessagesCache.get(activeExplorationBranch.sessionId) ?? []), ...explorationLiveMessages],
-          activeExplorationBranch.sourceMessageId,
-        )
-      : '',
-    [activeExplorationBranch, explorationLiveMessages, explorationMessagesCache],
-  )
   const [memoryTabOpen, setMemoryTabOpen] = useAtom(agentMemoryPanelOpenAtomFamily(sessionId))
   const isAgentRunning = useAtomValue(agentSessionStreamingStateAtomFamily(sessionId))?.running === true
   const memoryChangesMap = useAtomValue(workspaceMemoryChangesAtom)
@@ -649,38 +702,6 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     })
     if (getDelegationSessionIdFromSidePanelTab(activeTab) === childSessionId) onTabChange('files')
   }, [activeTab, onTabChange, sessionId, setSideDelegationMap])
-
-  const handleBringExplorationBack = React.useCallback(() => {
-    if (!activeExplorationBranch || !latestExplorationConclusion) {
-      toast.info('探索分支还没有可带回的 Agent 结论')
-      return
-    }
-    const branchTitle = sessions.find((item) => item.id === activeExplorationBranch.sessionId)?.title || '探索分支'
-    // `&session` mention 是 Agent 可直接查询会话的结构化标记；标签明确限定为分叉后的内容，
-    // 避免主线与探索共用的历史被再次当作新增上下文读取。
-    const referenceLabel = `探索后新增内容 · ${branchTitle}`
-    const referenceMarkdown = `这是探索后的新增内容：&session:${activeExplorationBranch.sessionId}::${encodeURIComponent(referenceLabel)}`
-    const referenceHtml = `<p>这是探索后的新增内容：<span data-type="mention" data-id="${escapeHtml(activeExplorationBranch.sessionId)}" data-label="${escapeHtml(referenceLabel)}" data-mention-suggestion-char="&">${escapeHtml(referenceLabel)}</span></p>`
-    setParentDraftSyncVersions((previous) => {
-      const next = new Map(previous)
-      next.set(sessionId, (next.get(sessionId) ?? 0) + 1)
-      return next
-    })
-    setParentDrafts((previous) => {
-      const next = new Map(previous)
-      const current = parentDrafts.get(sessionId)?.trim() ?? ''
-      next.set(sessionId, current ? `${current}\n\n${referenceMarkdown}` : referenceMarkdown)
-      return next
-    })
-    setParentDraftHtml((previous) => {
-      const currentHtml = parentDraftHtml.get(sessionId) || markdownToHtml(parentDrafts.get(sessionId) ?? '')
-      const nextHtml = currentHtml ? `${currentHtml}<p></p>${referenceHtml}` : referenceHtml
-      const next = new Map(previous)
-      next.set(sessionId, nextHtml)
-      return next
-    })
-    toast.success('已添加探索引用', { description: '探索 Tab 保持打开；主会话发送后 Agent 会读取该标记。' })
-  }, [activeExplorationBranch, latestExplorationConclusion, parentDraftHtml, parentDrafts, sessionId, sessions, setParentDraftHtml, setParentDrafts, setParentDraftSyncVersions])
 
   // 分支是正常持久化会话，但若用户从左侧删除了它，右侧不能保留悬空 Tab。
   React.useEffect(() => {
@@ -960,14 +981,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
               onTabChange('memory')
             }}
             activeTabAction={activeExplorationBranch ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="size-7 active:scale-[0.96]" onClick={handleBringExplorationBack} disabled={!latestExplorationConclusion} aria-label="添加探索引用">
-                    <GitMerge className="size-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">{latestExplorationConclusion ? '将探索后新增内容作为会话引用添加到主线草稿；探索 Tab 保持打开，不会自动发送' : '完成一轮新的探索回复后即可添加引用'}</TooltipContent>
-              </Tooltip>
+              <ExplorationBringBackAction parentSessionId={sessionId} branch={activeExplorationBranch} sessions={sessions} />
             ) : undefined}
             onClose={() => setIsOpen(false)}
             isWindows={isWindows}

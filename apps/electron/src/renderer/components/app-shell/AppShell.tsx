@@ -33,18 +33,31 @@ const MIN_RIGHT_PANEL_WIDTH = 360
 const MIN_AGENT_SESSION_PANEL_WIDTH = 480
 const RIGHT_PANEL_MAX_VIEWPORT_RATIO = 3 / 5
 const WIDE_RIGHT_PANEL_DEFAULT_VIEWPORT_RATIO = 1 / 2
+// 窄窗口时优先保留主会话的最小可读宽度；Agent 侧栏的 480px 仅在空间足够时强制。
+const MIN_MAIN_AREA_WIDTH = 320
 
 function getRightPanelMinWidth(isAgentSessionTab: boolean): number {
   return isAgentSessionTab ? MIN_AGENT_SESSION_PANEL_WIDTH : MIN_RIGHT_PANEL_WIDTH
 }
 
-function getRightPanelMaxWidth(viewportWidth: number, minimumWidth: number): number {
-  return Math.max(minimumWidth, Math.floor(viewportWidth * RIGHT_PANEL_MAX_VIEWPORT_RATIO))
+function getRightPanelMaxWidth(viewportWidth: number, leftSidebarOccupiedWidth: number): number {
+  // 宽视图不超过 3/5；更重要的是右栏不能侵占主工作区的最小可读宽度。
+  return Math.max(0, Math.min(
+    Math.floor(viewportWidth * RIGHT_PANEL_MAX_VIEWPORT_RATIO),
+    viewportWidth - leftSidebarOccupiedWidth - MIN_MAIN_AREA_WIDTH,
+  ))
 }
 
-function clampRightPanelWidth(width: number, viewportWidth: number, minimumWidth = MIN_RIGHT_PANEL_WIDTH): number {
-  // 工作区可占整个应用的 3/5；避免窄窗口下最小宽度反而超过可用界面。
-  return Math.max(minimumWidth, Math.min(getRightPanelMaxWidth(viewportWidth, minimumWidth), width))
+function clampRightPanelWidth(
+  width: number,
+  viewportWidth: number,
+  minimumWidth = MIN_RIGHT_PANEL_WIDTH,
+  leftSidebarOccupiedWidth = 0,
+): number {
+  const maximumWidth = getRightPanelMaxWidth(viewportWidth, leftSidebarOccupiedWidth)
+  // 480px 是 Agent 会话的理想下限；在窄窗口中放宽它，而不是把中间会话挤到不可用。
+  const effectiveMinimumWidth = Math.min(minimumWidth, maximumWidth)
+  return Math.max(effectiveMinimumWidth, Math.min(maximumWidth, width))
 }
 
 const MIN_LEFT_SIDEBAR_WIDTH = 240
@@ -140,14 +153,20 @@ export function AppShell(): React.ReactElement {
     activeRightPanelTab?.startsWith('exploration:') || activeRightPanelTab?.startsWith('delegation:'),
   )
   const rightPanelMinimumWidth = getRightPanelMinWidth(isAgentSessionRightTab)
-  const clampedRightPanelWidth = clampRightPanelWidth(rightPanelLayout.width, viewportWidth, rightPanelMinimumWidth)
+  const leftSidebarOccupiedWidth = sidebarCollapsed ? 0 : clampedLeftSidebarWidth + (isClassic ? 0 : 1)
+  const clampedRightPanelWidth = clampRightPanelWidth(
+    rightPanelLayout.width,
+    viewportWidth,
+    rightPanelMinimumWidth,
+    leftSidebarOccupiedWidth,
+  )
   const isWideRightWorkspace = Boolean(
     activeRightPanelTab?.startsWith('preview:') || activeRightPanelTab?.startsWith('browser:'),
   )
   // 首次打开预览/浏览器后，工作区维持宽视图；切回文件/改动不会自动收窄，交给用户拖拽决定。
   const effectiveWidePanelWidth = rightPanelLayout.widePanelWidthOverride === null
-    ? clampRightPanelWidth(Math.floor(viewportWidth * WIDE_RIGHT_PANEL_DEFAULT_VIEWPORT_RATIO), viewportWidth)
-    : clampRightPanelWidth(rightPanelLayout.widePanelWidthOverride, viewportWidth)
+    ? clampRightPanelWidth(Math.floor(viewportWidth * WIDE_RIGHT_PANEL_DEFAULT_VIEWPORT_RATIO), viewportWidth, MIN_RIGHT_PANEL_WIDTH, leftSidebarOccupiedWidth)
+    : clampRightPanelWidth(rightPanelLayout.widePanelWidthOverride, viewportWidth, MIN_RIGHT_PANEL_WIDTH, leftSidebarOccupiedWidth)
   // 浏览器/预览打开过的会话可继续在文件页保留宽视图；探索和子 Agent
   // 始终回到适中的 Agent 工作宽度，避免挤占主会话阅读区。
   const usesWidePanelLayout = rightPanelLayout.hasOpenedWideWorkspace && !isAgentSessionRightTab
@@ -198,7 +217,7 @@ export function AppShell(): React.ReactElement {
 
     const applyWidth = () => {
       const delta = startX - latestClientX
-      latestWidth = clampRightPanelWidth(startWidth + delta, viewportWidth, rightPanelMinimumWidth)
+      latestWidth = clampRightPanelWidth(startWidth + delta, viewportWidth, rightPanelMinimumWidth, leftSidebarOccupiedWidth)
       setDraggedRightPanelWidth(latestWidth)
     }
 
@@ -241,7 +260,7 @@ export function AppShell(): React.ReactElement {
     rightPanelDragCleanup.current = cancelDrag
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp)
-  }, [currentSessionId, displayedRightPanelWidth, rightPanelMinimumWidth, setRightPanelLayout, usesWidePanelLayout, viewportWidth])
+  }, [currentSessionId, displayedRightPanelWidth, leftSidebarOccupiedWidth, rightPanelMinimumWidth, setRightPanelLayout, usesWidePanelLayout, viewportWidth])
 
   return (
     <>
