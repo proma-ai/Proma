@@ -7,6 +7,7 @@
  * apps/electron/node_modules，保证 packaged app 中 Node 模块解析可用。
  */
 
+import { execFileSync } from 'node:child_process'
 import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, readdirSync, realpathSync, rmSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 
@@ -57,6 +58,35 @@ const repoNodeModules = join(repoRoot, 'node_modules')
 const bunVirtualNodeModules = join(repoNodeModules, '.bun', 'node_modules')
 const defaultSourceNodeModules = existsSync(bunVirtualNodeModules) ? bunVirtualNodeModules : repoNodeModules
 const defaultTargetNodeModules = join(appDir, 'node_modules')
+
+// Bun 的 workspace 虚拟依赖目录不会在 sync 时保留 patchedDependencies 的产物。
+// 外置 Pi 包会被 electron-builder 原样收入 asar，因此必须在复制后显式套用同一补丁。
+const RUNTIME_PACKAGE_PATCHES: ReadonlyMap<string, { file: string; marker: string }> = new Map([
+  ['@earendil-works/pi-ai', {
+    file: resolve(repoRoot, 'patches/@earendil-works%2Fpi-ai@0.84.2.patch'),
+    marker: 'stream_read_error',
+  }],
+])
+
+function applyRuntimePackagePatch(packageName: string, targetDir: string): void {
+  const patch = RUNTIME_PACKAGE_PATCHES.get(packageName)
+  if (!patch) return
+  if (!existsSync(patch.file)) throw new Error(`缺少运行时依赖补丁: ${patch.file}`)
+
+  const retryModule = join(targetDir, 'dist/utils/retry.js')
+  if (existsSync(retryModule) && readFileSync(retryModule, 'utf-8').includes(patch.marker)) return
+
+  try {
+    execFileSync('git', ['apply', `--directory=${targetDir}`, patch.file], { stdio: 'pipe' })
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    throw new Error(`无法向运行时依赖 ${packageName} 应用商业版补丁: ${detail}`)
+  }
+
+  if (!existsSync(retryModule) || !readFileSync(retryModule, 'utf-8').includes(patch.marker)) {
+    throw new Error(`运行时依赖 ${packageName} 补丁校验失败: 未找到 ${patch.marker}`)
+  }
+}
 
 function getPackageDir(nodeModulesDir: string, packageName: string): string {
   if (packageName.startsWith('@')) {
@@ -152,6 +182,7 @@ function copyPackage(
     force: true,
     preserveTimestamps: true,
   })
+  applyRuntimePackagePatch(packageName, targetDir)
 
   const nextAncestors = new Set(sourceAncestors)
   nextAncestors.add(sourceDir)
