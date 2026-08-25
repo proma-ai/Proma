@@ -531,32 +531,33 @@ export const MAX_PERSISTED_AGENT_SIDE_PANEL_LAYOUTS = 50
 
 /**
  * 仅保留最近活动的 Session 布局，防止 localStorage 随历史会话无限增长。
- * 正在写入的 Session 视为最新交互，即使其元数据尚未更新也保留当前布局。
+ * 会话元数据可用时按 updatedAt 排序；冷启动尚未加载元数据时按存储顺序兜底。
+ * 正在写入的 Session 始终保留，即使其元数据尚未更新。
  */
 export function pruneAgentSidePanelLayouts(
   layouts: Record<string, AgentSidePanelLayout>,
   sessions: readonly AgentSessionMeta[],
   activeSessionId?: string,
 ): Record<string, AgentSidePanelLayout> {
-  // 冷启动时会话列表可能尚未加载；此时不能把有效缓存误判为孤立数据。
-  if (sessions.length === 0) return layouts
-
-  const recentSessionIds = sessions
-    .slice()
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .slice(0, MAX_PERSISTED_AGENT_SIDE_PANEL_LAYOUTS)
-    .map((session) => session.id)
+  const layoutIds = Object.keys(layouts)
+  const recentSessionIds = sessions.length === 0
+    ? layoutIds.slice(-MAX_PERSISTED_AGENT_SIDE_PANEL_LAYOUTS)
+    : sessions
+      .slice()
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, MAX_PERSISTED_AGENT_SIDE_PANEL_LAYOUTS)
+      .map((session) => session.id)
   const retainedIds = new Set(recentSessionIds)
 
   if (activeSessionId && !retainedIds.has(activeSessionId)) {
-    if (recentSessionIds.length === MAX_PERSISTED_AGENT_SIDE_PANEL_LAYOUTS) {
+    if (retainedIds.size === MAX_PERSISTED_AGENT_SIDE_PANEL_LAYOUTS) {
       retainedIds.delete(recentSessionIds.at(-1)!)
     }
     retainedIds.add(activeSessionId)
   }
 
   const entries = Object.entries(layouts).filter(([sessionId]) => retainedIds.has(sessionId))
-  if (entries.length === Object.keys(layouts).length) return layouts
+  if (entries.length === layoutIds.length) return layouts
   return Object.fromEntries(entries)
 }
 
@@ -583,7 +584,10 @@ export const agentSidePanelLayoutAtomFamily = atomFamily((sessionId: string) => 
         widePanelWidthOverride: null,
       }
       const next = typeof update === 'function' ? update(current) : update
-      return pruneAgentSidePanelLayouts({ ...previous, [sessionId]: next }, get(agentSessionsAtom), sessionId)
+      const nextLayouts = { ...previous, [sessionId]: next }
+      return Object.keys(nextLayouts).length > MAX_PERSISTED_AGENT_SIDE_PANEL_LAYOUTS
+        ? pruneAgentSidePanelLayouts(nextLayouts, get(agentSessionsAtom), sessionId)
+        : nextLayouts
     })
   },
 ))

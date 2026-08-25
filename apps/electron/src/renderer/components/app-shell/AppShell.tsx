@@ -124,6 +124,10 @@ export function AppShell(): React.ReactElement {
   const [rightPanelLayout, setRightPanelLayout] = useAtom(agentSidePanelLayoutAtomFamily(currentSessionId ?? ''))
   const [viewportWidth, setViewportWidth] = React.useState(() => window.innerWidth)
   const dragging = React.useRef(false)
+  const currentSessionIdRef = React.useRef(currentSessionId)
+  const rightPanelDragCleanup = React.useRef<(() => void) | null>(null)
+  const [draggedRightPanelWidth, setDraggedRightPanelWidth] = React.useState<number | null>(null)
+  currentSessionIdRef.current = currentSessionId
   const clampedRightPanelWidth = clampRightPanelWidth(rightPanelLayout.width, viewportWidth)
   const isWideRightWorkspace = Boolean(
     activeRightPanelTab?.startsWith('preview:') || activeRightPanelTab?.startsWith('browser:'),
@@ -132,10 +136,14 @@ export function AppShell(): React.ReactElement {
   const effectiveWidePanelWidth = rightPanelLayout.widePanelWidthOverride === null
     ? clampRightPanelWidth(Math.floor(viewportWidth * WIDE_RIGHT_PANEL_DEFAULT_VIEWPORT_RATIO), viewportWidth)
     : clampRightPanelWidth(rightPanelLayout.widePanelWidthOverride, viewportWidth)
-  const displayedRightPanelWidth = rightPanelLayout.hasOpenedWideWorkspace ? effectiveWidePanelWidth : clampedRightPanelWidth
+  const persistedRightPanelWidth = rightPanelLayout.hasOpenedWideWorkspace ? effectiveWidePanelWidth : clampedRightPanelWidth
+  const displayedRightPanelWidth = draggedRightPanelWidth ?? persistedRightPanelWidth
 
   React.useEffect(() => {
-    if (agentSessions.length === 0) return
+    return () => rightPanelDragCleanup.current?.()
+  }, [currentSessionId])
+
+  React.useEffect(() => {
     setRightPanelLayouts((previous) => pruneAgentSidePanelLayouts(previous, agentSessions, currentSessionId ?? undefined))
   }, [agentSessions, currentSessionId, setRightPanelLayouts])
 
@@ -158,21 +166,43 @@ export function AppShell(): React.ReactElement {
   }, [clampedRightPanelWidth, currentSessionId, rightPanelLayout.width, setRightPanelLayout])
 
   const handleMouseDown = React.useCallback((e: React.MouseEvent) => {
+    if (!currentSessionId) return
+
     e.preventDefault()
+    rightPanelDragCleanup.current?.()
     dragging.current = true
+    const dragSessionId = currentSessionId
     const startX = e.clientX
     const startWidth = displayedRightPanelWidth
+    const isWideWorkspace = rightPanelLayout.hasOpenedWideWorkspace
     // 记录最新光标位置，rAF 回调读取它而非调度时捕获的旧事件，避免快拖时坐标滞后
     let latestClientX = startX
+    let latestWidth = startWidth
     let rafId = 0
+    let cancelDrag: () => void
 
     const applyWidth = () => {
       const delta = startX - latestClientX
-      const nextWidth = clampRightPanelWidth(startWidth + delta, viewportWidth)
-      if (rightPanelLayout.hasOpenedWideWorkspace) {
-        setRightPanelLayout((previous) => ({ ...previous, widePanelWidthOverride: nextWidth }))
-      } else {
-        setRightPanelLayout((previous) => ({ ...previous, width: nextWidth }))
+      latestWidth = clampRightPanelWidth(startWidth + delta, viewportWidth)
+      setDraggedRightPanelWidth(latestWidth)
+    }
+
+    const finishDrag = (persist: boolean) => {
+      dragging.current = false
+      if (rafId) {
+        cancelAnimationFrame(rafId)
+        rafId = 0
+      }
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+      setDraggedRightPanelWidth(null)
+      if (rightPanelDragCleanup.current === cancelDrag) rightPanelDragCleanup.current = null
+
+      // 会话切换后取消旧拖拽，不能把旧闭包的尺寸写入先前的 Session。
+      if (persist && currentSessionIdRef.current === dragSessionId) {
+        setRightPanelLayout((previous) => isWideWorkspace
+          ? { ...previous, widePanelWidthOverride: latestWidth }
+          : { ...previous, width: latestWidth })
       }
     }
 
@@ -187,20 +217,16 @@ export function AppShell(): React.ReactElement {
     }
 
     const onMouseUp = () => {
-      dragging.current = false
-      if (rafId) {
-        cancelAnimationFrame(rafId)
-        rafId = 0
-      }
-      // 补一次最终 flush，保证落点停在光标实际位置而非上一帧
+      // 补一次最终 flush，保证落点停在光标实际位置而非上一帧。
       applyWidth()
-      document.removeEventListener('mousemove', onMouseMove)
-      document.removeEventListener('mouseup', onMouseUp)
+      finishDrag(true)
     }
 
+    cancelDrag = () => finishDrag(false)
+    rightPanelDragCleanup.current = cancelDrag
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp)
-  }, [displayedRightPanelWidth, rightPanelLayout.hasOpenedWideWorkspace, setRightPanelLayout, viewportWidth])
+  }, [currentSessionId, displayedRightPanelWidth, rightPanelLayout.hasOpenedWideWorkspace, setRightPanelLayout, viewportWidth])
 
   return (
     <>
