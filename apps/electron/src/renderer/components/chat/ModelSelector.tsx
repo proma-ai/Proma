@@ -31,12 +31,13 @@ import {
 import { useConversationModelOptional } from '@/hooks/useConversationSettings'
 import { useConversationIdOptional } from '@/contexts/session-context'
 import { inputToolbarControlHeightClass } from '@/components/ai-elements/input-toolbar-styles'
+import { billingInfoAtom } from '@/atoms/cloud-billing'
 import { getModelLogo, getChannelLogo, DefaultLogo } from '@/lib/model-logo'
+import { buildOfficialChannelQuotaSummary } from '@/lib/official-channel-quota-summary'
 import { cn } from '@/lib/utils'
 import { PROMA_OFFICIAL_CHANNEL_ID } from '@proma/shared'
 import type { Channel, ModelOption, ProviderType } from '@proma/shared'
 import { ChannelPlanQuotaBadge } from './ChannelPlanQuotaBadge'
-import { ModelHealthIndicator } from './ModelHealthIndicator'
 import { getModelSelectorOptionVisualState } from './model-selector-visual-state'
 
 /** 渠道标题与模型项共享的三列栅格，确保左右边距和文字起点一致。 */
@@ -45,16 +46,17 @@ const MODEL_SELECTOR_ROW_LAYOUT =
 
 interface ModelSelectorListIconProps {
   src: string
+  imageClassName?: string
 }
 
 /** 使用固定外框吸收不同 Logo 素材的透明留白差异，保持列表中的视觉尺寸稳定。 */
-function ModelSelectorListIcon({ src }: ModelSelectorListIconProps): React.ReactElement {
+function ModelSelectorListIcon({ src, imageClassName }: ModelSelectorListIconProps): React.ReactElement {
   return (
     <span
       className="flex size-6 shrink-0 items-center justify-center justify-self-center overflow-hidden rounded-md bg-muted/50"
       aria-hidden="true"
     >
-      <img src={src} alt="" className="size-5 rounded-md object-contain" />
+      <img src={src} alt="" className={cn('size-5 rounded-md object-contain', imageClassName)} />
     </span>
   )
 }
@@ -154,12 +156,17 @@ export function ModelSelector({
   const setGlobalModel = useSetAtom(selectedModelAtom)
   const channels = useAtomValue(channelsAtom)
   const channelsLoaded = useAtomValue(channelsLoadedAtom)
+  const billing = useAtomValue(billingInfoAtom)
   const setChannels = useSetAtom(channelsAtom)
   const [localOpen, setLocalOpen] = React.useState(false)
   const [sharedOpen, setSharedOpen] = useAtom(modelSelectorOpenAtom)
   const open = useSharedOpenState ? sharedOpen : localOpen
   const setOpen = useSharedOpenState ? setSharedOpen : setLocalOpen
   const [search, setSearch] = React.useState('')
+  const officialChannelQuotaSummary = React.useMemo(
+    () => buildOfficialChannelQuotaSummary(billing),
+    [billing],
+  )
 
   // 外部模型优先 → per-conversation 模型
   const selectedModel = externalSelectedModel !== undefined ? externalSelectedModel : conversationModel
@@ -332,7 +339,7 @@ export function ModelSelector({
         align="end"
         sideOffset={8}
         collisionPadding={12}
-        className="w-[320px] p-0"
+        className="w-[420px] max-w-[calc(100vw-2rem)] p-0"
         aria-label="选择模型"
       >
         {/* 搜索栏 */}
@@ -370,15 +377,23 @@ export function ModelSelector({
                     aria-label={first.channelName}
                     className="border-b border-border/40 py-1 last:border-b-0"
                   >
-                    {/* 渠道标题与模型行共用栅格，仅通过字号和色阶区分层级。 */}
+                    {/* 官方额度与第三方 Plan 额度一样作为行内标签展示，不占用模型行。 */}
                     <div className={cn(MODEL_SELECTOR_ROW_LAYOUT, 'min-h-7 py-0.5')}>
                       <ModelSelectorListIcon
                         src={channel ? getChannelLogo(channel) : DefaultLogo}
+                        imageClassName={channelId === PROMA_OFFICIAL_CHANNEL_ID ? 'scale-[1.2]' : undefined}
                       />
                       <span className="min-w-0 truncate text-xs font-medium text-muted-foreground/80">
                         {first.channelName}
                       </span>
-                      {channel ? <ChannelPlanQuotaBadge channel={channel} /> : null}
+                      {channelId === PROMA_OFFICIAL_CHANNEL_ID && officialChannelQuotaSummary ? (
+                        <span
+                          className="ml-auto shrink-0 whitespace-nowrap rounded border border-foreground/10 bg-background/70 px-1.5 py-0.5 text-[10px] leading-none text-foreground/70 tabular-nums"
+                          title={officialChannelQuotaSummary}
+                        >
+                          {officialChannelQuotaSummary}
+                        </span>
+                      ) : channel ? <ChannelPlanQuotaBadge channel={channel} /> : null}
                     </div>
 
                     {/* 该渠道下的模型列表 */}
@@ -418,14 +433,8 @@ export function ModelSelector({
                           )}>
                             {option.modelName}
                           </span>
-                          <span className="flex items-center gap-2 justify-self-end">
-                            {/* 官方健康状态不得映射到同名第三方渠道模型。 */}
-                            {option.channelId === PROMA_OFFICIAL_CHANNEL_ID ? (
-                              <ModelHealthIndicator modelId={option.modelId} />
-                            ) : null}
-                            <span className="flex size-5 items-center justify-center" aria-hidden="true">
-                              {isSelected ? <Check className="size-4 text-primary" strokeWidth={2.5} /> : null}
-                            </span>
+                          <span className="flex size-5 items-center justify-center justify-self-end" aria-hidden="true">
+                            {isSelected ? <Check className="size-4 text-primary" strokeWidth={2.5} /> : null}
                           </span>
                         </button>
                       )
