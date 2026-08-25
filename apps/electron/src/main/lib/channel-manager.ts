@@ -60,17 +60,12 @@ import {
 } from '@proma/core'
 import { normalizeHttpResponse, normalizeRequestError } from './channel-test-error'
 import { applyOfficialModelEnabledStates } from './official-channel-models'
+import { migrateVolcengineOfficialEndpoint } from './volcengine-channel-migration'
 import pkg from '../../../package.json' with { type: 'json' }
 
 /** 当前配置版本 */
-const CONFIG_VERSION = 9
+const CONFIG_VERSION = 10
 
-// v6 前 OpenAI 兼容渠道使用的旧火山方舟地址。
-const LEGACY_VOLCENGINE_OPENAI_URLS: Partial<Record<ProviderType, string>> = {
-  doubao: 'https://ark.cn-beijing.volces.com/api/v3',
-}
-// v6 曾错误写入的 Anthropic Coding Plan 协议根地址。
-const INCORRECT_VOLCENGINE_ANTHROPIC_CODING_URL = 'https://ark.cn-beijing.volces.com/api/coding'
 /** 连接测试 / 模型拉取的统一超时时间 */
 const CHANNEL_TEST_TIMEOUT_MS = 15_000
 // ChatGPT backend 首次经代理 / Cloudflare 建连可能超过普通模型探测的 15 秒。
@@ -275,15 +270,13 @@ function inferProviderFromBaseUrl(provider: ProviderType, baseUrl: string): Prov
  *
  * v3 → v4：将豆包 API 的默认展示名更新为火山引擎 API。
  *
- * v5 → v6：将火山方舟 OpenAI 兼容渠道从历史 `/api/v3` 地址迁移到官方 Coding `/api/coding/v3`。
- *
- * v6 → v7：将误写为 `/api/coding` 的火山方舟 Anthropic Coding Plan Base URL 恢复到 `/api/plan`，
- * 使运行时请求正确落到 `/api/plan/v1/messages`。
- *
  * v7 → v8：在商业版既有 schema 上吸收上游的火山渠道展示名称；仅更新旧默认名称。
  *
  * v8 → v9：将仍使用 DashScope 默认 Anthropic 兼容端点的通义千问渠道切换到 OpenAI 兼容端点；
  * 用户自定义 Anthropic 地址不迁移，以免变更其显式协议选择。
+ *
+ * v9 → v10：修复已写入高版本 schema 的火山方舟 Coding Plan 旧端点。该端点是火山方舟
+ * 官方地址的历史变体，必须先规范化，不能被第三方中转站清理误删。
  *
  * @returns 迁移后的配置；`changed` 标记是否发生实际变更（决定是否需要回写文件）
  */
@@ -300,24 +293,6 @@ function migrateConfig(config: ChannelsConfig): { config: ChannelsConfig; change
       if (migratedUrl === channel.baseUrl) return channel
       changed = true
       return { ...channel, baseUrl: migratedUrl }
-    })
-  }
-
-  if (version < 6) {
-    channels = channels.map((channel) => {
-      const legacyUrl = LEGACY_VOLCENGINE_OPENAI_URLS[channel.provider]
-      if (!legacyUrl || normalizeBaseUrl(channel.baseUrl) !== normalizeBaseUrl(legacyUrl)) return channel
-      changed = true
-      return { ...channel, baseUrl: PROVIDER_DEFAULT_URLS[channel.provider] }
-    })
-  }
-
-  if (version < 7) {
-    channels = channels.map((channel) => {
-      if (channel.provider !== 'ark-coding-plan'
-        || normalizeBaseUrl(channel.baseUrl) !== INCORRECT_VOLCENGINE_ANTHROPIC_CODING_URL) return channel
-      changed = true
-      return { ...channel, baseUrl: PROVIDER_DEFAULT_URLS['ark-coding-plan'] }
     })
   }
 
@@ -342,6 +317,17 @@ function migrateConfig(config: ChannelsConfig): { config: ChannelsConfig; change
         || normalizeBaseUrl(channel.baseUrl) !== normalizeBaseUrl(PROVIDER_DEFAULT_URLS['qwen-anthropic'])) return channel
       console.log(`[渠道管理] v${version}→v9 迁移渠道 ${channel.name}：通义千问 Anthropic 兼容端点 → OpenAI 兼容端点`)
       return { ...channel, provider: 'qwen', baseUrl: PROVIDER_DEFAULT_URLS.qwen }
+    })
+  }
+
+  if (version < 10) {
+    channels = channels.map((channel) => {
+      const migratedChannel = migrateVolcengineOfficialEndpoint(channel)
+      if (migratedChannel === channel) return channel
+      changed = true
+      const planName = channel.provider === 'doubao' ? 'Coding Plan' : 'Agent Plan'
+      console.log(`[渠道管理] v${version}→v10 迁移渠道 ${channel.name}：火山方舟 ${planName} 旧端点 → 官方端点`)
+      return migratedChannel
     })
   }
 
