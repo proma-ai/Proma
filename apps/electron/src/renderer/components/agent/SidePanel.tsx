@@ -40,12 +40,12 @@ import {
   agentDiffRefreshVersionAtom,
   agentNonGitFileChangesAtom,
   agentFileChangesCurrentRunAtom,
-  workspaceComponentTabsAtomFamily,
+  agentSessionComponentTabsAtomFamily,
+  agentSessionStreamingStateAtomFamily,
   isWorkspaceComponentTab,
   isUserPriorityWorkspaceComponentTab,
   sanitizeWorkspaceComponentTabs,
   getDelegationTabLabel,
-  agentSessionStreamingStateAtomFamily,
   fileBrowserAutoRevealAtom,
   agentSelectedWorktreeAtom,
   agentSideTemporaryAgentMapAtom,
@@ -674,8 +674,8 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   const activeExplorationBranch = activeExplorationSessionId
     ? sideTemporaryAgents.find((branch) => branch.sessionId === activeExplorationSessionId) ?? null
     : null
-  // Todo / 日程 / 能力 / 记忆是工作区组件，而不是会话附件；同一项目下切换会话仍保留打开状态。
-  const [workspaceComponentTabs, setWorkspaceComponentTabs] = useAtom(workspaceComponentTabsAtomFamily(currentWorkspaceId ?? ''))
+  // Todo / 日程 / 能力 / 记忆的数据仍归属于 workspace，但右侧 Tab 仅属于当前 session。
+  const [workspaceComponentTabs, setWorkspaceComponentTabs] = useAtom(agentSessionComponentTabsAtomFamily(sessionId))
   const automationFormOpen = useAtomValue(automationFormAtom).open
 
   React.useEffect(() => {
@@ -698,10 +698,8 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
         ? 'files'
         : activeTab
 
-  // Agent 对当前项目记忆写入后，默认展开并激活完整编辑器这个独立工作区 Tab。
-  // 记忆 watcher 按 workspace 缓存最新事件，必须排除本轮开始前的陈旧事件。
-  // 用户正在查看 Skills 或项目记忆时，变更只在后台保留为可见的 Memory Tab，
-  // 不抢焦点，也不重置其正在阅读或编辑的文件。
+  // memory 写入不能沿用通用组件激活：只有 watcher 捕获真实文件变更后才能生成受限 Diff。
+  // SidePanel 按 session 挂载，因此只会为正在运行的来源 session 路由这次 Diff；其他会话不受影响。
   React.useEffect(() => {
     const runStartedAt = agentStreamState?.startedAt
     if (!agentStreamState?.running || !runStartedAt || !latestMemoryChange || latestMemoryChange.changedAt < runStartedAt) return
@@ -710,6 +708,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     lastActivatedMemoryChangeRef.current = changeId
     setWorkspaceComponentTabs((previous) => previous.includes('memory') ? previous : [...previous, 'memory'])
 
+    // 用户正在阅读 Skills 或项目记忆时，只保留新变更，不抢焦点或覆盖其当前文件。
     if (isOpen && isUserPriorityWorkspaceComponentTab(effectiveActiveTab)) return
 
     setMemoryNavigationRequest({ workspaceSlug: workspaceSlug!, relativePath: latestMemoryChange.relativePath, mode: 'change' })

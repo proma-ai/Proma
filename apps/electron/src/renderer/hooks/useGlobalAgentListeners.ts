@@ -88,7 +88,7 @@ import { detectIsWindows } from '@/lib/platform'
 import { getSessionFileChangeKind, getOwnedSessionWatcherPaths, upsertSessionFileChange } from '@/lib/session-file-changes'
 import { removeQueuedMessage, createQueuedAgentStreamState } from '@/lib/agent-message-queue'
 import { createAgentStreamEventBatcher } from '@/lib/agent-stream-event-batcher'
-import { getChangedWorkspaceComponentFromSdkMessage } from '@/lib/agent-component-activation'
+import { getChangedWorkspaceComponentFromSdkMessage, shouldRevealChangedWorkspaceComponentImmediately } from '@/lib/agent-component-activation'
 import { mergeActiveAgentSessionSnapshot } from '@/lib/agent-active-session-snapshot'
 
 /** 触发右侧文件浏览器自动定位的写入类工具集合 */
@@ -1105,18 +1105,12 @@ export function useGlobalAgentListeners(): void {
 
         if (payload.kind === 'sdk_message') {
           const msgRecord = payload.message as Record<string, unknown>
-          // 仅在 Agent 发出变更工具调用时展示对应项目组件；同项目的当前会话可承接
-          // 后台/子会话变更，其他项目绝不抢走用户正在查看的工作区。
+          // 仅在 Agent 发出变更工具调用时展示对应项目组件；右侧 Tab 严格归属产生变更的 session，
+          // 同一 workspace 的其他活跃会话不得被后台变更抢走焦点。
           if (!msgRecord.isReplay) {
             const changedComponent = getChangedWorkspaceComponentFromSdkMessage(payload.message)
-            if (changedComponent) {
-              const activeSessionId = store.get(currentAgentSessionIdAtom)
-              const sessions = store.get(agentSessionsAtom)
-              const activeWorkspaceId = sessions.find((session) => session.id === activeSessionId)?.workspaceId
-              const sourceWorkspaceId = sessions.find((session) => session.id === sessionId)?.workspaceId
-              if (activeSessionId === sessionId || (activeWorkspaceId && activeWorkspaceId === sourceWorkspaceId)) {
-                store.set(revealChangedWorkspaceComponentAtom, changedComponent)
-              }
+            if (changedComponent && shouldRevealChangedWorkspaceComponentImmediately(changedComponent)) {
+              store.set(revealChangedWorkspaceComponentAtom, { sessionId, component: changedComponent })
             }
           }
 

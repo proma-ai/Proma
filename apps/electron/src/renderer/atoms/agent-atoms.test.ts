@@ -10,7 +10,10 @@ import {
   isRetryEventForCurrentStream,
   isWorkspaceComponentTab,
   sanitizeWorkspaceComponentTabs,
-  workspaceComponentTabsAtomFamily,
+  agentSessionComponentTabsAtomFamily,
+  agentDiffPanelTabAtom,
+  agentSidePanelOpenAtomFamily,
+  revealChangedWorkspaceComponentAtom,
   type AgentStreamState,
 } from './agent-atoms'
 
@@ -27,14 +30,26 @@ function createStreamState(overrides: Partial<AgentStreamState> = {}): AgentStre
 }
 
 describe('右侧工作区组件', () => {
-  test('工作区组件状态跨会话使用同一 workspace key，且不混入临时右栏状态', () => {
+  test('工作区组件 Tab 按 session 隔离，不会影响同一 workspace 的其他会话', () => {
     const store = createStore()
-    const atom = workspaceComponentTabsAtomFamily('workspace-a')
+    const sourceSessionTabs = agentSessionComponentTabsAtomFamily('session-a')
 
-    store.set(atom, ['todos', 'memory'])
+    store.set(sourceSessionTabs, ['skills', 'memory'])
 
-    expect(store.get(atom)).toEqual(['todos', 'memory'])
-    expect(store.get(workspaceComponentTabsAtomFamily('workspace-b'))).toEqual([])
+    expect(store.get(sourceSessionTabs)).toEqual(['skills', 'memory'])
+    expect(store.get(agentSessionComponentTabsAtomFamily('session-b'))).toEqual([])
+  })
+
+  test('Agent 变更只打开来源 session 的对应 Tab', () => {
+    const store = createStore()
+
+    store.set(revealChangedWorkspaceComponentAtom, { sessionId: 'source-session', component: 'memory' })
+
+    expect(store.get(agentSessionComponentTabsAtomFamily('source-session'))).toEqual(['memory'])
+    expect(store.get(agentSessionComponentTabsAtomFamily('other-session'))).toEqual([])
+    expect(store.get(agentSidePanelOpenAtomFamily('source-session'))).toBe(true)
+    expect(store.get(agentDiffPanelTabAtom).get('source-session')).toBe('memory')
+    expect(store.get(agentDiffPanelTabAtom).get('other-session')).toBeUndefined()
   })
 
   test('只接受已注册的项目级组件类型', () => {
