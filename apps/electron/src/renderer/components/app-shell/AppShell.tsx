@@ -176,9 +176,9 @@ export function AppShell(): React.ReactElement {
   const effectiveWidePanelWidth = rightPanelLayout.widePanelWidthOverride === null
     ? clampRightPanelWidth(Math.floor(viewportWidth * WIDE_RIGHT_PANEL_DEFAULT_VIEWPORT_RATIO), viewportWidth, MIN_RIGHT_PANEL_WIDTH, leftSidebarOccupiedWidth)
     : clampRightPanelWidth(rightPanelLayout.widePanelWidthOverride, viewportWidth, MIN_RIGHT_PANEL_WIDTH, leftSidebarOccupiedWidth)
-  // 浏览器/预览打开过的会话可继续在文件页保留宽视图；探索和子 Agent
-  // 始终回到适中的 Agent 工作宽度，避免挤占主会话阅读区。
-  const usesWidePanelLayout = rightPanelLayout.hasOpenedWideWorkspace && !isAgentSessionRightTab
+  // 会话中一旦打开过浏览器/预览等宽视图，后续切换到较窄 Tab 也保留该宽度，
+  // 以当前已打开 Tab 的最大宽度为准，避免切换时工作区来回缩放。
+  const usesWidePanelLayout = rightPanelLayout.hasOpenedWideWorkspace
   const persistedRightPanelWidth = usesWidePanelLayout ? effectiveWidePanelWidth : clampedRightPanelWidth
   const displayedRightPanelWidth = draggedRightPanelWidth ?? persistedRightPanelWidth
 
