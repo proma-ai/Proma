@@ -10,8 +10,12 @@ import { useSetAtom } from 'jotai'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { LegalAgreement } from './LegalAgreement'
-import { canSubmitWithLegalAcceptance } from './legal-agreement'
+import {
+  canSubmitWithLegalAcceptance,
+  GOOGLE_OAUTH_LEGAL_ACCEPTANCE_HINT,
+} from './legal-agreement'
 import {
   cloudAuthViewAtom,
   cloudAuthEmailAtom,
@@ -51,6 +55,8 @@ export function LoginPage(): React.ReactElement {
   const [loading, setLoading] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
   const [googleConfigured, setGoogleConfigured] = useState(false)
+  const requiresLegalAcceptance = !canSubmitWithLegalAcceptance(legalAccepted)
+  const googleLoginDisabled = loading || requiresLegalAcceptance
 
   // 检查 Google OAuth 是否可用
   useEffect(() => {
@@ -178,16 +184,31 @@ export function LoginPage(): React.ReactElement {
             </div>
           </div>
 
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full"
-            onClick={() => { void handleGoogleLogin() }}
-            disabled={loading || !canSubmitWithLegalAcceptance(legalAccepted)}
-          >
-            <GoogleIcon />
-            使用 Google 登录
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                className={googleLoginDisabled ? 'block w-full cursor-not-allowed' : 'block w-full'}
+                tabIndex={requiresLegalAcceptance && !loading ? 0 : undefined}
+                aria-label={requiresLegalAcceptance && !loading ? GOOGLE_OAUTH_LEGAL_ACCEPTANCE_HINT : undefined}
+              >
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={googleLoginDisabled ? 'pointer-events-none w-full' : 'w-full'}
+                  onClick={() => { void handleGoogleLogin() }}
+                  disabled={googleLoginDisabled}
+                >
+                  <GoogleIcon />
+                  使用 Google 登录
+                </Button>
+              </span>
+            </TooltipTrigger>
+            {requiresLegalAcceptance && !loading && (
+              <TooltipContent side="bottom" className="max-w-xs text-center leading-relaxed">
+                {GOOGLE_OAUTH_LEGAL_ACCEPTANCE_HINT}
+              </TooltipContent>
+            )}
+          </Tooltip>
         </>
       )}
 
