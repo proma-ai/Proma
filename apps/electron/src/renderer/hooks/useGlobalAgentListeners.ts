@@ -72,7 +72,11 @@ import type { NotificationSoundType } from '@/types/settings'
 import { toast } from 'sonner'
 import type { AgentStreamEvent, AgentStreamCompletePayload, AgentEvent, AgentStreamPayload, AgentAssistantDelta, AgentAssistantDeltaPayload, SDKAssistantMessage, SDKMessage, SDKUserMessage, SDKSystemMessage, PromaEvent, AgentSessionMeta, ProviderType, SDKContentBlock, SDKUserContentBlock } from '@proma/shared'
 import { inferContextWindow } from '@proma/shared'
-import { buildExternalAgentRunActivation, shouldActivateExternalAgentRun } from '@/lib/external-agent-run'
+import {
+  buildExternalAgentRunActivation,
+  shouldActivateExternalAgentRun,
+  shouldRevealDelegatedSession,
+} from '@/lib/external-agent-run'
 import { upsertAgentSession, mergeFetchedAgentSessions } from '@/lib/agent-session-list'
 import {
   getAgentCompletionMarkers,
@@ -702,11 +706,13 @@ export function useGlobalAgentListeners(): void {
           return map
         })
 
-        // 协作子 Agent 是用户可检查的独立执行单元：启动时保持左侧树不变，
-        // 但将其自动聚焦到父会话右侧工作区，直接观察流式输出。
-        if (upserted.sourceDelegationId && upserted.parentSessionId) {
-          const parentSession = store.get(agentSessionsAtom).find((item) => item.id === upserted.parentSessionId)
-          makeNavigateToSession(upserted.parentSessionId, parentSession?.title ?? '父会话')()
+        // 协作子 Agent 仅在用户正查看其父会话时才自动展开到右侧工作区。
+        // 后台父会话派生子会话时，仍更新运行状态和侧栏树，但不能抢走用户焦点。
+        if (
+          upserted.sourceDelegationId
+          && upserted.parentSessionId
+          && shouldRevealDelegatedSession(upserted.parentSessionId, store.get(activeSessionIdAtom))
+        ) {
           store.set(agentSideDelegationMapAtom, (previous) => {
             const openChildIds = previous.get(upserted.parentSessionId!) ?? []
             if (openChildIds.includes(upserted.id)) return previous
