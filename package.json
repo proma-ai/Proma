@@ -82,6 +82,7 @@
     "prosemirror-model": "1.25.9"
   },
   "patchedDependencies": {
-    "@earendil-works/pi-ai@0.84.2": "patches/@earendil-works%2Fpi-ai@0.84.2.patch"
+    "@earendil-works/pi-ai@0.84.2": "patches/@earendil-works%2Fpi-ai@0.84.2.patch",
+    "node-pty@1.1.0": "patches/node-pty@1.1.0.patch"
   }
 }
