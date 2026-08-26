@@ -14,6 +14,7 @@ import {
   agentDiffPanelTabAtom,
   agentSidePanelOpenAtomFamily,
   revealChangedWorkspaceComponentAtom,
+  skillDetailNavigationAtomFamily,
   type AgentStreamState,
 } from './agent-atoms'
 
@@ -50,6 +51,15 @@ describe('右侧工作区组件', () => {
     expect(store.get(agentSidePanelOpenAtomFamily('source-session'))).toBe(true)
     expect(store.get(agentDiffPanelTabAtom).get('source-session')).toBe('memory')
     expect(store.get(agentDiffPanelTabAtom).get('other-session')).toBeUndefined()
+  })
+
+  test('Skill 历史引用导航状态按会话隔离', () => {
+    const store = createStore()
+
+    store.set(skillDetailNavigationAtomFamily('session-a'), { skillSlug: 'skill-a', workspaceSlug: 'workspace-a' })
+
+    expect(store.get(skillDetailNavigationAtomFamily('session-a'))).toEqual({ skillSlug: 'skill-a', workspaceSlug: 'workspace-a' })
+    expect(store.get(skillDetailNavigationAtomFamily('session-b'))).toBeNull()
   })
 
   test('只接受已注册的项目级组件类型', () => {

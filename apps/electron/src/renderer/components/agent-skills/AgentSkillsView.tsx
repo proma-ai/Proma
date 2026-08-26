@@ -21,7 +21,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
-import { agentPendingPromptAtom, skillDetailNavigationAtom, workspaceCapabilitiesVersionAtom } from '@/atoms/agent-atoms'
+import { agentPendingPromptAtom, skillDetailNavigationAtomFamily, workspaceCapabilitiesVersionAtom } from '@/atoms/agent-atoms'
 import { agentSkillsTabAtom } from '@/atoms/active-view'
 import { settingsOpenAtom, settingsTabAtom, toolSettingsFocusAtom, type ToolSettingsFocus } from '@/atoms/settings-tab'
 import { useProjectActions } from '@/hooks/useProjectActions'
@@ -91,15 +91,16 @@ export function AgentSkillsView({
   embedded = false,
   componentTab,
   workspaceId,
-}: { embedded?: boolean; componentTab?: 'skills' | 'mcp'; workspaceId?: string } = {}): React.ReactElement {
+  sessionId,
+}: { embedded?: boolean; componentTab?: 'skills' | 'mcp'; workspaceId?: string; sessionId?: string } = {}): React.ReactElement {
   const data = useAgentSkillsData(workspaceId)
   const bumpCapabilities = useSetAtom(workspaceCapabilitiesVersionAtom)
   const setPendingPrompt = useSetAtom(agentPendingPromptAtom)
   const setSettingsOpen = useSetAtom(settingsOpenAtom)
   const setSettingsTab = useSetAtom(settingsTabAtom)
   const setToolSettingsFocus = useSetAtom(toolSettingsFocusAtom)
-  const skillDetailNavigation = useAtomValue(skillDetailNavigationAtom)
-  const setSkillDetailNavigation = useSetAtom(skillDetailNavigationAtom)
+  const skillDetailNavigation = useAtomValue(skillDetailNavigationAtomFamily(sessionId ?? ''))
+  const setSkillDetailNavigation = useSetAtom(skillDetailNavigationAtomFamily(sessionId ?? ''))
   const { workspaces, currentWorkspaceId: selectedWorkspaceId, selectProject } = useProjectActions()
   const { createAgent } = useCreateSession()
   const currentWorkspace = workspaces.find((workspace) => workspace.id === (workspaceId ?? selectedWorkspaceId))

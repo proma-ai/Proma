@@ -764,7 +764,8 @@ export interface SkillDetailNavigationRequest {
   workspaceSlug?: string
 }
 
-export const skillDetailNavigationAtom = atom<SkillDetailNavigationRequest | null>(null)
+/** 历史引用导航属于会话级短暂 UI 状态，避免其他会话的 Skills 视图消费请求。 */
+export const skillDetailNavigationAtomFamily = atomFamily((sessionId: string) => atom<SkillDetailNavigationRequest | null>(null))
 
 /** 在当前 Agent 会话中打开并聚焦一个项目级组件。 */
 export const openWorkspaceComponentAtom = atom(

@@ -4,7 +4,7 @@ import { Sparkles } from 'lucide-react'
 import { collectSkillActivations } from '@proma/shared'
 import type { SDKMessage, SDKUserMessage, SkillActivation } from '@proma/shared'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { currentAgentSessionIdAtom, openWorkspaceComponentAtom, skillDetailNavigationAtom } from '@/atoms/agent-atoms'
+import { currentAgentSessionIdAtom, openWorkspaceComponentAtom, skillDetailNavigationAtomFamily } from '@/atoms/agent-atoms'
 import { cn } from '@/lib/utils'
 
 export interface TurnSkillUsageSummaryProps {
@@ -17,7 +17,7 @@ export interface TurnSkillUsageSummaryProps {
 function SkillUsageChip({ activation }: { activation: SkillActivation }): React.ReactElement {
   const sessionId = useAtomValue(currentAgentSessionIdAtom)
   const openWorkspaceComponent = useSetAtom(openWorkspaceComponentAtom)
-  const setSkillDetailNavigation = useSetAtom(skillDetailNavigationAtom)
+  const setSkillDetailNavigation = useSetAtom(skillDetailNavigationAtomFamily(sessionId ?? ''))
   const canOpen = Boolean(sessionId && activation.slug)
   const handleOpenSkill = React.useCallback(() => {
     if (!sessionId) return

@@ -1205,9 +1205,9 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
           ) : effectiveActiveTab === 'automations' ? (
             automationFormOpen ? <AutomationFormView embedded /> : <PlanningView embedded componentTab="automations" />
           ) : effectiveActiveTab === 'skills' ? (
-            <AgentSkillsView embedded componentTab="skills" workspaceId={currentWorkspaceId ?? undefined} />
+            <AgentSkillsView embedded componentTab="skills" workspaceId={currentWorkspaceId ?? undefined} sessionId={sessionId} />
           ) : effectiveActiveTab === 'mcp' ? (
-            <AgentSkillsView embedded componentTab="mcp" workspaceId={currentWorkspaceId ?? undefined} />
+            <AgentSkillsView embedded componentTab="mcp" workspaceId={currentWorkspaceId ?? undefined} sessionId={sessionId} />
           ) : effectiveActiveTab === 'memory' ? (
             workspaceSlug ? (
               <div className="min-h-0 flex-1 overflow-hidden p-2">
