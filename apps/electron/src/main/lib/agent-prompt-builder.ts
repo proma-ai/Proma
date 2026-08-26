@@ -4,6 +4,7 @@
  */
 
 import type { PromaPermissionMode, SessionWorkbenchLayout } from '@proma/shared'
+import { lstatSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { getUserProfile } from './user-profile-service'
@@ -67,6 +68,16 @@ function buildWorkspacePaths(
     autoMemoryIndex: join(workspaceRoot, 'memory', 'MEMORY.md'),
     mcpConfig: join(workspaceRoot, 'mcp.json'),
     skillsDir: join(workspaceRoot, 'skills'),
+    workspaceAgentsExists: isRegularFile(join(workspaceRoot, 'AGENTS.md')),
+    projectAgentsExists: isRegularFile(join(projectRoot, 'AGENTS.md')),
+  }
+}
+
+function isRegularFile(path: string): boolean {
+  try {
+    return lstatSync(path).isFile()
+  } catch {
+    return false
   }
 }
 
@@ -104,7 +115,7 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
       ? `## 工作区与 Context
 - 项目根：\`${workspace.projectRoot}\`（${workspace.isLocalProject ? '用户本地原始文件' : 'Proma 托管项目文件'}）；cwd：\`${workspace.agentCwd}\`（${workspace.isProjectCwd ? '当前直接在项目根工作' : '会话工作台，不等同项目根'}）。
 - 会话工作台：\`${sessionContextDir}\`，用于本次任务、计划和交接；新会话直接使用 workbench 根，历史会话兼容 \`.context/\`。项目级 Context：\`${projectContextDir}\` 用于跨会话资料。用户指定位置优先；不要随意清理本地项目。
-- Proma 工作区规则：\`${workspace.agentsMd}\`；记忆索引：\`${workspace.autoMemoryIndex}\`；MCP：\`${workspace.mcpConfig}\`；Skills：\`${workspace.skillsDir}\`。只使用 Proma 工作区的 MCP/Skills 配置。
+- Proma 工作区规则：\`${workspace.agentsMd}\`${workspace.workspaceAgentsExists ? '（已加载）' : '（当前未建立；这是候选路径，不要读取）'}；记忆索引：\`${workspace.autoMemoryIndex}\`；MCP：\`${workspace.mcpConfig}\`；Skills：\`${workspace.skillsDir}\`。只使用 Proma 工作区的 MCP/Skills 配置。
 - 需要原文或更多细节时，再按当前任务读取两级 Context、记忆索引或 Skill 元数据；禁止无差别全量扫描。`
       : undefined,
     buildLegacyProjectMigrationRequirement({ sources: ctx.legacyProjectInstructions ?? [] }),
@@ -113,8 +124,8 @@ Proma 将项目地图与用户协作记忆分开维护：前者让 Agent 少做�
 
 | 层级 | 位置 | 维护方式 | 内容边界 |
 | --- | --- | --- | --- |
-| 项目地图 | \`${workspace?.projectAgentsMd ?? '项目根/AGENTS.md'}\` | ${agentsMaintenanceMode} | 架构、目录、命令、验证、项目边界与关键文档索引 |
-| Proma 工作区规则 | \`${workspace?.agentsMd ?? 'AGENTS.md'}\` | ${agentsMaintenanceMode} | Proma 执行环境、工作区流程、项目入口指针；不复制项目地图 |
+| 项目地图 | \`${workspace?.projectAgentsMd ?? '项目根/AGENTS.md'}\` | ${agentsMaintenanceMode}${workspace && !workspace.projectAgentsExists ? '；当前未建立' : ''} | 架构、目录、命令、验证、项目边界与关键文档索引 |
+| Proma 工作区规则 | \`${workspace?.agentsMd ?? 'AGENTS.md'}\` | ${agentsMaintenanceMode}${workspace && !workspace.workspaceAgentsExists ? '；当前未建立' : ''} | Proma 执行环境、工作区流程、项目入口指针；不复制项目地图 |
 | 协作记忆 | \`${workspace?.autoMemoryDir ?? 'memory'}\` | 已验证的最小增量可直接写入并在完成后说明；删除/大段覆盖、冲突、不确定推断或敏感信息先确认 | 用户画像、协作偏好、纠错、经验与会影响未来判断的决策理由；\`MEMORY.md\` 只作主题索引 |
 | Skills | \`${workspace?.skillsDir ?? 'skills'}\` | 仅在匹配任务或用户请求时读取/维护 | 可复用流程与 SOP，不存普通事实 |
 | 会话工作台 | \`${sessionContextDir}\` | 当前会话可读写 | todo、plan、handoff、临时笔记和中间产物，不自动升级为长期知识 |

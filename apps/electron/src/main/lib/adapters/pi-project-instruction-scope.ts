@@ -1,8 +1,9 @@
-import { realpathSync } from 'node:fs'
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import {
+  normalizeProjectPathForComparison,
   resolveProjectInstructions,
+  canonicalizeProjectPath,
   type ProjectInstructionSource,
 } from '../project-instruction-resolver'
 import { buildLegacyProjectMigrationPrompt } from '../project-instruction-migration'
@@ -24,11 +25,15 @@ interface ScopeToolDecision {
 }
 
 function sourceKey(source: ProjectInstructionSource): string {
-  return `${source.path}\0${source.contentHash}`
+  return `${normalizeForComparison(source.path)}\0${source.contentHash}`
+}
+
+function normalizeForComparison(path: string): string {
+  return normalizeProjectPathForComparison(path)
 }
 
 function isWithinScope(candidate: string, scopeRoot: string): boolean {
-  const pathRelative = relative(scopeRoot, candidate)
+  const pathRelative = relative(normalizeForComparison(scopeRoot), normalizeForComparison(candidate))
   return pathRelative === '' || (!!pathRelative && !pathRelative.startsWith('..') && !isAbsolute(pathRelative))
 }
 
@@ -51,11 +56,7 @@ function resolveTargetDirectory(call: ScopedToolCall, cwd: string): string | und
   const scopePath = call.toolName === 'ls' || call.toolName === 'find' || call.toolName === 'grep'
     ? targetPath
     : dirname(targetPath)
-  try {
-    return realpathSync(scopePath)
-  } catch {
-    return scopePath
-  }
+  return canonicalizeProjectPath(scopePath)
 }
 
 function formatSource(source: ProjectInstructionSource): string {
@@ -75,7 +76,7 @@ export class ProjectInstructionScopeController {
   private readonly pending = new Map<string, ProjectInstructionSource>()
 
   constructor(options: ProjectInstructionScopeOptions) {
-    this.projectRoot = realpathSync(options.projectRoot)
+    this.projectRoot = canonicalizeProjectPath(options.projectRoot)
     this.cwd = options.cwd
     for (const source of options.initialSources) {
       this.delivered.add(sourceKey(source))
@@ -118,15 +119,14 @@ export class ProjectInstructionScopeController {
     if (!isMutationTool(call.toolName)) return undefined
     const targetPath = typeof call.input.path === 'string' ? resolve(this.cwd, call.input.path) : undefined
     const canonicalTargetPath = targetPath
-      ? (() => {
-          try { return realpathSync(targetPath) } catch { return join(targetDirectory, basename(targetPath)) }
-        })()
+      ? canonicalizeProjectPath(targetPath)
       : undefined
-    const legacySource = manifest.sources.find((source) => source.kind === 'claude' && canonicalTargetPath && isWithinScope(canonicalTargetPath, dirname(source.path)))
+    if (!canonicalTargetPath) return undefined
+    const legacySource = manifest.sources.find((source) => source.kind === 'claude' && isWithinScope(canonicalTargetPath, dirname(source.path)))
     if (!legacySource) return undefined
 
-    const expectedAgentsPath = join(dirname(legacySource.path), 'AGENTS.md')
-    if (canonicalTargetPath === expectedAgentsPath) return undefined
+    const expectedAgentsPath = canonicalizeProjectPath(join(dirname(legacySource.path), 'AGENTS.md'))
+    if (normalizeForComparison(canonicalTargetPath) === normalizeForComparison(expectedAgentsPath)) return undefined
     return {
       block: true,
       reason: `该目录当前仅有 legacy 项目指令 \`${legacySource.relativePath}\`。请先结合当前目录实际情况创建同目录 \`AGENTS.md\`，保留原 CLAUDE.md，然后再修改其他项目文件。`,
