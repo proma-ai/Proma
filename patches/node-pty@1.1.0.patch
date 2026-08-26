@@ -1,0 +1,37 @@
+diff --git a/lib/unixTerminal.js b/lib/unixTerminal.js
+index 1ec12f796a822c78fba9ad7f6448c3987e325c23..cda1592b83b1d464fbfaee850eca8daa3c9ae8c8 100644
+--- a/lib/unixTerminal.js
++++ b/lib/unixTerminal.js
+@@ -28,8 +28,10 @@ var native = utils_1.loadNativeModule('pty');
+ var pty = native.module;
+ var helperPath = native.dir + '/spawn-helper';
+ helperPath = path.resolve(__dirname, helperPath);
+-helperPath = helperPath.replace('app.asar', 'app.asar.unpacked');
+-helperPath = helperPath.replace('node_modules.asar', 'node_modules.asar.unpacked');
++// electron-builder may already load node-pty from app.asar.unpacked. Avoid
++// transforming that valid path a second time into app.asar.unpacked.unpacked.
++helperPath = helperPath.replace(/app\.asar(?!\.unpacked)/, 'app.asar.unpacked');
++helperPath = helperPath.replace(/node_modules\.asar(?!\.unpacked)/, 'node_modules.asar.unpacked');
+ var DEFAULT_FILE = 'sh';
+ var DEFAULT_NAME = 'xterm';
+ var DESTROY_SOCKET_TIMEOUT_MS = 200;
+diff --git a/prebuilds/darwin-arm64/spawn-helper b/prebuilds/darwin-arm64/spawn-helper
+old mode 100644
+new mode 100755
+diff --git a/src/unixTerminal.ts b/src/unixTerminal.ts
+index 98733dc0cd752b554bd94e45904ca341ad141bba..5844ccf314a4352fbe80ee06ba8b8ddb0b931c92 100644
+--- a/src/unixTerminal.ts
++++ b/src/unixTerminal.ts
+@@ -16,8 +16,10 @@ const native = loadNativeModule('pty');
+ const pty: IUnixNative = native.module;
+ let helperPath = native.dir + '/spawn-helper';
+ helperPath = path.resolve(__dirname, helperPath);
+-helperPath = helperPath.replace('app.asar', 'app.asar.unpacked');
+-helperPath = helperPath.replace('node_modules.asar', 'node_modules.asar.unpacked');
++// electron-builder may already load node-pty from app.asar.unpacked. Avoid
++// transforming that valid path a second time into app.asar.unpacked.unpacked.
++helperPath = helperPath.replace(/app\.asar(?!\.unpacked)/, 'app.asar.unpacked');
++helperPath = helperPath.replace(/node_modules\.asar(?!\.unpacked)/, 'node_modules.asar.unpacked');
+ 
+ const DEFAULT_FILE = 'sh';
+ const DEFAULT_NAME = 'xterm';
