@@ -65,17 +65,31 @@ export function ChannelSettings(): React.ReactElement {
     }
   }, [])
 
+  /** 仅在渠道设置页展示已启用的官方渠道时读取健康数据。 */
+  const loadHealth = React.useCallback(
+    (): Promise<void> => loadModelHealth(setHealthData, setHealthLoading, setHealthError),
+    [setHealthData, setHealthError, setHealthLoading],
+  )
+
   React.useEffect(() => {
-    loadChannels()
-  }, [loadChannels])
+    let cancelled = false
+
+    void loadChannels().then((list) => {
+      const officialChannel = list.find((channel) => channel.id === PROMA_OFFICIAL_CHANNEL_ID)
+      if (!cancelled && officialChannel?.enabled) {
+        void loadHealth()
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [loadChannels, loadHealth])
 
   /** 在官方渠道模型同步完成后，同时刷新渠道列表与完整健康度表。 */
   const refreshOfficialChannelState = React.useCallback(async (): Promise<void> => {
-    await Promise.all([
-      loadChannels(),
-      loadModelHealth(setHealthData, setHealthLoading, setHealthError),
-    ])
-  }, [loadChannels, setHealthData, setHealthError, setHealthLoading])
+    await Promise.all([loadChannels(), loadHealth()])
+  }, [loadChannels, loadHealth])
 
   /** 删除渠道（通过弹窗确认） */
   const handleDeleteRequest = (channel: Channel): void => {
@@ -112,6 +126,9 @@ export function ChannelSettings(): React.ReactElement {
     try {
       const savedChannel = await window.electronAPI.updateChannel(channel.id, { enabled: !channel.enabled })
       await loadChannels()
+      if (savedChannel.id === PROMA_OFFICIAL_CHANNEL_ID && savedChannel.enabled) {
+        await loadHealth()
+      }
     } catch (error) {
       console.error('[渠道设置] 切换渠道状态失败:', error)
     }

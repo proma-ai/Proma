@@ -52,7 +52,7 @@ import {
   deleteApiKey,
 } from './lib/cloud-api-keys-service'
 import { downloadCloudPrompts } from './lib/cloud-prompts-service'
-import { getModelHealth, startHealthPolling, stopHealthPolling } from './lib/cloud-health-service'
+import { getModelHealth } from './lib/cloud-health-service'
 import { getAgentWorkspaceBySlug } from './lib/agent-workspace-manager'
 import {
   getUsageLogs,
@@ -294,9 +294,6 @@ export async function registerCloudIpcHandlers(): Promise<void> {
       return getModelHealth()
     },
   )
-
-  // 启动健康数据主动轮询（每 3 分钟）
-  startHealthPolling()
 
   // 启动官方模型列表定时轮询（每 20 分钟）
   startModelsPolling()

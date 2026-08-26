@@ -82,7 +82,6 @@ import { showCapabilityChangeToasts } from './lib/capabilities-toast'
 import { GlobalShortcuts } from './components/shortcuts/GlobalShortcuts'
 import { VoiceDictationApp } from './components/voice-dictation/VoiceDictationApp'
 import { TabSwitcher } from './components/tabs/TabSwitcher'
-import { ModelHealthInitializer } from './components/ModelHealthInitializer'
 import { htmlToMarkdown, markdownToHtml } from './lib/markdown-rich-text'
 import { PromaLogo } from './lib/model-logo'
 import { cloudUserAtom, cloudAuthLoadingAtom, initializeCloudAuth } from './atoms/cloud-auth'
@@ -1243,7 +1242,6 @@ if (isQuickTaskWindow) {
       <ThemeInitializer />
       <UserProfileInitializer />
       <CloudInitializer />
-      <ModelHealthInitializer />
       <AgentSettingsInitializer />
       <NotificationsInitializer />
       <DockBadgeInitializer />
