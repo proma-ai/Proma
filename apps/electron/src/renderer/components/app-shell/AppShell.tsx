@@ -28,23 +28,38 @@ import { cn } from '@/lib/utils'
 import { Toaster } from '@/components/ui/sonner'
 
 const MIN_RIGHT_PANEL_WIDTH = 360
-// 探索/委派 Agent 需要同时容纳消息正文、工具活动和输入区；略宽于普通文件栏，
-// 但显著小于浏览器/预览的半屏宽视图。
-const MIN_AGENT_SESSION_PANEL_WIDTH = 480
-// Todo、日程、能力和记忆都含列表与详情；与临时 Agent 一样需要可读的并排空间。
-const MIN_WORKSPACE_COMPONENT_PANEL_WIDTH = 480
+// 日程、定时任务、能力、记忆、探索、协作、终端及浏览/预览统一采用可读的工作区宽度。
+const MIN_EXPANDED_WORKSPACE_PANEL_WIDTH = 480
+// Todo 选中任务后同时展示导航、列表与详情三栏，需要比其他工作区组件更宽的可读空间。
+const MIN_TODO_PANEL_WIDTH = 720
 const RIGHT_PANEL_MAX_VIEWPORT_RATIO = 3 / 5
-const WIDE_RIGHT_PANEL_DEFAULT_VIEWPORT_RATIO = 1 / 2
-// 窄窗口时优先保留主会话的最小可读宽度；Agent 侧栏的 480px 仅在空间足够时强制。
+const EXPANDED_WORKSPACE_DEFAULT_VIEWPORT_RATIO = 2 / 5
+// 窄窗口时优先保留主会话的最小可读宽度；扩展工作区的 480px 仅在空间足够时强制。
 const MIN_MAIN_AREA_WIDTH = 320
 const COLLAPSED_LEFT_SIDEBAR_WIDTH = 60
 const CLASSIC_LEFT_SIDEBAR_LEADING_PADDING = 8
 
-function getRightPanelMinWidth(isAgentSessionTab: boolean, isWorkspaceComponent: boolean): number {
-  return isAgentSessionTab
-    ? MIN_AGENT_SESSION_PANEL_WIDTH
-    : isWorkspaceComponent
-      ? MIN_WORKSPACE_COMPONENT_PANEL_WIDTH
+function isExpandedWorkspaceTab(tab: string | undefined): boolean {
+  return Boolean(
+    tab
+    && (
+      isWorkspaceComponentTab(tab)
+      || tab === 'browser'
+      || tab === 'preview'
+      || tab.startsWith('browser:')
+      || tab.startsWith('preview:')
+      || tab.startsWith('terminal:')
+      || tab.startsWith('exploration:')
+      || tab.startsWith('delegation:')
+    ),
+  )
+}
+
+function getRightPanelMinWidth(isTodoTab: boolean, isExpandedWorkspace: boolean): number {
+  return isTodoTab
+    ? MIN_TODO_PANEL_WIDTH
+    : isExpandedWorkspace
+      ? MIN_EXPANDED_WORKSPACE_PANEL_WIDTH
       : MIN_RIGHT_PANEL_WIDTH
 }
 
@@ -157,10 +172,11 @@ export function AppShell(): React.ReactElement {
   const rightPanelDragCleanup = React.useRef<(() => void) | null>(null)
   const [draggedRightPanelWidth, setDraggedRightPanelWidth] = React.useState<number | null>(null)
   currentSessionIdRef.current = currentSessionId
-  const isAgentSessionRightTab = Boolean(
-    activeRightPanelTab?.startsWith('exploration:') || activeRightPanelTab?.startsWith('delegation:'),
+  const isExpandedRightWorkspace = isExpandedWorkspaceTab(activeRightPanelTab)
+  const rightPanelMinimumWidth = getRightPanelMinWidth(
+    activeRightPanelTab === 'todos',
+    isExpandedRightWorkspace || rightPanelLayout.hasOpenedWideWorkspace,
   )
-  const rightPanelMinimumWidth = getRightPanelMinWidth(isAgentSessionRightTab, Boolean(activeRightPanelTab && isWorkspaceComponentTab(activeRightPanelTab)))
   const leftSidebarContentWidth = sidebarCollapsed ? COLLAPSED_LEFT_SIDEBAR_WIDTH : clampedLeftSidebarWidth
   const leftSidebarOccupiedWidth = leftSidebarContentWidth + (isClassic ? CLASSIC_LEFT_SIDEBAR_LEADING_PADDING : 1)
   const clampedRightPanelWidth = clampRightPanelWidth(
@@ -169,15 +185,10 @@ export function AppShell(): React.ReactElement {
     rightPanelMinimumWidth,
     leftSidebarOccupiedWidth,
   )
-  const isWideRightWorkspace = Boolean(
-    activeRightPanelTab?.startsWith('preview:') || activeRightPanelTab?.startsWith('browser:'),
-  )
-  // 首次打开预览/浏览器后，工作区维持宽视图；切回文件/改动不会自动收窄，交给用户拖拽决定。
   const effectiveWidePanelWidth = rightPanelLayout.widePanelWidthOverride === null
-    ? clampRightPanelWidth(Math.floor(viewportWidth * WIDE_RIGHT_PANEL_DEFAULT_VIEWPORT_RATIO), viewportWidth, MIN_RIGHT_PANEL_WIDTH, leftSidebarOccupiedWidth)
-    : clampRightPanelWidth(rightPanelLayout.widePanelWidthOverride, viewportWidth, MIN_RIGHT_PANEL_WIDTH, leftSidebarOccupiedWidth)
-  // 会话中一旦打开过浏览器/预览等宽视图，后续切换到较窄 Tab 也保留该宽度，
-  // 以当前已打开 Tab 的最大宽度为准，避免切换时工作区来回缩放。
+    ? clampRightPanelWidth(Math.floor(viewportWidth * EXPANDED_WORKSPACE_DEFAULT_VIEWPORT_RATIO), viewportWidth, rightPanelMinimumWidth, leftSidebarOccupiedWidth)
+    : clampRightPanelWidth(rightPanelLayout.widePanelWidthOverride, viewportWidth, rightPanelMinimumWidth, leftSidebarOccupiedWidth)
+  // 打开任一扩展工作区后，当前会话保持该宽度，避免在右侧 Tab 间切换时反复缩放。
   const usesWidePanelLayout = rightPanelLayout.hasOpenedWideWorkspace
   const persistedRightPanelWidth = usesWidePanelLayout ? effectiveWidePanelWidth : clampedRightPanelWidth
   const displayedRightPanelWidth = draggedRightPanelWidth ?? persistedRightPanelWidth
@@ -191,10 +202,10 @@ export function AppShell(): React.ReactElement {
   }, [agentSessions, currentSessionId, setRightPanelLayouts])
 
   React.useEffect(() => {
-    if (isWideRightWorkspace && currentSessionId && !rightPanelLayout.hasOpenedWideWorkspace) {
+    if (isExpandedRightWorkspace && currentSessionId && !rightPanelLayout.hasOpenedWideWorkspace) {
       setRightPanelLayout((previous) => ({ ...previous, hasOpenedWideWorkspace: true }))
     }
-  }, [currentSessionId, isWideRightWorkspace, rightPanelLayout.hasOpenedWideWorkspace, setRightPanelLayout])
+  }, [currentSessionId, isExpandedRightWorkspace, rightPanelLayout.hasOpenedWideWorkspace, setRightPanelLayout])
 
   React.useEffect(() => {
     const updateViewportWidth = () => setViewportWidth(window.innerWidth)
