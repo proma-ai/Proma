@@ -1294,8 +1294,8 @@ export class AgentOrchestrator {
           })
         }
 
-        // 终端元数据可在计划阶段检查，但创建、执行、打断或关闭 PTY 都属于可见的本地副作用。
-        if (toolName === 'TerminalList') return { behavior: 'allow' as const, updatedInput: input }
+        // 终端元数据与已缓冲的输出可在计划阶段只读检查；创建、执行、打断或关闭 PTY 都属于可见的本地副作用。
+        if (toolName === 'TerminalList' || toolName === 'TerminalRead') return { behavior: 'allow' as const, updatedInput: input }
         if (toolName.startsWith('Terminal') && currentMode === 'plan') {
           return { behavior: 'deny' as const, message: '计划模式下不能创建或操作本地终端，请在计划获批后执行。' }
         }

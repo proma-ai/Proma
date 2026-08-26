@@ -85,6 +85,7 @@ import {
   interruptAgentTerminal,
   listAgentTerminals,
   openAgentTerminal,
+  readAgentTerminalOutput,
 } from '../terminal-service'
 import {
   automationCreateToolParameters,
@@ -1347,8 +1348,8 @@ function buildAgentTerminalTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDe
     sdk.defineTool({
       name: 'TerminalExecute',
       label: '在可见终端执行命令',
-      description: 'Run one command in a new visible Agent-owned terminal Tab. The user can see and interrupt it. Terminal output is not automatically returned to the Agent; only the command-start receipt is returned.',
-      promptSnippet: 'Execute one command only when it serves the user request. It is visibly run in the Agent workspace and may require permission approval.',
+      description: 'Run one command in a new visible Agent-owned terminal Tab. The user can see and interrupt it. Call TerminalRead with the returned terminal ID when you need to inspect its output; output is never pushed into this tool result.',
+      promptSnippet: 'Execute one command only when it serves the user request. It is visibly run in the Agent workspace and may require permission approval. If its result matters, call TerminalRead after it has produced output instead of assuming output is returned automatically.',
       parameters: Type.Object({
         command: Type.String({ description: 'Complete command to execute in the controlled shell. Do not prepend shell wrappers.' }),
         cwd: Type.Optional(Type.String({ description: 'Absolute or Agent-CWD-relative directory within the current authorized roots.' })),
@@ -1360,6 +1361,24 @@ function buildAgentTerminalTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDe
         if (!command) throw new Error('command 必填')
         const record = await executeAgentTerminal({ ...agentContext, ...terminalInput(args), command })
         return jsonToolResult({ terminal: record, commandStarted: true, outputSharedWithAgent: false })
+      },
+    }),
+    sdk.defineTool({
+      name: 'TerminalRead',
+      label: '读取 Agent 终端输出',
+      description: 'Read bounded buffered output from one current-session Agent-owned terminal. By default returns the latest 12,000 characters of normalized text. Use offset and limit to page earlier output; it can read output after the terminal exits until the terminal or session is closed.',
+      promptSnippet: 'After starting a visible terminal command, use TerminalRead whenever you need its result. Start with the default tail; use the returned nextOffset to page forward or a smaller offset to inspect earlier output. Do not assume terminal output is automatically returned.',
+      parameters: Type.Object({
+        terminalId: Type.String({ description: 'Terminal ID returned by TerminalOpen, TerminalExecute, or TerminalList.' }),
+        offset: Type.Optional(Type.Number({ description: 'Optional non-negative character offset in the terminal output stream. Omit to read the latest output.' })),
+        limit: Type.Optional(Type.Number({ description: 'Optional maximum characters to return, from 1 to 48000. Defaults to 12000.' })),
+      }),
+      async execute(_toolCallId, params) {
+        const args = params as Record<string, unknown>
+        const terminalId = typeof args.terminalId === 'string' ? args.terminalId : ''
+        const offset = typeof args.offset === 'number' ? args.offset : undefined
+        const limit = typeof args.limit === 'number' ? args.limit : undefined
+        return jsonToolResult(readAgentTerminalOutput(ctx.sessionId, terminalId, { offset, limit }))
       },
     }),
     sdk.defineTool({

@@ -11,7 +11,13 @@ import {
   type TerminalState,
 } from '@proma/shared'
 import { getMainWindow } from './main-window-store'
-import { appendTerminalOutput, type TerminalOutputBuffer } from './terminal-output-buffer'
+import {
+  appendTerminalOutput,
+  readTerminalOutput,
+  type TerminalOutputBuffer,
+  type TerminalOutputReadOptions,
+  type TerminalOutputReadResult,
+} from './terminal-output-buffer'
 import { resolveAgentTerminalCwd } from './terminal-agent-policy'
 import { requireTerminalCwd, resolveTerminalCwd } from './terminal-cwd'
 import { terminalRuntimeClient } from './terminal-runtime-client'
@@ -44,11 +50,13 @@ function initialize(): void {
   })
   terminalRuntimeClient.onExit((event) => {
     terminals.delete(event.terminalId)
-    terminalOutputBuffers.delete(event.terminalId)
     const agentTerminal = agentTerminals.get(event.terminalId)
     if (agentTerminal) {
+      // Agent 可在命令退出后读取结果；缓冲会随显式关闭或会话回收一并释放。
       agentTerminal.status = 'exited'
       agentTerminal.exitCode = event.exitCode
+    } else {
+      terminalOutputBuffers.delete(event.terminalId)
     }
     getMainWindow()?.webContents.send(TERMINAL_IPC_CHANNELS.EXIT, event)
   })
@@ -69,7 +77,7 @@ export async function createTerminal(
   // Record ownership before spawning so a concurrent session deletion can cancel it.
   terminalSessionOwners.set(input.terminalId, input.sessionId)
   // Initialize the replay buffer before the runtime can emit the first shell output.
-  terminalOutputBuffers.set(input.terminalId, { output: '', sequence: 0 })
+  terminalOutputBuffers.set(input.terminalId, { output: '', sequence: 0, startOffset: 0, endOffset: 0 })
   const creation = terminalRuntimeClient.create({
     ...input,
     cwd,
@@ -167,6 +175,18 @@ export function listAgentTerminals(sessionId: string): AgentTerminalRecord[] {
   return [...agentTerminals.values()].filter((record) => record.sessionId === sessionId)
 }
 
+/** 读取当前 Agent 会话拥有的终端输出；只暴露有限内存回放缓冲，不读取其他会话或系统终端。 */
+export function readAgentTerminalOutput(
+  sessionId: string,
+  terminalId: string,
+  options: TerminalOutputReadOptions = {},
+): { terminal: AgentTerminalRecord; read: TerminalOutputReadResult } {
+  const terminal = getOwnedAgentTerminal(sessionId, terminalId)
+  const buffer = terminalOutputBuffers.get(terminalId)
+  if (!buffer) throw new Error('终端输出已不可用')
+  return { terminal, read: readTerminalOutput(buffer, options) }
+}
+
 export async function interruptAgentTerminal(sessionId: string, terminalId: string): Promise<void> {
   const record = getOwnedAgentTerminal(sessionId, terminalId)
   if (record.status !== 'running') return
@@ -191,7 +211,7 @@ export function getTerminalSnapshot(terminalId: string): TerminalSnapshot {
   validateTerminalId(terminalId)
   const state = terminals.get(terminalId)
   if (!state) throw new Error('终端不存在')
-  const buffer = terminalOutputBuffers.get(terminalId) ?? { output: '', sequence: 0 }
+  const buffer = terminalOutputBuffers.get(terminalId) ?? { output: '', sequence: 0, startOffset: 0, endOffset: 0 }
   return { state, ...buffer }
 }
 
@@ -230,7 +250,7 @@ function getOwnedAgentTerminal(sessionId: string, terminalId: string): AgentTerm
 }
 
 function appendOutputBuffer(event: { terminalId: string; sequence: number; data: string }): void {
-  const current = terminalOutputBuffers.get(event.terminalId) ?? { output: '', sequence: 0 }
+  const current = terminalOutputBuffers.get(event.terminalId) ?? { output: '', sequence: 0, startOffset: 0, endOffset: 0 }
   terminalOutputBuffers.set(event.terminalId, appendTerminalOutput(current, event, MAX_REPLAY_CHARS))
 }
 
