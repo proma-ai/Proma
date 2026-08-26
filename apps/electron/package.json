@@ -30,7 +30,7 @@
     "sync:runtime-deps": "bun run scripts/sync-runtime-deps.ts",
     "sync:runtime-deps:dev": "bun run scripts/sync-runtime-deps.ts --no-clean",
     "build": "bun run build:main && bun run build:agent-runtime && bun run build:terminal-runtime && bun run build:preload && bun run build:renderer && bun run build:cli && bun run build:native-helpers && bun run build:resources",
-    "rebuild:node-pty": "electron-rebuild -f -w node-pty",
+    "rebuild:node-pty": "bun run scripts/rebuild-node-pty.ts",
     "start": "bun run build && bunx electron .",
     "typecheck": "tsc --noEmit",
     "generate:icons": "cd resources && ./generate-icons.sh",
