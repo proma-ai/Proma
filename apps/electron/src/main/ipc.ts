@@ -9,7 +9,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { existsSync, realpathSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, AGENT_ISLAND_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, PLANNING_CONFLICT_ERROR, MAX_ATTACHMENT_SIZE, isPromaPermissionMode, normalizePathForCompare } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, AGENT_ISLAND_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, PLANNING_CONFLICT_ERROR, MAX_ATTACHMENT_SIZE, isPromaPermissionMode, normalizePathForCompare, TERMINAL_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS, WINDOWS_AGENT_ISLAND_IPC_CHANNELS, TRAY_IPC_CHANNELS } from '../types'
 import type {
   QuickTaskSubmitInput,
@@ -156,6 +156,8 @@ import type {
 import type { UserProfile, AppSettings } from '../types'
 import { getRuntimeStatus, getGitRepoStatus, reinitializeRuntime } from './lib/runtime-init'
 import { browserController } from './lib/browser-controller'
+import { acknowledgeTerminalOutput, closeTerminalsForSession, createTerminal, getTerminalSnapshot, killTerminal, resizeTerminal, writeTerminal } from './lib/terminal-service'
+import { getMainWindow } from './lib/main-window-store'
 import { resolveBrowserProfileKey } from './lib/browser-profile-policy'
 import { getUnstagedChanges, invalidateGitDiffCache, getFileDiff, getUntrackedContent, revertFile, getDiffContents, listWorktrees, getWorktreeChanges, getMainRepoRoot } from './lib/git-diff-service'
 import { registerPromaDirectoryPath, registerPromaFilePath } from './lib/local-file-protocol'
@@ -1014,6 +1016,41 @@ async function withOAuthDeviceCodeQr<T extends CodexOAuthDeviceCode | XaiOAuthDe
 }
 
 export function registerIpcHandlers(): void {
+  // ===== 本地终端（仅主 renderer 可操作，不能指定可执行文件） =====
+  const assertMainTerminalRenderer = (senderId: number): void => {
+    const mainWindow = getMainWindow()
+    if (!mainWindow || mainWindow.webContents.id !== senderId) {
+      throw new Error('仅主窗口可以操作本地终端。')
+    }
+  }
+  ipcMain.handle(TERMINAL_IPC_CHANNELS.CREATE, async (event, input) => {
+    assertMainTerminalRenderer(event.sender.id)
+    if (!input.sessionId || !getAgentSessionMeta(input.sessionId)) {
+      throw new Error('终端所属 Agent 会话不存在。')
+    }
+    return createTerminal(input)
+  })
+  ipcMain.handle(TERMINAL_IPC_CHANNELS.INPUT, async (event, input) => {
+    assertMainTerminalRenderer(event.sender.id)
+    return writeTerminal(input)
+  })
+  ipcMain.handle(TERMINAL_IPC_CHANNELS.RESIZE, async (event, input) => {
+    assertMainTerminalRenderer(event.sender.id)
+    return resizeTerminal(input)
+  })
+  ipcMain.handle(TERMINAL_IPC_CHANNELS.KILL, async (event, terminalId: string) => {
+    assertMainTerminalRenderer(event.sender.id)
+    return killTerminal(terminalId)
+  })
+  ipcMain.handle(TERMINAL_IPC_CHANNELS.SNAPSHOT, async (event, terminalId: string) => {
+    assertMainTerminalRenderer(event.sender.id)
+    return getTerminalSnapshot(terminalId)
+  })
+  ipcMain.on(TERMINAL_IPC_CHANNELS.ACK_OUTPUT, (event, input) => {
+    assertMainTerminalRenderer(event.sender.id)
+    acknowledgeTerminalOutput(input)
+  })
+
   console.log('[IPC] 正在注册 IPC 处理器...')
 
   // ===== 运行时相关 =====
@@ -2267,6 +2304,7 @@ export function registerIpcHandlers(): void {
       exitPlanService.clearSessionPending(id)
       clearAgentQueuedMessages(id)
       await browserController.close(id)
+      closeTerminalsForSession(id)
       deleteAgentSession(id)
       releaseAttachedFileWatchers(attachedFiles)
     }
@@ -2527,6 +2565,7 @@ export function registerIpcHandlers(): void {
         if (isAgentSessionActive(sessionId)) {
           stopAgent(sessionId)
         }
+        closeTerminalsForSession(sessionId)
         deleteAgentSession(sessionId)
       }
       for (const automationId of affectedAutomationIds) {

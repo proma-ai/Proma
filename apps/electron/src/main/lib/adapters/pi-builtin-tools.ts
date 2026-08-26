@@ -74,6 +74,13 @@ import {
 import { browserController } from '../browser-controller'
 import { resolveBrowserProfileKey } from '../browser-profile-policy'
 import {
+  closeAgentTerminal,
+  executeAgentTerminal,
+  interruptAgentTerminal,
+  listAgentTerminals,
+  openAgentTerminal,
+} from '../terminal-service'
+import {
   automationCreateToolParameters,
   discardInapplicableAutomationScheduleFields,
 } from './automation-tool-schema'
@@ -93,7 +100,7 @@ export interface PiBuiltinToolsContext {
   /** 图片外发前必须校验在这些已授权目录内。 */
   allowedRoots?: string[]
   permissionMode?: PromaPermissionMode
-  triggeredBy?: 'user' | 'automation' | 'delegation'
+  triggeredBy?: 'user' | 'automation' | 'delegation' | 'external'
   /** Windows 设备是否已有可供 Pi Bash 使用的 Git Bash 或 WSL。 */
   windowsShellAvailable?: boolean
 }
@@ -803,7 +810,7 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
 // ===== Windows Shell 安装 =====
 
 function buildWindowsShellInstallerTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinition[] {
-  if (!shouldOfferWindowsShellInstaller(process.platform, ctx.windowsShellAvailable, ctx.triggeredBy)) {
+  if (!shouldOfferWindowsShellInstaller(process.platform, ctx.windowsShellAvailable, ctx.triggeredBy === 'external' ? undefined : ctx.triggeredBy)) {
     return []
   }
 
@@ -1222,6 +1229,88 @@ function buildBrowserTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefiniti
   ] as ToolDefinition[]
 }
 
+function buildAgentTerminalTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinition[] {
+  // 无用户在场的来源不能启动或驱动本地交互终端；这既没有可见性，也会扩大自动任务与外部 Bridge 的权限。
+  if (ctx.triggeredBy === 'automation' || ctx.triggeredBy === 'delegation' || ctx.triggeredBy === 'external') return []
+
+  const terminalInput = (args: Record<string, unknown>): { cwd?: string; title?: string } => ({
+    ...(typeof args.cwd === 'string' && args.cwd.trim() ? { cwd: args.cwd.trim() } : {}),
+    ...(typeof args.title === 'string' && args.title.trim() ? { title: args.title.trim() } : {}),
+  })
+  const agentContext = { sessionId: ctx.sessionId, agentCwd: ctx.agentCwd, allowedRoots: ctx.allowedRoots }
+
+  return [
+    sdk.defineTool({
+      name: 'TerminalOpen',
+      label: '打开 Agent 终端',
+      description: 'Open a visible terminal Tab in the Agent right workspace. cwd controls the initial directory and must resolve within the current session’s authorized directories; it is not an OS sandbox. This tool opens an interactive terminal but does not run a command.',
+      promptSnippet: 'Open a visible Agent terminal at an authorized cwd. Do not use it to silently run commands.',
+      parameters: Type.Object({
+        cwd: Type.Optional(Type.String({ description: 'Absolute or Agent-CWD-relative initial directory. It must resolve within the current session’s authorized roots.' })),
+        title: Type.Optional(Type.String({ description: 'Short visible terminal title.' })),
+      }),
+      async execute(_toolCallId, params) {
+        const record = await openAgentTerminal({ ...agentContext, ...terminalInput(params as Record<string, unknown>) })
+        return jsonToolResult({ terminal: record, visible: true, outputSharedWithAgent: false })
+      },
+    }),
+    sdk.defineTool({
+      name: 'TerminalExecute',
+      label: '在可见终端执行命令',
+      description: 'Run one command in a new visible Agent-owned terminal Tab. The user can see and interrupt it. Terminal output is not automatically returned to the Agent; only the command-start receipt is returned.',
+      promptSnippet: 'Execute one command only when it serves the user request. It is visibly run in the Agent workspace and may require permission approval.',
+      parameters: Type.Object({
+        command: Type.String({ description: 'Complete command to execute in the controlled shell. Do not prepend shell wrappers.' }),
+        cwd: Type.Optional(Type.String({ description: 'Absolute or Agent-CWD-relative directory within the current authorized roots.' })),
+        title: Type.Optional(Type.String({ description: 'Short visible terminal title.' })),
+      }),
+      async execute(_toolCallId, params) {
+        const args = params as Record<string, unknown>
+        const command = typeof args.command === 'string' ? args.command.trim() : ''
+        if (!command) throw new Error('command 必填')
+        const record = await executeAgentTerminal({ ...agentContext, ...terminalInput(args), command })
+        return jsonToolResult({ terminal: record, commandStarted: true, outputSharedWithAgent: false })
+      },
+    }),
+    sdk.defineTool({
+      name: 'TerminalList',
+      label: '列出 Agent 终端',
+      description: 'List terminals owned by the current Agent session, including cwd and running/exited state. It never exposes terminal output.',
+      promptSnippet: 'Inspect Agent-owned terminal metadata without reading terminal output.',
+      parameters: Type.Object({}),
+      async execute() {
+        return jsonToolResult({ terminals: listAgentTerminals(ctx.sessionId) })
+      },
+    }),
+    sdk.defineTool({
+      name: 'TerminalInterrupt',
+      label: '中断 Agent 终端',
+      description: 'Send Ctrl+C to a running terminal owned by the current Agent session. The terminal remains visible.',
+      promptSnippet: 'Interrupt only the specified current-session Agent terminal.',
+      parameters: Type.Object({ terminalId: Type.String({ description: 'Terminal ID returned by TerminalOpen, TerminalExecute, or TerminalList.' }) }),
+      async execute(_toolCallId, params) {
+        const args = params as Record<string, unknown>
+        const terminalId = typeof args.terminalId === 'string' ? args.terminalId : ''
+        await interruptAgentTerminal(ctx.sessionId, terminalId)
+        return jsonToolResult({ terminalId, interrupted: true })
+      },
+    }),
+    sdk.defineTool({
+      name: 'TerminalClose',
+      label: '关闭 Agent 终端',
+      description: 'Close and terminate a terminal owned by the current Agent session.',
+      promptSnippet: 'Close only a specified current-session Agent terminal after it is no longer needed.',
+      parameters: Type.Object({ terminalId: Type.String({ description: 'Terminal ID returned by TerminalOpen, TerminalExecute, or TerminalList.' }) }),
+      async execute(_toolCallId, params) {
+        const args = params as Record<string, unknown>
+        const terminalId = typeof args.terminalId === 'string' ? args.terminalId : ''
+        closeAgentTerminal(ctx.sessionId, terminalId)
+        return jsonToolResult({ terminalId, closed: true })
+      },
+    }),
+  ] as ToolDefinition[]
+}
+
 function buildPromaCloudTools(sdk: PiSdk, _ctx: PiBuiltinToolsContext): ToolDefinition[] {
   // proma-cloud MCP 工具（get_credentials / create_app_key）通常由 Proma 的
   // 内置 MCP server 进程独立提供（非 SDK in-process），Pi adapter 在 orchestrator
@@ -1246,7 +1335,7 @@ export async function buildPiBuiltinTools(
   browserController.configureSession(ctx.sessionId, {
     profileKey: resolveBrowserProfileKey(ctx.workspaceId, ctx.sessionId),
     allowedRoots: ctx.allowedRoots,
-    executionSource: ctx.triggeredBy ?? 'user',
+    executionSource: ctx.triggeredBy === 'external' ? 'user' : (ctx.triggeredBy ?? 'user'),
   })
 
   const tools: ToolDefinition[] = []
@@ -1286,7 +1375,7 @@ export async function buildPiBuiltinTools(
         modelId: ctx.modelId,
         workspaceId: ctx.workspaceId,
         permissionMode: ctx.permissionMode,
-        triggeredBy: ctx.triggeredBy,
+        triggeredBy: ctx.triggeredBy === 'external' ? 'user' : ctx.triggeredBy,
       })
       tools.push(...collaborationTools as ToolDefinition[])
     } catch (error) {
@@ -1299,6 +1388,13 @@ export async function buildPiBuiltinTools(
     tools.push(...buildWindowsShellInstallerTools(sdk, ctx))
   } catch (error) {
     console.error('[Pi 桥接] 注入 Windows Shell 安装工具失败:', error)
+  }
+
+  // Agent 终端以可见 PTY 承接直接执行；无用户在场的自动任务/子 Agent 不会获得该能力。
+  try {
+    tools.push(...buildAgentTerminalTools(sdk, ctx))
+  } catch (error) {
+    console.error('[Pi 桥接] 注入 Agent 终端工具失败:', error)
   }
 
   // Pi-native 受管浏览器不经过 MCP：网页 WebContents 和 CDP 永远停留在主进程。

@@ -49,6 +49,8 @@ export const EXTERNAL_RUNTIME_PACKAGES: readonly string[] = [
   '@earendil-works/pi-ai',
   'pdfjs-dist',
   'sharp',
+  // 独立 Terminal utility process 通过 require 加载其 native PTY binding。
+  'node-pty',
 ]
 
 const appDir = resolve(import.meta.dir, '..')

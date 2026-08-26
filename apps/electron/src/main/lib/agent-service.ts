@@ -349,7 +349,15 @@ export async function runAgentHeadless(
     callbacks.originSessionId,
     getMainRendererWebContents,
   )
-  const runInput: AgentSendInput = input.startedAt != null ? input : { ...input, startedAt: Date.now() }
+  // Headless runs originate from automation, delegation, or an external Bridge. Never
+  // treat an omitted source as an interactive desktop-user run: custom tools may grant
+  // local side effects that cannot be visibly supervised by an external sender.
+  const inferredTriggeredBy = callbacks.source === 'delegation' ? 'delegation' : 'external'
+  const runInput: AgentSendInput = {
+    ...input,
+    ...(input.triggeredBy ? {} : { triggeredBy: inferredTriggeredBy }),
+    ...(input.startedAt != null ? {} : { startedAt: Date.now() }),
+  }
   const startedAt = runInput.startedAt!
   if (wc) {
     registerWebContents(runInput.sessionId, wc)

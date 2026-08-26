@@ -26,6 +26,8 @@ asarUnpack:
   - "node_modules/@earendil-works/pi-tui/native/**"
   - "node_modules/sharp/**"
   - "node_modules/@img/**"
+  # node-pty 的 platform-native .node 与 ConPTY helper 不能留在 asar 内。
+  - "node_modules/node-pty/**"
 
 # 跳过 npm install（代码已被 esbuild/Vite 打包，npm 不识别 workspace:* 协议）
 npmRebuild: false

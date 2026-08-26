@@ -1190,8 +1190,8 @@ export interface AgentSendInput {
   startedAt?: number
   /** 用户点击错误消息的重试时，指向本轮开始前应删除的错误 UUID。 */
   retryOfErrorUuid?: string
-  /** 触发来源：用户手动、定时任务、父 Agent 委派（用于 UI 区分标记） */
-  triggeredBy?: 'user' | 'automation' | 'delegation'
+  /** 触发来源：用户手动、定时任务、父 Agent 委派或外部 Bridge（用于权限与 UI 区分）。 */
+  triggeredBy?: 'user' | 'automation' | 'delegation' | 'external'
   /** 定时任务执行上下文（注入到系统提示词，用户不可见） */
   automationContext?: string
 }

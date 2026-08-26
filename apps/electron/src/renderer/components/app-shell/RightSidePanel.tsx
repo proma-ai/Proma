@@ -14,6 +14,8 @@ import {
   currentSessionSidePanelOpenAtom,
   agentSessionPathMapAtom,
   agentDiffPanelTabAtom,
+  agentTerminalTabsAtom,
+  getTerminalSidePanelTab,
   getBrowserSidePanelTab,
   getPreviewSidePanelTab,
 } from '@/atoms/agent-atoms'
@@ -28,6 +30,7 @@ export function RightSidePanel({ width }: { width?: number }): React.ReactElemen
   const sessionPathMap = useAtomValue(agentSessionPathMapAtom)
   const diffPanelTabMap = useAtomValue(agentDiffPanelTabAtom)
   const setDiffPanelTabMap = useSetAtom(agentDiffPanelTabAtom)
+  const setTerminalTabsMap = useSetAtom(agentTerminalTabsAtom)
   const setSidePanelOpen = useSetAtom(currentSessionSidePanelOpenAtom)
   const browserOpenMap = useAtomValue(browserPanelOpenMapAtom)
   const browserStateMap = useAtomValue(browserStateMapAtom)
@@ -49,6 +52,47 @@ export function RightSidePanel({ width }: { width?: number }): React.ReactElemen
 
   // Agent 或回复链接在当前会话首次打开浏览器时，直接让右侧工作区承接它。
   // 切换到一个已有浏览器的会话时不抢占用户当前视图，保留该会话上次的外层 Tab。
+  React.useEffect(() => {
+    const unsubscribeOpen = window.electronAPI.onAgentTerminalOpen((event) => {
+      setTerminalTabsMap((previous) => {
+        const current = previous.get(event.sessionId) ?? []
+        if (current.some((terminal) => terminal.terminalId === event.terminalId)) return previous
+        const next = new Map(previous)
+        next.set(event.sessionId, [...current, { terminalId: event.terminalId, title: event.title }])
+        return next
+      })
+      if (event.sessionId !== currentSessionId) return
+      setSidePanelOpen(true)
+      setDiffPanelTabMap((previous) => {
+        const next = new Map(previous)
+        next.set(event.sessionId, getTerminalSidePanelTab(event.terminalId))
+        return next
+      })
+    })
+    const unsubscribeClose = window.electronAPI.onAgentTerminalClose((event) => {
+      setTerminalTabsMap((previous) => {
+        const current = previous.get(event.sessionId) ?? []
+        const remaining = current.filter((terminal) => terminal.terminalId !== event.terminalId)
+        if (remaining.length === current.length) return previous
+        const next = new Map(previous)
+        if (remaining.length > 0) next.set(event.sessionId, remaining)
+        else next.delete(event.sessionId)
+        return next
+      })
+      if (event.sessionId !== currentSessionId) return
+      setDiffPanelTabMap((previous) => {
+        if (previous.get(event.sessionId) !== getTerminalSidePanelTab(event.terminalId)) return previous
+        const next = new Map(previous)
+        next.set(event.sessionId, 'files')
+        return next
+      })
+    })
+    return () => {
+      unsubscribeOpen()
+      unsubscribeClose()
+    }
+  }, [currentSessionId, setDiffPanelTabMap, setSidePanelOpen, setTerminalTabsMap])
+
   React.useEffect(() => {
     const previous = previousBrowserStateRef.current
     const openedInCurrentSession = previous.sessionId === currentSessionId && !previous.open && browserOpen

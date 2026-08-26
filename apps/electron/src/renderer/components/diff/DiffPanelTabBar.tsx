@@ -6,7 +6,7 @@
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { Blocks, Brain, CalendarDays, Clock, Globe, ListTodo, MessageCircle, PanelRight, Plus, ServerCog, X } from 'lucide-react'
+import { Blocks, Brain, CalendarDays, Clock, FolderOpen, Globe, ListTodo, MessageCircle, PanelRight, Plus, Repeat2, ServerCog, SquareTerminal, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
 import { getScrollLeftToRevealTab } from '@/lib/tab-visibility'
@@ -37,6 +37,8 @@ interface DiffPanelTabBarProps {
   onOpenBrowser: () => void
   /** 加号菜单是否展开；供原生浏览器视图临时避让。 */
   onAddTabMenuOpenChange?: (open: boolean) => void
+  onOpenFile: () => void
+  onOpenTerminal?: () => void
   onOpenWorkspaceComponent?: (component: WorkspaceComponentTab) => void
   onOpenChat?: () => void
   /** 仅当前右侧 Tab 需要的紧凑动作，渲染于标签列表之后，不影响内容区布局。 */
@@ -52,6 +54,8 @@ export function DiffPanelTabBar({
   onCloseTab,
   onOpenBrowser,
   onAddTabMenuOpenChange,
+  onOpenFile,
+  onOpenTerminal,
   onOpenWorkspaceComponent,
   onOpenChat,
   activeTabAction,
@@ -184,6 +188,16 @@ export function DiffPanelTabBar({
               <Globe className="size-3.5" />
               新建浏览器标签
             </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onOpenFile}>
+              <FolderOpen className="size-3.5" />
+              打开文件
+            </DropdownMenuItem>
+            {onOpenTerminal && (
+              <DropdownMenuItem onSelect={onOpenTerminal}>
+                <SquareTerminal className="size-3.5" />
+                新建终端
+              </DropdownMenuItem>
+            )}
             {onOpenWorkspaceComponent && (
               <>
                 <DropdownMenuSeparator />

@@ -617,7 +617,7 @@ export function isWorkspaceComponentTab(tab: AgentSidePanelTab | string): tab is
 
 export type AgentSidePanelBaseTab = 'files' | 'changes' | 'chat' | 'temporary-agent' | WorkspaceComponentTab
 /** 工作区组件、每个 Pi 探索分支、协作子 Agent、浏览器网页和文件预览都处于右侧工作区顶栏。 */
-export type AgentSidePanelTab = AgentSidePanelBaseTab | `exploration:${string}` | `delegation:${string}` | `browser:${string}` | `preview:${string}`
+export type AgentSidePanelTab = AgentSidePanelBaseTab | `exploration:${string}` | `delegation:${string}` | `browser:${string}` | `preview:${string}` | `terminal:${string}`
 
 /** 用户主动进入这些项目级能力时，Agent 后续的改动提示不得抢走当前视图。 */
 export function isUserPriorityWorkspaceComponentTab(
@@ -687,6 +687,22 @@ export function getPreviewSidePanelTab(previewId: string): AgentSidePanelTab {
 
 export function getPreviewIdFromSidePanelTab(tab: AgentSidePanelTab | 'preview'): string | null {
   return tab.startsWith('preview:') ? tab.slice('preview:'.length) : null
+}
+
+/** 终端仅在本次应用运行期存在，按 Agent 会话归属右侧工作区。 */
+export interface AgentTerminalTab {
+  terminalId: string
+  title: string
+}
+
+export const agentTerminalTabsAtom = atom<Map<string, AgentTerminalTab[]>>(new Map())
+
+export function getTerminalSidePanelTab(terminalId: string): AgentSidePanelTab {
+  return `terminal:${terminalId}`
+}
+
+export function getTerminalIdFromSidePanelTab(tab: AgentSidePanelTab | 'terminal'): string | null {
+  return tab.startsWith('terminal:') ? tab.slice('terminal:'.length) : null
 }
 
 /** 当前会话的侧面板是否打开，并将写入定向到当前会话。 */

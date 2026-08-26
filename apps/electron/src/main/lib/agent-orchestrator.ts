@@ -1294,6 +1294,12 @@ export class AgentOrchestrator {
           })
         }
 
+        // 终端元数据可在计划阶段检查，但创建、执行、打断或关闭 PTY 都属于可见的本地副作用。
+        if (toolName === 'TerminalList') return { behavior: 'allow' as const, updatedInput: input }
+        if (toolName.startsWith('Terminal') && currentMode === 'plan') {
+          return { behavior: 'deny' as const, message: '计划模式下不能创建或操作本地终端，请在计划获批后执行。' }
+        }
+
         // 所有 Pi 会话均可使用受管浏览器。主进程仍隔离网页来源并默认拒绝网页权限；下载和弹窗留在受管浏览器内，
         // 页面内容始终视为不可信输入。计划模式仅允许只读浏览器操作。
         if (toolName.startsWith('Browser')) {
