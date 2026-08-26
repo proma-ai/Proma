@@ -757,6 +757,15 @@ export const agentSessionComponentTabsAtomFamily = atomFamily((sessionId: string
 /** 侧面板当前工作区：基础视图或某个浏览器网页（per-session Map）。 */
 export const agentDiffPanelTabAtom = atom<Map<string, AgentSidePanelTab | 'browser' | 'preview'>>(new Map())
 
+/** Agent 历史中的 Skill 引用请求在 Skills Tab 内打开对应详情。 */
+export interface SkillDetailNavigationRequest {
+  skillSlug: string
+  /** 用于防止跨项目会话误打开同名 Skill。 */
+  workspaceSlug?: string
+}
+
+export const skillDetailNavigationAtom = atom<SkillDetailNavigationRequest | null>(null)
+
 /** 在当前 Agent 会话中打开并聚焦一个项目级组件。 */
 export const openWorkspaceComponentAtom = atom(
   null,

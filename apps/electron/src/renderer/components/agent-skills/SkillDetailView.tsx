@@ -1,8 +1,7 @@
 /**
- * SkillDetailSheet — Skill 详情右侧抽屉
+ * SkillDetailView — Skills Tab 内的详情视图。
  *
- * 承载元数据、SKILL.md 说明（可编辑）、资源文件树（复用 SkillFilesPanel），
- * 以及启用 / 更新 / 卸载 / 打开目录等操作。
+ * 复用 Skills 列表所在的右侧工作区 Tab，不再以抽屉覆盖会话历史。
  */
 
 import * as React from 'react'
@@ -10,7 +9,6 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { toast } from 'sonner'
 import { Sparkles, Pencil, Save, X, FolderOpen, RefreshCw, Trash2, ArrowLeft } from 'lucide-react'
-import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -21,12 +19,12 @@ import { cn } from '@/lib/utils'
 import type { SkillMeta } from '@proma/shared'
 import { extractSkillBody, rebuildSkillMd } from './skillMdUtils'
 
-interface SkillDetailSheetProps {
-  skill: SkillMeta | null
+export interface SkillDetailViewProps {
+  skill: SkillMeta
   workspaceSlug: string
   isBuiltin: boolean
   updating: boolean
-  onOpenChange: (open: boolean) => void
+  onBack: () => void
   onToggle: (enabled: boolean) => void
   onUpdate: () => void
   onRequestDelete: () => void
@@ -34,30 +32,18 @@ interface SkillDetailSheetProps {
   onChanged: () => void
 }
 
-export function SkillDetailSheet(props: SkillDetailSheetProps): React.ReactElement {
-  const { skill, onOpenChange } = props
-  return (
-    <Sheet open={!!skill} onOpenChange={onOpenChange}>
-      <SheetContent hideClose side="right" className="w-[62vw] min-w-[680px] max-w-[1100px] sm:max-w-[1100px] p-0 flex flex-col gap-0" aria-describedby={undefined}>
-        <SheetTitle className="sr-only">Skill 详情</SheetTitle>
-        {skill && <SkillDetailBody key={skill.slug} {...props} skill={skill} />}
-      </SheetContent>
-    </Sheet>
-  )
-}
-
-function SkillDetailBody({
+export function SkillDetailView({
   skill,
   workspaceSlug,
   isBuiltin,
   updating,
-  onOpenChange,
+  onBack,
   onToggle,
   onUpdate,
   onRequestDelete,
   onOpenFolder,
   onChanged,
-}: SkillDetailSheetProps & { skill: SkillMeta }): React.ReactElement {
+}: SkillDetailViewProps): React.ReactElement {
   const [content, setContent] = React.useState<string | null>(null)
   const [loadingContent, setLoadingContent] = React.useState(true)
 
@@ -137,8 +123,9 @@ function SkillDetailBody({
       {/* 头部 */}
       <div className="shrink-0 border-b border-border/60 px-5 pb-4 pt-5">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" className="h-8 w-8" type="button" onClick={() => onOpenChange(false)}>
-            <ArrowLeft size={18} />
+          <Button variant="ghost" size="sm" className="h-10 gap-1.5 px-2" type="button" onClick={onBack}>
+            <ArrowLeft size={16} />
+            返回 Skills
           </Button>
           <h3 className="text-lg font-medium text-foreground">Skill 详情</h3>
         </div>
