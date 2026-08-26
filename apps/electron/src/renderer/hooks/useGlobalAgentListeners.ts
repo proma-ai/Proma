@@ -50,7 +50,7 @@ import {
   agentNonGitFileChangesAtom,
   agentFileChangesCurrentRunAtom,
   agentSidePanelOpenAtomFamily,
-  openWorkspaceComponentAtom,
+  revealChangedWorkspaceComponentAtom,
   agentSideDelegationMapAtom,
   getDelegationSidePanelTab,
   askUserDraftsAtom,
@@ -1102,7 +1102,7 @@ export function useGlobalAgentListeners(): void {
               const activeWorkspaceId = sessions.find((session) => session.id === activeSessionId)?.workspaceId
               const sourceWorkspaceId = sessions.find((session) => session.id === sessionId)?.workspaceId
               if (activeSessionId === sessionId || (activeWorkspaceId && activeWorkspaceId === sourceWorkspaceId)) {
-                store.set(openWorkspaceComponentAtom, changedComponent)
+                store.set(revealChangedWorkspaceComponentAtom, changedComponent)
               }
             }
           }

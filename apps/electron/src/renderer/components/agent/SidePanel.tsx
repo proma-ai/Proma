@@ -42,6 +42,7 @@ import {
   agentFileChangesCurrentRunAtom,
   workspaceComponentTabsAtomFamily,
   isWorkspaceComponentTab,
+  isUserPriorityWorkspaceComponentTab,
   agentSessionStreamingStateAtomFamily,
   fileBrowserAutoRevealAtom,
   agentSelectedWorktreeAtom,
@@ -641,27 +642,24 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
         ? 'files'
         : activeTab
 
-  // Agent 对当前项目记忆写入后，自动展开并激活完整编辑器这个独立工作区 Tab。
-  // 记忆 watcher 按 workspace 缓存最新事件；必须排除本轮开始前的陈旧事件，否则用户
-  // 一发送新消息，旧变更就会随着 running 状态被再次消费并抢占当前视图。
-  // 用户在记忆编辑器中的手动保存仍不会打断其他工作。
+  // Agent 对当前项目记忆写入后，默认展开并激活完整编辑器这个独立工作区 Tab。
+  // 记忆 watcher 按 workspace 缓存最新事件，必须排除本轮开始前的陈旧事件。
+  // 用户正在查看 Skills 或项目记忆时，变更只在后台保留为可见的 Memory Tab，
+  // 不抢焦点，也不重置其正在阅读或编辑的文件。
   React.useEffect(() => {
     const runStartedAt = agentStreamState?.startedAt
     if (!agentStreamState?.running || !runStartedAt || !latestMemoryChange || latestMemoryChange.changedAt < runStartedAt) return
     const changeId = `${latestMemoryChange.relativePath}:${latestMemoryChange.changedAt}`
     if (lastActivatedMemoryChangeRef.current === changeId) return
-    // 用户已停留在项目记忆中时，不用同一事件重置其阅读/编辑位置；标记为已消费，
-    // 同时避免本地自动保存经 watcher 回传后把用户切回局部 Diff。
-    if (effectiveActiveTab === 'memory') {
-      lastActivatedMemoryChangeRef.current = changeId
-      return
-    }
     lastActivatedMemoryChangeRef.current = changeId
     setWorkspaceComponentTabs((previous) => previous.includes('memory') ? previous : [...previous, 'memory'])
+
+    if (isOpen && isUserPriorityWorkspaceComponentTab(effectiveActiveTab)) return
+
     setMemoryNavigationRequest({ workspaceSlug: workspaceSlug!, relativePath: latestMemoryChange.relativePath, mode: 'change' })
     setIsOpen(true)
     onTabChange('memory')
-  }, [agentStreamState?.running, agentStreamState?.startedAt, effectiveActiveTab, latestMemoryChange, onTabChange, setIsOpen, setMemoryNavigationRequest, setWorkspaceComponentTabs, workspaceSlug])
+  }, [agentStreamState?.running, agentStreamState?.startedAt, effectiveActiveTab, isOpen, latestMemoryChange, onTabChange, setIsOpen, setMemoryNavigationRequest, setWorkspaceComponentTabs, workspaceSlug])
 
   const handleClosePreviewTab = React.useCallback((previewId: string) => {
     const remaining = previewFiles.filter((file) => getPreviewFileId(file) !== previewId)

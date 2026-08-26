@@ -9,6 +9,7 @@ import { useAtomValue, useSetAtom } from 'jotai'
 import { Blocks, Brain, CalendarDays, Clock, Globe, ListTodo, MessageCircle, PanelRight, Plus, ServerCog, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
+import { getScrollLeftToRevealTab } from '@/lib/tab-visibility'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import {
   DropdownMenu,
@@ -64,6 +65,8 @@ export function DiffPanelTabBar({
   const [isAddTabMenuOpen, setIsAddTabMenuOpen] = React.useState(false)
   // 仅鼠标在菜单外取消时抑制 Radix 的回焦；Esc 与键盘选择必须保留可见焦点。
   const suppressPointerDismissFocusRestoreRef = React.useRef(false)
+  const tabListRef = React.useRef<HTMLDivElement>(null)
+  const tabRefs = React.useRef(new Map<AgentSidePanelTab, HTMLDivElement>())
 
   React.useEffect(() => () => onAddTabMenuOpenChange?.(false), [onAddTabMenuOpenChange])
 
@@ -72,6 +75,17 @@ export function DiffPanelTabBar({
     setIsAddTabMenuOpen(open)
     onAddTabMenuOpenChange?.(open)
   }, [onAddTabMenuOpenChange])
+
+  React.useLayoutEffect(() => {
+    const tabList = tabListRef.current
+    const activeTabElement = tabRefs.current.get(activeTab)
+    if (!tabList || !activeTabElement) return
+
+    const nextScrollLeft = getScrollLeftToRevealTab(tabList, activeTabElement)
+    if (nextScrollLeft !== tabList.scrollLeft) {
+      tabList.scrollTo({ left: nextScrollLeft, behavior: 'smooth' })
+    }
+  }, [activeTab, tabs.length])
 
   const selectTab = React.useCallback((tab: AgentSidePanelTab) => {
     if (tab === 'changes' && currentSessionId) {
@@ -89,13 +103,17 @@ export function DiffPanelTabBar({
     <div className="relative flex h-10 shrink-0 items-center border-b border-border/50 bg-content-area">
       <div className={cn('pointer-events-none absolute inset-0 titlebar-drag-region', isWindows && WINDOW_CONTROLS_INSET_RIGHT)} />
       <div className="relative flex min-w-0 flex-1 items-center titlebar-no-drag">
-        <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overscroll-x-contain px-2 py-1 scrollbar-none" role="tablist" aria-label="右侧工作区">
+        <div ref={tabListRef} className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overscroll-x-contain px-2 py-1 scrollbar-none" role="tablist" aria-label="右侧工作区">
           {tabs.map((tab) => {
             const selected = activeTab === tab.id
             const isChangesTab = tab.id === 'changes'
             return (
               <div
                 key={tab.id}
+                ref={(element) => {
+                  if (element) tabRefs.current.set(tab.id, element)
+                  else tabRefs.current.delete(tab.id)
+                }}
                 className={cn(
                   'group flex h-7 min-w-[84px] max-w-60 shrink-0 items-center rounded-lg transition-[background-color,color] duration-150',
                   selected
