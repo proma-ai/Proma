@@ -619,6 +619,13 @@ export type AgentSidePanelBaseTab = 'files' | 'changes' | 'chat' | 'temporary-ag
 /** 工作区组件、每个 Pi 探索分支、协作子 Agent、浏览器网页和文件预览都处于右侧工作区顶栏。 */
 export type AgentSidePanelTab = AgentSidePanelBaseTab | `exploration:${string}` | `delegation:${string}` | `browser:${string}` | `preview:${string}`
 
+/** 用户主动进入这些项目级能力时，Agent 后续的改动提示不得抢走当前视图。 */
+export function isUserPriorityWorkspaceComponentTab(
+  tab: AgentSidePanelTab | 'browser' | 'preview' | undefined,
+): tab is Extract<WorkspaceComponentTab, 'skills' | 'memory'> {
+  return tab === 'skills' || tab === 'memory'
+}
+
 /** Pi `/tree` 探索分支在右侧工作区的展示信息。 */
 export interface AgentExplorationBranchTab {
   /** Pi 原生 fork 生成的独立 Proma session。 */
@@ -732,6 +739,38 @@ export const openWorkspaceComponentAtom = atom(
     set(workspaceComponentTabsAtomFamily(workspaceId), (previous) => (
       previous.includes(component) ? previous : [...previous, component]
     ))
+    set(agentSidePanelOpenAtomFamily(sessionId), true)
+    set(agentDiffPanelTabAtom, (previous) => {
+      if (previous.get(sessionId) === component) return previous
+      const next = new Map(previous)
+      next.set(sessionId, component)
+      return next
+    })
+  },
+)
+
+/**
+ * Agent 改动项目级数据时展示对应 Tab。若用户当前正在查看 Skills 或项目记忆，
+ * 仅打开变更对应的 Tab，不改变用户显式选择的焦点。
+ */
+export const revealChangedWorkspaceComponentAtom = atom(
+  null,
+  (get, set, component: WorkspaceComponentTab) => {
+    const sessionId = get(currentAgentSessionIdAtom)
+    if (!sessionId) return
+    const workspaceId = get(agentSessionsAtom).find((session) => session.id === sessionId)?.workspaceId
+      ?? get(currentAgentWorkspaceIdAtom)
+    if (!workspaceId) return
+
+    set(workspaceComponentTabsAtomFamily(workspaceId), (previous) => (
+      previous.includes(component) ? previous : [...previous, component]
+    ))
+
+    const activeTab = get(agentDiffPanelTabAtom).get(sessionId)
+    const preservesUserFocus = get(agentSidePanelOpenAtomFamily(sessionId))
+      && isUserPriorityWorkspaceComponentTab(activeTab)
+    if (preservesUserFocus) return
+
     set(agentSidePanelOpenAtomFamily(sessionId), true)
     set(agentDiffPanelTabAtom, (previous) => {
       if (previous.get(sessionId) === component) return previous
