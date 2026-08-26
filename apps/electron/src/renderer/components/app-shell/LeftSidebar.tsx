@@ -787,7 +787,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   // 会话高亮按"激活 Tab 所属会话"判定：预览 Tab 激活时其 owner 会话仍保持高亮
   const activeSessionId = useAtomValue(activeSessionIdAtom)
   const [sidebarCollapsed, setSidebarCollapsed] = useAtom(sidebarCollapsedAtom)
-  const { createChat } = useCreateSession()
+  const { createChat, createAgent } = useCreateSession()
   const openSession = useOpenSession()
   const syncActiveTabSideEffects = useSyncActiveTabSideEffects()
   const store = useStore()
@@ -1184,6 +1184,95 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   const handleConfirmDelete = async (cascade: boolean = false): Promise<void> => {
     if (!pendingDeleteId) return
 
+    if (mode === 'agent') {
+      const sessionId = pendingDeleteId
+      // activeSessionId 会把 Preview Tab 归一化为其所属 Agent 会话，不能只比较 Tab ID。
+      const deletingActiveSession = activeSessionId === sessionId
+      // 级联删除时在发起 IPC 前固定子会话快照，确保删除范围与弹窗展示一致，
+      // 避免弹窗打开期间新增的子会话被意外删除。
+      const childIds = cascade
+        ? getDirectDelegatedChildren(store.get(agentSessionsAtom), sessionId).map((child) => child.id)
+        : []
+
+      try {
+        // 先删子后删父：若子会话删除中途失败，父会话仍在，UI 一致性更好。
+        if (childIds.length > 0) {
+          const failedChildIds: string[] = []
+          for (const childId of childIds) {
+            try {
+              await window.electronAPI.deleteAgentSession(childId)
+            } catch (error) {
+              console.error(`[侧边栏] 级联删除子会话失败 (${childId}):`, error)
+              failedChildIds.push(childId)
+            }
+          }
+          if (failedChildIds.length > 0) {
+            toast.error(`部分子会话删除失败（${failedChildIds.length} 个），请手动清理`)
+          }
+          closeArchivedAgentTabs(childIds)
+          for (const childId of childIds) {
+            setExpandedDelegationParentIds((prev) => deleteSetEntry(prev, childId))
+            setAgentMessagesCache((prev) => {
+              if (!prev.has(childId)) return prev
+              const next = new Map(prev)
+              next.delete(childId)
+              return next
+            })
+          }
+        }
+
+        // 先由主进程确认删除成功，再清理本地状态；失败时保留当前会话与输入，避免假删除。
+        await window.electronAPI.deleteAgentSession(sessionId)
+        // 刷新失败不应中断已成功删除会话的本地收尾，否则会残留一个指向已删除数据的 Tab。
+        await refreshAgentSidebarSessions(viewMode === 'archived').catch((refreshError) => {
+          console.error('[侧边栏] 刷新 Agent 会话列表失败:', refreshError)
+          setAgentSessions((prev) => prev.filter((session) => session.id !== sessionId))
+        })
+
+        const currentTabs = store.get(tabsAtom)
+        const currentActiveTabId = store.get(activeTabIdAtom)
+        const tabResult = closeTab(currentTabs, currentActiveTabId, sessionId)
+        setTabs(tabResult.tabs)
+        setActiveTabId(tabResult.activeTabId)
+
+        // 删除/归档是会话终态，清理 draft 与所有 per-session 内存状态。
+        setDraftSessionIds((prev: Set<string>) => {
+          if (!prev.has(sessionId)) return prev
+          const next = new Set(prev)
+          next.delete(sessionId)
+          return next
+        })
+        cleanupMapAtoms(sessionId)
+        setExpandedDelegationParentIds((prev) => deleteSetEntry(prev, sessionId))
+        setAgentMessagesCache((prev) => {
+          if (!prev.has(sessionId)) return prev
+          const next = new Map(prev)
+          next.delete(sessionId)
+          return next
+        })
+
+        if (deletingActiveSession) {
+          // Scratch Pad 在普通 Agent 工作流中要保留当前上下文；仅在会话已被删除时
+          // 显式清空旧指针，防止右侧面板继续引用已删除会话。
+          setCurrentAgentSessionId(null)
+          setCurrentConversationId(null)
+
+          // 保持用户在 Agent 工作流内：新会话先作为隐藏 draft，首条消息发出后才进入侧栏。
+          const draftId = await createAgent({ draft: true })
+          if (!draftId) {
+            toast.error('已删除会话，但无法创建新的 Agent 会话')
+          }
+        }
+      } catch (error) {
+        console.error('[侧边栏] 删除 Agent 会话失败:', error)
+        toast.error('删除 Agent 会话失败，请重试')
+      } finally {
+        setPendingDeleteId(null)
+      }
+      return
+    }
+
+    // Chat 删除逻辑保持既有行为。
     // 关闭对应的标签页：setTabs 与 setActiveTabId 成组更新，便于阅读，
     // 也避免将来在两者之间意外插入 await 导致跨渲染状态不一致。
     // （React 18 在同一事件回调中会自动批处理多次 setState，所以单次渲染
@@ -1214,63 +1303,6 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     // 清理 per-conversation/session Map atoms 条目
     cleanupMapAtoms(pendingDeleteId)
     setExpandedDelegationParentIds((prev) => deleteSetEntry(prev, pendingDeleteId))
-
-    if (mode === 'agent') {
-      // Agent 模式：删除 Agent 会话
-      // 注意：当前会话指针（currentAgentSessionId）已由上面的
-      // syncActiveTabSideEffects 在 wasActive 分支同步到新激活标签，
-      // 这里不要再按旧闭包值强制置 null，否则会覆盖新 sessionId，
-      // 导致 RightSidePanel 消失（依赖 currentAgentSessionIdAtom）。
-      // 级联删除时在发起 IPC 前固定子会话快照，确保删除范围与弹窗展示一致，
-      // 避免弹窗打开期间新增的子会话被意外删除。
-      const childIds = cascade
-        ? getDirectDelegatedChildren(store.get(agentSessionsAtom), pendingDeleteId).map((child) => child.id)
-        : []
-      try {
-        // 先删子后删父：若子会话删除中途失败，父会话仍在，UI 一致性更好。
-        if (childIds.length > 0) {
-          const failedChildIds: string[] = []
-          for (const childId of childIds) {
-            try {
-              await window.electronAPI.deleteAgentSession(childId)
-            } catch (error) {
-              console.error(`[侧边栏] 级联删除子会话失败 (${childId}):`, error)
-              failedChildIds.push(childId)
-            }
-          }
-          if (failedChildIds.length > 0) {
-            toast.error(`部分子会话删除失败（${failedChildIds.length} 个），请手动清理`)
-          }
-          closeArchivedAgentTabs(childIds)
-          for (const childId of childIds) {
-            setExpandedDelegationParentIds((prev) => deleteSetEntry(prev, childId))
-            setAgentMessagesCache((prev) => {
-              if (!prev.has(childId)) return prev
-              const next = new Map(prev)
-              next.delete(childId)
-              return next
-            })
-          }
-        }
-        await window.electronAPI.deleteAgentSession(pendingDeleteId)
-        // 按当前视图刷新：active 不重新加载归档元数据。
-        await refreshAgentSidebarSessions(viewMode === 'archived')
-      } catch (error) {
-        console.error('[侧边栏] 删除 Agent 会话失败:', error)
-        // 即使后端报错，也从本地列表移除（可能是会话已不存在）
-        setAgentSessions((prev) => prev.filter((s) => s.id !== pendingDeleteId))
-      } finally {
-        // 清理该会话的消息缓存，避免已删除会话的消息数组滞留内存
-        setAgentMessagesCache((prev) => {
-          if (!prev.has(pendingDeleteId)) return prev
-          const next = new Map(prev)
-          next.delete(pendingDeleteId)
-          return next
-        })
-        setPendingDeleteId(null)
-      }
-      return
-    }
 
     try {
       await window.electronAPI.deleteConversation(pendingDeleteId)
