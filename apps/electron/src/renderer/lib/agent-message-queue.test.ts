@@ -62,4 +62,21 @@ describe('queued message @file mention path decoding (Agent 侧真实路径)', (
       { type: 'text', value: '还是做一个单独渲染的内容吧' },
     ])
   })
+
+  test('parses and renders a CJK MCP server name', () => {
+    const text = '#mcp:中文服务器 后续处理'
+    const result = parseQueuedMessageMentions(text)
+
+    expect(result.mentionedMcpServers).toEqual(['中文服务器'])
+    expect(result.cleanedText).toBe('后续处理')
+    expect(getQueuedMessageDisplayParts(text)).toEqual([
+      {
+        type: 'reference',
+        referenceType: 'mcp',
+        id: '中文服务器',
+        label: '中文服务器',
+      },
+      { type: 'text', value: ' 后续处理' },
+    ])
+  })
 })

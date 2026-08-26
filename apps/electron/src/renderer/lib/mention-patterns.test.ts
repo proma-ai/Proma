@@ -19,13 +19,14 @@ describe('mention token boundaries', () => {
     expect(matches[0]?.[5]).toBe(encodeURIComponent('上下文整理'))
   })
 
-  test('still supports whitespace-delimited skill and MCP mentions', () => {
-    const text = '/skill:brainstorming #mcp:playwright 后续文本'
+  test('supports whitespace-delimited raw Skill and MCP identifiers, including CJK MCP names', () => {
+    const text = '/skill:brainstorming #mcp:中文服务器 后续文本'
     const matches = Array.from(text.matchAll(createMentionPattern()))
 
     expect(matches.map((match) => match[0])).toEqual([
       '/skill:brainstorming',
-      '#mcp:playwright',
+      '#mcp:中文服务器',
     ])
+    expect(matches[1]?.[3]).toBe('中文服务器')
   })
 })
