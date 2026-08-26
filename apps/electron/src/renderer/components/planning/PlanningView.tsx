@@ -482,6 +482,7 @@ function TodoWorkspace(): React.ReactElement {
       // 不自动打开详情；同时切换到新任务实际所属的视图，确保创建后立即可见。
       setSelectedId(null)
       setView(quickGroupId === '__none__' ? (dueAt ? 'today' : 'all') : `group:${quickGroupId}`)
+      setCreateOpen(false)
       setQuickTitle('')
       setQuickPriority('medium')
       setQuickDueAt(endOfToday())
