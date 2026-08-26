@@ -1,6 +1,4 @@
-import { existsSync, statSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
-import { homedir } from 'node:os'
 import {
   TERMINAL_IPC_CHANNELS,
   type AgentTerminalCloseEvent,
@@ -15,6 +13,7 @@ import {
 import { getMainWindow } from './main-window-store'
 import { appendTerminalOutput, type TerminalOutputBuffer } from './terminal-output-buffer'
 import { resolveAgentTerminalCwd } from './terminal-agent-policy'
+import { requireTerminalCwd, resolveTerminalCwd } from './terminal-cwd'
 import { terminalRuntimeClient } from './terminal-runtime-client'
 
 const terminals = new Map<string, TerminalState>()
@@ -55,16 +54,17 @@ function initialize(): void {
   })
 }
 
-export async function createTerminal(input: TerminalCreateInput): Promise<TerminalState> {
+export async function createTerminal(
+  input: TerminalCreateInput,
+  options: { strictCwd?: boolean } = {},
+): Promise<TerminalState> {
   initialize()
   validateTerminalId(input.terminalId)
   const existing = terminals.get(input.terminalId)
   if (existing) return existing
   const pending = pendingTerminals.get(input.terminalId)
   if (pending) return pending
-  if (input.cwd && (!existsSync(input.cwd) || !statSync(input.cwd).isDirectory())) {
-    throw new Error('终端工作目录不存在或不是目录')
-  }
+  const cwd = options.strictCwd ? requireTerminalCwd(input.cwd) : resolveTerminalCwd(input.cwd)
 
   // Record ownership before spawning so a concurrent session deletion can cancel it.
   terminalSessionOwners.set(input.terminalId, input.sessionId)
@@ -72,10 +72,10 @@ export async function createTerminal(input: TerminalCreateInput): Promise<Termin
   terminalOutputBuffers.set(input.terminalId, { output: '', sequence: 0 })
   const creation = terminalRuntimeClient.create({
     ...input,
-    cwd: input.cwd || homedir(),
+    cwd,
     cols: normalizeDimension(input.cols),
     rows: normalizeDimension(input.rows),
-  }).then((state) => {
+  }, options).then((state) => {
     if (cancelledPendingTerminalIds.delete(state.terminalId)) {
       terminalRuntimeClient.kill(state.terminalId)
       throw new Error('终端已在创建完成前关闭')
@@ -136,7 +136,7 @@ export async function openAgentTerminal(input: {
   const cwd = resolveAgentTerminalCwd(input)
   const terminalId = randomUUID()
   const title = input.title?.trim().slice(0, 80) || 'Agent 终端'
-  await createTerminal({ terminalId, sessionId: input.sessionId, cwd, cols: 80, rows: 24 })
+  await createTerminal({ terminalId, sessionId: input.sessionId, cwd, cols: 80, rows: 24 }, { strictCwd: true })
   const record: AgentTerminalRecord = { sessionId: input.sessionId, terminalId, title, cwd, status: 'running' }
   agentTerminals.set(terminalId, record)
   notifyAgentTerminalOpen(record)

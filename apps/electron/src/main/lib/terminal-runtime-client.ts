@@ -20,6 +20,10 @@ type PendingCreate = {
   reject: (reason: Error) => void
 }
 
+type RuntimeTerminalCreateInput = TerminalCreateInput & {
+  strictCwd?: boolean
+}
+
 type RuntimeMessage =
   | { type: 'terminal.ready'; pid: number }
   | { type: 'terminal.created'; state: TerminalState }
@@ -51,7 +55,7 @@ export class TerminalRuntimeClient {
     return () => this.exitListeners.delete(listener)
   }
 
-  async create(input: TerminalCreateInput): Promise<TerminalState> {
+  async create(input: TerminalCreateInput, options: { strictCwd?: boolean } = {}): Promise<TerminalState> {
     await this.start()
     const pending = this.pendingCreates.get(input.terminalId)
     if (pending) return pending.promise
@@ -63,7 +67,10 @@ export class TerminalRuntimeClient {
       rejectCreate = reject
     })
     this.pendingCreates.set(input.terminalId, { promise, resolve: resolveCreate, reject: rejectCreate })
-    this.port?.postMessage({ type: 'terminal.create', input })
+    const runtimeInput: RuntimeTerminalCreateInput = options.strictCwd
+      ? { ...input, strictCwd: true }
+      : input
+    this.port?.postMessage({ type: 'terminal.create', input: runtimeInput })
     return promise
   }
 
