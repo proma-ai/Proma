@@ -43,6 +43,8 @@ import {
   workspaceComponentTabsAtomFamily,
   isWorkspaceComponentTab,
   isUserPriorityWorkspaceComponentTab,
+  sanitizeWorkspaceComponentTabs,
+  getDelegationTabLabel,
   agentSessionStreamingStateAtomFamily,
   fileBrowserAutoRevealAtom,
   agentSelectedWorktreeAtom,
@@ -87,10 +89,11 @@ import { getPreviewFileId, previewFileMapAtom, previewFilesMapAtom, previewPanel
 import { PreviewPanel } from '@/components/diff/PreviewPanel'
 import { useOpenPreview } from '@/components/diff/preview-opener'
 import { detectIsWindows } from '@/lib/platform'
-import type { FileEntry, AgentPendingFile, AgentSessionMeta, SDKMessage } from '@proma/shared'
+import type { FileEntry, AgentPendingFile, AgentSessionMeta, SDKMessage, WorktreeInfo } from '@proma/shared'
 import { setFilePanelDragData, getMediaTypeFromFilename, dispatchInsertFileMention } from '@/lib/file-panel-drag'
 import { CLOSE_ACTIVE_RIGHT_WORKSPACE_TAB_EVENT } from '@/lib/right-workspace-events'
 import { TerminalTabContent } from '@/components/tabs/TerminalTabContent'
+import { shouldShowBothFileSources } from './file-panel-layout'
 
 function getPathBasename(filePath: string): string {
   return filePath.split(/[\\/]/).filter(Boolean).pop() || filePath
@@ -249,6 +252,7 @@ interface SidePanelProps {
 }
 
 export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, width = 460 }: SidePanelProps): React.ReactElement {
+  const showBothFileSources = shouldShowBothFileSources(width)
   // 侧面板状态按 sessionId 持久化，切换会话不会互相覆盖。
   const [isOpen, setIsOpen] = useAtom(currentSessionSidePanelOpenAtom)
   const isWindows = React.useMemo(() => detectIsWindows(), [])
@@ -593,13 +597,23 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       return { ...prev, [sessionId]: source }
     })
   }, [sessionId, setFileSourceFilterMap])
-  const showSessionFiles = fileSourceFilter === 'session'
-  const showProjectFiles = fileSourceFilter === 'project'
+  const showSessionFiles = showBothFileSources || fileSourceFilter === 'session'
+  const showProjectFiles = showBothFileSources || fileSourceFilter === 'project'
 
+  const sessionFileRoots = React.useMemo(
+    () => sessionPath ? [{ path: sessionPath, scope: 'session' as const }] : [],
+    [sessionPath],
+  )
+  const projectFileRoots = React.useMemo(
+    () => workspaceFilesPath && !isProjectRootUnavailable
+      ? [{ path: workspaceFilesPath, scope: 'project' as const }]
+      : [],
+    [isProjectRootUnavailable, workspaceFilesPath],
+  )
   const visibleFileRoots = React.useMemo(() => [
-    ...(showProjectFiles && workspaceFilesPath && !isProjectRootUnavailable ? [{ path: workspaceFilesPath, scope: 'project' as const }] : []),
-    ...(showSessionFiles && sessionPath ? [{ path: sessionPath, scope: 'session' as const }] : []),
-  ], [showProjectFiles, workspaceFilesPath, isProjectRootUnavailable, showSessionFiles, sessionPath])
+    ...(showProjectFiles ? projectFileRoots : []),
+    ...(showSessionFiles ? sessionFileRoots : []),
+  ], [projectFileRoots, sessionFileRoots, showProjectFiles, showSessionFiles])
 
   // Files 将会话与项目文件放在同一视图；FileBrowser 自己处理对应根目录的自动定位。
   // RightSidePanel 完全由用户控制，不因 Agent 文件变更自动打开。
@@ -636,6 +650,13 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   // Todo / 日程 / 能力 / 记忆是工作区组件，而不是会话附件；同一项目下切换会话仍保留打开状态。
   const [workspaceComponentTabs, setWorkspaceComponentTabs] = useAtom(workspaceComponentTabsAtomFamily(currentWorkspaceId ?? ''))
   const automationFormOpen = useAtomValue(automationFormAtom).open
+
+  React.useEffect(() => {
+    const validTabs = sanitizeWorkspaceComponentTabs(workspaceComponentTabs)
+    if (validTabs === workspaceComponentTabs) return
+    setWorkspaceComponentTabs(validTabs)
+  }, [setWorkspaceComponentTabs, workspaceComponentTabs])
+
   const agentStreamState = useAtomValue(agentSessionStreamingStateAtomFamily(sessionId))
   const memoryChangesMap = useAtomValue(workspaceMemoryChangesAtom)
   const setMemoryNavigationRequest = useSetAtom(memoryFileNavigationAtom)
@@ -861,15 +882,19 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     }
   }, [browserState, ensureBrowserOpen, onTabChange, publishBrowserState, sessionId])
 
-  const handleOpenTerminal = React.useCallback(() => {
+  const handleOpenTerminal = React.useCallback((cwd?: string, title = '终端') => {
     const terminalId = crypto.randomUUID()
     setTerminalTabsMap((previous) => {
       const next = new Map(previous)
-      next.set(sessionId, [...(next.get(sessionId) ?? []), { terminalId, title: '终端' }])
+      next.set(sessionId, [...(next.get(sessionId) ?? []), { terminalId, title, cwd }])
       return next
     })
     onTabChange(getTerminalSidePanelTab(terminalId))
   }, [onTabChange, sessionId, setTerminalTabsMap])
+
+  const handleOpenWorktreeTerminal = React.useCallback((worktree: WorktreeInfo) => {
+    handleOpenTerminal(worktree.path, `终端 · ${worktree.branch}`)
+  }, [handleOpenTerminal])
 
   const handleCloseBrowserTab = React.useCallback(async (browserTabId: string) => {
     try {
@@ -958,7 +983,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       ))
       return child ? [{
         id: getDelegationSidePanelTab(child.id),
-        label: child.title,
+        label: getDelegationTabLabel(child.title),
         icon: <GitBranch className="size-3.5" />,
         closable: true,
       }] : []
@@ -1013,6 +1038,41 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     window.addEventListener(CLOSE_ACTIVE_RIGHT_WORKSPACE_TAB_EVENT, handleCloseActiveWorkspaceTab)
     return () => window.removeEventListener(CLOSE_ACTIVE_RIGHT_WORKSPACE_TAB_EVENT, handleCloseActiveWorkspaceTab)
   }, [activeTab, handleCloseWorkspaceTab, sessionId])
+
+  const renderFileSourceContent = (scope: 'session' | 'project'): React.ReactElement => {
+    const isSession = scope === 'session'
+    const hasAttachedItems = isSession ? hasSessionAttachedItems : hasWorkspaceAttachedItems
+    const roots = isSession ? sessionFileRoots : projectFileRoots
+
+    return (
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" aria-label={isSession ? '会话文件' : '项目文件'}>
+        <h3 className="flex h-8 shrink-0 items-center px-3 text-[11px] font-medium text-muted-foreground">
+          {isSession ? '会话文件' : '项目文件'}
+        </h3>
+        <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin pt-1">
+          {isSession && attachedFiles.length > 0 && (
+            <AttachedFilesSection scope="session" showSessionBadge={false} attachedFiles={attachedFiles} onDetach={handleDetachFile} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
+          )}
+          {isSession && attachedDirs.length > 0 && (
+            <AttachedDirsSection scope="session" showSessionBadge={false} attachedDirs={attachedDirs} onDetach={handleDetachDirectory} refreshVersion={filesVersion} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
+          )}
+          {!isSession && wsAttachedFiles.length > 0 && (
+            <AttachedFilesSection scope="project" attachedFiles={wsAttachedFiles} onDetach={handleDetachWorkspaceFile} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
+          )}
+          {!isSession && wsAttachedDirs.length > 0 && (
+            <AttachedDirsSection scope="project" attachedDirs={wsAttachedDirs} onDetach={handleDetachWorkspaceDirectory} refreshVersion={filesVersion} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
+          )}
+          {!isSession && isProjectRootUnavailable && <div className="mx-2 my-2 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">本地项目根目录不可用；当前会话文件仍可访问。</div>}
+          <FileBrowser roots={roots} access={fileAccess} projectRootPath={isProjectRootUnavailable ? null : workspaceFilesPath} showSessionBadge={false} hideToolbar embedded hideEmpty={hasAttachedItems} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} />
+          {workspaceSlug && (isSession ? (
+            <FileDropZone workspaceSlug={workspaceSlug} sessionId={sessionId} target="session" onFilesUploaded={handleFilesUploaded} onFilesAttached={handleSessionFilesAttached} onAttachFolder={handleAttachSessionFolder} onFoldersDropped={handleSessionFoldersDropped} />
+          ) : !isProjectRootUnavailable ? (
+            <FileDropZone workspaceSlug={workspaceSlug} target="workspace" onFilesUploaded={handleFilesUploaded} onFilesAttached={handleWorkspaceFilesAttached} onAttachFolder={handleAttachWorkspaceFolder} onFoldersDropped={handleWorkspaceFoldersDropped} />
+          ) : null)}
+        </div>
+      </section>
+    )
+  }
 
   return (
     <div
@@ -1125,6 +1185,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
                 onFileClick={handleDiffFileClick}
                 workspaceSlug={workspaceSlug || undefined}
                 worktreeRepoPaths={worktreeRepoPathsMemo}
+                onOpenWorktreeTerminal={handleOpenWorktreeTerminal}
                 nonGitFileChanges={nonGitFileChanges}
                 currentFileChangeRunId={fileChangesCurrentRunId}
                 onPlainFileClick={handleFilePreview}
@@ -1141,134 +1202,82 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
                     sessionPath={sessionPath}
                     sessionAttachedDirs={attachedDirs}
                     workspaceAttachedDirs={wsAttachedDirs}
-                    sourceFilter={fileSourceFilter}
-                    showSessionBadge={false}
+                    sourceFilter={showBothFileSources ? 'all' : fileSourceFilter}
+                    showSessionBadge={showBothFileSources}
                     placeholder="搜索文件..."
                     sessionId={sessionId}
                     onFilePreview={handleFilePreview}
                   >
-                    <div className="file-source-tabbar main-tabbar mt-1.5 flex h-7 border-b border-border/80" role="tablist" aria-label="文件来源">
-                      <button
-                        type="button"
-                        role="tab"
-                        className={cn(
-                          'relative flex-1 h-7 px-2 text-[11px] transition-colors select-none',
-                          fileSourceFilter === 'session'
-                            ? 'app-tab-active text-foreground'
-                            : 'app-tab-inactive text-muted-foreground hover:text-foreground',
-                        )}
-                        aria-selected={fileSourceFilter === 'session'}
-                        onClick={() => setFileSourceFilter('session')}
-                      >
-                        会话文件
-                      </button>
-                      <button
-                        type="button"
-                        role="tab"
-                        className={cn(
-                          'relative flex-1 h-7 px-2 text-[11px] transition-colors select-none',
-                          fileSourceFilter === 'project'
-                            ? 'app-tab-active text-foreground'
-                            : 'app-tab-inactive text-muted-foreground hover:text-foreground',
-                        )}
-                        aria-selected={fileSourceFilter === 'project'}
-                        onClick={() => setFileSourceFilter('project')}
-                      >
-                        项目文件
-                      </button>
-                    </div>
-                  </FileSearchBar>
-                  <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin pt-1">
-                    {/* 拖拽引用提示：引用块样式，左侧竖线 + 缩进，与下方文件列表内容左对齐 */}
-                    <div className="mb-1.5 ml-4 border-l-2 border-primary/40 pl-2 text-[11px] leading-4 text-foreground/75">
-                      支持拖拽文件或文件夹到输入框，实现引用
-                    </div>
-                    {showProjectFiles && wsAttachedFiles.length > 0 && (
-                      <AttachedFilesSection
-                        scope="project"
-                        attachedFiles={wsAttachedFiles}
-                        onDetach={handleDetachWorkspaceFile}
-                        onAddToChat={handleAddToChat}
-                        onFilePreview={handleFilePreview}
-                        allowedPaths={basePathsRef.current}
-                        sessionId={sessionId}
-                      />
-                    )}
-                    {showProjectFiles && wsAttachedDirs.length > 0 && (
-                      <AttachedDirsSection
-                        scope="project"
-                        attachedDirs={wsAttachedDirs}
-                        onDetach={handleDetachWorkspaceDirectory}
-                        refreshVersion={filesVersion}
-                        onAddToChat={handleAddToChat}
-                        onFilePreview={handleFilePreview}
-                        allowedPaths={basePathsRef.current}
-                        sessionId={sessionId}
-                      />
-                    )}
-                    {showSessionFiles && attachedFiles.length > 0 && (
-                      <AttachedFilesSection
-                        scope="session"
-                        showSessionBadge={false}
-                        attachedFiles={attachedFiles}
-                        onDetach={handleDetachFile}
-                        onAddToChat={handleAddToChat}
-                        onFilePreview={handleFilePreview}
-                        allowedPaths={basePathsRef.current}
-                        sessionId={sessionId}
-                      />
-                    )}
-                    {showSessionFiles && attachedDirs.length > 0 && (
-                      <AttachedDirsSection
-                        scope="session"
-                        showSessionBadge={false}
-                        attachedDirs={attachedDirs}
-                        onDetach={handleDetachDirectory}
-                        refreshVersion={filesVersion}
-                        onAddToChat={handleAddToChat}
-                        onFilePreview={handleFilePreview}
-                        allowedPaths={basePathsRef.current}
-                        sessionId={sessionId}
-                      />
-                    )}
-                    {showProjectFiles && isProjectRootUnavailable && (
-                      <div className="mx-2 my-2 px-3 py-2 text-xs text-destructive bg-destructive/10 rounded-md">
-                        本地项目根目录不可用；当前会话文件仍可访问。
+                    {!showBothFileSources && (
+                      <div className="file-source-tabbar main-tabbar mt-1.5 flex h-7 border-b border-border/80" role="tablist" aria-label="文件来源">
+                        <button
+                          type="button"
+                          role="tab"
+                          className={cn(
+                            'relative flex-1 h-7 px-2 text-[11px] transition-colors select-none',
+                            fileSourceFilter === 'session'
+                              ? 'app-tab-active text-foreground'
+                              : 'app-tab-inactive text-muted-foreground hover:text-foreground',
+                          )}
+                          aria-selected={fileSourceFilter === 'session'}
+                          onClick={() => setFileSourceFilter('session')}
+                        >
+                          会话文件
+                        </button>
+                        <button
+                          type="button"
+                          role="tab"
+                          className={cn(
+                            'relative flex-1 h-7 px-2 text-[11px] transition-colors select-none',
+                            fileSourceFilter === 'project'
+                              ? 'app-tab-active text-foreground'
+                              : 'app-tab-inactive text-muted-foreground hover:text-foreground',
+                          )}
+                          aria-selected={fileSourceFilter === 'project'}
+                          onClick={() => setFileSourceFilter('project')}
+                        >
+                          项目文件
+                        </button>
                       </div>
                     )}
-                    <FileBrowser
-                      roots={visibleFileRoots}
-                      access={fileAccess}
-                      projectRootPath={isProjectRootUnavailable ? null : workspaceFilesPath}
-                      showSessionBadge={false}
-                      hideToolbar
-                      embedded
-                      hideEmpty={hasVisibleSessionAttachedItems || hasVisibleWorkspaceAttachedItems}
-                      onAddToChat={handleAddToChat}
-                      onFilePreview={handleFilePreview}
-                    />
-                    {showSessionFiles && workspaceSlug && (
-                      <FileDropZone
-                        workspaceSlug={workspaceSlug}
-                        sessionId={sessionId}
-                        target="session"
-                        onFilesUploaded={handleFilesUploaded}
-                        onFilesAttached={handleSessionFilesAttached}
-                        onAttachFolder={handleAttachSessionFolder}
-                        onFoldersDropped={handleSessionFoldersDropped}
-                      />
-                    )}
-                    {showProjectFiles && !isProjectRootUnavailable && workspaceSlug && (
-                      <FileDropZone
-                        workspaceSlug={workspaceSlug}
-                        target="workspace"
-                        onFilesUploaded={handleFilesUploaded}
-                        onFilesAttached={handleWorkspaceFilesAttached}
-                        onAttachFolder={handleAttachWorkspaceFolder}
-                        onFoldersDropped={handleWorkspaceFoldersDropped}
-                      />
-                    )}
-                  </div>
+                  </FileSearchBar>
+                  {showBothFileSources ? (
+                    <div className="grid min-h-0 flex-1 grid-cols-2 divide-x divide-border/70 overflow-hidden pt-2">
+                      {renderFileSourceContent('session')}
+                      {renderFileSourceContent('project')}
+                    </div>
+                  ) : (
+                    <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin pt-1">
+                      {/* 拖拽引用提示：引用块样式，左侧竖线 + 缩进，与下方文件列表内容左对齐 */}
+                      <div className="mb-1.5 ml-4 border-l-2 border-primary/40 pl-2 text-[11px] leading-4 text-foreground/75">
+                        支持拖拽文件或文件夹到输入框，实现引用
+                      </div>
+                      {showProjectFiles && wsAttachedFiles.length > 0 && (
+                        <AttachedFilesSection scope="project" attachedFiles={wsAttachedFiles} onDetach={handleDetachWorkspaceFile} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
+                      )}
+                      {showProjectFiles && wsAttachedDirs.length > 0 && (
+                        <AttachedDirsSection scope="project" attachedDirs={wsAttachedDirs} onDetach={handleDetachWorkspaceDirectory} refreshVersion={filesVersion} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
+                      )}
+                      {showSessionFiles && attachedFiles.length > 0 && (
+                        <AttachedFilesSection scope="session" showSessionBadge={false} attachedFiles={attachedFiles} onDetach={handleDetachFile} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
+                      )}
+                      {showSessionFiles && attachedDirs.length > 0 && (
+                        <AttachedDirsSection scope="session" showSessionBadge={false} attachedDirs={attachedDirs} onDetach={handleDetachDirectory} refreshVersion={filesVersion} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
+                      )}
+                      {showProjectFiles && isProjectRootUnavailable && (
+                        <div className="mx-2 my-2 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                          本地项目根目录不可用；当前会话文件仍可访问。
+                        </div>
+                      )}
+                      <FileBrowser roots={visibleFileRoots} access={fileAccess} projectRootPath={isProjectRootUnavailable ? null : workspaceFilesPath} showSessionBadge={false} hideToolbar embedded hideEmpty={hasVisibleSessionAttachedItems || hasVisibleWorkspaceAttachedItems} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} />
+                      {showSessionFiles && workspaceSlug && (
+                        <FileDropZone workspaceSlug={workspaceSlug} sessionId={sessionId} target="session" onFilesUploaded={handleFilesUploaded} onFilesAttached={handleSessionFilesAttached} onAttachFolder={handleAttachSessionFolder} onFoldersDropped={handleSessionFoldersDropped} />
+                      )}
+                      {showProjectFiles && !isProjectRootUnavailable && workspaceSlug && (
+                        <FileDropZone workspaceSlug={workspaceSlug} target="workspace" onFilesUploaded={handleFilesUploaded} onFilesAttached={handleWorkspaceFilesAttached} onAttachFolder={handleAttachWorkspaceFolder} onFoldersDropped={handleWorkspaceFoldersDropped} />
+                      )}
+                    </div>
+                  )}
                 </>
               ) : (
                 <div className="flex-1 flex items-center justify-center text-muted-foreground text-xs">等待会话初始化...</div>
@@ -1995,7 +2004,7 @@ function SidePanelTerminalTabs({
   sessionId,
   cwd,
 }: {
-  terminals: Array<{ terminalId: string; title: string }>
+  terminals: Array<{ terminalId: string; title: string; cwd?: string }>
   activeTerminalId: string | null
   sessionId: string
   cwd?: string
@@ -2008,7 +2017,7 @@ function SidePanelTerminalTabs({
           className={cn('absolute inset-0', terminal.terminalId === activeTerminalId ? 'block' : 'hidden')}
           aria-hidden={terminal.terminalId !== activeTerminalId}
         >
-          <TerminalTabContent terminalId={terminal.terminalId} sessionId={sessionId} cwd={cwd} terminateOnUnmount={false} />
+          <TerminalTabContent terminalId={terminal.terminalId} sessionId={sessionId} cwd={terminal.cwd ?? cwd} terminateOnUnmount={false} />
         </div>
       ))}
     </div>

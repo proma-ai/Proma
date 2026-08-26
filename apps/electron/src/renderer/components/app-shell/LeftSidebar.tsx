@@ -110,6 +110,8 @@ import { ShortcutKeycaps } from '@/components/shortcuts/ShortcutKeycaps'
 import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-registry'
 import {
   collectAgentSessionTreeIds,
+  countSettledDelegatedChildren,
+  getDelegatedChildSessionStatus,
   groupArchivedAgentSessionsByProject,
   isAgentSessionVisibleInTrees,
   replaceAgentSessionInFreshnessOrder,
@@ -501,9 +503,7 @@ function getDelegatedChildStatus(
   session: AgentSessionMeta,
   agentIndicatorMap: Map<string, SessionIndicatorStatus>,
 ): SessionIndicatorStatus {
-  const status = agentIndicatorMap.get(session.id)
-  if (status) return status
-  return session.delegationStatus === 'running' ? 'running' : 'idle'
+  return getDelegatedChildSessionStatus(session, agentIndicatorMap)
 }
 
 function getSessionTreeStatus(
@@ -519,10 +519,6 @@ function getSessionTreeStatus(
   if (statuses.includes('running')) return 'running'
   if (statuses.includes('completed')) return 'completed'
   return 'idle'
-}
-
-function countCompletedDelegatedChildren(childSessions: AgentSessionMeta[]): number {
-  return childSessions.filter((session) => session.delegationStatus === 'completed').length
 }
 
 function treeContainsSessionId(item: AgentSessionTreeItem, sessionId: string | null): boolean {
@@ -2756,7 +2752,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                 delegationSummary={childCount > 0
                   ? {
                     total: childCount,
-                    completed: countCompletedDelegatedChildren(item.childSessions),
+                    settled: countSettledDelegatedChildren(item.childSessions, agentIndicatorMap),
                     expanded: expandedChildren,
                     onToggle: () => handleToggleDelegationParent(item.session.id, expandedChildren),
                   }
@@ -2843,7 +2839,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
               delegationSummary={childCount > 0
                 ? {
                   total: childCount,
-                  completed: countCompletedDelegatedChildren(item.childSessions),
+                  settled: countSettledDelegatedChildren(item.childSessions, agentIndicatorMap),
                   expanded: expandedChildren,
                   onToggle: () => handleToggleDelegationParent(item.session.id, expandedChildren),
                 }
@@ -4092,7 +4088,7 @@ interface AgentSessionItemProps {
   showPinIcon?: boolean
   delegationSummary?: {
     total: number
-    completed: number
+    settled: number
     expanded: boolean
     onToggle: () => void
   }
@@ -4335,7 +4331,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
                 )}
                 {delegationSummary && (
                   <span className="flex-shrink-0 text-[11px] leading-4 text-foreground/45">
-                    {delegationSummary.completed}/{delegationSummary.total}
+                    {delegationSummary.settled}/{delegationSummary.total}
                   </span>
                 )}
               </div>
@@ -4880,7 +4876,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
                       delegationSummary={childCount > 0
                         ? {
                           total: childCount,
-                          completed: countCompletedDelegatedChildren(item.childSessions),
+                          settled: countSettledDelegatedChildren(item.childSessions, agentIndicatorMap),
                           expanded: expandedChildren,
                           onToggle: () => onToggleDelegationParent(item.session.id, expandedChildren),
                         }

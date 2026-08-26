@@ -16,6 +16,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, useImperativeHandle, forwardRef } from 'react'
 import { useAtomValue } from 'jotai'
 import { useEditor, EditorContent } from '@tiptap/react'
+import { DOMParser as ProseMirrorDOMParser } from '@tiptap/pm/model'
 import { TextSelection } from '@tiptap/pm/state'
 import type { Transaction } from '@tiptap/pm/state'
 import StarterKit from '@tiptap/starter-kit'
@@ -28,7 +29,12 @@ import { ChevronsDownUp, ChevronsUpDown } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { lowlight } from '@/lib/lowlight'
-import { htmlToMarkdown } from '@/lib/markdown-rich-text'
+import {
+  hasRichClipboardMarkup,
+  htmlToMarkdown,
+  looksLikeMarkdownText,
+  markdownToHtml,
+} from '@/lib/markdown-rich-text'
 import type { QuotedSelection } from '@/atoms/preview-atoms'
 import {
   buildAgentHistoryQuoteLabel,
@@ -775,6 +781,14 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
         ) {
           event.preventDefault()
           onPasteLongTextRef.current(text)
+          return true
+        }
+        if (looksLikeMarkdownText(plainText) && !hasRichClipboardMarkup(html)) {
+          const container = document.createElement('div')
+          container.innerHTML = markdownToHtml(plainText)
+          const slice = ProseMirrorDOMParser.fromSchema(view.state.schema).parseSlice(container)
+          event.preventDefault()
+          view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView().setMeta('uiEvent', 'paste'))
           return true
         }
         return false

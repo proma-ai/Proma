@@ -1,4 +1,5 @@
 import type { AgentSessionMeta, AgentWorkspace } from '@proma/shared'
+import type { SessionIndicatorStatus } from '@/atoms/agent-atoms'
 
 interface AgentSessionTreeLike {
   session: Pick<AgentSessionMeta, 'id'>
@@ -192,4 +193,31 @@ export function isAgentSessionVisibleInTrees(
 ): boolean {
   if (!sessionId) return false
   return collectAgentSessionTreeIds(items).has(sessionId)
+}
+
+/**
+ * Resolve a delegated child's current sidebar status. A live status takes
+ * precedence over the persisted delegation status after the child is rerun.
+ */
+export function getDelegatedChildSessionStatus(
+  session: AgentSessionMeta,
+  agentIndicatorMap: ReadonlyMap<string, SessionIndicatorStatus>,
+): SessionIndicatorStatus {
+  const status = agentIndicatorMap.get(session.id)
+  if (status) return status
+  return session.delegationStatus === 'running' ? 'running' : 'idle'
+}
+
+/**
+ * Count direct children whose current sidebar state has settled. This must use
+ * the same status source as child rows so parent progress cannot disagree.
+ */
+export function countSettledDelegatedChildren(
+  childSessions: readonly AgentSessionMeta[],
+  agentIndicatorMap: ReadonlyMap<string, SessionIndicatorStatus>,
+): number {
+  return childSessions.filter((session) => {
+    const status = getDelegatedChildSessionStatus(session, agentIndicatorMap)
+    return status !== 'running' && status !== 'blocked'
+  }).length
 }

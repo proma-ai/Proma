@@ -13,6 +13,7 @@ import { FileTypeIcon } from './FileTypeIcon'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { fileBrowserAutoRevealAtom } from '@/atoms/agent-atoms'
 import type { FileIndexEntry } from '@proma/shared'
+import { hasMixedFileSources } from './file-search-sources'
 
 interface FileSearchBarProps {
   workspaceFilesPath: string | null
@@ -244,6 +245,8 @@ export function FileSearchBar({
     return children ? <div className="mx-2 flex-shrink-0">{children}</div> : null
   }
 
+  const shouldShowSessionBadge = showSessionBadge && hasMixedFileSources(results)
+
   return (
     <div ref={containerRef} className="relative mx-2 flex-shrink-0">
       {/* 搜索输入框 */}
@@ -278,7 +281,7 @@ export function FileSearchBar({
                 key={`${entry.source}:${entry.path}`}
                 entry={entry}
                 isSelected={index === selectedIndex}
-                showSessionBadge={showSessionBadge}
+                showSessionBadge={shouldShowSessionBadge}
                 onClick={handleClick}
                 onHover={() => setSelectedIndex(index)}
               />

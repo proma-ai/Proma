@@ -41,6 +41,7 @@ import { CodeBlock, MermaidBlock } from '@proma/ui'
 import { detectLanguage } from '@proma/core'
 import { FilePathChip, isAbsoluteFilePath, isImageFilePath, isRelativeFilePath } from './file-path-chip'
 import { buildAgentHistoryQuoteLabel, parseAgentHistoryQuoteMention } from '@/lib/quoted-selection'
+import { createMentionPattern } from '@/lib/mention-patterns'
 import { useAgentBrowserLink } from '@/components/browser/AgentBrowserLinkProvider'
 import type { HTMLAttributes, ComponentProps, ReactNode } from 'react'
 import type { FileAttachment } from '@proma/shared'
@@ -412,8 +413,9 @@ export function remarkMentions() {
   return (tree: MdastParent) => {
     walkMdastText(tree, (node, index, parent) => {
       const text = node.value
-      // 每次调用创建独立正则实例，避免 /g 状态在并发 remark pipeline 间互相干扰
-      const mentionPattern = /@file:(\S+)|\/skill:(\S+)|#mcp:(\S+)|&session:([A-Za-z0-9-]+)(?:(?:~|::)(\S+))?|&todo:([A-Za-z0-9-]+)(?:(?:~|::)(\S+))?|&calendar_event:([A-Za-z0-9-]+)(?:(?:~|::)(\S+))?|&quote:([A-Za-z0-9%_.!~*'()-]+)/g
+      // 每次调用创建独立正则实例，避免 /g 状态在并发 remark pipeline 间互相干扰。
+      // Mention 值已编码，遇到紧邻的 CJK 普通文本时应立即结束。
+      const mentionPattern = createMentionPattern()
       if (!mentionPattern.test(text)) return
       mentionPattern.lastIndex = 0
 

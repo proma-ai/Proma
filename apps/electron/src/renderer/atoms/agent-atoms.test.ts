@@ -6,8 +6,10 @@ import {
   agentStreamingStatesAtom,
   applyAgentEvent,
   clearAgentStreamError,
+  getDelegationTabLabel,
   isRetryEventForCurrentStream,
   isWorkspaceComponentTab,
+  sanitizeWorkspaceComponentTabs,
   workspaceComponentTabsAtomFamily,
   type AgentStreamState,
 } from './agent-atoms'
@@ -40,6 +42,16 @@ describe('右侧工作区组件', () => {
     expect(isWorkspaceComponentTab('memory')).toBe(true)
     expect(isWorkspaceComponentTab('browser:tab-1')).toBe(false)
     expect(isWorkspaceComponentTab('files')).toBe(false)
+  })
+
+  test('过滤旧版本或异常持久化的项目级 Tab', () => {
+    expect(sanitizeWorkspaceComponentTabs(['todos', '', 'legacy-memory', 'memory'])).toEqual(['todos', 'memory'])
+  })
+
+  test('委派子 Agent 标题为空时使用可见的默认 Tab 标签', () => {
+    expect(getDelegationTabLabel('  ')).toBe('委派任务')
+    expect(getDelegationTabLabel(undefined)).toBe('委派任务')
+    expect(getDelegationTabLabel('整理 PR')).toBe('整理 PR')
   })
 })
 

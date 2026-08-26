@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 import { DOMParser } from '@xmldom/xmldom'
-import { htmlToClipboardText, htmlToMarkdown, markdownToHtml } from './markdown-rich-text'
+import {
+  hasRichClipboardMarkup,
+  htmlToClipboardText,
+  htmlToMarkdown,
+  looksLikeMarkdownText,
+  markdownToHtml,
+} from './markdown-rich-text'
 
 function withHtmlDocument<T>(run: () => T): T {
   const originalDocument = globalThis.document
@@ -33,6 +39,18 @@ function withHtmlDocument<T>(run: () => T): T {
     Object.assign(globalThis, { document: originalDocument, Node: originalNode })
   }
 }
+
+describe('Markdown 剪贴板检测', () => {
+  test('识别常见 Markdown 文本并拒绝普通段落误判', () => {
+    expect(looksLikeMarkdownText('**粗体** 和 *斜体*\n\n---\n\n- 列表项')).toBe(true)
+    expect(looksLikeMarkdownText('这是一段没有格式标记的普通文本。')).toBe(false)
+  })
+
+  test('只把带语义标签的 HTML 当作已格式化剪贴板内容', () => {
+    expect(hasRichClipboardMarkup('<div><p>**粗体**</p></div>')).toBe(false)
+    expect(hasRichClipboardMarkup('<div><p><strong>粗体</strong></p></div>')).toBe(true)
+  })
+})
 
 describe('markdownToHtml rich preview blocks', () => {
   test('renders leading yaml frontmatter as a collapsible metadata block', () => {
@@ -170,6 +188,15 @@ describe('Agent mention serialization', () => {
     expect(markdown).toBe('@file:%2FUsers%2Fme%2FMy%20report.pdf')
   })
 
+  test('adds a separator when a mention is followed by adjacent English text', () => {
+    const markdown = withHtmlDocument(() => htmlToMarkdown([
+      '<p>',
+      '<span data-type="mention" data-id="/Users/me/BPD与LD关系_综合研究报告.pdf" data-mention-suggestion-char="@">BPD与LD关系_综合研究报告.pdf</span>qwedqweq',
+      '</p>',
+    ].join('')))
+
+    expect(markdown).toBe(`@file:${encodeURIComponent('/Users/me/BPD与LD关系_综合研究报告.pdf')} qwedqweq`)
+  })
   test('serializes planning selections by reference type rather than the trigger character', () => {
     const markdown = withHtmlDocument(() => htmlToMarkdown([
       '<p>',

@@ -146,6 +146,7 @@ function createMentionSuggestion<T>(
               onSelect: (item: T) => {
                 const cmd = config.toCommand(item)
                 props.command({ ...cmd, mentionSuggestionChar: config.char })
+                props.editor.chain().insertContent(' ').run()
               },
             },
             editor: props.editor,
@@ -174,6 +175,7 @@ function createMentionSuggestion<T>(
             onSelect: (item: T) => {
               const cmd = config.toCommand(item)
               props.command({ ...cmd, mentionSuggestionChar: config.char })
+              props.editor.chain().insertContent(' ').run()
             },
           })
           positionPopup(popup, props.clientRect?.())

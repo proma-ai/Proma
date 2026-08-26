@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
+import { DOMParser as ProseMirrorDOMParser } from '@tiptap/pm/model'
 import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import Link from '@tiptap/extension-link'
@@ -9,7 +10,12 @@ import { TextSelection } from '@tiptap/pm/state'
 import type { FileAccessOptions } from '@proma/shared'
 import type { MarkdownEditorSelection, MarkdownScrollPosition } from '@/lib/markdown-editor-state'
 import { cn } from '@/lib/utils'
-import { MARKDOWN_RENDERER_VERSION, markdownToHtml } from '@/lib/markdown-rich-text'
+import {
+  hasRichClipboardMarkup,
+  looksLikeMarkdownText,
+  MARKDOWN_RENDERER_VERSION,
+  markdownToHtml,
+} from '@/lib/markdown-rich-text'
 import {
   MathBlock,
   MathInline,
@@ -155,6 +161,23 @@ export function MarkdownRichEditor({
           return true
         }
         return false
+      },
+      handlePaste: (view, event) => {
+        if (!isEditableRef.current) return false
+
+        const plainText = event.clipboardData?.getData('text/plain') ?? ''
+        const clipboardHtml = event.clipboardData?.getData('text/html') ?? ''
+        if (!plainText || !looksLikeMarkdownText(plainText)) return false
+        // 复制已有富文本时优先保留剪贴板中的语义 HTML；普通 <p>/<div> 包装的
+        // Markdown 文本则继续按 Markdown 解析，避免把 **粗体** 当成字面量插入。
+        if (hasRichClipboardMarkup(clipboardHtml)) return false
+
+        const container = document.createElement('div')
+        container.innerHTML = markdownToHtml(plainText)
+        const slice = ProseMirrorDOMParser.fromSchema(view.state.schema).parseSlice(container)
+        event.preventDefault()
+        view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView().setMeta('uiEvent', 'paste'))
+        return true
       },
       handleDoubleClick: (_view, pos) => {
         if (isEditableRef.current || disabledRef.current || !onRequestEditRef.current) return false

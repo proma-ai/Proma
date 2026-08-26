@@ -615,6 +615,18 @@ export function isWorkspaceComponentTab(tab: AgentSidePanelTab | string): tab is
   return (WORKSPACE_COMPONENT_TABS as readonly string[]).includes(tab)
 }
 
+/** 过滤旧版本或异常持久化数据，避免未知组件渲染成空的右侧 Tab。 */
+export function sanitizeWorkspaceComponentTabs(tabs: readonly string[]): WorkspaceComponentTab[] {
+  return tabs.every(isWorkspaceComponentTab)
+    ? tabs as WorkspaceComponentTab[]
+    : tabs.filter(isWorkspaceComponentTab)
+}
+
+/** 协作子 Agent 尚未提供标题时仍需有可见的 Tab 标签。 */
+export function getDelegationTabLabel(title: string | null | undefined): string {
+  return title?.trim() || '委派任务'
+}
+
 export type AgentSidePanelBaseTab = 'files' | 'changes' | 'chat' | 'temporary-agent' | WorkspaceComponentTab
 /** 工作区组件、每个 Pi 探索分支、协作子 Agent、浏览器网页和文件预览都处于右侧工作区顶栏。 */
 export type AgentSidePanelTab = AgentSidePanelBaseTab | `exploration:${string}` | `delegation:${string}` | `browser:${string}` | `preview:${string}` | `terminal:${string}`
@@ -693,6 +705,8 @@ export function getPreviewIdFromSidePanelTab(tab: AgentSidePanelTab | 'preview')
 export interface AgentTerminalTab {
   terminalId: string
   title: string
+  /** 用户从 Worktree 入口打开时，终端固定在对应根目录。 */
+  cwd?: string
 }
 
 export const agentTerminalTabsAtom = atom<Map<string, AgentTerminalTab[]>>(new Map())
