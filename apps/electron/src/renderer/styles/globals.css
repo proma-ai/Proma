@@ -574,29 +574,29 @@
   border-right: 7px solid currentColor;
 }
 
-/* Windows 自定义窗口控制按钮
- *
- * 可点击性关键点（解决 Windows 用户点击失效 / 需要双击的 bug）：
- * 1. 容器本身就是 no-drag 矩形，不靠"在 drag 区里挖三个小洞"——避免 Chromium hitmask
- *    在小矩形 + 高 DPI 缩放下的像素对齐误差。
- * 2. AppShell 的 drag-region 在 Windows 上不再延伸到按钮区域（见 AppShell.tsx 的 right-[126px]），
- *    drag 与 no-drag 区域彻底解耦，OS hitmask 不会再误判。
- * 3. 按钮尺寸与位置使用整数 px，避免 125%/150%/175% DPI 下四舍五入收缩。
- */
+/* Windows 顶部标题栏与系统控制按钮。拖拽区和按钮组分属独立矩形，避免高 DPI 下的 hitmask 重叠。 */
+.window-titlebar {
+  background-color: hsl(var(--background) / 0.9);
+  backdrop-filter: blur(12px);
+}
+
+.window-titlebar-classic {
+  background-color: hsl(var(--sidebar-surface));
+}
+
 .window-controls {
   -webkit-app-region: no-drag;
   app-region: no-drag;
-  height: 28px;
-  gap: 1px;
+  height: 32px;
 }
 
 .window-control-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 28px;
-  border-radius: 4px;
+  width: 46px;
+  height: 32px;
+  border-radius: 0;
   color: hsl(var(--muted-foreground));
   background: transparent;
   border: none;

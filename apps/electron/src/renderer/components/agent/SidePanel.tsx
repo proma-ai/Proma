@@ -88,7 +88,6 @@ import { BrowserPanel } from '@/components/browser/BrowserPanel'
 import { getPreviewFileId, previewFileMapAtom, previewFilesMapAtom, previewPanelOpenMapAtom } from '@/atoms/preview-atoms'
 import { PreviewPanel } from '@/components/diff/PreviewPanel'
 import { useOpenPreview } from '@/components/diff/preview-opener'
-import { detectIsWindows } from '@/lib/platform'
 import type { FileEntry, AgentPendingFile, AgentSessionMeta, SDKMessage, WorktreeInfo } from '@proma/shared'
 import { setFilePanelDragData, getMediaTypeFromFilename, dispatchInsertFileMention } from '@/lib/file-panel-drag'
 import { CLOSE_ACTIVE_RIGHT_WORKSPACE_TAB_EVENT } from '@/lib/right-workspace-events'
@@ -255,8 +254,6 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   const showBothFileSources = shouldShowBothFileSources(width)
   // 侧面板状态按 sessionId 持久化，切换会话不会互相覆盖。
   const [isOpen, setIsOpen] = useAtom(currentSessionSidePanelOpenAtom)
-  const isWindows = React.useMemo(() => detectIsWindows(), [])
-
   // Tab 系统
   const previewFileMap = useAtomValue(previewFileMapAtom)
   const setPreviewFileMap = useSetAtom(previewFileMapAtom)
@@ -1087,7 +1084,6 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       <div
         className={cn(
           'w-full h-full flex flex-col titlebar-no-drag',
-          isWindows ? 'pt-[34px]' : 'pt-0',
           shouldAnimate && 'transition-opacity duration-300',
           isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none',
         )}
@@ -1109,7 +1105,6 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
               <ExplorationBringBackAction parentSessionId={sessionId} branch={activeExplorationBranch} sessions={sessions} />
             ) : undefined}
             onClose={() => setIsOpen(false)}
-            isWindows={isWindows}
           />
 
           <SidePanelTerminalTabs

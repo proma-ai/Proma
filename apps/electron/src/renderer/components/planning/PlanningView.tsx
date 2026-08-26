@@ -29,7 +29,6 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { TodoDatePicker } from '@/components/ui/todo-date-picker'
 import { ShortcutKeycaps } from '@/components/shortcuts/ShortcutKeycaps'
-import { detectIsWindows, WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
 import { getTodoWorkspaceLayoutMode, type TodoWorkspaceLayoutMode } from '@/components/planning/todo-layout'
 
 const TABS: Array<{ id: PlanningTab; label: string }> = [
@@ -62,7 +61,6 @@ export function PlanningView({
   // planningTabAtom 的初始值为 Todo；右侧组件由 componentTab 锁定，避免组件 Tab 与内部导航失焦。
   const [tab, setTab] = useAtom(planningTabAtom)
   const visibleTab = embedded && componentTab ? componentTab : tab
-  const isWindows = React.useMemo(() => detectIsWindows(), [])
   const automations = useAtomValue(automationsAtom)
   const setAutomationForm = useSetAtom(automationFormAtom)
   const requestTodoCreate = useSetAtom(planningTodoCreateRequestAtom)
@@ -92,7 +90,7 @@ export function PlanningView({
   return (
     <div className="flex h-full flex-col overflow-hidden bg-content-area">
       <header className={cn('relative flex w-full items-center justify-between titlebar-no-drag', embedded ? 'px-4 py-3' : 'px-6 pb-5 pt-8 sm:px-8 xl:px-10')}>
-        <div className={cn('absolute inset-y-0 left-0 z-0 titlebar-drag-region', isWindows ? WINDOW_CONTROLS_INSET_RIGHT : 'right-0')} />
+        <div className="absolute inset-y-0 left-0 z-0 titlebar-drag-region right-0" />
         <div className="relative z-[1]">
           <h1 className={cn('font-semibold tracking-tight text-wrap-balance', embedded ? 'text-lg' : 'text-2xl')}>{visibleTab === 'todos' ? 'Todo' : visibleTab === 'calendar' ? '日程' : '定时任务'}</h1>
           <p className={cn('text-muted-foreground', embedded ? 'mt-0.5 text-xs' : 'mt-1 text-sm')}>{visibleTab === 'todos' ? '今天要完成什么？' : visibleTab === 'calendar' ? '安排你的时间' : '持续运行的自动任务'}</p>

@@ -8,7 +8,6 @@ import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { Blocks, Brain, CalendarDays, Clock, FolderOpen, Globe, ListTodo, MessageCircle, PanelRight, Plus, Repeat2, ServerCog, SquareTerminal, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
 import { getScrollLeftToRevealTab } from '@/lib/tab-visibility'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import {
@@ -44,7 +43,6 @@ interface DiffPanelTabBarProps {
   /** 仅当前右侧 Tab 需要的紧凑动作，渲染于标签列表之后，不影响内容区布局。 */
   activeTabAction?: React.ReactNode
   onClose?: () => void
-  isWindows?: boolean
 }
 
 export function DiffPanelTabBar({
@@ -60,7 +58,6 @@ export function DiffPanelTabBar({
   onOpenChat,
   activeTabAction,
   onClose,
-  isWindows = false,
 }: DiffPanelTabBarProps): React.ReactElement {
   const unseenMap = useAtomValue(agentDiffUnseenChangesAtom)
   const setUnseenMap = useSetAtom(agentDiffUnseenChangesAtom)
@@ -105,7 +102,7 @@ export function DiffPanelTabBar({
 
   return (
     <div className="relative flex h-10 shrink-0 items-center border-b border-border/50 bg-content-area">
-      <div className={cn('pointer-events-none absolute inset-0 titlebar-drag-region', isWindows && WINDOW_CONTROLS_INSET_RIGHT)} />
+      <div className="pointer-events-none absolute inset-0 titlebar-drag-region" />
       <div className="relative flex min-w-0 flex-1 items-center titlebar-no-drag">
         <div ref={tabListRef} className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overscroll-x-contain px-2 py-1 scrollbar-none" role="tablist" aria-label="右侧工作区">
           {tabs.map((tab) => {

@@ -8,7 +8,8 @@ import { TooltipProvider } from './components/ui/tooltip'
 import { ShortcutGuideDialog } from './components/shortcuts/ShortcutGuideDialog'
 import { FaqDialog } from './components/shortcuts/FaqDialog'
 import { WindowControls } from './components/WindowControls'
-import { detectIsWindows, WINDOW_CONTROLS_INSET_RIGHT } from './lib/platform'
+import { detectIsWindows } from './lib/platform'
+import { getWindowTitlebarContentInsetClass } from './lib/window-titlebar-layout'
 import { cn } from './lib/utils'
 import { PlanningReminderRail } from './components/planning/PlanningReminderRail'
 import { conversationsAtom } from './atoms/chat-atoms'
@@ -108,15 +109,7 @@ export default function App(): React.ReactElement {
   if (showOnboarding) {
     return (
       <TooltipProvider delayDuration={200} disableHoverableContent>
-        <div className="relative h-screen w-screen overflow-hidden">
-          {/* Onboarding 绕过 AppShell 时仍需提供隐藏标题栏窗口的拖拽区，并避开 Windows 控制按钮。 */}
-          <div
-            aria-hidden="true"
-            className={cn(
-              'titlebar-drag-region fixed left-0 top-0 z-50 h-[50px]',
-              isWindows ? WINDOW_CONTROLS_INSET_RIGHT : 'right-0',
-            )}
-          />
+        <div className={cn('relative h-screen w-screen overflow-hidden', getWindowTitlebarContentInsetClass(isWindows))}>
           <WindowControls />
           <OnboardingView
             initialStep={isReplayingOnboarding ? 'guide' : 'welcome'}
