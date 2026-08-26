@@ -1,4 +1,4 @@
-import type { AgentSessionMeta } from '@proma/shared'
+import type { AgentSessionMeta, AgentWorkspace } from '@proma/shared'
 
 interface AgentSessionTreeLike {
   session: Pick<AgentSessionMeta, 'id'>
@@ -10,6 +10,89 @@ export function sortAgentSessionsByUpdatedAtDesc(
   sessions: readonly AgentSessionMeta[],
 ): AgentSessionMeta[] {
   return [...sessions].sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
+/** Agent 归档会话的顶层项目分组。 */
+export interface ArchivedAgentSessionProjectGroup {
+  /** 稳定的虚拟列表 key；不对应真实项目的分组使用保留 ID。 */
+  id: string
+  label: string
+  kind: 'workspace' | 'automation' | 'unassigned'
+  /** 真实项目分组保留元数据，以复用活跃项目的视觉标识。 */
+  workspace?: AgentWorkspace
+  sessions: AgentSessionMeta[]
+}
+
+const ARCHIVED_AUTOMATION_GROUP_ID = '__archived-automations__'
+const ARCHIVED_UNASSIGNED_GROUP_ID = '__archived-unassigned__'
+
+/**
+ * 将归档会话按所属项目组织，保留自动任务和遗留无归属会话的独立入口。
+ *
+ * 只输出非空分组：真实项目顺序跟随当前工作区顺序，自动任务与未归属项目
+ * 固定置后，避免历史会话被误归入默认项目。
+ */
+export function groupArchivedAgentSessionsByProject({
+  sessions,
+  workspaces,
+  excludedSessionIds = new Set<string>(),
+}: {
+  sessions: readonly AgentSessionMeta[]
+  workspaces: readonly AgentWorkspace[]
+  excludedSessionIds?: ReadonlySet<string>
+}): ArchivedAgentSessionProjectGroup[] {
+  const sessionsByWorkspaceId = new Map<string, AgentSessionMeta[]>(
+    workspaces.map((workspace) => [workspace.id, []]),
+  )
+  const automationSessions: AgentSessionMeta[] = []
+  const unassignedSessions: AgentSessionMeta[] = []
+
+  for (const session of sessions) {
+    if (!session.archived || excludedSessionIds.has(session.id)) continue
+    if (session.sourceAutomationId) {
+      automationSessions.push(session)
+      continue
+    }
+
+    const workspaceSessions = session.workspaceId
+      ? sessionsByWorkspaceId.get(session.workspaceId)
+      : undefined
+    if (workspaceSessions) {
+      workspaceSessions.push(session)
+    } else {
+      unassignedSessions.push(session)
+    }
+  }
+
+  const groups: ArchivedAgentSessionProjectGroup[] = []
+  for (const workspace of workspaces) {
+    const workspaceSessions = sessionsByWorkspaceId.get(workspace.id) ?? []
+    if (workspaceSessions.length === 0) continue
+    groups.push({
+      id: workspace.id,
+      label: workspace.name,
+      kind: 'workspace',
+      workspace,
+      sessions: sortAgentSessionsByUpdatedAtDesc(workspaceSessions),
+    })
+  }
+  if (automationSessions.length > 0) {
+    groups.push({
+      id: ARCHIVED_AUTOMATION_GROUP_ID,
+      label: '定时任务',
+      kind: 'automation',
+      sessions: sortAgentSessionsByUpdatedAtDesc(automationSessions),
+    })
+  }
+  if (unassignedSessions.length > 0) {
+    groups.push({
+      id: ARCHIVED_UNASSIGNED_GROUP_ID,
+      label: '未归属项目',
+      kind: 'unassigned',
+      sessions: sortAgentSessionsByUpdatedAtDesc(unassignedSessions),
+    })
+  }
+  return groups
 }
 
 /** 用后端返回的新元数据替换本地条目，并按最近更新时间重新排序。 */

@@ -110,6 +110,7 @@ import { ShortcutKeycaps } from '@/components/shortcuts/ShortcutKeycaps'
 import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-registry'
 import {
   collectAgentSessionTreeIds,
+  groupArchivedAgentSessionsByProject,
   isAgentSessionVisibleInTrees,
   replaceAgentSessionInFreshnessOrder,
   sortAgentSessionsByUpdatedAtDesc,
@@ -733,6 +734,8 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   const [expandedExtraCountMap, setExpandedExtraCountMap] = React.useState<Map<string, number>>(new Map())
   /** 记录被用户手动折叠的工作区 ID（点击当前工作区标题时折叠/展开）。刻意不持久化：折叠被视为临时查看行为，刷新/重启后恢复默认展开 */
   const [collapsedWorkspaceIds, setCollapsedWorkspaceIds] = React.useState<Set<string>>(new Set())
+  /** 归档项目默认折叠；只记录用户主动展开的项目，避免影响活跃视图的临时状态。 */
+  const [expandedArchivedProjectIds, setExpandedArchivedProjectIds] = React.useState<Set<string>>(new Set())
   /** 记录已展开的委派母会话；默认收起，避免批量派遣后撑满侧栏 */
   const [expandedDelegationParentIds, setExpandedDelegationParentIds] = React.useState<Set<string>>(new Set())
   /** 记录用户手动收起的委派母会话；用于覆盖“当前子会话自动展开”的兜底可见性 */
@@ -1347,6 +1350,11 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     setCollapsedWorkspaceIds((prev) => toggleSetEntry(prev, groupId))
   }, [])
 
+  /** 归档项目默认折叠；点击后仅在归档视图内切换展开状态。 */
+  const handleToggleArchivedProject = React.useCallback((groupId: string): void => {
+    setExpandedArchivedProjectIds((prev) => toggleSetEntry(prev, groupId))
+  }, [])
+
   const handleToggleDelegationParent = React.useCallback((sessionId: string, expanded: boolean): void => {
     if (expanded) {
       setExpandedDelegationParentIds((prev) => deleteSetEntry(prev, sessionId))
@@ -1450,6 +1458,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       })
 
       setCollapsedWorkspaceIds((prev) => deleteSetEntry(prev, workspaceId))
+      setExpandedArchivedProjectIds((prev) => deleteSetEntry(prev, workspaceId))
       setExpandedDelegationParentIds((prev) => {
         let changed = false
         const next = new Set(prev)
@@ -1872,6 +1881,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     conversationGroups,
     expandedExtraCountMap,
     collapsedWorkspaceIds,
+    expandedArchivedProjectIds,
     expandedDelegationParentIds,
     collapsedDelegationParentIds,
     activeSessionId,
@@ -2253,17 +2263,18 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     [agentProjectGroups, automationGroup, automationGroupOrder],
   )
 
-  /** Agent 归档会话按日期分组（跨项目），仅在归档视图已加载时构建。 */
-  const archivedAgentSessionTrees = React.useMemo(() => {
+  /** Agent 归档会话按项目分组；归档列表仍只在进入该视图后按需加载。 */
+  const archivedAgentSessionProjectGroups = React.useMemo(() => {
     if (viewMode !== 'archived') return []
-    const archived = sortAgentSessionsByUpdatedAtDesc(
-      agentSessions.filter((s) => s.archived && !draftSessionIds.has(s.id))
-    )
-    const trees = buildAgentSessionTrees(archived)
-    // groupByDate 要求 T extends { updatedAt: number }，AgentSessionTreeItem 不直接满足
-    const wrapped = trees.map((tree) => ({ updatedAt: tree.session.updatedAt, tree }))
-    return groupByDate(wrapped).map((g) => ({ label: g.label, items: g.items.map((w) => w.tree) }))
-  }, [agentSessions, draftSessionIds, viewMode])
+    return groupArchivedAgentSessionsByProject({
+      sessions: agentSessions,
+      workspaces,
+      excludedSessionIds: draftSessionIds,
+    }).map((group) => ({
+      ...group,
+      trees: buildAgentSessionTrees(group.sessions),
+    }))
+  }, [agentSessions, draftSessionIds, viewMode, workspaces])
 
   const handleRailModeSwitch = React.useCallback((targetMode: AppMode) => {
     setViewMode('active')
@@ -2646,13 +2657,69 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
 
   const agentArchivedVirtualRows = React.useMemo<VirtualSidebarRow[]>(() => {
     const rows: VirtualSidebarRow[] = []
-    for (const group of archivedAgentSessionTrees) {
+    for (const group of archivedAgentSessionProjectGroups) {
+      const collapsed = !expandedArchivedProjectIds.has(group.id)
+      const isCurrentProject = group.kind === 'workspace' && group.id === currentWorkspaceId
       rows.push({
-        id: `agent-archived-date-${group.label}`,
-        estimateSize: 30,
-        content: <div className="px-3 pt-2 pb-1 text-[13px] font-medium leading-[18px] text-foreground/40 select-none">{group.label}</div>,
+        id: `agent-archived-project-${group.id}`,
+        estimateSize: 34,
+        content: (
+          <div className="px-2">
+            <section className="relative py-0.5 rounded-md">
+              <div className="group/project relative flex translate-x-[2px] items-center">
+                <button
+                  type="button"
+                  aria-expanded={!collapsed}
+                  onClick={() => handleToggleArchivedProject(group.id)}
+                  className={cn(
+                    'relative flex-1 min-w-0 flex items-center gap-1 pl-[9px] pr-1 py-1 rounded-md text-left transition-[padding,color,background-color] titlebar-no-drag group-hover/project:pl-4 hover:bg-foreground/[0.025]',
+                    isCurrentProject
+                      ? 'agent-project-item-current text-foreground'
+                      : 'text-foreground/65 hover:text-foreground/88',
+                  )}
+                >
+                  {group.kind === 'automation' ? (
+                    <Clock size={13} className="flex-shrink-0 text-foreground/40" />
+                  ) : (
+                    <>
+                      <FolderOpen size={13} className="flex-shrink-0 text-foreground/40 group-hover/project:hidden" />
+                      <ChevronRight
+                        size={13}
+                        className={cn(
+                          'hidden flex-shrink-0 text-foreground/40 transition-transform duration-150 group-hover/project:block',
+                          collapsed ? '-rotate-90' : 'rotate-90',
+                        )}
+                      />
+                    </>
+                  )}
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <span className="min-w-0 truncate text-[13px] font-medium leading-[18px]">{group.label}</span>
+                    <LocalProjectBadge
+                      projectRootPath={group.workspace?.projectRootPath}
+                      projectRootStatus={group.workspace?.projectRootStatus}
+                    />
+                    {isCurrentProject && (
+                      <span className="workspace-selected-triangle flex-shrink-0" aria-hidden="true" />
+                    )}
+                  </span>
+                  <span className="min-w-[4px] flex-1" aria-hidden="true" />
+                  {group.kind === 'automation' && (
+                    <ChevronRight
+                      size={12}
+                      className={cn(
+                        'flex-shrink-0 text-foreground/30 transition-transform duration-150',
+                        collapsed ? '-rotate-90' : 'rotate-90',
+                      )}
+                    />
+                  )}
+                </button>
+              </div>
+            </section>
+          </div>
+        ),
       })
-      for (const item of group.items) {
+      if (collapsed) continue
+      for (const item of group.trees) {
         const childCount = item.childSessions.length
         const rowStatus = getSessionTreeStatus(item, agentIndicatorMap)
         const treeActive = treeContainsSessionId(item, activeSessionId)
@@ -2721,7 +2788,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       }
     }
     return rows
-  }, [activeSessionId, agentIndicatorMap, archivedAgentSessionTrees, collapsedDelegationParentIds, expandedDelegationParentIds, handleAgentRename, handleRequestDelete, handleRequestMove, handleSelectAgentSession, handleToggleArchiveAgent, handleToggleDelegationParent, handleTogglePinAgent, handleToggleStarAgent, relativeTimeNow, sessionHoverPreviewEnabled, workspaceNameMap])
+  }, [activeSessionId, agentIndicatorMap, archivedAgentSessionProjectGroups, collapsedDelegationParentIds, currentWorkspaceId, expandedArchivedProjectIds, expandedDelegationParentIds, handleAgentRename, handleRequestDelete, handleRequestMove, handleSelectAgentSession, handleToggleArchiveAgent, handleToggleArchivedProject, handleToggleDelegationParent, handleTogglePinAgent, handleToggleStarAgent, relativeTimeNow, sessionHoverPreviewEnabled, workspaceNameMap])
 
   const agentActiveVirtualRows = React.useMemo<VirtualSidebarRow[]>(() => {
     if (viewMode !== 'active') return []
