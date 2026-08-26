@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from 'node:fs'
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, normalize, relative, resolve } from 'node:path'
 
 const INSTRUCTION_FILE_CANDIDATES = [
   { name: 'AGENTS.md', kind: 'agents' },
@@ -38,6 +38,11 @@ export interface ProjectInstructionManifest {
   totalBytes: number
 }
 
+/** Whether the selected project root contributed an active AGENTS instruction. */
+export function hasRootProjectAgentsInstruction(manifest: ProjectInstructionManifest | undefined): boolean {
+  return manifest?.sources.some((source) => source.kind === 'agents' && source.scopeRoot === '.') ?? false
+}
+
 export interface ResolveProjectInstructionsOptions {
   /** The user-authorized project root. Proma never walks above it. */
   projectRoot: string
@@ -48,8 +53,42 @@ export interface ResolveProjectInstructionsOptions {
   targetPath?: string
 }
 
+/**
+ * Normalize an absolute path for comparisons without changing the display
+ * path stored in diagnostics. Windows paths are case-insensitive, and native
+ * realpath keeps drive/junction handling consistent with the host filesystem.
+ */
+export function canonicalizeProjectPath(path: string): string {
+  const absolutePath = resolve(path)
+  const missingSegments: string[] = []
+  let current = absolutePath
+
+  while (true) {
+    try {
+      const canonical = realpathSync.native(current)
+      return missingSegments.reduceRight((parent, segment) => join(parent, segment), canonical)
+    } catch {
+      const parent = dirname(current)
+      if (parent === current) return absolutePath
+      missingSegments.push(basename(current))
+      current = parent
+    }
+  }
+}
+
+function comparisonPath(path: string): string {
+  const normalized = normalize(canonicalizeProjectPath(path))
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized
+}
+
+export function normalizeProjectPathForComparison(path: string): string {
+  return comparisonPath(path)
+}
+
 function isWithinRoot(root: string, candidate: string): boolean {
-  const rel = relative(root, candidate)
+  const normalizedRoot = comparisonPath(root)
+  const normalizedCandidate = comparisonPath(candidate)
+  const rel = relative(normalizedRoot, normalizedCandidate)
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
 }
 
@@ -67,7 +106,7 @@ function instructionDirectories(projectRoot: string, targetPath: string): string
 
   const directories = [projectRoot]
   let current = projectRoot
-  const segments = relative(projectRoot, targetDirectory).split(/[\\/]/).filter(Boolean)
+  const segments = relative(comparisonPath(projectRoot), comparisonPath(targetDirectory)).split(/[\\/]/).filter(Boolean)
   for (const segment of segments) {
     current = join(current, segment)
     directories.push(current)
@@ -90,11 +129,13 @@ export function resolveProjectInstructions(options: ResolveProjectInstructionsOp
   if (!isWithinRoot(requestedRoot, requestedTarget)) {
     throw new Error('项目指令目标路径必须位于已授权的项目根目录内')
   }
-  // macOS may expose the same directory through /var and /private/var. Keep
-  // the requested target's relative path, but resolve it under the canonical
-  // root so the root-boundary check stays stable across those aliases.
-  const projectRoot = realpathSync(requestedRoot)
-  const targetPath = resolve(projectRoot, relative(requestedRoot, requestedTarget))
+  // Resolve the existing root and preserve missing target suffixes. This keeps
+  // new-file writes and Windows junction/case aliases in the same scope.
+  const projectRoot = canonicalizeProjectPath(requestedRoot)
+  const targetPath = canonicalizeProjectPath(join(
+    projectRoot,
+    relative(comparisonPath(requestedRoot), comparisonPath(requestedTarget)),
+  ))
 
   const sources: ProjectInstructionSource[] = []
   const diagnostics: ProjectInstructionDiagnostic[] = []

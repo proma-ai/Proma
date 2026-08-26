@@ -1534,7 +1534,7 @@ export class AgentOrchestrator {
         permissionMode: initialPermissionMode,
         collaborationAvailable,
         currentModelId: selectedModelId,
-        legacyProjectInstructions: projectInstructions?.sources,
+        projectInstructions,
         projectKnowledgeMaintenanceApproved,
         memoryGuidance,
         memoryRefreshOpportunity,

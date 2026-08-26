@@ -10,7 +10,6 @@ import { Check, ChevronDown, PanelRight, Pencil, Split, X } from 'lucide-react'
 import { agentSessionsAtom, agentSideTemporaryAgentMapAtom, agentDiffPanelTabAtom, currentSessionSidePanelOpenAtom, getExplorationSidePanelTab } from '@/atoms/agent-atoms'
 import { tabsAtom, updateTabTitle } from '@/atoms/tab-atoms'
 import { replaceAgentSessionInFreshnessOrder } from '@/lib/agent-session-list'
-import { detectIsWindows, WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import {
   DropdownMenu,
@@ -25,7 +24,6 @@ interface AgentHeaderProps {
 }
 
 export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement | null {
-  const isWindows = React.useMemo(() => detectIsWindows(), [])
   const sessions = useAtomValue(agentSessionsAtom)
   const session = sessions.find((s) => s.id === sessionId) ?? null
   const setAgentSessions = useSetAtom(agentSessionsAtom)
@@ -100,8 +98,8 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
 
   return (
     <div className="relative z-[51] flex items-center gap-2 px-3 h-[48px]">
-      {/* 拖拽层覆盖整行（Windows 避开右上角 WindowControls ~126px），编辑/标题按钮内部已自带 titlebar-no-drag。 */}
-      <div className={cn("absolute inset-0 titlebar-drag-region pointer-events-none", isWindows && WINDOW_CONTROLS_INSET_RIGHT)} />
+      {/* 页面标题栏仍可拖动；系统控制按钮由窗口顶部的统一标题栏承载。 */}
+      <div className="absolute inset-0 titlebar-drag-region pointer-events-none" />
       {editing ? (
         <div className="flex items-center gap-1.5 flex-1 min-w-0 titlebar-no-drag">
           <input

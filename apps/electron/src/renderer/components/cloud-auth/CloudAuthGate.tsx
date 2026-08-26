@@ -26,7 +26,8 @@ import { ResetPasswordPage } from './ResetPasswordPage'
 import { PendingPage } from './PendingPage'
 import { AuthSplitLayout } from './AuthSplitLayout'
 import { WindowControls } from '@/components/WindowControls'
-import { detectIsWindows, WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
+import { detectIsWindows } from '@/lib/platform'
+import { getWindowTitlebarDragInsetClass } from '@/lib/window-titlebar-layout'
 import { cn } from '@/lib/utils'
 
 interface CloudAuthGateProps {
@@ -83,7 +84,7 @@ function CloudAuthGuard({ children }: CloudAuthGateProps): React.ReactElement {
     return (
       <div className="relative min-h-full">
         {/* Windows 上避开原生窗口控制区，防止点击被 OS 判作标题栏拖拽。 */}
-        <div className={cn('app-drag-region absolute left-0 top-0 z-10 h-8', isWindows ? WINDOW_CONTROLS_INSET_RIGHT : 'right-0')} />
+        <div className={cn('app-drag-region absolute left-0 top-0 z-10 h-8', getWindowTitlebarDragInsetClass(isWindows))} />
         <WindowControls />
         <AuthSplitLayout>
           <CloudAuthScreen />

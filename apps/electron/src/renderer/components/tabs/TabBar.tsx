@@ -39,7 +39,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { TabBarItem } from './TabBarItem'
 import { getTabBarActionLayout } from './tab-bar-action-layout'
 import { useCloseTab } from '@/hooks/useCloseTab'
-import { detectIsWindows, WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import { shortcutGuideOpenAtom } from '@/atoms/shortcut-guide'
 import { faqDialogOpenAtom } from '@/atoms/faq-dialog'
@@ -231,7 +230,6 @@ function TabBarInner({
   const enterTimerRef = React.useRef<ReturnType<typeof setTimeout>>()
   const leaveTimerRef = React.useRef<ReturnType<typeof setTimeout>>()
   const fadeTimerRef = React.useRef<ReturnType<typeof setTimeout>>()
-  const isWindows = React.useMemo(() => detectIsWindows(), [])
 
   // 文件面板按会话独立保存；Agent 会话及其归属的预览 Tab 都可切换面板；
   // 仅 Agent 会话 Tab 在面板关闭时展示右上角"打开"按钮。
@@ -254,7 +252,7 @@ function TabBarInner({
   const setBrowserStateMap = useSetAtom(browserStateMapAtom)
   const setSidePanelTabMap = useSetAtom(agentDiffPanelTabAtom)
   const hasMinimizedBrowser = Boolean(activeAgentSession && browserStateMap.has(activeAgentSession.id) && browserMinimizedMap.get(activeAgentSession.id) === true)
-  const actionLayout = getTabBarActionLayout(isWindows, showOpenPanelButton, showBrowserButton)
+  const actionLayout = getTabBarActionLayout(showOpenPanelButton, showBrowserButton)
 
   const togglePanel = React.useCallback(() => {
     if (!isAgentContextTab(activeTab)) return
@@ -412,11 +410,10 @@ function TabBarInner({
 
   return (
     <div ref={barRef} className="main-tabbar flex items-end h-[34px] tabbar-bg relative">
-      {/* 顶部 TabBar 的空白区域必须保持可拖拽，尤其是 macOS/Windows 自定义标题栏。
-          注意：不要把 titlebar-no-drag 加到下面的整条 flex 容器上，否则标签右侧空白会再次失去拖拽能力。
-          Windows 上背景拖拽层避开右上角 WindowControls 区域（126px），防止 hitmask 重叠。
+      {/* 顶部 TabBar 的空白区域保持可拖拽；系统控制按钮由窗口顶部的统一标题栏承载。
+          不要把 titlebar-no-drag 加到下面的整条 flex 容器上，否则标签右侧空白会失去拖拽能力。
           需要交互的单个 Tab 会在 TabBarItem 内部自己声明 titlebar-no-drag。 */}
-      <div className={cn("absolute inset-0 titlebar-drag-region", isWindows && WINDOW_CONTROLS_INSET_RIGHT)} />
+      <div className="pointer-events-none absolute inset-0 titlebar-drag-region" />
 
       {/* Tear-off 提示遮罩：拖出 TabBar 区域时，让 TabBar 下方出现一条高亮分割线 */}
       {tearingOff && (

@@ -65,14 +65,19 @@ describe('项目与会话工作台提示词', () => {
       sessionId: 'session-1',
       agentCwd: '/tmp/sample-project',
       permissionMode: 'bypassPermissions',
-      legacyProjectInstructions: [{
-        path: '/tmp/sample-project/CLAUDE.md',
-        relativePath: 'CLAUDE.md',
-        scopeRoot: '.',
-        kind: 'claude',
-        content: 'legacy instruction',
-        contentHash: 'legacy-hash',
-      }],
+      projectInstructions: {
+        projectRoot: '/tmp/sample-project',
+        sources: [{
+          path: '/tmp/sample-project/CLAUDE.md',
+          relativePath: 'CLAUDE.md',
+          scopeRoot: '.',
+          kind: 'claude',
+          content: 'legacy instruction',
+          contentHash: 'legacy-hash',
+        }],
+        diagnostics: [],
+        totalBytes: 18,
+      },
     })
 
     expect(prompt).toContain('## Legacy 项目指令迁移任务')

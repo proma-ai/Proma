@@ -13,7 +13,6 @@ import type { ConversationMeta } from '@proma/shared'
 import { SystemPromptSelector } from './SystemPromptSelector'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { detectIsWindows, WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 
 interface ChatHeaderProps {
@@ -21,7 +20,6 @@ interface ChatHeaderProps {
 }
 
 export function ChatHeader({ conversation }: ChatHeaderProps): React.ReactElement | null {
-  const isWindows = React.useMemo(() => detectIsWindows(), [])
   const setConversations = useSetAtom(conversationsAtom)
   const [parallelMode, setParallelMode] = useConversationParallelMode()
   const [editing, setEditing] = React.useState(false)
@@ -68,9 +66,8 @@ export function ChatHeader({ conversation }: ChatHeaderProps): React.ReactElemen
 
   return (
     <div className="relative z-[51] flex items-center gap-2 px-4 h-[48px]">
-      {/* 拖拽层仅覆盖左侧区域，Windows 上避开右上角 WindowControls（~126px）。
-          否则 header 的 drag-region 会与按钮重叠，导致 OS hitmask 把单击当成标题栏点击。 */}
-      <div className={cn("absolute inset-0 titlebar-drag-region pointer-events-none", isWindows && WINDOW_CONTROLS_INSET_RIGHT)} />
+      {/* 系统控制按钮由窗口顶部的统一标题栏承载。 */}
+      <div className="absolute inset-0 titlebar-drag-region pointer-events-none" />
       {editing ? (
         <div className="flex items-center gap-1.5 flex-1 min-w-0 titlebar-no-drag">
           <input

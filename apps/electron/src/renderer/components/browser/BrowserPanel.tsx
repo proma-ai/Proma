@@ -15,7 +15,6 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { BROWSER_RISK_DISCLAIMER_VERSION } from '@/types/settings'
-import { detectIsWindows, getWindowControlsPaddingClass } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import { browserPendingNavigationMapAtom } from '@/atoms/browser-atoms'
 import { BrowserSlot } from './BrowserSlot'
@@ -118,10 +117,9 @@ export function BrowserPanel({ sessionId, tabId, state, isAddTabMenuOpen = false
   // 依赖 controller.activeTabId 的历史操作，导航则始终显式携带当前 tabId。
   const isControllerTabActive = state?.activeTabId === tabId
   const isBackgroundRun = state?.executionSource === 'automation' || state?.executionSource === 'delegation'
-  const isWindows = React.useMemo(() => detectIsWindows(), [])
   return (
     <div className="flex h-full min-w-0 flex-col overflow-hidden border-l border-border/80 bg-content-area titlebar-no-drag">
-      <div className={cn('flex items-center h-[42px] gap-1 px-2 border-b border-border/40 bg-muted/20', getWindowControlsPaddingClass(isWindows))}>
+      <div className="flex items-center h-[42px] gap-1 px-2 border-b border-border/40 bg-muted/20">
         <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-8 rounded-lg text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground" disabled={riskBlocked || !isControllerTabActive || !state?.canGoBack} onClick={() => void window.electronAPI.goBackAgentBrowser?.(sessionId)}><ChevronLeft className="size-5" /></Button></TooltipTrigger><TooltipContent>后退</TooltipContent></Tooltip>
         <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-8 rounded-lg text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground" disabled={riskBlocked || !isControllerTabActive || !state?.canGoForward} onClick={() => void window.electronAPI.goForwardAgentBrowser?.(sessionId)}><ChevronRight className="size-5" /></Button></TooltipTrigger><TooltipContent>前进</TooltipContent></Tooltip>
         <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-8 rounded-lg text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground" disabled={riskBlocked || !isControllerTabActive} onClick={() => void window.electronAPI.reloadAgentBrowser?.(sessionId)}><RotateCw className="size-[18px]" /></Button></TooltipTrigger><TooltipContent>刷新</TooltipContent></Tooltip>
