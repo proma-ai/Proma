@@ -1018,7 +1018,7 @@ export interface SkillImportSource {
   sourceVersion: string     // 导入时源 Skill 的 version，无则 '0.0.0'
 }
 
-/** 企业 Skills 库安装来源。 */
+/** 企业 Skills安装来源。 */
 export interface EnterpriseSkillSource {
   schemaVersion: 2
   type: 'enterprise-library'

@@ -111,7 +111,7 @@ export function SkillCard({ skill, isBuiltin, updating, canPublishToEnterprise =
         ) : skill.enterpriseSource ? (
           <span className="flex max-w-full items-center gap-1 truncate rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
             <Building2 size={12} className="shrink-0" />
-            企业 Skills 库
+            企业 Skills
           </span>
         ) : skill.importSource ? (
           <span className="truncate rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
@@ -138,7 +138,7 @@ export function SkillCard({ skill, isBuiltin, updating, canPublishToEnterprise =
                 {skill.enterpriseSource ? '推送更新' : '发布到企业库'}
               </button>
             </TooltipTrigger>
-            <TooltipContent side="top">{skill.enterpriseSource ? '以 SKILL.md 的新版本向企业库推送不可变更新' : '发布一个不可变版本，企业成员可在企业 Skills 库中手动安装'}</TooltipContent>
+            <TooltipContent side="top">{skill.enterpriseSource ? '以 SKILL.md 的新版本向企业库推送不可变更新' : '发布一个不可变版本，企业成员可在企业 Skills中手动安装'}</TooltipContent>
           </Tooltip>
         )}
 

@@ -1,4 +1,4 @@
-/** 企业 Skills 库内嵌 Tab：远端访问和文件写入均经主进程 IPC。 */
+/** 企业 Skills内嵌 Tab：远端访问和文件写入均经主进程 IPC。 */
 import * as React from 'react'
 import { Building2, Check, Download, Loader2, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
@@ -32,7 +32,7 @@ export function EnterpriseSkillsTab({ workspaceSlug, search, installedSkills, on
     try {
       setResponse(await window.electronAPI.enterpriseSkills.list())
     } catch (error) {
-      console.error('[企业 Skills 库] 加载失败:', error)
+      console.error('[企业 Skills] 加载失败:', error)
       setResponse({ items: [], availability: { enabled: false, reason: '无法连接企业 Skills 服务' } })
     } finally {
       setLoading(false)
@@ -94,7 +94,7 @@ export function EnterpriseSkillsTab({ workspaceSlug, search, installedSkills, on
         <div>
           <h2 className="flex items-center gap-2 text-lg font-semibold text-foreground">
             <Building2 size={19} className="text-primary" />
-            企业 Skills 库
+            企业 Skills
           </h2>
           <p className="mt-1 text-[13px] text-muted-foreground">企业管理员集中发布；安装、更新和本地修改均由你手动控制。</p>
         </div>
@@ -109,7 +109,7 @@ export function EnterpriseSkillsTab({ workspaceSlug, search, installedSkills, on
       ) : !availability?.enabled ? (
         <div className="flex flex-1 flex-col items-center justify-center rounded-2xl bg-muted/40 px-6 py-16 text-center shadow-sm">
           <Building2 className="size-8 text-foreground/25" />
-          <div className="mt-3 text-sm font-medium text-foreground/80">企业 Skills 库暂不可用</div>
+          <div className="mt-3 text-sm font-medium text-foreground/80">企业 Skills暂不可用</div>
           <div className="mt-2 max-w-md text-sm text-muted-foreground">{availability?.reason ?? '请登录企业账号，或联系企业管理员开通此功能。'}</div>
         </div>
       ) : visibleSkills.length === 0 ? (

@@ -3295,7 +3295,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
           />
           {mode === 'agent' && (
             <WorkspaceComponentRailButton
-              label="企业 Skills 库"
+              label="企业 Skills"
               icon={<Building2 size={16} />}
               active={isWorkspaceComponentActive('enterprise')}
               onClick={() => handleOpenCapabilityComponent('enterprise')}
@@ -3503,7 +3503,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
         />
         {mode === 'agent' && (
           <WorkspaceComponentSidebarEntry
-            label="企业 Skills 库"
+            label="企业 Skills"
             icon={<Building2 size={16} />}
             active={isWorkspaceComponentActive('enterprise')}
             onClick={() => handleOpenCapabilityComponent('enterprise')}

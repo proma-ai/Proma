@@ -50,7 +50,7 @@ export function PublishEnterpriseSkillDialog({ skill, workspaceSlug, onOpenChang
     <Dialog open={skill !== null} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><ShieldCheck size={18} className="text-primary" />{isVersionUpdate ? '推送企业 Skill 更新' : '发布到企业 Skills 库'}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2"><ShieldCheck size={18} className="text-primary" />{isVersionUpdate ? '推送企业 Skill 更新' : '发布到企业 Skills'}</DialogTitle>
           <DialogDescription className="leading-6">{isVersionUpdate ? '确认后会将当前本地修改打包为新的不可变版本。请先在 SKILL.md 中递增 version；企业成员可手动更新。' : '确认后会将当前本地 Skill 打包为不可变制品，并向本企业成员开放手动安装。'}</DialogDescription>
         </DialogHeader>
 

@@ -338,7 +338,7 @@ export async function registerCloudIpcHandlers(): Promise<void> {
     },
   )
 
-  // ===== 企业 Skills 库 =====
+  // ===== 企业 Skills =====
   // Renderer 传入的 slug 不可信：只允许已注册的工作区，阻止 ../ 等路径穿越进入配置目录。
   const requireRegisteredWorkspaceSlug = (workspaceSlug: string): string => {
     if (!/^[a-z0-9-]+$/i.test(workspaceSlug) || !getAgentWorkspaceBySlug(workspaceSlug)) {
@@ -365,5 +365,5 @@ export async function registerCloudIpcHandlers(): Promise<void> {
     async (_, workspaceSlug: string, skills: SkillMeta[]) => checkEnterpriseSkillUpdates(requireRegisteredWorkspaceSlug(workspaceSlug), skills),
   )
 
-  console.log('[Cloud IPC] 已注册 Cloud 认证、账单、渠道、用量与企业 Skills 库处理器')
+  console.log('[Cloud IPC] 已注册 Cloud 认证、账单、渠道、用量与企业 Skills处理器')
 }

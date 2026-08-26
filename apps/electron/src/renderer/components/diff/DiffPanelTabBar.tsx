@@ -212,7 +212,7 @@ export function DiffPanelTabBar({
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => onOpenWorkspaceComponent('enterprise')}>
                   <Building2 className="size-3.5" />
-                  打开企业 Skills 库
+                  打开企业 Skills
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => onOpenWorkspaceComponent('mcp')}>
                   <ServerCog className="size-3.5" />

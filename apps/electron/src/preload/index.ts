@@ -738,7 +738,7 @@ export interface ElectronAPI {
   /** 从源工作区同步更新已导入的 Skill */
   updateSkillFromSource: (targetSlug: string, skillSlug: string) => Promise<SkillMeta>
 
-  /** 企业 Skills 库：Renderer 仅通过此受限接口访问远端技能。 */
+  /** 企业 Skills：Renderer 仅通过此受限接口访问远端技能。 */
   enterpriseSkills: {
     list: () => Promise<EnterpriseSkillListResponse>
     get: (skillId: string) => Promise<EnterpriseSkillDetail>

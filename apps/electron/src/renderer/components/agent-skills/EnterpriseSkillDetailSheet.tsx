@@ -49,7 +49,7 @@ function EnterpriseSkillDetailBody({ skill, installState, installing, onClose, o
     setLoading(true)
     void window.electronAPI.enterpriseSkills.get(skill.id)
       .then((result) => { if (!cancelled) setDetail(result) })
-      .catch((error) => console.error('[企业 Skills 库] 加载 Skill 详情失败:', error))
+      .catch((error) => console.error('[企业 Skills] 加载 Skill 详情失败:', error))
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [skill.id])
@@ -87,7 +87,7 @@ function EnterpriseSkillDetailBody({ skill, installState, installing, onClose, o
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          <span className="flex items-center gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary"><Building2 size={12} />企业 Skills 库</span>
+          <span className="flex items-center gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary"><Building2 size={12} />企业 Skills</span>
           {installState.isInstalled && <span className="flex items-center gap-1 rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400"><Check size={12} />本地 v{localVersion}</span>}
           {installState.hasUpdate && <span className="rounded-md bg-blue-500/10 px-1.5 py-0.5 text-[11px] font-medium text-blue-600 dark:text-blue-400">有更新</span>}
           <Button className="ml-auto" size="sm" variant={installState.isInstalled && !installState.hasUpdate ? 'secondary' : 'default'} onClick={onInstall} disabled={installing || (installState.isInstalled && !installState.hasUpdate)}>

@@ -1,5 +1,5 @@
 /**
- * 企业 Skills 库服务。所有远端请求和制品文件操作均在 Electron 主进程执行。
+ * 企业 Skills服务。所有远端请求和制品文件操作均在 Electron 主进程执行。
  * Renderer 只接收 DTO，永远不会接触 JWT、预签名 URL 或本地制品路径。
  */
 import { createHash, randomUUID } from 'node:crypto'

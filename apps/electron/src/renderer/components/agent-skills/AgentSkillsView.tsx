@@ -184,7 +184,7 @@ export function AgentSkillsView({
       })
       .catch((error) => {
         if (cancelled) return
-        console.warn('[企业 Skills 库] 获取企业资格失败:', error)
+        console.warn('[企业 Skills] 获取企业资格失败:', error)
         setEnterpriseSkillsAvailability('disabled')
       })
     return () => { cancelled = true }
@@ -264,7 +264,7 @@ export function AgentSkillsView({
       <div className={cn('titlebar-no-drag mx-auto flex w-full max-w-6xl shrink-0 items-center justify-between', embedded ? 'px-4 py-3' : 'px-8 pt-14 pb-4')}>
         <div className="flex items-center gap-2.5">
           <Blocks className="size-6 text-foreground/70" />
-          <h1 className={cn('font-semibold text-foreground', embedded ? 'text-lg' : 'text-2xl')}>{embedded ? (tab === 'enterprise' ? '企业 Skills 库' : tab === 'mcp' ? 'MCP' : 'Skills') : 'Agent 技能'}</h1>
+          <h1 className={cn('font-semibold text-foreground', embedded ? 'text-lg' : 'text-2xl')}>{embedded ? (tab === 'enterprise' ? '企业 Skills' : tab === 'mcp' ? 'MCP' : 'Skills') : 'Agent 技能'}</h1>
         </div>
 
         {!embedded && <Popover open={wsPopoverOpen} onOpenChange={setWsPopoverOpen}>
@@ -335,7 +335,7 @@ export function AgentSkillsView({
           />
           {([
             { value: 'skills' as const, label: 'Skills', count: data.skills.length },
-            ...(enterpriseSkillsEnabled ? [{ value: 'enterprise' as const, label: '企业 Skills 库' }] : []),
+            ...(enterpriseSkillsEnabled ? [{ value: 'enterprise' as const, label: '企业 Skills' }] : []),
             { value: 'mcp' as const, label: 'MCP', count: mcpCount },
             { value: 'memory' as const, label: '记忆', count: memoryCount },
           ]).map(({ value, label, count }) => (
