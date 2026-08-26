@@ -1,6 +1,4 @@
-import { existsSync, statSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
-import { homedir } from 'node:os'
 import {
   TERMINAL_IPC_CHANNELS,
   type AgentTerminalCloseEvent,
@@ -15,6 +13,7 @@ import {
 import { getMainWindow } from './main-window-store'
 import { appendTerminalOutput, type TerminalOutputBuffer } from './terminal-output-buffer'
 import { resolveAgentTerminalCwd } from './terminal-agent-policy'
+import { resolveTerminalCwd } from './terminal-cwd'
 import { terminalRuntimeClient } from './terminal-runtime-client'
 
 const terminals = new Map<string, TerminalState>()
@@ -62,9 +61,7 @@ export async function createTerminal(input: TerminalCreateInput): Promise<Termin
   if (existing) return existing
   const pending = pendingTerminals.get(input.terminalId)
   if (pending) return pending
-  if (input.cwd && (!existsSync(input.cwd) || !statSync(input.cwd).isDirectory())) {
-    throw new Error('终端工作目录不存在或不是目录')
-  }
+  const cwd = resolveTerminalCwd(input.cwd)
 
   // Record ownership before spawning so a concurrent session deletion can cancel it.
   terminalSessionOwners.set(input.terminalId, input.sessionId)
@@ -72,7 +69,7 @@ export async function createTerminal(input: TerminalCreateInput): Promise<Termin
   terminalOutputBuffers.set(input.terminalId, { output: '', sequence: 0 })
   const creation = terminalRuntimeClient.create({
     ...input,
-    cwd: input.cwd || homedir(),
+    cwd,
     cols: normalizeDimension(input.cols),
     rows: normalizeDimension(input.rows),
   }).then((state) => {
