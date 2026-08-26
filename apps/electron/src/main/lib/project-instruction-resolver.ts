@@ -38,6 +38,11 @@ export interface ProjectInstructionManifest {
   totalBytes: number
 }
 
+/** Whether the selected project root contributed an active AGENTS instruction. */
+export function hasRootProjectAgentsInstruction(manifest: ProjectInstructionManifest | undefined): boolean {
+  return manifest?.sources.some((source) => source.kind === 'agents' && source.scopeRoot === '.') ?? false
+}
+
 export interface ResolveProjectInstructionsOptions {
   /** The user-authorized project root. Proma never walks above it. */
   projectRoot: string
