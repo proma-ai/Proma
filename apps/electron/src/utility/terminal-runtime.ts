@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { spawn, type IPty } from 'node-pty'
@@ -26,8 +26,12 @@ type ParentPortLike = {
   start?: () => void
 }
 
+type RuntimeTerminalCreateInput = TerminalCreateInput & {
+  strictCwd?: boolean
+}
+
 type RuntimeRequest =
-  | { type: 'terminal.create'; input: TerminalCreateInput }
+  | { type: 'terminal.create'; input: RuntimeTerminalCreateInput }
   | { type: 'terminal.input'; input: TerminalInput }
   | { type: 'terminal.resize'; input: TerminalResizeInput }
   | { type: 'terminal.kill'; terminalId: string }
@@ -105,7 +109,7 @@ function handleRequest(raw: unknown): void {
   }
 }
 
-function createTerminal(input: TerminalCreateInput): void {
+function createTerminal(input: RuntimeTerminalCreateInput): void {
   const existing = terminals.get(input.terminalId)
   if (existing) {
     runtimePort?.postMessage({ type: 'terminal.created', state: existing.state })
@@ -114,17 +118,18 @@ function createTerminal(input: TerminalCreateInput): void {
   const profile = isTerminalProfile(input.profile) ? input.profile : 'default'
   const shell = resolveShell(profile)
   try {
+    const cwd = getSafeCwd(input.cwd, input.strictCwd === true)
     const pty = spawn(shell.file, shell.args, {
       name: 'xterm-256color',
       cols: normalizeDimension(input.cols),
       rows: normalizeDimension(input.rows),
-      cwd: getSafeCwd(input.cwd),
+      cwd,
       env: { ...process.env, TERM: 'xterm-256color' },
     })
     const state: TerminalState = {
       terminalId: input.terminalId,
       title: shell.title,
-      cwd: getSafeCwd(input.cwd),
+      cwd,
       profile,
       pid: pty.pid,
     }
@@ -223,8 +228,19 @@ function destroyTerminal(terminalId: string): void {
   }
 }
 
-function getSafeCwd(cwd: string | undefined): string {
-  return cwd && existsSync(cwd) ? cwd : homedir()
+function getSafeCwd(cwd: string | undefined, strict: boolean): string {
+  if (isDirectory(cwd)) return cwd
+  if (strict) throw new Error('终端工作目录不存在或不是目录')
+  return homedir()
+}
+
+function isDirectory(path: string | undefined): path is string {
+  if (!path || !existsSync(path)) return false
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
 }
 
 function normalizeDimension(value: number): number {
