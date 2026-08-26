@@ -23,7 +23,6 @@ import {
   SCRATCH_PAD_TITLE,
 } from '@/atoms/tab-atoms'
 import { previewFileMapAtom } from '@/atoms/preview-atoms'
-import { workspaceMemoryEditingStateAtomFamily } from '@/atoms/memory-change-atoms'
 import { getInitialTabSwitchIndex, promoteTabMru } from '@/lib/tab-switching'
 import { appModeAtom } from '@/atoms/app-mode'
 import { activeViewAtom } from '@/atoms/active-view'
@@ -97,7 +96,6 @@ export function TabSwitcher(): ReactElement | null {
   const setAutomationForm = useSetAtom(automationFormAtom)
   const setCurrentConversationId = useSetAtom(currentConversationIdAtom)
   const currentAgentSessionId = useAtomValue(currentAgentSessionIdAtom)
-  const currentMemoryEditingState = useAtomValue(workspaceMemoryEditingStateAtomFamily(currentAgentSessionId ?? ''))
   const setCurrentAgentSessionId = useSetAtom(currentAgentSessionIdAtom)
   const setCurrentAgentWorkspaceId = useSetAtom(currentAgentWorkspaceIdAtom)
   const setUnviewedCompleted = useSetAtom(unviewedCompletedSessionIdsAtom)
@@ -259,9 +257,6 @@ export function TabSwitcher(): ReactElement | null {
 
   const activateCandidate = useCallback(
     (candidate: SwitchCandidate): void => {
-      if (currentAgentSessionId && candidate.id !== currentAgentSessionId && currentMemoryEditingState.dirty) {
-        if (!window.confirm('项目记忆有未保存修改。确定丢弃并切换会话吗？')) return
-      }
       // 快速切换器全局挂载；确认候选时必须退出任务/技能等覆盖视图，
       // 否则 activeTab 已变更而 TabContent 仍不可见。
       setAutomationForm({ open: false, draft: null })
@@ -337,7 +332,6 @@ export function TabSwitcher(): ReactElement | null {
     [
       appMode,
       currentAgentSessionId,
-      currentMemoryEditingState.dirty,
       setActiveTabId,
       setActiveView,
       setScratchPadPanelOpen,

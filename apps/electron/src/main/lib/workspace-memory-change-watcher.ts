@@ -29,10 +29,10 @@ function readSnapshot(path: string): FileSnapshot | undefined {
   } catch { return undefined }
 }
 function firstMeaningfulLine(lines: string[]): string | undefined { return lines.find((line) => line.trim())?.trim().slice(0, 180) }
-function createChange(relativePath: string, before: FileSnapshot | undefined, after: FileSnapshot | undefined): WorkspaceMemoryFileChange | undefined {
+function createChange(relativePath: string, before: FileSnapshot | undefined, after: FileSnapshot | undefined, changedAt: number): WorkspaceMemoryFileChange | undefined {
   if (before?.signature === after?.signature) return undefined
   const kind = !before ? 'created' : !after ? 'deleted' : 'modified'
-  if ((before && before.text === undefined) || (after && after.text === undefined)) return { relativePath, kind, changedAt: Date.now(), diffAvailable: false }
+  if ((before && before.text === undefined) || (after && after.text === undefined)) return { relativePath, kind, changedAt, diffAvailable: false }
   const previous = (before?.text ?? '').split(/\r?\n/)
   const next = (after?.text ?? '').split(/\r?\n/)
   let prefix = 0
@@ -42,7 +42,7 @@ function createChange(relativePath: string, before: FileSnapshot | undefined, af
   const removed = previous.slice(prefix, previous.length - suffix)
   const added = next.slice(prefix, next.length - suffix)
   return {
-    relativePath, kind, changedAt: Date.now(), diffAvailable: true,
+    relativePath, kind, changedAt, diffAvailable: true,
     preview: firstMeaningfulLine(added) ?? firstMeaningfulLine(removed),
     diff: { context: previous.slice(Math.max(0, prefix - 1), prefix), removed: removed.slice(0, MAX_DIFF_LINES), added: added.slice(0, MAX_DIFF_LINES), truncated: removed.length > MAX_DIFF_LINES || added.length > MAX_DIFF_LINES },
   }
@@ -54,8 +54,9 @@ class WorkspaceMemoryWatcher {
   private readonly callbacks = new Set<(change: WorkspaceMemoryFileChange) => void>()
   private readonly directoryWatchers = new Map<string, FSWatcher>()
   private rootParentWatcher?: FSWatcher
-  private readonly pendingPaths = new Map<string, ReturnType<typeof setTimeout>>()
+  private readonly pendingPaths = new Map<string, { timer: ReturnType<typeof setTimeout>; observedAt: number }>()
   private rescanTimer?: ReturnType<typeof setTimeout>
+  private rescanObservedAt?: number
   private closed = false
 
   constructor(private readonly root: string) {
@@ -153,32 +154,41 @@ class WorkspaceMemoryWatcher {
   }
 
   private scheduleRescan(): void {
-    if (this.rescanTimer) clearTimeout(this.rescanTimer)
+    // 保留同一轮 debounce 的首次观察时间，避免 run 开始前的文件变更因延迟上报被误归属到新 run。
+    if (!this.rescanTimer) this.rescanObservedAt = Date.now()
+    else clearTimeout(this.rescanTimer)
     this.rescanTimer = setTimeout(() => {
+      const observedAt = this.rescanObservedAt ?? Date.now()
       this.rescanTimer = undefined
+      this.rescanObservedAt = undefined
       this.watchRootParent()
       this.reconcileDirectoryWatchers()
-      if (isRegularDirectory(this.root)) this.reconcileTree()
+      if (isRegularDirectory(this.root)) this.reconcileTree(observedAt)
     }, CHANGE_DEBOUNCE_MS)
   }
   private schedulePath(relativePath: string): void {
     const existing = this.pendingPaths.get(relativePath)
-    if (existing) clearTimeout(existing)
-    this.pendingPaths.set(relativePath, setTimeout(() => { this.pendingPaths.delete(relativePath); this.reconcilePath(relativePath) }, CHANGE_DEBOUNCE_MS))
+    if (existing) clearTimeout(existing.timer)
+    const observedAt = existing?.observedAt ?? Date.now()
+    const timer = setTimeout(() => {
+      this.pendingPaths.delete(relativePath)
+      this.reconcilePath(relativePath, observedAt)
+    }, CHANGE_DEBOUNCE_MS)
+    this.pendingPaths.set(relativePath, { timer, observedAt })
   }
-  private reconcilePath(relativePath: string): void {
+  private reconcilePath(relativePath: string, observedAt = Date.now()): void {
     if (this.closed || !isRegularDirectory(this.root)) return
     const absolutePath = resolve(this.root, relativePath)
     if (!isSafeRelativePath(relative(this.root, absolutePath))) return
     const after = readSnapshot(absolutePath)
     const before = this.snapshots.get(relativePath)
     if (!after && !before) return
-    const change = createChange(relativePath, before, after)
+    const change = createChange(relativePath, before, after, observedAt)
     if (!change) return
     if (after) this.snapshots.set(relativePath, after); else this.snapshots.delete(relativePath)
     for (const callback of this.callbacks) callback(change)
   }
-  private reconcileTree(): void {
+  private reconcileTree(observedAt = Date.now()): void {
     const currentFiles = new Set<string>()
     let count = 0
     const visit = (directory: string, depth: number): void => {
@@ -193,13 +203,14 @@ class WorkspaceMemoryWatcher {
       }
     }
     visit(this.root, 0)
-    for (const path of new Set([...currentFiles, ...this.snapshots.keys()])) this.reconcilePath(path)
+    for (const path of new Set([...currentFiles, ...this.snapshots.keys()])) this.reconcilePath(path, observedAt)
   }
   private close(): void {
     if (this.closed) return
     this.closed = true
     if (this.rescanTimer) clearTimeout(this.rescanTimer)
-    for (const timer of this.pendingPaths.values()) clearTimeout(timer)
+    this.rescanObservedAt = undefined
+    for (const { timer } of this.pendingPaths.values()) clearTimeout(timer)
     this.pendingPaths.clear()
     this.rootParentWatcher?.close()
     this.rootParentWatcher = undefined

@@ -701,7 +701,7 @@ export interface ElectronAPI {
   readWorkspaceAgentsMd: (workspaceSlug: string) => Promise<import('@proma/shared').SkillFileContent>
 
   /** 写入工作区 AGENTS.md */
-  writeWorkspaceAgentsMd: (workspaceSlug: string, content: string) => Promise<void>
+  writeWorkspaceAgentsMd: (workspaceSlug: string, content: string, expectedContent?: string) => Promise<void>
 
   /** 列出工作区长期记忆文件树 */
   listWorkspaceAutoMemoryFiles: (workspaceSlug: string) => Promise<import('@proma/shared').SkillFileNode[]>
@@ -710,7 +710,7 @@ export interface ElectronAPI {
   readWorkspaceAutoMemoryFile: (workspaceSlug: string, relativePath: string) => Promise<import('@proma/shared').SkillFileContent>
 
   /** 写入工作区长期记忆文件 */
-  writeWorkspaceAutoMemoryFile: (workspaceSlug: string, relativePath: string, content: string) => Promise<void>
+  writeWorkspaceAutoMemoryFile: (workspaceSlug: string, relativePath: string, content: string, expectedContent?: string) => Promise<void>
 
   /** 打开或聚焦当前 workspace 的独立 Memory 编辑窗口，可选定位到某个记忆文件。 */
   openWorkspaceMemoryWindow: (workspaceSlug: string, relativePath?: string) => Promise<void>
@@ -1987,8 +1987,8 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.READ_WORKSPACE_AGENTS_MD, workspaceSlug)
   },
 
-  writeWorkspaceAgentsMd: (workspaceSlug: string, content: string) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.WRITE_WORKSPACE_AGENTS_MD, workspaceSlug, content)
+  writeWorkspaceAgentsMd: (workspaceSlug: string, content: string, expectedContent?: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.WRITE_WORKSPACE_AGENTS_MD, workspaceSlug, content, expectedContent)
   },
 
   listWorkspaceAutoMemoryFiles: (workspaceSlug: string) => {
@@ -1999,8 +1999,8 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.READ_WORKSPACE_AUTO_MEMORY_FILE, workspaceSlug, relativePath)
   },
 
-  writeWorkspaceAutoMemoryFile: (workspaceSlug: string, relativePath: string, content: string) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.WRITE_WORKSPACE_AUTO_MEMORY_FILE, workspaceSlug, relativePath, content)
+  writeWorkspaceAutoMemoryFile: (workspaceSlug: string, relativePath: string, content: string, expectedContent?: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.WRITE_WORKSPACE_AUTO_MEMORY_FILE, workspaceSlug, relativePath, content, expectedContent)
   },
 
   openWorkspaceMemoryWindow: (workspaceSlug: string, relativePath?: string) => {

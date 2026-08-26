@@ -64,7 +64,6 @@ import {
   getPreviewSidePanelTab,
 } from '@/atoms/agent-atoms'
 import type { AgentSidePanelTab, AgentFileSourceFilter, AgentExplorationBranchTab, WorkspaceComponentTab } from '@/atoms/agent-atoms'
-import { WorkspaceMemoryChangeDock } from '@/components/agent-skills/WorkspaceMemoryChangeDock'
 import { WorkspaceMemoryTab } from '@/components/agent-skills/WorkspaceMemoryTab'
 import { AgentSkillsView } from '@/components/agent-skills/AgentSkillsView'
 import { PlanningView } from '@/components/planning/PlanningView'
@@ -628,7 +627,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   // Todo / 日程 / 能力 / 记忆是工作区组件，而不是会话附件；同一项目下切换会话仍保留打开状态。
   const [workspaceComponentTabs, setWorkspaceComponentTabs] = useAtom(workspaceComponentTabsAtomFamily(currentWorkspaceId ?? ''))
   const automationFormOpen = useAtomValue(automationFormAtom).open
-  const isAgentRunning = useAtomValue(agentSessionStreamingStateAtomFamily(sessionId))?.running === true
+  const agentStreamState = useAtomValue(agentSessionStreamingStateAtomFamily(sessionId))
   const memoryChangesMap = useAtomValue(workspaceMemoryChangesAtom)
   const setMemoryNavigationRequest = useSetAtom(memoryFileNavigationAtom)
   const latestMemoryChange = workspaceSlug ? memoryChangesMap.get(workspaceSlug)?.[0] : undefined
@@ -643,18 +642,26 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
         : activeTab
 
   // Agent 对当前项目记忆写入后，自动展开并激活完整编辑器这个独立工作区 Tab。
-  // Watcher 同一事件可因重新挂载被读到多次，按路径和时间戳去重；仅流式 Agent 运行中
-  // 的改动会抢占当前视图，用户在记忆编辑器中的手动保存不会打断其他工作。
+  // 记忆 watcher 按 workspace 缓存最新事件；必须排除本轮开始前的陈旧事件，否则用户
+  // 一发送新消息，旧变更就会随着 running 状态被再次消费并抢占当前视图。
+  // 用户在记忆编辑器中的手动保存仍不会打断其他工作。
   React.useEffect(() => {
-    if (!isAgentRunning || !latestMemoryChange) return
+    const runStartedAt = agentStreamState?.startedAt
+    if (!agentStreamState?.running || !runStartedAt || !latestMemoryChange || latestMemoryChange.changedAt < runStartedAt) return
     const changeId = `${latestMemoryChange.relativePath}:${latestMemoryChange.changedAt}`
     if (lastActivatedMemoryChangeRef.current === changeId) return
+    // 用户已停留在项目记忆中时，不用同一事件重置其阅读/编辑位置；标记为已消费，
+    // 同时避免本地自动保存经 watcher 回传后把用户切回局部 Diff。
+    if (effectiveActiveTab === 'memory') {
+      lastActivatedMemoryChangeRef.current = changeId
+      return
+    }
     lastActivatedMemoryChangeRef.current = changeId
     setWorkspaceComponentTabs((previous) => previous.includes('memory') ? previous : [...previous, 'memory'])
-    setMemoryNavigationRequest({ workspaceSlug: workspaceSlug!, relativePath: latestMemoryChange.relativePath, mode: 'preview' })
+    setMemoryNavigationRequest({ workspaceSlug: workspaceSlug!, relativePath: latestMemoryChange.relativePath, mode: 'change' })
     setIsOpen(true)
     onTabChange('memory')
-  }, [isAgentRunning, latestMemoryChange, onTabChange, setIsOpen, setMemoryNavigationRequest, setWorkspaceComponentTabs, workspaceSlug])
+  }, [agentStreamState?.running, agentStreamState?.startedAt, effectiveActiveTab, latestMemoryChange, onTabChange, setIsOpen, setMemoryNavigationRequest, setWorkspaceComponentTabs, workspaceSlug])
 
   const handleClosePreviewTab = React.useCallback((previewId: string) => {
     const remaining = previewFiles.filter((file) => getPreviewFileId(file) !== previewId)
@@ -1042,7 +1049,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
           ) : effectiveActiveTab === 'memory' ? (
             workspaceSlug ? (
               <div className="min-h-0 flex-1 overflow-hidden p-2">
-                <WorkspaceMemoryTab workspaceSlug={workspaceSlug} embedded />
+                <WorkspaceMemoryTab workspaceSlug={workspaceSlug} sessionId={sessionId} embedded />
               </div>
             ) : (
               <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">等待项目初始化...</div>

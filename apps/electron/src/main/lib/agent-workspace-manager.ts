@@ -1551,12 +1551,17 @@ export function readWorkspaceAgentsMd(workspaceSlug: string): SkillFileContent {
   }
 }
 
-export function writeWorkspaceAgentsMd(workspaceSlug: string, content: string): void {
+export function writeWorkspaceAgentsMd(workspaceSlug: string, content: string, expectedContent?: string): void {
+  const path = getWorkspaceAgentsMdPath(workspaceSlug)
+  const currentContent = existsSync(path) ? readFileSync(path, 'utf-8') : ''
+  if (expectedContent !== undefined && currentContent !== expectedContent) {
+    throw new Error('文件已被外部更新。请刷新后再处理你的修改。')
+  }
   const byteLen = Buffer.byteLength(content, 'utf-8')
   if (byteLen > SKILL_FILE_SIZE_LIMIT) {
     throw new Error(`内容过大（${(byteLen / 1024 / 1024).toFixed(2)} MB），超过 10 MB 限制`)
   }
-  writeTextFileAtomic(getWorkspaceAgentsMdPath(workspaceSlug), content)
+  writeTextFileAtomic(path, content)
   console.log(`[Agent 工作区] 已更新工作区 AGENTS.md: ${workspaceSlug}`)
 }
 
@@ -1588,9 +1593,13 @@ export function readWorkspaceAutoMemoryFile(workspaceSlug: string, relativePath:
   }
 }
 
-export function writeWorkspaceAutoMemoryFile(workspaceSlug: string, relativePath: string, content: string): void {
+export function writeWorkspaceAutoMemoryFile(workspaceSlug: string, relativePath: string, content: string, expectedContent?: string): void {
   const dir = getWorkspaceAutoMemoryDir(workspaceSlug)
   const abs = resolveAutoMemoryFilePath(dir, relativePath)
+  const currentContent = existsSync(abs) ? readFileSync(abs, 'utf-8') : ''
+  if (expectedContent !== undefined && currentContent !== expectedContent) {
+    throw new Error('文件已被外部更新。请刷新后再处理你的修改。')
+  }
   const byteLen = Buffer.byteLength(content, 'utf-8')
   if (byteLen > SKILL_FILE_SIZE_LIMIT) {
     throw new Error(`内容过大（${(byteLen / 1024 / 1024).toFixed(2)} MB），超过 10 MB 限制`)

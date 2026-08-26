@@ -2746,8 +2746,8 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(
     AGENT_IPC_CHANNELS.WRITE_WORKSPACE_AGENTS_MD,
-    async (_, workspaceSlug: string, content: string): Promise<void> => {
-      writeWorkspaceAgentsMd(workspaceSlug, content)
+    async (_, workspaceSlug: string, content: string, expectedContent?: string): Promise<void> => {
+      writeWorkspaceAgentsMd(workspaceSlug, content, expectedContent)
     }
   )
 
@@ -2767,8 +2767,8 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(
     AGENT_IPC_CHANNELS.WRITE_WORKSPACE_AUTO_MEMORY_FILE,
-    async (_, workspaceSlug: string, relativePath: string, content: string): Promise<void> => {
-      writeWorkspaceAutoMemoryFile(workspaceSlug, relativePath, content)
+    async (_, workspaceSlug: string, relativePath: string, content: string, expectedContent?: string): Promise<void> => {
+      writeWorkspaceAutoMemoryFile(workspaceSlug, relativePath, content, expectedContent)
     }
   )
 
