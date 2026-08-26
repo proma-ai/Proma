@@ -44,14 +44,40 @@ const AGENT_ACTION_HINTS: Record<PlanningTab, string> = {
   automations: '创建、调整、暂停或删除定时任务',
 }
 
-function CreateShortcutHint(): React.ReactElement | null {
+interface CreateShortcutHintProps {
+  compact?: boolean
+}
+
+interface PlanningCreateButtonProps {
+  label: string
+  onClick: () => void
+}
+
+function CreateShortcutHint({ compact = false }: CreateShortcutHintProps = {}): React.ReactElement | null {
   return (
     <ShortcutKeycaps
       shortcutId="new-session"
-      className="ml-1.5"
-      keycapClassName="border-primary-foreground/30 bg-primary-foreground/10 text-primary-foreground shadow-none"
+      className={compact ? 'ml-1' : 'ml-1.5'}
+      keycapClassName={cn(
+        'border-primary-foreground/30 bg-primary-foreground/10 text-primary-foreground shadow-none',
+        compact && 'h-5 min-w-5 rounded-[3px] px-1 text-[10px]',
+      )}
       separatorClassName="text-primary-foreground/70"
     />
+  )
+}
+
+function PlanningCreateButton({ label, onClick }: PlanningCreateButtonProps): React.ReactElement {
+  return (
+    <button
+      type="button"
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={onClick}
+      aria-keyshortcuts="Meta+N Control+N"
+      className="relative inline-flex h-8 items-center gap-1 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground shadow-sm transition-[transform,background-color] hover:bg-primary/90 active:scale-[0.96] after:absolute after:-inset-1 after:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+    >
+      <Plus size={14} /> {label}<CreateShortcutHint compact />
+    </button>
   )
 }
 
@@ -98,26 +124,8 @@ export function PlanningView({
           <p className={cn('text-muted-foreground', embedded ? 'mt-0.5 text-xs' : 'mt-1 text-sm')}>{visibleTab === 'todos' ? '今天要完成什么？' : visibleTab === 'calendar' ? '安排你的时间' : '持续运行的自动任务'}</p>
         </div>
         <div className="relative z-[1] titlebar-no-drag flex items-center gap-2">
-          {visibleTab === 'todos' && (
-            <button
-              type="button"
-              onClick={triggerTodoCreate}
-              aria-keyshortcuts="Meta+N Control+N"
-              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 active:scale-[0.96]"
-            >
-              <Plus size={16} /> 新建 Todo<CreateShortcutHint />
-            </button>
-          )}
-          {visibleTab === 'calendar' && (
-            <button
-              type="button"
-              onClick={triggerCalendarCreate}
-              aria-keyshortcuts="Meta+N Control+N"
-              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 active:scale-[0.96]"
-            >
-              <Plus size={16} /> 新建日程<CreateShortcutHint />
-            </button>
-          )}
+          {visibleTab === 'todos' && <PlanningCreateButton label="新建 Todo" onClick={triggerTodoCreate} />}
+          {visibleTab === 'calendar' && <PlanningCreateButton label="新建日程" onClick={triggerCalendarCreate} />}
           {visibleTab === 'automations' && automations.length > 0 && (
             <button
               type="button"
