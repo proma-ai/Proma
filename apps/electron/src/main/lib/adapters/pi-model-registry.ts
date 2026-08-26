@@ -12,9 +12,11 @@ import {
   extractZhipuCodingTeamApiToken,
   inferContextWindow,
   inferCodexAlignedGPT5ContextWindow,
+  resolveChannelReasoningCapability,
   resolveReasoningCapability,
   resolveReasoningProfile,
   type CodexOAuthCredentials,
+  type ChannelModelReasoningConfig,
   type XaiOAuthCredentials,
   type ReasoningCapability,
   type ReasoningTransport,
@@ -123,6 +125,33 @@ function compilePiReasoningCapabilities(
         },
         thinkingLevelMap,
       }
+  }
+}
+
+/** 将频道模型声明编译为通用 OpenAI reasoning_effort 能力。 */
+export function compilePiChannelReasoningCapabilities(
+  api: Api,
+  config: ChannelModelReasoningConfig | undefined,
+): Pick<PiModelDefaults, 'compat' | 'thinkingLevelMap'> | undefined {
+  if (api !== 'openai-completions' && api !== 'openai-responses') return undefined
+  const capability = resolveChannelReasoningCapability(config)
+  if (!capability || !config) return undefined
+
+  const thinkingLevelMap: Partial<Record<(typeof capability.levels)[number], string | null>> = {}
+  for (const level of capability.levels) {
+    const mapped = config.thinkingLevelMap?.[level]
+    if (typeof mapped === 'string' || mapped === null) thinkingLevelMap[level] = mapped
+  }
+
+  return {
+    compat: {
+      supportsReasoningEffort: true,
+      // Ollama/llama.cpp 等兼容端点可能无法把复杂工具 schema 编译为 grammar。
+      supportsStrictMode: false,
+    },
+    ...(Object.keys(thinkingLevelMap).length > 0 && {
+      thinkingLevelMap: thinkingLevelMap as PiCatalogModel['thinkingLevelMap'],
+    }),
   }
 }
 
@@ -567,6 +596,7 @@ export async function resolvePiVisionRelayRoute(
 export async function resolvePiReasoningCapability(
   provider: ProviderType,
   modelId: string | undefined,
+  channelReasoning?: ChannelModelReasoningConfig,
 ): Promise<ReasoningCapability | undefined> {
   const resolvedModelId = stripLegacyAgentSdkContextSuffix(modelId)
   const catalogModel = resolvedModelId
@@ -578,8 +608,18 @@ export async function resolvePiReasoningCapability(
       ? 'openai-responses'
       : toReasoningTransport(resolvePiApi(provider, catalogModel?.api)),
   })
+  const profileCapability = resolveReasoningCapability({ profile })
+  // 内置 profile 优先：白名单模型行为不变
+  if (profileCapability) return profileCapability
+
+  const api = resolvePiApi(provider, catalogModel?.api)
+  // profile 未命中时回退到频道级推理声明（仅 OpenAI 兼容 transport）
+  if (api === 'openai-completions' || api === 'openai-responses') {
+    const channelCapability = resolveChannelReasoningCapability(channelReasoning)
+    if (channelCapability) return channelCapability
+  }
+
   return resolveReasoningCapability({
-    profile,
     catalog: catalogModel && {
       reasoning: catalogModel.reasoning,
       thinkingLevelMap: catalogModel.thinkingLevelMap,
@@ -592,6 +632,10 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
   const codexAlignedCapabilities = getCodexAlignedGPT5Capabilities(input.model)
   const api = resolvePiApi(input.provider, catalogModel?.api)
   const providerSpecificCapabilities = compilePiReasoningCapabilities(api, input.model)
+  // 内置 profile 能力优先；未命中时编译频道级推理声明作为 fallback
+  const channelSpecificCapabilities = providerSpecificCapabilities
+    ? undefined
+    : compilePiChannelReasoningCapabilities(api, input.modelReasoning)
   const glmModelId = input.model?.toLowerCase()
   const isVolcengineGlm5x = (input.provider === 'doubao' || input.provider === 'doubao-api' || input.provider === 'ark-coding-plan')
     && (glmModelId === 'glm-5.2' || glmModelId === 'glm-5.3')
@@ -601,12 +645,13 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
   const shouldForceAdaptiveThinking = shouldForcePiAdaptiveThinking(api, catalogModel)
   return {
     api,
-    reasoning: catalogModel?.reasoning ?? true,
+    reasoning: channelSpecificCapabilities ? true : (catalogModel?.reasoning ?? true),
     thinkingLevelMap: providerSpecificCapabilities?.thinkingLevelMap
+      ?? channelSpecificCapabilities?.thinkingLevelMap
       ?? catalogModel?.thinkingLevelMap,
     compat: shouldForceAdaptiveThinking
-      ? { ...providerSpecificCapabilities?.compat, forceAdaptiveThinking: true }
-      : providerSpecificCapabilities?.compat,
+      ? { ...providerSpecificCapabilities?.compat, ...channelSpecificCapabilities?.compat, forceAdaptiveThinking: true }
+      : (providerSpecificCapabilities?.compat ?? channelSpecificCapabilities?.compat),
     input: catalogModel ? [...catalogModel.input] : ['text', 'image'],
     cost: catalogModel ? { ...catalogModel.cost } : { ...ZERO_MODEL_COST },
     // Codex 对齐策略优先；其他模型仍保留 catalog 与 shared inference 中更大的已验证能力。

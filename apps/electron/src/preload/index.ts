@@ -288,6 +288,9 @@ export interface ElectronAPI {
   /** 获取所有渠道列表（apiKey 保持加密态） */
   listChannels: () => Promise<Channel[]>
 
+  /** 订阅来自其他窗口的渠道配置变化。 */
+  onChannelsChanged: (callback: (channels: Channel[]) => void) => () => void
+
   /** 创建渠道（apiKey 为明文，主进程加密） */
   createChannel: (input: ChannelCreateInput) => Promise<Channel>
 
@@ -1435,6 +1438,12 @@ const electronAPI: ElectronAPI = {
   // 渠道管理
   listChannels: () => {
     return ipcRenderer.invoke(CHANNEL_IPC_CHANNELS.LIST)
+  },
+
+  onChannelsChanged: (callback: (channels: Channel[]) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, channels: Channel[]): void => callback(channels)
+    ipcRenderer.on(CHANNEL_IPC_CHANNELS.CHANGED, listener)
+    return () => ipcRenderer.removeListener(CHANNEL_IPC_CHANNELS.CHANGED, listener)
   },
 
   createChannel: (input: ChannelCreateInput) => {

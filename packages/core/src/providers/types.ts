@@ -220,6 +220,8 @@ export interface StreamRequestInput {
   readImageAttachments: ImageAttachmentReader
   /** 是否启用思考模式（各适配器根据供应商 API 自行转换） */
   thinkingEnabled?: boolean
+  /** 已按频道模型配置映射的线上推理强度；null 表示不发送。 */
+  reasoningEffort?: string | null
   /** 工具定义列表（可选，启用 function calling） */
   tools?: ToolDefinition[]
   /** 工具续接消息（tool use 循环中，前一轮的 tool_use + tool_result） */

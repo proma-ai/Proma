@@ -32,6 +32,7 @@ import {
   inputToolbarSendButtonClass,
 } from '@/components/ai-elements/input-toolbar-styles'
 import { Button } from '@/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   Tooltip,
   TooltipContent,
@@ -42,16 +43,19 @@ import {
   conversationDraftsAtom,
   conversationDraftSyncVersionsAtom,
   conversationDraftSyncVersionAtomFamily,
+  channelsAtom,
 } from '@/atoms/chat-atoms'
 import type { PendingAttachment } from '@/atoms/chat-atoms'
 import { quotedSelectionMapAtom } from '@/atoms/preview-atoms'
 import {
   useConversationModel,
   useConversationThinkingEnabled,
+  useConversationReasoningLevel,
 } from '@/hooks/useConversationSettings'
 import { cn } from '@/lib/utils'
 import { fileToBase64, formatFileNames } from '@/lib/file-utils'
-import { MAX_ATTACHMENT_SIZE } from '@proma/shared'
+import { MAX_ATTACHMENT_SIZE, normalizeReasoningCapabilityLevel, resolveChannelReasoningCapability } from '@proma/shared'
+import type { AgentThinkingLevel } from '@proma/shared'
 import { sendWithCmdEnterAtom } from '@/atoms/shortcut-atoms'
 import { toast } from 'sonner'
 
@@ -70,6 +74,16 @@ interface ChatInputProps {
   onStop: () => void
   /** 清除上下文回调 */
   onClearContext?: () => void
+}
+
+const REASONING_LEVEL_LABELS: Record<AgentThinkingLevel, string> = {
+  off: '关闭',
+  minimal: '最小',
+  low: '低',
+  medium: '中',
+  high: '高',
+  xhigh: '极高',
+  max: '最大',
 }
 
 export function ChatInput({ conversationId, streaming, pendingAttachments, onSetPendingAttachments, onSend, onStop, onClearContext }: ChatInputProps): React.ReactElement {
@@ -105,6 +119,31 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
 
   const [selectedModel] = useConversationModel()
   const [thinkingEnabled, setThinkingEnabled] = useConversationThinkingEnabled()
+  const [reasoningLevel, setReasoningLevel] = useConversationReasoningLevel()
+  const channels = useAtomValue(channelsAtom)
+  const reasoningCapability = React.useMemo(() => {
+    if (!selectedModel) return undefined
+    const config = channels
+      .find((channel) => channel.id === selectedModel.channelId)
+      ?.models.find((model) => model.id === selectedModel.modelId)
+      ?.reasoning
+    return resolveChannelReasoningCapability(config)
+  }, [channels, selectedModel])
+  const availableReasoningLevels: AgentThinkingLevel[] = reasoningCapability?.levels.filter((level) => level !== 'off') ?? []
+  const effectiveReasoningLevel = normalizeReasoningCapabilityLevel(
+    reasoningCapability,
+    reasoningLevel ?? reasoningCapability?.defaultLevel,
+  )
+  // displayedReasoningLevel 是实际生效的档位（用于请求发送）。
+  // selectDisplayValue 是 Select 当前展示值：当生效档位不在可选列表中（如 defaultLevel 为 off，
+  // 或用户尚未选择且默认值被过滤掉）时回退为 undefined，使 SelectValue 显示「推理强度」占位文字。
+  const displayedReasoningLevel = effectiveReasoningLevel === 'off'
+    ? reasoningCapability?.defaultLevel
+    : effectiveReasoningLevel
+  const selectDisplayValue = displayedReasoningLevel
+    && availableReasoningLevels.includes(displayedReasoningLevel)
+    ? displayedReasoningLevel
+    : undefined
   const setPendingAttachments = onSetPendingAttachments
   const [isDragOver, setIsDragOver] = React.useState(false)
   const chatVoiceInputId = React.useId()
@@ -349,7 +388,13 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
                 inputToolbarButtonClass,
                 thinkingEnabled && inputToolbarActiveButtonClass
               )}
-              onClick={() => setThinkingEnabled(!thinkingEnabled)}
+              onClick={() => {
+                const next = !thinkingEnabled
+                setThinkingEnabled(next)
+                if (next && reasoningCapability) {
+                  setReasoningLevel(displayedReasoningLevel ?? reasoningCapability.defaultLevel)
+                }
+              }}
             >
               <Brain className="size-5" />
             </Button>
@@ -360,6 +405,29 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
         </Tooltip>
       ),
     },
+    ...(reasoningCapability && availableReasoningLevels.length > 0 ? [{
+      key: 'reasoning-level',
+      node: (
+        <Select
+          value={selectDisplayValue}
+          onValueChange={(level) => setReasoningLevel(level as AgentThinkingLevel)}
+          disabled={!thinkingEnabled}
+        >
+          <SelectTrigger
+            className="h-8 w-auto min-w-[52px] border-0 bg-transparent px-2 text-xs font-medium text-foreground/70 shadow-none hover:bg-muted/50 hover:text-foreground focus:ring-0 disabled:opacity-40"
+            aria-label="推理档位"
+            title={thinkingEnabled ? '选择当前对话的推理档位' : '开启思考后可选择推理档位'}
+          >
+            <SelectValue placeholder="推理强度" />
+          </SelectTrigger>
+          <SelectContent align="center">
+            {availableReasoningLevels.map((level) => (
+              <SelectItem key={level} value={level}>{REASONING_LEVEL_LABELS[level]}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ),
+    }] : []),
     {
       key: 'attach',
       node: (
@@ -385,7 +453,7 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
     { key: 'tools', node: <ToolSelectorPopover /> },
     { key: 'context', node: <ContextSettingsPopover /> },
     { key: 'clear', node: <ClearContextButton onClick={onClearContext} /> },
-  ], [handleOpenFileDialog, thinkingEnabled, setThinkingEnabled, onClearContext, chatVoiceInputId])
+  ], [availableReasoningLevels, chatVoiceInputId, selectDisplayValue, handleOpenFileDialog, onClearContext, reasoningCapability, setReasoningLevel, setThinkingEnabled, thinkingEnabled])
 
   const trailingNode = streaming ? (
     <Tooltip>

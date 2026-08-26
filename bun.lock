@@ -36,7 +36,7 @@
     },
     "apps/electron": {
       "name": "@proma/electron",
-      "version": "0.17.68",
+      "version": "0.17.71",
       "dependencies": {
         "@earendil-works/pi-agent-core": "0.84.2",
         "@earendil-works/pi-ai": "0.84.2",
@@ -157,7 +157,7 @@
     },
     "packages/core": {
       "name": "@proma/core",
-      "version": "0.2.17",
+      "version": "0.2.18",
       "dependencies": {
         "@proma/shared": "workspace:*",
         "highlight.js": "^11.11.1",
@@ -184,7 +184,7 @@
     },
     "packages/shared": {
       "name": "@proma/shared",
-      "version": "0.1.63",
+      "version": "0.1.64",
       "devDependencies": {
         "typescript": "^5.0.0",
       },

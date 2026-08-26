@@ -202,6 +202,11 @@ export class OpenAIAdapter implements ProviderAdapter {
       stream: true,
     }
 
+    // 自建模型推理强度：按频道配置映射后的 effort 字符串写入请求体
+    if (typeof input.reasoningEffort === 'string') {
+      bodyObj.reasoning_effort = input.reasoningEffort
+    }
+
     // 工具定义
     if (input.tools && input.tools.length > 0) {
       bodyObj.tools = toOpenAITools(input.tools)

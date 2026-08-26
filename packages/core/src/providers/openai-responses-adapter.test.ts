@@ -48,6 +48,20 @@ describe('OpenAIResponsesAdapter', () => {
     ])
   })
 
+  test('Given 自建模型推理档位 When buildStreamRequest Then 编码 reasoning effort', () => {
+    const request = adapter.buildStreamRequest({
+      baseUrl: 'http://localhost:8001/v1',
+      apiKey: 'test',
+      modelId: 'qwen3.8-27b-q8',
+      history: [],
+      userMessage: '你好',
+      readImageAttachments: () => [],
+      reasoningEffort: 'high',
+    })
+
+    expect(JSON.parse(request.body)).toMatchObject({ reasoning: { effort: 'high' } })
+  })
+
   test('Given Responses 文本 delta When parseSSELine Then 输出 chunk', () => {
     expect(adapter.parseSSELine(JSON.stringify({ type: 'response.output_text.delta', delta: 'hi' }))).toEqual([
       { type: 'chunk', delta: 'hi' },

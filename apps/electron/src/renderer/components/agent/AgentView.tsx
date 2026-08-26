@@ -59,6 +59,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
+import { createReasoningCapabilityKey, resolveConversationReasoningCapability } from '@/lib/channel-model-reasoning'
 import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-registry'
 import { registerShortcut } from '@/lib/shortcut-registry'
 import { supportsChannelPlanQuota } from '@/lib/channel-plan-quota'
@@ -302,7 +303,8 @@ function normalizeOpenAIThinkingLevel(
   level: AgentThinkingLevel | undefined,
   levels: readonly OpenAIThinkingLevel[],
 ): OpenAIThinkingLevel {
-  if (level === 'minimal') return 'low'
+  // minimal 档位仅在模型声明支持时保留，否则降级为 low（兼容 GPT-5 标准档位）
+  if (level === 'minimal' && !levels.includes('minimal')) return 'low'
   // max 会话设置在切到非 GPT-5.6 时由主进程降级为 xhigh；UI 同步展示有效档位。
   if (level === 'max' && !levels.includes('max')) return 'xhigh'
   return levels.includes(level as OpenAIThinkingLevel) ? level as OpenAIThinkingLevel : 'off'
@@ -311,6 +313,8 @@ function normalizeOpenAIThinkingLevel(
 interface CodexThinkingConfig {
   thinkingLevel: AgentThinkingLevel
   levels: readonly OpenAIThinkingLevel[]
+  /** 开启思考时的默认档位，用于点击开关时恢复初始档位。 */
+  defaultLevel: AgentThinkingLevel
   onThinkingLevelChange: (level: AgentThinkingLevel) => void
 }
 
@@ -318,6 +322,43 @@ interface AgentThinkingPopoverProps {
   agentThinking: import('@proma/shared').ThinkingConfig | undefined
   onToggle: () => void
   codexConfig?: CodexThinkingConfig
+}
+
+/** Agent 输入栏的推理档位下拉选择器，按当前能力声明渲染可选档位。 */
+interface AgentReasoningLevelSelectProps {
+  thinkingLevel: AgentThinkingLevel
+  levels: readonly AgentThinkingLevel[]
+  enabled: boolean
+  onThinkingLevelChange: (level: AgentThinkingLevel) => void
+}
+
+function AgentReasoningLevelSelect({
+  thinkingLevel,
+  levels,
+  enabled,
+  onThinkingLevelChange,
+}: AgentReasoningLevelSelectProps): React.ReactElement {
+  const normalizedLevel = normalizeOpenAIThinkingLevel(thinkingLevel, levels)
+  return (
+    <Select
+      value={normalizedLevel}
+      onValueChange={(level) => onThinkingLevelChange(level as AgentThinkingLevel)}
+      disabled={!enabled}
+    >
+      <SelectTrigger
+        className="h-8 w-auto min-w-[52px] border-0 bg-transparent px-2 text-xs font-medium text-foreground/70 shadow-none hover:bg-muted/50 hover:text-foreground focus:ring-0 disabled:opacity-40"
+        aria-label="推理档位"
+        title={enabled ? '选择当前会话的推理档位' : '开启思考后可选择推理档位'}
+      >
+        <SelectValue>{OPENAI_THINKING_LABELS[normalizedLevel]}</SelectValue>
+      </SelectTrigger>
+      <SelectContent align="center">
+        {levels.filter((level) => level !== 'off').map((level) => (
+          <SelectItem key={level} value={level}>{OPENAI_THINKING_LABELS[level]}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
 }
 
 function AgentThinkingPopover({ agentThinking, onToggle, codexConfig }: AgentThinkingPopoverProps): React.ReactElement {
@@ -352,7 +393,7 @@ function AgentThinkingPopover({ agentThinking, onToggle, codexConfig }: AgentThi
   const handleButtonClick = (): void => {
     if (codexConfig) {
       if (!supportsThinkingToggle) return
-      codexConfig.onThinkingLevelChange(isEnabled ? 'off' : 'high')
+      codexConfig.onThinkingLevelChange(isEnabled ? 'off' : codexConfig.defaultLevel)
       return
     }
     onToggle()
@@ -737,10 +778,11 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
     ? stableChannel.id
     : null
   const planQuotaChannelUpdatedAt = planQuotaChannelId ? stableChannel?.updatedAt : undefined
-  const agentChannelProvider = React.useMemo(
-    () => globalChannels.find((c) => c.id === agentChannelId)?.provider,
+  const agentChannel = React.useMemo(
+    () => globalChannels.find((channel) => channel.id === agentChannelId),
     [globalChannels, agentChannelId],
   )
+  const agentChannelProvider = agentChannel?.provider
   const isCodexFastModeAvailable = hasSessionMeta
     && agentChannelProvider === 'openai-codex'
     && isCodexFastModeSupportedModel(agentModelId ?? undefined)
@@ -751,7 +793,15 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
       transport: inferReasoningTransport(agentChannelProvider),
     })
     : undefined
-  const reasoningCapabilityKey = `${agentChannelId ?? ''}:${agentModelId ?? ''}`
+  // 查找当前模型的频道级推理声明，用于 capability 缓存键与三级优先级解析
+  const modelReasoningConfig = agentChannel?.models.find((model) => model.id === agentModelId)?.reasoning
+  // 缓存键包含 channelId/modelId/频道更新时间/推理配置，任一变化时触发重新解析
+  const reasoningCapabilityKey = createReasoningCapabilityKey({
+    channelId: agentChannelId,
+    modelId: agentModelId,
+    channelUpdatedAt: agentChannel?.updatedAt,
+    reasoning: modelReasoningConfig,
+  })
   const [piReasoningCapability, setPiReasoningCapability] = React.useState<{
     key: string
     capability: ReasoningCapability | undefined
@@ -776,9 +826,15 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
     return () => { cancelled = true }
   }, [agentChannelId, agentModelId, hasSessionMeta, reasoningCapabilityKey])
 
-  const effectiveReasoningCapability = piReasoningCapability.key === reasoningCapabilityKey
-    ? piReasoningCapability.capability ?? resolveReasoningCapability({ profile: reasoningProfile })
-    : resolveReasoningCapability({ profile: reasoningProfile })
+  // 三级优先级解析推理能力：内置 profile > 频道声明 > IPC 远端目录
+  const profileReasoningCapability = resolveReasoningCapability({ profile: reasoningProfile })
+  const effectiveReasoningCapability = resolveConversationReasoningCapability({
+    profile: profileReasoningCapability,
+    channelReasoning: modelReasoningConfig,
+    remote: piReasoningCapability.key === reasoningCapabilityKey
+      ? piReasoningCapability.capability
+      : undefined,
+  })
   const isSessionThinkingAvailable = Boolean(effectiveReasoningCapability)
   const openAIThinkingLevels = effectiveReasoningCapability?.levels ?? OPENAI_STANDARD_THINKING_LEVELS
   const fallbackOpenAIThinkingLevel: AgentThinkingLevel = agentEffort === 'max'
@@ -789,6 +845,9 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
     ? normalizeReasoningLevel(reasoningProfile, persistedReasoningLevel ?? fallbackOpenAIThinkingLevel)
     : normalizeReasoningCapabilityLevel(effectiveReasoningCapability, persistedReasoningLevel ?? fallbackOpenAIThinkingLevel)
   const openAIThinkingLevel = normalizedReasoningLevel ?? (persistedReasoningLevel ?? fallbackOpenAIThinkingLevel)
+  // UI 展示档位：将实际档位规范化到可选列表内；档位选择器在思考关闭时禁用
+  const displayedReasoningLevel = normalizeOpenAIThinkingLevel(openAIThinkingLevel, openAIThinkingLevels)
+  const reasoningLevelSelectionEnabled = !openAIThinkingLevels.includes('off') || displayedReasoningLevel !== 'off'
 
   // Pi runtime supports all protocols, so any enabled channel with an enabled model is available.
   const hasAvailableModel = React.useMemo(
@@ -2815,11 +2874,25 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
           codexConfig={isSessionThinkingAvailable ? {
             thinkingLevel: openAIThinkingLevel,
             levels: openAIThinkingLevels,
+            // 开启思考时恢复的默认档位，取自能力声明的 defaultLevel
+            defaultLevel: effectiveReasoningCapability?.defaultLevel ?? 'high',
             onThinkingLevelChange: (level) => { void updateReasoningLevel(level) },
           } : undefined}
         />
       ),
     },
+    // 推理档位选择器：仅在有推理能力时显示，与思考开关联动
+    ...(isSessionThinkingAvailable ? [{
+      key: 'reasoning-level',
+      node: (
+        <AgentReasoningLevelSelect
+          thinkingLevel={displayedReasoningLevel}
+          levels={openAIThinkingLevels}
+          enabled={reasoningLevelSelectionEnabled}
+          onThinkingLevelChange={(level) => { void updateReasoningLevel(level) }}
+        />
+      ),
+    }] : []),
     { key: 'speech', node: <SpeechButton className={inputToolbarButtonClass} voiceInputId={agentVoiceInputId} /> },
     {
       key: 'attach-content',
@@ -2862,6 +2935,8 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
     isSessionThinkingAvailable,
     openAIThinkingLevel,
     openAIThinkingLevels,
+    displayedReasoningLevel,
+    reasoningLevelSelectionEnabled,
     updateReasoningLevel,
     backgroundWaiting,
     sessionId,

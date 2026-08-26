@@ -5,6 +5,8 @@
  * API Key 使用 Electron safeStorage 加密后存储在本地配置文件中。
  */
 
+import type { AgentThinkingLevel } from './agent'
+
 /**
  * 支持的 AI 供应商类型
  */
@@ -265,6 +267,15 @@ export function isXaiCredentialExpired(credentials: XaiOAuthCredentials, skewMs 
 /**
  * 渠道中的模型配置
  */
+export interface ChannelModelReasoningConfig {
+  /** UI 可选档位；顺序即滑杆展示顺序。 */
+  levels: AgentThinkingLevel[]
+  /** 新会话默认档位，必须包含在 levels 中。 */
+  defaultLevel: AgentThinkingLevel
+  /** 档位到 OpenAI reasoning_effort 的可选映射；null 表示不发送。 */
+  thinkingLevelMap?: Partial<Record<AgentThinkingLevel, string | null>>
+}
+
 export interface ChannelModel {
   /** 模型唯一标识（如 claude-sonnet-4-5-20250929） */
   id: string
@@ -274,6 +285,8 @@ export interface ChannelModel {
   enabled: boolean
   /** 来源标记：手动添加的模型在拉取供应商列表时保留，不会被覆盖清除 */
   source?: 'manual' | 'fetched'
+  /** 自建 OpenAI 兼容模型的推理档位声明。 */
+  reasoning?: ChannelModelReasoningConfig
 }
 
 /**
@@ -470,6 +483,8 @@ export interface ChannelPlanQuotaResult {
 export const CHANNEL_IPC_CHANNELS = {
   /** 获取所有渠道列表 */
   LIST: 'channel:list',
+  /** 渠道配置变化后向所有渲染窗口广播最新列表 */
+  CHANGED: 'channel:changed',
   /** 创建渠道 */
   CREATE: 'channel:create',
   /** 更新渠道 */

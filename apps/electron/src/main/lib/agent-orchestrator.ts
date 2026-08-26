@@ -1378,7 +1378,9 @@ export class AgentOrchestrator {
       const maxTurns = appSettings.agentMaxTurns && appSettings.agentMaxTurns > 0
         ? appSettings.agentMaxTurns
         : undefined
-      const piReasoningCapability = await resolvePiReasoningCapability(channel.provider, selectedModelId)
+      // 查找当前模型的频道级推理声明，传入能力解析以支持自建模型推理档位
+      const modelReasoning = channel.models.find((model) => model.id === selectedModelId)?.reasoning
+      const piReasoningCapability = await resolvePiReasoningCapability(channel.provider, selectedModelId, modelReasoning)
       const piThinkingLevel = resolvePiThinkingLevel(appSettings, sessionMeta, channel.provider, selectedModelId, piReasoningCapability)
       const projectInstructions = workspaceSlug
         ? (() => {
@@ -1505,6 +1507,8 @@ export class AgentOrchestrator {
         provider: channel.provider,
         channelId,
         channelName: channel.name,
+        // 将频道推理声明透传给 Pi 运行时，供模型注册时编译为 reasoning_effort 能力
+        ...(modelReasoning && { modelReasoning }),
         proxyUrl,
         runtimeEnv,
         ...(maxTurns != null && { maxTurns }),

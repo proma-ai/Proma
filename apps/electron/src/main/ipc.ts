@@ -1335,6 +1335,14 @@ export function registerIpcHandlers(): void {
 
   // ===== 渠道管理相关 =====
 
+  /** 渠道增删改后向所有渲染窗口广播最新列表，保证多窗口配置同步。 */
+  const broadcastChannelsChanged = (): void => {
+    const channels = listChannels()
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send(CHANNEL_IPC_CHANNELS.CHANGED, channels)
+    }
+  }
+
   // 获取所有渠道（apiKey 保持加密态）
   ipcMain.handle(
     CHANNEL_IPC_CHANNELS.LIST,
@@ -1347,7 +1355,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     CHANNEL_IPC_CHANNELS.CREATE,
     async (_, input: ChannelCreateInput): Promise<Channel> => {
-      return createChannel(input)
+      const channel = createChannel(input)
+      broadcastChannelsChanged()
+      return channel
     }
   )
 
@@ -1355,7 +1365,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     CHANNEL_IPC_CHANNELS.UPDATE,
     async (_, id: string, input: ChannelUpdateInput): Promise<Channel> => {
-      return updateChannel(id, input)
+      const channel = updateChannel(id, input)
+      broadcastChannelsChanged()
+      return channel
     }
   )
 
@@ -1363,7 +1375,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     CHANNEL_IPC_CHANNELS.DELETE,
     async (_, id: string): Promise<void> => {
-      return deleteChannel(id)
+      deleteChannel(id)
+      broadcastChannelsChanged()
     }
   )
 
@@ -3030,7 +3043,9 @@ export function registerIpcHandlers(): void {
       if (!channelId || !modelId) return undefined
       const channel = getChannelById(channelId)
       if (!channel) return undefined
-      return resolvePiReasoningCapability(channel.provider, modelId)
+      // 查找当前模型的频道级推理声明，连同 provider/modelId 一起传入能力解析
+      const channelReasoning = channel.models.find((model) => model.id === modelId)?.reasoning
+      return resolvePiReasoningCapability(channel.provider, modelId, channelReasoning)
     }
   )
 

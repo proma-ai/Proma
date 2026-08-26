@@ -22,13 +22,23 @@ import {
   Zap,
   Download,
   Search,
+  Settings2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useSetAtom } from 'jotai'
 import { channelFormDirtyAtom } from '@/atoms/settings-tab'
+import { channelsAtom } from '@/atoms/chat-atoms'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   PROVIDER_DEFAULT_URLS,
   PROVIDER_LABELS,
@@ -42,11 +52,19 @@ import type {
   ChannelCreateInput,
   ChannelModel,
   ChannelTestResult,
+  AgentThinkingLevel,
   CodexOAuthDeviceCode,
   FetchModelsResult,
   ProviderType,
   XaiOAuthDeviceCode,
 } from '@proma/shared'
+import {
+  addChannelReasoningLevel,
+  CHANNEL_REASONING_LEVELS,
+  createChannelReasoningConfig,
+  removeChannelReasoningLevel,
+  updateChannelReasoningEffort,
+} from '@/lib/channel-model-reasoning'
 import {
   normalizeBaseUrl,
   resolveAnthropicMessagesUrl,
@@ -123,6 +141,27 @@ const ANTHROPIC_PROTOCOL_PROVIDERS: ReadonlySet<ProviderType> = new Set<Provider
   'qwen-anthropic',
   'qwen-token-plan',
 ])
+
+const CHANNEL_REASONING_PROVIDERS: ReadonlySet<ProviderType> = new Set<ProviderType>([
+  'openai',
+  'openai-responses',
+  'opencode-go-openai',
+  'zhipu',
+  'doubao',
+  'doubao-api',
+  'qwen',
+  'custom',
+])
+
+const CHANNEL_REASONING_LEVEL_LABELS: Record<AgentThinkingLevel, string> = {
+  off: '关闭',
+  minimal: '最小',
+  low: '低',
+  medium: '中',
+  high: '高',
+  xhigh: '极高',
+  max: '最大',
+}
 
 /**
  * 生成 API 端点预览 URL
@@ -221,6 +260,8 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
 
   // 模型搜索过滤
   const [modelFilter, setModelFilter] = React.useState('')
+  const [expandedReasoningModelId, setExpandedReasoningModelId] = React.useState<string | null>(null)
+  const [reasoningLevelToAdd, setReasoningLevelToAdd] = React.useState<AgentThinkingLevel | ''>('')
 
   // UI 状态
   const [saving, setSaving] = React.useState(false)
@@ -238,6 +279,7 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
   const [xaiDeviceCode, setXaiDeviceCode] = React.useState<XaiOAuthDeviceCode | null>(null)
 
   const setChannelFormDirty = useSetAtom(channelFormDirtyAtom)
+  const setGlobalChannels = useSetAtom(channelsAtom)
   const codexLoggingInRef = React.useRef(false)
   const xaiLoggingInRef = React.useRef(false)
 
@@ -329,12 +371,16 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
         models: currentModels,
         enabled: currentEnabled,
       })
+      // 同步更新全局渠道缓存，使 ChatInput 等依赖 channelsAtom 的组件立即反映推理配置变化
+      setGlobalChannels((current) => current.map((item) => (
+        item.id === savedChannel.id ? savedChannel : item
+      )))
       toast.success('已保存', { id: 'auto-save-success' })
     } catch (error) {
       console.error('[模型配置表单] auto-save 失败:', error)
       toast.error('自动保存失败，请检查后手动重试', { id: 'auto-save-error' })
     }
-  }, [isEdit, channel])
+  }, [isEdit, channel, setGlobalChannels])
 
   /** 触发防抖 auto-save */
   const scheduleAutoSave = React.useCallback((
@@ -509,6 +555,58 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
     )
   }
 
+  // ===== 频道模型推理档位编辑 handler =====
+
+  const handleToggleModelReasoning = (modelId: string, checked: boolean): void => {
+    setModels((prev) => prev.map((model) => (
+      model.id === modelId
+        ? {
+            ...model,
+            reasoning: checked
+              ? createChannelReasoningConfig()
+              : undefined,
+          }
+        : model
+    )))
+  }
+
+  const handleAddModelReasoningLevel = (modelId: string, level: AgentThinkingLevel): void => {
+    setModels((prev) => prev.map((model) => (
+      model.id === modelId && model.reasoning
+        ? { ...model, reasoning: addChannelReasoningLevel(model.reasoning, level) }
+        : model
+    )))
+    setReasoningLevelToAdd('')
+  }
+
+  const handleRemoveModelReasoningLevel = (modelId: string, level: AgentThinkingLevel): void => {
+    setModels((prev) => prev.map((model) => (
+      model.id === modelId && model.reasoning
+        ? { ...model, reasoning: removeChannelReasoningLevel(model.reasoning, level) }
+        : model
+    )))
+  }
+
+  const handleModelReasoningDefaultChange = (modelId: string, level: AgentThinkingLevel): void => {
+    setModels((prev) => prev.map((model) => (
+      model.id === modelId && model.reasoning?.levels.includes(level)
+        ? { ...model, reasoning: { ...model.reasoning, defaultLevel: level } }
+        : model
+    )))
+  }
+
+  const handleModelReasoningEffortChange = (
+    modelId: string,
+    level: AgentThinkingLevel,
+    effort: string,
+  ): void => {
+    setModels((prev) => prev.map((model) => (
+      model.id === modelId && model.reasoning
+        ? { ...model, reasoning: updateChannelReasoningEffort(model.reasoning, level, effort) }
+        : model
+    )))
+  }
+
   const handleCancelCodexLogin = (): void => {
     codexLoggingInRef.current = false
     void window.electronAPI.codexOAuthCancel()
@@ -676,7 +774,10 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
           // 与登录自动拉取路径（handleCodexLogin）保持一致，避免新模型（如 gpt-5.6 系列）
           // 默认未启用而沉到「可用模型」折叠区，被误认为"拉不到"。
           if (isSubscriptionProvider) return { ...m, enabled: true }
-          return old ? { ...m, enabled: old.enabled } : { ...m, enabled: false }
+          return old
+            // 保留已有模型的启用状态与推理声明，避免重新拉取列表后丢失用户配置
+            ? { ...m, enabled: old.enabled, ...(old.reasoning && { reasoning: old.reasoning }) }
+            : { ...m, enabled: false }
         })
         return [...manualKept, ...merged]
       })
@@ -1143,28 +1244,147 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
             </div>
           ) : (
             <div className="divide-y divide-border/50">
-              {enabledModels.map((model) => (
-                <div
-                  key={model.id}
-                  className="flex items-center gap-2 px-4 py-2.5 group"
-                >
-                  <CheckCircle2 size={14} className="text-emerald-500 flex-shrink-0" />
-                  <span className="text-sm text-foreground flex-1">
-                    {model.name}
-                    {model.name !== model.id && (
-                      <span className="text-muted-foreground ml-1">({model.id})</span>
+              {enabledModels.map((model) => {
+                const reasoningExpanded = expandedReasoningModelId === model.id
+                return (
+                  <div key={model.id}>
+                    <div className="flex items-center gap-2 px-4 py-2.5 group">
+                      <CheckCircle2 size={14} className="text-emerald-500 flex-shrink-0" />
+                      <span className="text-sm text-foreground flex-1 min-w-0 break-all">
+                        {model.name}
+                        {model.name !== model.id && (
+                          <span className="text-muted-foreground ml-1">({model.id})</span>
+                        )}
+                      </span>
+                      {CHANNEL_REASONING_PROVIDERS.has(provider) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExpandedReasoningModelId(reasoningExpanded ? null : model.id)
+                            setReasoningLevelToAdd('')
+                          }}
+                          className={cn(
+                            'p-1 transition-colors',
+                            reasoningExpanded || model.reasoning
+                              ? 'text-primary'
+                              : 'text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100',
+                          )}
+                          title="推理强度设置"
+                          aria-label={`${model.name} 推理强度设置`}
+                          aria-expanded={reasoningExpanded}
+                        >
+                          <Settings2 size={14} />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleToggleModel(model.id)}
+                        className="p-0.5 text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
+                        title="取消启用"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                    {reasoningExpanded && (
+                      <div className="space-y-3 border-t border-border/40 bg-muted/20 px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm text-foreground">自定义推理档位</div>
+                            <div className="text-xs text-muted-foreground">为此模型声明会话可选档位</div>
+                          </div>
+                          <Switch
+                            checked={Boolean(model.reasoning)}
+                            onCheckedChange={(checked) => handleToggleModelReasoning(model.id, checked)}
+                            aria-label={`${model.name} 自定义推理档位`}
+                          />
+                        </div>
+                        {model.reasoning && (
+                          <div className="space-y-2.5">
+                            {model.reasoning.levels.length > 0 && (
+                              <div className="flex items-center gap-3">
+                                <span className="w-20 shrink-0 text-xs text-muted-foreground">默认档位</span>
+                                <Select
+                                  value={model.reasoning.defaultLevel}
+                                  onValueChange={(value) => handleModelReasoningDefaultChange(
+                                    model.id,
+                                    value as AgentThinkingLevel,
+                                  )}
+                                >
+                                  <SelectTrigger className="h-8 flex-1">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {model.reasoning.levels.map((level) => (
+                                      <SelectItem key={level} value={level}>
+                                        {CHANNEL_REASONING_LEVEL_LABELS[level]} ({level})
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            )}
+                            {model.reasoning.levels.map((level) => (
+                              <div key={level} className="flex items-center gap-2">
+                                <span className="w-20 shrink-0 text-xs text-foreground">
+                                  {CHANNEL_REASONING_LEVEL_LABELS[level]}
+                                </span>
+                                <Input
+                                  value={model.reasoning?.thinkingLevelMap?.[level] ?? ''}
+                                  onChange={(event) => handleModelReasoningEffortChange(
+                                    model.id,
+                                    level,
+                                    event.target.value,
+                                  )}
+                                  placeholder={level === 'off' ? '如 none；留空则不发送' : `留空则发送 ${level}`}
+                                  className="h-8 flex-1 text-xs"
+                                  aria-label={`${CHANNEL_REASONING_LEVEL_LABELS[level]}档位发送值`}
+                                />
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                                  onClick={() => handleRemoveModelReasoningLevel(model.id, level)}
+                                  aria-label={`删除${CHANNEL_REASONING_LEVEL_LABELS[level]}档位`}
+                                >
+                                  <X size={14} />
+                                </Button>
+                              </div>
+                            ))}
+                            {model.reasoning.levels.length === 0 && (
+                              <div className="py-2 text-center text-xs text-muted-foreground">
+                                尚未添加档位
+                              </div>
+                            )}
+                            {model.reasoning.levels.length < CHANNEL_REASONING_LEVELS.length && (
+                              <Select
+                                value={reasoningLevelToAdd}
+                                onValueChange={(value) => handleAddModelReasoningLevel(
+                                  model.id,
+                                  value as AgentThinkingLevel,
+                                )}
+                              >
+                                <SelectTrigger className="h-8 w-full border-dashed text-xs">
+                                  <SelectValue placeholder="添加推理档位" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {CHANNEL_REASONING_LEVELS
+                                    .filter((level) => !model.reasoning?.levels.includes(level))
+                                    .map((level) => (
+                                      <SelectItem key={level} value={level}>
+                                        {CHANNEL_REASONING_LEVEL_LABELS[level]} ({level})
+                                      </SelectItem>
+                                    ))}
+                                </SelectContent>
+                              </Select>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     )}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => handleToggleModel(model.id)}
-                    className="p-0.5 text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
-                    title="取消启用"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              ))}
+                  </div>
+                )
+              })}
             </div>
           )}
         </SettingsCard>

@@ -1,4 +1,5 @@
 import type { ProviderType } from './channel'
+import type { ChannelModelReasoningConfig } from './channel'
 import type { AgentThinkingLevel } from './agent'
 
 /** Proma 可识别的 reasoning 请求协议族。 */
@@ -70,7 +71,7 @@ export interface PiCatalogReasoningMetadata {
  * 不携带 protocol encoding；Pi catalog 继续负责把所选 level 编码为实际请求字段。
  */
 export interface ReasoningCapability {
-  source: 'profile' | 'pi-catalog'
+  source: 'profile' | 'pi-catalog' | 'channel'
   levels: readonly AgentThinkingLevel[]
   defaultLevel: AgentThinkingLevel
 }
@@ -342,6 +343,37 @@ export function resolveReasoningProfile(input: ResolveReasoningProfileInput): Re
 }
 
 const PI_EXTENDED_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const satisfies readonly AgentThinkingLevel[]
+
+/**
+ * 将频道模型推理声明解析为会话滑杆使用的 capability。
+ * 校验档位合法性与默认档位归属，无效声明返回 undefined（行为不变）。
+ */
+export function resolveChannelReasoningCapability(
+  config: ChannelModelReasoningConfig | undefined,
+): ReasoningCapability | undefined {
+  if (!config || !Array.isArray(config.levels)) return undefined
+
+  const validLevels = new Set<AgentThinkingLevel>(PI_EXTENDED_THINKING_LEVELS)
+  const levels = [...new Set(config.levels)].filter((level) => validLevels.has(level))
+  if (levels.length === 0 || !levels.includes(config.defaultLevel)) return undefined
+
+  return { source: 'channel', levels, defaultLevel: config.defaultLevel }
+}
+
+/**
+ * 将会话档位映射为线上 reasoning_effort 字符串。
+ * thinkingLevelMap 中 null 表示不发送，未配置映射时原样发送档位名称。
+ */
+export function resolveChannelReasoningEffort(
+  config: ChannelModelReasoningConfig | undefined,
+  level: AgentThinkingLevel | undefined,
+): string | null | undefined {
+  const capability = resolveChannelReasoningCapability(config)
+  if (!capability || !config || !level || !capability.levels.includes(level)) return undefined
+  const mapped = config.thinkingLevelMap?.[level]
+  if (mapped === null) return null
+  return typeof mapped === 'string' && mapped.trim() ? mapped.trim() : level
+}
 
 function getPiCatalogThinkingLevels(catalog: PiCatalogReasoningMetadata): AgentThinkingLevel[] {
   if (!catalog.reasoning) return []

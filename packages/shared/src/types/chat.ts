@@ -6,6 +6,7 @@
  */
 
 import type { ProviderType } from './channel'
+import type { AgentThinkingLevel } from './agent'
 
 // ===== 附件相关 =====
 
@@ -222,6 +223,8 @@ export interface ChatSendInput {
   attachments?: FileAttachment[]
   /** 是否启用思考模式 */
   thinkingEnabled?: boolean
+  /** 当前对话选择的模型推理档位。 */
+  reasoningLevel?: AgentThinkingLevel
   /** 本次请求启用的工具 ID 列表（由前端工具选择器决定） */
   enabledToolIds?: string[]
 }

@@ -14,7 +14,7 @@
 
 import { randomUUID } from 'node:crypto'
 import type { WebContents } from 'electron'
-import { CHAT_IPC_CHANNELS } from '@proma/shared'
+import { CHAT_IPC_CHANNELS, resolveChannelReasoningEffort } from '@proma/shared'
 import type { ChatSendInput, ChatMessage, GenerateTitleInput, FileAttachment, ChatToolActivity } from '@proma/shared'
 import {
   getAdapter,
@@ -197,7 +197,7 @@ export async function sendMessage(
   const {
     conversationId, userMessage, channelId,
     modelId, systemMessage, contextLength, contextDividers, attachments,
-    thinkingEnabled, enabledToolIds,
+    thinkingEnabled, reasoningLevel, enabledToolIds,
   } = input
 
   // 1. 查找渠道
@@ -210,6 +210,9 @@ export async function sendMessage(
     })
     return
   }
+  // 查找当前模型的频道级推理声明，将会话档位映射为线上 reasoning_effort 字符串
+  const modelReasoning = channel.models.find((model) => model.id === modelId)?.reasoning
+  const reasoningEffort = resolveChannelReasoningEffort(modelReasoning, reasoningLevel)
 
   // Subscription OAuth uses Pi provider-specific transports, which Chat mode does
   // not currently implement. Keep this guard for historical conversations that
@@ -332,6 +335,7 @@ export async function sendMessage(
         attachments,
         readImageAttachments: getImageAttachmentData,
         thinkingEnabled,
+        reasoningEffort,
         tools,
         continuationMessages: continuationMessages.length > 0 ? continuationMessages : undefined,
       })
@@ -408,6 +412,7 @@ export async function sendMessage(
         attachments,
         readImageAttachments: getImageAttachmentData,
         thinkingEnabled,
+        reasoningEffort,
         // 不传 tools，强制模型生成文本回复而非继续调用工具
         continuationMessages,
       })

@@ -29,6 +29,7 @@ import {
   chatMessageRefreshAtom,
   pendingAgentRecommendationAtom,
   conversationModelsAtom,
+  channelsAtom,
   chatPendingMessageAtom,
   INITIAL_MESSAGE_LIMIT,
 } from '@/atoms/chat-atoms'
@@ -42,6 +43,7 @@ import {
   useConversationModel,
   useConversationContextLength,
   useConversationThinkingEnabled,
+  useConversationReasoningLevel,
   useConversationPromptId,
 } from '@/hooks/useConversationSettings'
 import { registerPendingTitle } from '@/hooks/useGlobalChatListeners'
@@ -49,11 +51,13 @@ import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
 import { cn } from '@/lib/utils'
 import { buildQuotedSelectionBlock } from '@/lib/quoted-selection'
 import type {
+  AgentThinkingLevel,
   ChatMessage,
   ChatSendInput,
   FileAttachment,
   AttachmentSaveInput,
 } from '@proma/shared'
+import { resolveConversationRequestReasoningLevel } from '@/lib/channel-model-reasoning'
 
 interface ChatViewProps {
   conversationId: string
@@ -91,10 +95,12 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
   const [selectedModel, setSelectedModel] = useConversationModel()
   const [contextLength] = useConversationContextLength()
   const [thinkingEnabled] = useConversationThinkingEnabled()
+  const [reasoningLevel] = useConversationReasoningLevel()
   const [conversationPromptId] = useConversationPromptId()
 
   // ===== 全局 atoms（Map 结构，按 conversationId 读取） =====
   const conversations = useAtomValue(conversationsAtom)
+  const channels = useAtomValue(channelsAtom)
   const setConversations = useSetAtom(conversationsAtom)
   const setDraftSessionIds = useSetAtom(draftSessionIdsAtom)
   const streamingStates = useAtomValue(streamingStatesAtom)
@@ -336,6 +342,17 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
       return next
     })
 
+    // 从频道配置查找当前模型的推理声明，按会话档位与思考开关解析请求档位
+    const modelReasoning = channels
+      .find((channel) => channel.id === selectedModel.channelId)
+      ?.models.find((model) => model.id === selectedModel.modelId)
+      ?.reasoning
+    const requestReasoningLevel: AgentThinkingLevel | undefined = resolveConversationRequestReasoningLevel({
+      config: modelReasoning,
+      selectedLevel: reasoningLevel,
+      enabled: thinkingEnabled,
+    })
+
     const input: ChatSendInput = {
       conversationId,
       userMessage: finalContent,
@@ -346,6 +363,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
       contextDividers: options?.contextDividersOverride ?? contextDividers,
       attachments: savedAttachments.length > 0 ? savedAttachments : undefined,
       thinkingEnabled: thinkingEnabled || undefined,
+      reasoningLevel: requestReasoningLevel,
       systemMessage: resolveSystemMessage(conversationPromptId, promptConfig, userProfile.userName),
       enabledToolIds: activeToolIds.length > 0 ? activeToolIds : undefined,
     }
@@ -385,6 +403,8 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
     contextLength,
     contextDividers,
     thinkingEnabled,
+    reasoningLevel,
+    channels,
     conversationPromptId,
     promptConfig,
     userProfile.userName,

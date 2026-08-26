@@ -199,6 +199,12 @@ function AgentSettingsInitializer(): null {
   // 初次加载标记 — 应用启动或切换工作区时不显示 toast
   const suppressToastRef = useRef(true)
 
+  // 订阅渠道变更广播：其他窗口增删改渠道时同步更新全局缓存
+  useEffect(() => window.electronAPI.onChannelsChanged((channels) => {
+    setChannels(channels)
+    setChannelsLoaded(true)
+  }), [setChannels, setChannelsLoaded])
+
   useEffect(() => {
     // 并行加载渠道列表和设置，确保两者都就绪后再验证渠道有效性
     Promise.all([

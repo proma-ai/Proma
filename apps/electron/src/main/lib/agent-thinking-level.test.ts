@@ -11,6 +11,18 @@ describe('Pi thinking level resolver', () => {
     )).toBe('off')
   })
 
+  test('Given two sessions on one custom model When each selects a level Then resolves independently', () => {
+    const capability = {
+      source: 'channel' as const,
+      levels: ['low', 'high'] as const,
+      defaultLevel: 'high' as const,
+    }
+    const settings = { agentThinking: { type: 'adaptive' as const }, agentEffort: 'high' as const }
+
+    expect(resolvePiThinkingLevel(settings, { reasoningLevel: 'low' }, 'openai', 'custom-model', capability)).toBe('low')
+    expect(resolvePiThinkingLevel(settings, { reasoningLevel: 'high' }, 'openai', 'custom-model', capability)).toBe('high')
+  })
+
   test.each(['openai', 'openai-responses', 'custom'] as const)(
     'Given third-party %s GPT-5.6 When session has max override Then uses it',
     (provider) => {

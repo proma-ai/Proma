@@ -15,9 +15,11 @@ import {
   conversationModelsAtom,
   conversationContextLengthAtom,
   conversationThinkingEnabledAtom,
+  conversationReasoningLevelAtom,
   conversationParallelModeAtom,
 } from '@/atoms/chat-atoms'
 import type { SelectedModel, ContextLengthValue } from '@/atoms/chat-atoms'
+import type { AgentThinkingLevel } from '@proma/shared'
 import {
   selectedPromptIdAtom,
   conversationPromptIdAtom,
@@ -105,6 +107,14 @@ export function useConversationThinkingEnabled(): [boolean, (v: boolean) => void
   const value = useMapValue(conversationThinkingEnabledAtom, conversationId, defaultEnabled)
   const setter = useMapSetter(conversationThinkingEnabledAtom, conversationId)
   return [value, setter]
+}
+
+/** 每个对话独立的模型推理档位。 */
+export function useConversationReasoningLevel(): [AgentThinkingLevel | undefined, (v: AgentThinkingLevel) => void] {
+  const conversationId = useConversationId()
+  const values = useAtomValue(conversationReasoningLevelAtom)
+  const setter = useMapSetter(conversationReasoningLevelAtom, conversationId)
+  return [values.get(conversationId), setter]
 }
 
 /** 每个对话独立的并排模式 */
