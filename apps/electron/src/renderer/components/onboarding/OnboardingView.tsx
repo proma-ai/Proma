@@ -36,6 +36,8 @@ import { SubagentGuideExamples } from './SubagentGuideExamples'
 import { FAQ_GROUPS } from './faq-content'
 import { AuthSplitLayout, CloudAuthScreen } from '@/components/cloud-auth'
 import { cloudAuthLoadingAtom, cloudAuthViewAtom, cloudUserAtom } from '@/atoms/cloud-auth'
+import { agentSettingsReadyAtom } from '@/atoms/agent-atoms'
+import { canCompleteOnboardingAccount } from './onboarding-account-readiness'
 
 type OnboardingStep = 'welcome' | 'guide' | 'files' | 'project' | 'automation' | 'memory' | 'sideanswer' | 'subagent' | 'faq' | 'account'
 
@@ -698,8 +700,14 @@ function ProgressMap({ current }: { current: Exclude<OnboardingStep, 'welcome'> 
 function OnboardingAccountStep({ onComplete }: { onComplete: () => Promise<void> }): React.ReactElement {
   const user = useAtomValue(cloudUserAtom)
   const loading = useAtomValue(cloudAuthLoadingAtom)
+  const agentSettingsReady = useAtomValue(agentSettingsReadyAtom)
   const completedRef = useRef(false)
   const [completionError, setCompletionError] = useState<string | null>(null)
+  const canComplete = canCompleteOnboardingAccount({
+    isAuthLoading: loading,
+    hasAuthenticatedUser: user !== null,
+    isAgentSettingsReady: agentSettingsReady,
+  })
 
   const complete = async (): Promise<void> => {
     if (completedRef.current) return
@@ -715,8 +723,8 @@ function OnboardingAccountStep({ onComplete }: { onComplete: () => Promise<void>
   }
 
   useEffect(() => {
-    if (!loading && user) void complete()
-  }, [loading, user])
+    if (canComplete) void complete()
+  }, [canComplete])
 
   return (
     <div className="h-full w-full self-stretch">
@@ -725,7 +733,7 @@ function OnboardingAccountStep({ onComplete }: { onComplete: () => Promise<void>
           <div className="w-full max-w-md rounded-xl border bg-card p-8 text-center shadow-lg">
             <div className="flex flex-col items-center gap-3 text-sm text-muted-foreground">
               <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#1b3f2d] border-t-transparent" />
-              <p>{user ? '正在完成引导…' : '正在准备账户服务…'}</p>
+              <p>{user ? (agentSettingsReady ? '正在完成引导…' : '正在准备工作空间…') : '正在准备账户服务…'}</p>
             </div>
             {completionError && (
               <div className="mt-5 space-y-3">
