@@ -576,8 +576,7 @@
 
 /* Windows 顶部标题栏与系统控制按钮。拖拽区和按钮组分属独立矩形，避免高 DPI 下的 hitmask 重叠。 */
 .window-titlebar {
-  background-color: hsl(var(--background) / 0.9);
-  backdrop-filter: blur(12px);
+  background-color: hsl(var(--background));
 }
 
 .window-titlebar-classic {
