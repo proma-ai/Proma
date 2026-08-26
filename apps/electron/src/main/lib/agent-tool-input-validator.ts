@@ -13,6 +13,9 @@ export const TOOL_REQUIRED_PARAMS: ReadonlyMap<string, ReadonlyArray<string>> = 
   ['Read', ['file_path']],
   ['Glob', ['pattern']],
   ['Grep', ['pattern']],
+  ['TerminalExecute', ['command']],
+  ['TerminalInterrupt', ['terminalId']],
+  ['TerminalClose', ['terminalId']],
 ])
 
 /** 校验失败结果，与 PermissionResult deny 形状一致 */

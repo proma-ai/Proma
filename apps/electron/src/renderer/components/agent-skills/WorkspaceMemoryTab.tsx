@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { SettingsCard } from '@/components/settings/primitives'
 import { DefaultAppOpenButton } from '@/components/diff/DefaultAppOpenButton'
 import { AgentActionHint } from '@/components/agent/AgentActionHint'
+import { WorkspaceMemoryChangeShelf } from './WorkspaceMemoryChangeShelf'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { MessageResponse } from '@/components/ai-elements/message'
 import { agentPendingPromptAtom } from '@/atoms/agent-atoms'
@@ -27,6 +28,8 @@ type SelectedMemoryFile =
 
 interface WorkspaceMemoryTabProps {
   workspaceSlug: string
+  /** 仅嵌入 Agent 右侧工作区时传入，用于展示当前会话的记忆变更 Diff。 */
+  sessionId?: string
   /** 能力中心传入的统一搜索词；嵌入组件未传时提供自己的内容搜索。 */
   search?: string
   embedded?: boolean
@@ -71,16 +74,23 @@ function filterNodes(nodes: SkillFileNode[], query: string, contentMatchPaths = 
   return result
 }
 
-export function WorkspaceMemoryTab({ workspaceSlug, search, embedded = false }: WorkspaceMemoryTabProps): React.ReactElement {
+export function WorkspaceMemoryTab({ workspaceSlug, sessionId, search, embedded = false }: WorkspaceMemoryTabProps): React.ReactElement {
   const { createAgent } = useCreateSession()
   const setPendingPrompt = useSetAtom(agentPendingPromptAtom)
   const [memoryNavigationRequest, setMemoryNavigationRequest] = useAtom(memoryFileNavigationAtom)
   const workspaceMemoryChanges = useAtomValue(workspaceMemoryChangesAtom)
-  const latestMemoryChange = workspaceMemoryChanges.get(workspaceSlug)?.[0]
+  const memoryChanges = workspaceMemoryChanges.get(workspaceSlug) ?? []
+  const latestMemoryChange = memoryChanges[0]
+  const [activeChangeId, setActiveChangeId] = React.useState<string | null>(null)
+  const activeMemoryChange = activeChangeId
+    ? memoryChanges.find((change) => `${change.relativePath}:${change.changedAt}` === activeChangeId)
+    : undefined
   const [summary, setSummary] = React.useState<WorkspaceMemorySummary | null>(null)
   const [autoFiles, setAutoFiles] = React.useState<SkillFileNode[]>([])
   const [selected, setSelected] = React.useState<SelectedMemoryFile | null>(null)
   const [editText, setEditText] = React.useState('')
+  const [editBaseText, setEditBaseText] = React.useState('')
+  const [saveConflict, setSaveConflict] = React.useState(false)
   const [loading, setLoading] = React.useState(true)
   const [loadingFile, setLoadingFile] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
@@ -96,14 +106,16 @@ export function WorkspaceMemoryTab({ workspaceSlug, search, embedded = false }: 
 
   // 自动保存：用 ref 持有最新的编辑状态，供防抖定时器与"切换文件前 flush"复用，
   // 避免把 selected/editText 塞进一堆回调的依赖数组里。
-  const saveStateRef = React.useRef<{ selected: SelectedMemoryFile | null; editText: string; isDirty: boolean }>({
+  const saveStateRef = React.useRef<{ selected: SelectedMemoryFile | null; editText: string; editBaseText: string; isDirty: boolean; saveConflict: boolean }>({
     selected: null,
     editText: '',
+    editBaseText: '',
     isDirty: false,
+    saveConflict: false,
   })
   React.useEffect(() => {
-    saveStateRef.current = { selected, editText, isDirty }
-  }, [selected, editText, isDirty])
+    saveStateRef.current = { selected, editText, editBaseText, isDirty, saveConflict }
+  }, [selected, editText, editBaseText, isDirty, saveConflict])
   const autoSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const persistInFlightRef = React.useRef<Promise<void> | null>(null)
   const historyRangeLabel = React.useMemo(
@@ -121,12 +133,12 @@ export function WorkspaceMemoryTab({ workspaceSlug, search, embedded = false }: 
     return nextSummary
   }, [workspaceSlug])
 
-  /** 底层写入：把指定内容写回目标文件并刷新摘要，供手动保存与自动保存复用 */
-  const persistTarget = React.useCallback(async (target: SelectedMemoryFile, text: string): Promise<void> => {
+  /** 底层写入：先核验磁盘仍是打开时的基线，避免自动保存覆盖外部更新。 */
+  const persistTarget = React.useCallback(async (target: SelectedMemoryFile, text: string, baseText: string): Promise<void> => {
     if (target.kind === 'agents') {
-      await window.electronAPI.writeWorkspaceAgentsMd(workspaceSlug, text)
+      await window.electronAPI.writeWorkspaceAgentsMd(workspaceSlug, text, baseText)
     } else {
-      await window.electronAPI.writeWorkspaceAutoMemoryFile(workspaceSlug, target.relativePath, text)
+      await window.electronAPI.writeWorkspaceAutoMemoryFile(workspaceSlug, target.relativePath, text, baseText)
     }
     const nextSummary = await refreshSummaryAndTree()
     const nextAbsolute = target.kind === 'agents'
@@ -136,6 +148,8 @@ export function WorkspaceMemoryTab({ workspaceSlug, search, embedded = false }: 
     setSelected((prev) => (prev && prev.kind === target.kind && prev.relativePath === target.relativePath
       ? { ...prev, absolutePath: nextAbsolute }
       : prev))
+    setEditBaseText(text)
+    setSaveConflict(false)
   }, [workspaceSlug, refreshSummaryAndTree])
 
   /**
@@ -152,19 +166,21 @@ export function WorkspaceMemoryTab({ workspaceSlug, search, embedded = false }: 
     if (persistInFlightRef.current) {
       await persistInFlightRef.current.catch(() => {})
     }
-    const { selected: curSelected, editText: curText, isDirty: curDirty } = saveStateRef.current
-    if (!curSelected || !curDirty) return
+    const { selected: curSelected, editText: curText, editBaseText: curBaseText, isDirty: curDirty, saveConflict: curSaveConflict } = saveStateRef.current
+    if (!curSelected || !curDirty || curSaveConflict) return
     setIsDirty(false)
     if (showSaving) setSaving(true)
     // 写入通常很快，saving 一闪而过看不到动画；自动保存时保证"保存中"至少显示一小段时间
     const startedAt = performance.now()
     try {
-      const p = persistTarget(curSelected, curText)
+      const p = persistTarget(curSelected, curText, curBaseText)
       persistInFlightRef.current = p
       await p
     } catch (err) {
       console.error('[工作区记忆] 自动保存失败:', err)
-      toast.error(err instanceof Error ? err.message : '自动保存失败')
+      const message = err instanceof Error ? err.message : '自动保存失败'
+      toast.error(message)
+      if (message.startsWith('文件已被外部更新')) setSaveConflict(true)
       setIsDirty(true)
     } finally {
       persistInFlightRef.current = null
@@ -180,6 +196,10 @@ export function WorkspaceMemoryTab({ workspaceSlug, search, embedded = false }: 
   }, [persistTarget])
 
   const openAgents = React.useCallback(async (knownSummary?: WorkspaceMemorySummary): Promise<void> => {
+    if (saveStateRef.current.saveConflict) {
+      toast.error('当前文件有外部更新，请先刷新或复制修改后再切换。')
+      return
+    }
     await flushPendingSave()
     setLoadingFile(true)
     try {
@@ -192,6 +212,8 @@ export function WorkspaceMemoryTab({ workspaceSlug, search, embedded = false }: 
         absolutePath: currentSummary.agentsMd.path,
       })
       setEditText(file.content ?? '')
+      setEditBaseText(file.content ?? '')
+      setSaveConflict(false)
       setIsDirty(false)
     } catch (err) {
       console.error('[工作区记忆] 读取 AGENTS.md 失败:', err)
@@ -202,6 +224,10 @@ export function WorkspaceMemoryTab({ workspaceSlug, search, embedded = false }: 
   }, [summary, workspaceSlug, flushPendingSave])
 
   const openAutoFile = React.useCallback(async (relativePath: string, knownSummary?: WorkspaceMemorySummary): Promise<void> => {
+    if (saveStateRef.current.saveConflict) {
+      toast.error('当前文件有外部更新，请先刷新或复制修改后再切换。')
+      return
+    }
     await flushPendingSave()
     setLoadingFile(true)
     try {
@@ -214,6 +240,8 @@ export function WorkspaceMemoryTab({ workspaceSlug, search, embedded = false }: 
         absolutePath: autoMemoryPath(currentSummary, file.relativePath),
       })
       setEditText(file.content ?? '')
+      setEditBaseText(file.content ?? '')
+      setSaveConflict(false)
       setIsDirty(false)
     } catch (err) {
       console.error('[工作区记忆] 读取长期记忆文件失败:', err)
@@ -225,12 +253,18 @@ export function WorkspaceMemoryTab({ workspaceSlug, search, embedded = false }: 
 
   React.useEffect(() => {
     if (!memoryNavigationRequest || memoryNavigationRequest.workspaceSlug !== workspaceSlug) return
+    if (memoryNavigationRequest.mode === 'change') {
+      const change = memoryChanges.find((item) => item.relativePath === memoryNavigationRequest.relativePath)
+      if (change && sessionId) setActiveChangeId(`${change.relativePath}:${change.changedAt}`)
+      setMemoryNavigationRequest(null)
+      return
+    }
     void (async () => {
       await openAutoFile(memoryNavigationRequest.relativePath)
-      setViewMode(memoryNavigationRequest.mode)
+      setViewMode(memoryNavigationRequest.mode === 'edit' ? 'edit' : 'preview')
       setMemoryNavigationRequest(null)
     })()
-  }, [memoryNavigationRequest, openAutoFile, setMemoryNavigationRequest, workspaceSlug])
+  }, [memoryChanges, memoryNavigationRequest, openAutoFile, sessionId, setMemoryNavigationRequest, workspaceSlug])
 
   React.useEffect(() => {
     if (!latestMemoryChange) return
@@ -238,7 +272,13 @@ export function WorkspaceMemoryTab({ workspaceSlug, search, embedded = false }: 
   }, [latestMemoryChange?.changedAt, refreshSummaryAndTree])
 
   const refresh = React.useCallback(async (): Promise<void> => {
-    await flushPendingSave()
+    if (saveStateRef.current.saveConflict) {
+      saveStateRef.current = { ...saveStateRef.current, saveConflict: false, isDirty: false }
+      setSaveConflict(false)
+      setIsDirty(false)
+    } else {
+      await flushPendingSave()
+    }
     setLoading(true)
     try {
       const nextSummary = await refreshSummaryAndTree()
@@ -259,6 +299,8 @@ export function WorkspaceMemoryTab({ workspaceSlug, search, embedded = false }: 
     let cancelled = false
     setSelected(null)
     setEditText('')
+    setEditBaseText('')
+    setSaveConflict(false)
     setIsDirty(false)
     setExpanded(new Set())
     setLoading(true)
@@ -279,6 +321,8 @@ export function WorkspaceMemoryTab({ workspaceSlug, search, embedded = false }: 
           absolutePath: nextSummary.agentsMd.path,
         })
         setEditText(claudeFile.content ?? '')
+        setEditBaseText(claudeFile.content ?? '')
+        setSaveConflict(false)
         setIsDirty(false)
       } catch (err) {
         console.error('[工作区记忆] 加载失败:', err)
@@ -313,7 +357,7 @@ export function WorkspaceMemoryTab({ workspaceSlug, search, embedded = false }: 
   }, [flushPendingSave])
 
   const handleSave = async (): Promise<void> => {
-    if (!selected) return
+    if (!selected || saveConflict) return
     if (autoSaveTimerRef.current) {
       clearTimeout(autoSaveTimerRef.current)
       autoSaveTimerRef.current = null
@@ -321,11 +365,13 @@ export function WorkspaceMemoryTab({ workspaceSlug, search, embedded = false }: 
     setSaving(true)
     try {
       setIsDirty(false)
-      await persistTarget(selected, editText)
+      await persistTarget(selected, editText, editBaseText)
       toast.success('记忆文件已保存')
     } catch (err) {
       console.error('[工作区记忆] 保存失败:', err)
-      toast.error(err instanceof Error ? err.message : '保存失败')
+      const message = err instanceof Error ? err.message : '保存失败'
+      toast.error(message)
+      if (message.startsWith('文件已被外部更新')) setSaveConflict(true)
       setIsDirty(true)
     } finally {
       setSaving(false)
@@ -414,6 +460,23 @@ export function WorkspaceMemoryTab({ workspaceSlug, search, embedded = false }: 
     summary?.instructionConflict ? `工作区规则：${summary.instructionConflict.legacyPath}` : null,
   ].filter((detail): detail is string => detail !== null).join('\n')
 
+  if (activeMemoryChange && sessionId) {
+    return (
+      <WorkspaceMemoryChangeShelf
+        changes={memoryChanges}
+        onOpenFile={(change) => {
+          setActiveChangeId(null)
+          void (async () => {
+            await openAutoFile(change.relativePath)
+            setViewMode('preview')
+          })()
+        }}
+        onBackToMemory={() => setActiveChangeId(null)}
+        className="h-full min-h-0 overflow-auto bg-content-area p-3"
+      />
+    )
+  }
+
   if (loading || !summary) {
     return <div className="py-20 text-center text-sm text-muted-foreground">加载协作知识中...</div>
   }
@@ -425,7 +488,7 @@ export function WorkspaceMemoryTab({ workspaceSlug, search, embedded = false }: 
           <Brain className="size-4 shrink-0 text-foreground/65" />
           <div className="min-w-0 flex-1">
             <div className="text-sm font-semibold text-foreground">项目记忆</div>
-            <div className="text-[11px] text-muted-foreground">{summary.autoMemory.fileCount} 个主题文件 · 可搜索正文并直接编辑</div>
+            <div className="text-[11px] text-muted-foreground">{summary.autoMemory.fileCount} 个记忆文件</div>
           </div>
         </div>
       )}
@@ -594,7 +657,7 @@ export function WorkspaceMemoryTab({ workspaceSlug, search, embedded = false }: 
                 {selected && (
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button size="sm" onClick={handleSave} disabled={!selected || saving || loadingFile}>
+                      <Button size="sm" onClick={handleSave} disabled={!selected || saving || loadingFile || saveConflict}>
                         {saving ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : <Save size={14} className="mr-1.5" />}
                         {saving ? '保存中...' : '保存'}
                       </Button>
@@ -604,6 +667,12 @@ export function WorkspaceMemoryTab({ workspaceSlug, search, embedded = false }: 
                 )}
               </div>
             </div>
+            {saveConflict && (
+              <div className="mx-4 mt-3 flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                <span>文件已被外部更新，已停止保存以避免覆盖。请复制你的修改后刷新文件。</span>
+                <Button size="sm" variant="outline" className="h-7 shrink-0 px-2 text-xs" onClick={() => void refresh()}>刷新文件</Button>
+              </div>
+            )}
             {loadingFile ? (
               <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">读取文件中...</div>
             ) : selected && viewMode === 'edit' ? (

@@ -20,7 +20,7 @@ import { join, dirname } from 'node:path'
 import { accessSync, constants, existsSync, mkdirSync, realpathSync } from 'node:fs'
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 import { app } from 'electron'
-import type { AgentSendInput, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, AgentSessionMeta, CodexOAuthCredentials, XaiOAuthCredentials, TypedError, SDKMessage, SDKAssistantMessage, AgentStreamPayload, AgentAssistantDeltaPayload, RewindSessionResult, SkillActivation } from '@proma/shared'
+import type { AgentSendInput, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, AgentSessionMeta, AgentActiveSessionSnapshot, CodexOAuthCredentials, XaiOAuthCredentials, TypedError, SDKMessage, SDKAssistantMessage, AgentStreamPayload, AgentAssistantDeltaPayload, RewindSessionResult, SkillActivation } from '@proma/shared'
 import {
   PROMA_DEFAULT_PERMISSION_MODE,
   PROMA_PERMISSION_MODE_CONFIG,
@@ -235,6 +235,7 @@ export class AgentOrchestrator {
   private adapter: AgentProviderAdapter
   private eventBus: AgentEventBus
   private activeSessions = new Map<string, number>()
+  private activeSessionStartedAt = new Map<string, number>()
   private nextRunGeneration = 0
 
   /** 队列消息本地记录（sessionId → UUID 集合，用于防重） */
@@ -949,6 +950,7 @@ export class AgentOrchestrator {
 
     const runGeneration = ++this.nextRunGeneration
     this.activeSessions.set(sessionId, runGeneration)
+    this.activeSessionStartedAt.set(sessionId, streamStartedAt)
 
     // 手动重试直接删除原错误，避免它在下一轮完成后仍被历史回放。
     // 删除失败不阻断重试（例如旧版本遗留的无 UUID 错误）。
@@ -967,13 +969,14 @@ export class AgentOrchestrator {
         const message = error instanceof Error ? error.message : String(error)
         console.error('[Agent 编排] 持久化用户消息失败:', error)
         this.activeSessions.delete(sessionId)
+        this.activeSessionStartedAt.delete(sessionId)
         callbacks.onError(`消息保存失败：${message}`)
         callbacks.onComplete([], { startedAt: streamStartedAt })
         return
       }
     }
 
-    // 仅在用户消息成功持久化（或 retry 无需新消息）后通知渲染端进入运行态。
+    // 仅在用户消息成功持久化（或 retry 无需新消息）后通知渲染端进入运行态.
     callbacks.onRunStarted?.({ startedAt: streamStartedAt })
 
     const releaseActiveRun = (): void => {
@@ -982,6 +985,7 @@ export class AgentOrchestrator {
       const ownsActiveRun = this.activeSessions.get(sessionId) === runGeneration
       if (ownsActiveRun) {
         this.activeSessions.delete(sessionId)
+        this.activeSessionStartedAt.delete(sessionId)
         this.sessionPermissionModes.delete(sessionId)
         this.queuedMessageUuids.delete(sessionId)
       }
@@ -1379,6 +1383,12 @@ export class AgentOrchestrator {
           return permissionService.requestSingleApproval(sessionId, toolName, input, options, (request) => {
             this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'permission_request', request } })
           })
+        }
+
+        // 终端元数据可在计划阶段检查，但创建、执行、打断或关闭 PTY 都属于可见的本地副作用。
+        if (toolName === 'TerminalList') return { behavior: 'allow' as const, updatedInput: input }
+        if (toolName.startsWith('Terminal') && currentMode === 'plan') {
+          return { behavior: 'deny' as const, message: '计划模式下不能创建或操作本地终端，请在计划获批后执行。' }
         }
 
         // 所有 Pi 会话均可使用受管浏览器。主进程仍隔离网页来源并默认拒绝网页权限；下载和弹窗留在受管浏览器内，
@@ -2289,6 +2299,7 @@ export class AgentOrchestrator {
   stop(sessionId: string, stopBeforeRun = false): void {
     const runGeneration = this.activeSessions.get(sessionId)
     this.activeSessions.delete(sessionId)
+    this.activeSessionStartedAt.delete(sessionId)
     this.sessionPermissionModes.delete(sessionId)
     browserController.cancelSession(sessionId)
     if (runGeneration != null) {
@@ -2306,6 +2317,14 @@ export class AgentOrchestrator {
   /** 检查指定会话是否正在处理中 */
   isActive(sessionId: string): boolean {
     return this.activeSessions.has(sessionId)
+  }
+
+  /** 返回主进程当前仍在执行的 Agent，会话重载时供 renderer 恢复运行指示。 */
+  listActiveSessionSnapshots(): AgentActiveSessionSnapshot[] {
+    return [...this.activeSessions.keys()].map((sessionId) => ({
+      sessionId,
+      startedAt: this.activeSessionStartedAt.get(sessionId) ?? Date.now(),
+    }))
   }
 
   /** 是否存在任意运行中 Agent（含后台运行与外部触发的会话）。 */
@@ -2399,6 +2418,7 @@ export class AgentOrchestrator {
     // 即便 activeSessions 为空，也要调 dispose 清理可能残留的 pidMap / 子进程
     this.adapter.dispose()
     this.activeSessions.clear()
+    this.activeSessionStartedAt.clear()
     this.sessionPermissionModes.clear()
     this.stoppedBeforeRunSessions.clear()
     this.queuedMessageUuids.clear()
@@ -2517,6 +2537,7 @@ export class AgentOrchestrator {
       if (isMissingActiveQueueChannelError(error)) {
         console.warn(`[Agent 编排] 队列注入失败且消息通道已失效，释放陈旧运行状态: sessionId=${sessionId}`)
         this.activeSessions.delete(sessionId)
+        this.activeSessionStartedAt.delete(sessionId)
         this.sessionPermissionModes.delete(sessionId)
         this.queuedMessageUuids.delete(sessionId)
       }

@@ -1296,8 +1296,8 @@ export interface AgentSendInput {
   startedAt?: number
   /** 用户点击错误消息的重试时，指向本轮开始前应删除的错误 UUID。 */
   retryOfErrorUuid?: string
-  /** 触发来源：用户手动、定时任务、父 Agent 委派（用于 UI 区分标记） */
-  triggeredBy?: 'user' | 'automation' | 'delegation'
+  /** 触发来源：用户手动、定时任务、父 Agent 委派或外部 Bridge（用于权限与 UI 区分）。 */
+  triggeredBy?: 'user' | 'automation' | 'delegation' | 'external'
   /** 定时任务执行上下文（注入到系统提示词，用户不可见） */
   automationContext?: string
 }
@@ -1432,6 +1432,12 @@ export interface AgentStreamEvent {
   payload: AgentStreamPayload
   /** @deprecated 兼容旧格式，Phase 2 后移除 */
   event?: AgentEvent
+}
+
+export interface AgentActiveSessionSnapshot {
+  sessionId: string
+  /** 对应当前运行实例的启动时间，用于拒绝陈旧的 renderer 恢复快照。 */
+  startedAt: number
 }
 
 /**
@@ -1761,6 +1767,8 @@ export const AGENT_IPC_CHANNELS = {
   COUNT_ARCHIVED_SESSIONS: 'agent:count-archived-sessions',
   /** 创建会话 */
   CREATE_SESSION: 'agent:create-session',
+  /** 获取当前主进程仍在执行的 Agent 会话快照 */
+  ACTIVE_SESSIONS_SNAPSHOT: 'agent:active-sessions-snapshot',
   /** 获取会话 SDKMessage（Phase 4 新格式） */
   GET_SDK_MESSAGES: 'agent:get-sdk-messages',
   /** 更新会话标题 */

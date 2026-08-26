@@ -7,7 +7,7 @@
 
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
-import { X, ExternalLink, ChevronRight, MoreHorizontal, FolderSearch, Pencil, FolderInput, GitBranch, GitMerge, MessageSquarePlus, FileDiff, FileText, FolderOpen, Globe, MessageCircle, Brain, Building2, Split, Blocks, CalendarDays, ListTodo, Clock, ServerCog } from 'lucide-react'
+import { X, ExternalLink, ChevronRight, MoreHorizontal, FolderSearch, Pencil, FolderInput, GitBranch, GitMerge, MessageSquarePlus, FileDiff, FileText, FolderOpen, Globe, MessageCircle, Brain, Building2, Split, Blocks, CalendarDays, ListTodo, Clock, ServerCog, SquareTerminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -42,6 +42,7 @@ import {
   agentFileChangesCurrentRunAtom,
   workspaceComponentTabsAtomFamily,
   isWorkspaceComponentTab,
+  isUserPriorityWorkspaceComponentTab,
   agentSessionStreamingStateAtomFamily,
   fileBrowserAutoRevealAtom,
   agentSelectedWorktreeAtom,
@@ -52,6 +53,7 @@ import {
   agentSessionDraftsAtom,
   agentSessionDraftSyncVersionsAtom,
   agentSessionDraftHtmlAtom,
+  agentTerminalTabsAtom,
 } from '@/atoms/agent-atoms'
 import {
   getBrowserSidePanelTab,
@@ -62,9 +64,10 @@ import {
   getExplorationSidePanelTab,
   getPreviewIdFromSidePanelTab,
   getPreviewSidePanelTab,
+  getTerminalIdFromSidePanelTab,
+  getTerminalSidePanelTab,
 } from '@/atoms/agent-atoms'
 import type { AgentSidePanelTab, AgentFileSourceFilter, AgentExplorationBranchTab, WorkspaceComponentTab } from '@/atoms/agent-atoms'
-import { WorkspaceMemoryChangeDock } from '@/components/agent-skills/WorkspaceMemoryChangeDock'
 import { WorkspaceMemoryTab } from '@/components/agent-skills/WorkspaceMemoryTab'
 import { AgentSkillsView } from '@/components/agent-skills/AgentSkillsView'
 import { PlanningView } from '@/components/planning/PlanningView'
@@ -87,6 +90,7 @@ import { detectIsWindows } from '@/lib/platform'
 import type { FileEntry, AgentPendingFile, AgentSessionMeta, SDKMessage } from '@proma/shared'
 import { setFilePanelDragData, getMediaTypeFromFilename, dispatchInsertFileMention } from '@/lib/file-panel-drag'
 import { CLOSE_ACTIVE_RIGHT_WORKSPACE_TAB_EVENT } from '@/lib/right-workspace-events'
+import { TerminalTabContent } from '@/components/tabs/TerminalTabContent'
 
 function getPathBasename(filePath: string): string {
   return filePath.split(/[\\/]/).filter(Boolean).pop() || filePath
@@ -617,6 +621,10 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   const sideDelegationMap = useAtomValue(agentSideDelegationMapAtom)
   const setSideDelegationMap = useSetAtom(agentSideDelegationMapAtom)
   const sideDelegationSessionIds = sideDelegationMap.get(sessionId) ?? []
+  const terminalTabsMap = useAtomValue(agentTerminalTabsAtom)
+  const setTerminalTabsMap = useSetAtom(agentTerminalTabsAtom)
+  const terminalTabs = terminalTabsMap.get(sessionId) ?? []
+  const activeTerminalId = getTerminalIdFromSidePanelTab(activeTab)
   const activeDelegationSessionId = getDelegationSessionIdFromSidePanelTab(activeTab)
   const activeDelegationSession = activeDelegationSessionId
     ? sessions.find((item) => item.id === activeDelegationSessionId && item.parentSessionId === sessionId && !!item.sourceDelegationId) ?? null
@@ -628,7 +636,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   // Todo / 日程 / 能力 / 记忆是工作区组件，而不是会话附件；同一项目下切换会话仍保留打开状态。
   const [workspaceComponentTabs, setWorkspaceComponentTabs] = useAtom(workspaceComponentTabsAtomFamily(currentWorkspaceId ?? ''))
   const automationFormOpen = useAtomValue(automationFormAtom).open
-  const isAgentRunning = useAtomValue(agentSessionStreamingStateAtomFamily(sessionId))?.running === true
+  const agentStreamState = useAtomValue(agentSessionStreamingStateAtomFamily(sessionId))
   const memoryChangesMap = useAtomValue(workspaceMemoryChangesAtom)
   const setMemoryNavigationRequest = useSetAtom(memoryFileNavigationAtom)
   const latestMemoryChange = workspaceSlug ? memoryChangesMap.get(workspaceSlug)?.[0] : undefined
@@ -636,25 +644,30 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   const effectiveActiveTab: AgentSidePanelTab = activeTab === 'chat' && !sideChatConversationId
     ? 'files'
     // `temporary-agent` 是旧的单分支内存状态；新状态使用 exploration:<sessionId>。
-    : activeTab === 'temporary-agent' || (activeExplorationSessionId !== null && !activeExplorationBranch) || (activeDelegationSessionId !== null && !activeDelegationSession)
+    : activeTab === 'temporary-agent' || (activeExplorationSessionId !== null && !activeExplorationBranch) || (activeDelegationSessionId !== null && !activeDelegationSession) || (activeTerminalId !== null && !terminalTabs.some((terminal) => terminal.terminalId === activeTerminalId))
       ? 'files'
       : isWorkspaceComponentTab(activeTab) && (!workspaceSlug || !workspaceComponentTabs.includes(activeTab))
         ? 'files'
         : activeTab
 
-  // Agent 对当前项目记忆写入后，自动展开并激活完整编辑器这个独立工作区 Tab。
-  // Watcher 同一事件可因重新挂载被读到多次，按路径和时间戳去重；仅流式 Agent 运行中
-  // 的改动会抢占当前视图，用户在记忆编辑器中的手动保存不会打断其他工作。
+  // Agent 对当前项目记忆写入后，默认展开并激活完整编辑器这个独立工作区 Tab。
+  // 记忆 watcher 按 workspace 缓存最新事件，必须排除本轮开始前的陈旧事件。
+  // 用户正在查看 Skills 或项目记忆时，变更只在后台保留为可见的 Memory Tab，
+  // 不抢焦点，也不重置其正在阅读或编辑的文件。
   React.useEffect(() => {
-    if (!isAgentRunning || !latestMemoryChange) return
+    const runStartedAt = agentStreamState?.startedAt
+    if (!agentStreamState?.running || !runStartedAt || !latestMemoryChange || latestMemoryChange.changedAt < runStartedAt) return
     const changeId = `${latestMemoryChange.relativePath}:${latestMemoryChange.changedAt}`
     if (lastActivatedMemoryChangeRef.current === changeId) return
     lastActivatedMemoryChangeRef.current = changeId
     setWorkspaceComponentTabs((previous) => previous.includes('memory') ? previous : [...previous, 'memory'])
-    setMemoryNavigationRequest({ workspaceSlug: workspaceSlug!, relativePath: latestMemoryChange.relativePath, mode: 'preview' })
+
+    if (isOpen && isUserPriorityWorkspaceComponentTab(effectiveActiveTab)) return
+
+    setMemoryNavigationRequest({ workspaceSlug: workspaceSlug!, relativePath: latestMemoryChange.relativePath, mode: 'change' })
     setIsOpen(true)
     onTabChange('memory')
-  }, [isAgentRunning, latestMemoryChange, onTabChange, setIsOpen, setMemoryNavigationRequest, setWorkspaceComponentTabs, workspaceSlug])
+  }, [agentStreamState?.running, agentStreamState?.startedAt, effectiveActiveTab, isOpen, latestMemoryChange, onTabChange, setIsOpen, setMemoryNavigationRequest, setWorkspaceComponentTabs, workspaceSlug])
 
   const handleClosePreviewTab = React.useCallback((previewId: string) => {
     const remaining = previewFiles.filter((file) => getPreviewFileId(file) !== previewId)
@@ -848,6 +861,16 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     }
   }, [browserState, ensureBrowserOpen, onTabChange, publishBrowserState, sessionId])
 
+  const handleOpenTerminal = React.useCallback(() => {
+    const terminalId = crypto.randomUUID()
+    setTerminalTabsMap((previous) => {
+      const next = new Map(previous)
+      next.set(sessionId, [...(next.get(sessionId) ?? []), { terminalId, title: '终端' }])
+      return next
+    })
+    onTabChange(getTerminalSidePanelTab(terminalId))
+  }, [onTabChange, sessionId, setTerminalTabsMap])
+
   const handleCloseBrowserTab = React.useCallback(async (browserTabId: string) => {
     try {
       const state = await window.electronAPI.closeAgentBrowserTab({ sessionId, tabId: browserTabId })
@@ -892,6 +915,9 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   }, [activeBrowserTabId, browserState?.tabs, onTabChange])
 
   const showBrowserActivity = Boolean(browserState?.activity && browserState.executionSource !== 'user')
+  // WebContentsView 是原生子视图，会盖住 renderer 的 portal。加号菜单打开时，
+  // BrowserPanel 为它保留一个固定避让区，而非 setVisible(false)。
+  const [isAddTabMenuOpen, setIsAddTabMenuOpen] = React.useState(false)
   const workspaceTabs = React.useMemo<WorkspacePanelTab[]>(() => [
     { id: 'files', label: '文件', icon: <FolderOpen className="size-3.5" /> },
     { id: 'changes', label: '改动', icon: <FileDiff className="size-3.5" /> },
@@ -911,6 +937,12 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       id: getPreviewSidePanelTab(getPreviewFileId(file)),
       label: file.filePath.split(/[\\/]/).pop() || '预览',
       icon: <FileText className="size-3.5" />,
+      closable: true,
+    })),
+    ...terminalTabs.map((terminal) => ({
+      id: getTerminalSidePanelTab(terminal.terminalId),
+      label: terminal.title,
+      icon: <SquareTerminal className="size-3.5" />,
       closable: true,
     })),
     ...(sideChatConversationId ? [{ id: 'chat' as const, label: '问答', icon: <MessageCircle className="size-3.5" />, closable: true }] : []),
@@ -939,9 +971,24 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       closable: tab.tabId !== browserState.agentTabId,
       activity: showBrowserActivity && activeBrowserTabId !== tab.tabId && browserState.activeTabId === tab.tabId,
     })) ?? []),
-  ], [activeBrowserTabId, browserState, previewFiles, sessions, sessionId, showBrowserActivity, sideChatConversationId, sideDelegationSessionIds, sideTemporaryAgents, workspaceComponentTabs])
+  ], [activeBrowserTabId, browserState, previewFiles, sessions, sessionId, showBrowserActivity, sideChatConversationId, sideDelegationSessionIds, sideTemporaryAgents, terminalTabs, workspaceComponentTabs])
 
   const handleCloseWorkspaceTab = React.useCallback((tab: AgentSidePanelTab) => {
+    const terminalId = getTerminalIdFromSidePanelTab(tab)
+    if (terminalId) {
+      void window.electronAPI.killTerminal(terminalId).catch(console.error)
+      setTerminalTabsMap((previous) => {
+        const current = previous.get(sessionId) ?? []
+        if (!current.some((terminal) => terminal.terminalId === terminalId)) return previous
+        const next = new Map(previous)
+        const remaining = current.filter((terminal) => terminal.terminalId !== terminalId)
+        if (remaining.length > 0) next.set(sessionId, remaining)
+        else next.delete(sessionId)
+        return next
+      })
+      if (activeTab === tab) onTabChange('files')
+      return
+    }
     if (isWorkspaceComponentTab(tab)) {
       setWorkspaceComponentTabs((previous) => previous.filter((component) => component !== tab))
       if (activeTab === tab) onTabChange('files')
@@ -956,7 +1003,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     if (delegationSessionId) { handleCloseDelegationTab(delegationSessionId); return }
     const browserTabId = getBrowserTabIdFromSidePanelTab(tab)
     if (browserTabId && browserTabId !== browserState?.agentTabId) void handleCloseBrowserTab(browserTabId)
-  }, [activeTab, browserState?.agentTabId, handleCloseBrowserTab, handleCloseChatTab, handleCloseDelegationTab, handleCloseExplorationTab, handleClosePreviewTab, onTabChange, setWorkspaceComponentTabs])
+  }, [activeTab, browserState?.agentTabId, handleCloseBrowserTab, handleCloseChatTab, handleCloseDelegationTab, handleCloseExplorationTab, handleClosePreviewTab, onTabChange, sessionId, setTerminalTabsMap, setWorkspaceComponentTabs])
 
   React.useEffect(() => {
     const handleCloseActiveWorkspaceTab = (event: Event) => {
@@ -992,7 +1039,9 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
             onTabChange={handleWorkspaceTabChange}
             onCloseTab={handleCloseWorkspaceTab}
             onOpenBrowser={() => void handleOpenBrowserTab()}
+            onAddTabMenuOpenChange={setIsAddTabMenuOpen}
             onOpenFile={() => handleWorkspaceTabChange('files')}
+            onOpenTerminal={handleOpenTerminal}
             onOpenWorkspaceComponent={(component) => {
               setWorkspaceComponentTabs((previous) => previous.includes(component) ? previous : [...previous, component])
               onTabChange(component)
@@ -1004,12 +1053,24 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
             isWindows={isWindows}
           />
 
+          <SidePanelTerminalTabs
+            terminals={terminalTabs}
+            activeTerminalId={getTerminalIdFromSidePanelTab(effectiveActiveTab)}
+            sessionId={sessionId}
+            cwd={sessionPath ?? undefined}
+          />
+
           {requestedPreviewId && currentPreviewFile ? (
             <div className="min-h-0 flex-1 overflow-hidden"><PreviewPanel sessionId={sessionId} file={currentPreviewFile} onClose={() => handleClosePreviewTab(requestedPreviewId)} /></div>
           ) : activeBrowserTabId ? (
             browserState && browserState.tabs.some((tab) => tab.tabId === activeBrowserTabId) ? (
               <div className="min-h-0 flex-1 overflow-hidden">
-                <BrowserPanel sessionId={sessionId} tabId={activeBrowserTabId} state={browserState} />
+                <BrowserPanel
+                  sessionId={sessionId}
+                  tabId={activeBrowserTabId}
+                  state={browserState}
+                  isAddTabMenuOpen={isAddTabMenuOpen}
+                />
               </div>
             ) : (
               <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">浏览器标签已关闭</div>
@@ -1045,7 +1106,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
           ) : effectiveActiveTab === 'memory' ? (
             workspaceSlug ? (
               <div className="min-h-0 flex-1 overflow-hidden p-2">
-                <WorkspaceMemoryTab workspaceSlug={workspaceSlug} embedded />
+                <WorkspaceMemoryTab workspaceSlug={workspaceSlug} sessionId={sessionId} embedded />
               </div>
             ) : (
               <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">等待项目初始化...</div>
@@ -1925,5 +1986,31 @@ function AttachedDirItem({ entry, depth, selectedPaths, onSelect, refreshVersion
         </div>
       )}
     </>
+  )
+}
+
+function SidePanelTerminalTabs({
+  terminals,
+  activeTerminalId,
+  sessionId,
+  cwd,
+}: {
+  terminals: Array<{ terminalId: string; title: string }>
+  activeTerminalId: string | null
+  sessionId: string
+  cwd?: string
+}): React.ReactElement {
+  return (
+    <div className={cn('relative min-h-0 flex-1', activeTerminalId ? 'flex' : 'hidden')}>
+      {terminals.map((terminal) => (
+        <div
+          key={terminal.terminalId}
+          className={cn('absolute inset-0', terminal.terminalId === activeTerminalId ? 'block' : 'hidden')}
+          aria-hidden={terminal.terminalId !== activeTerminalId}
+        >
+          <TerminalTabContent terminalId={terminal.terminalId} sessionId={sessionId} cwd={cwd} terminateOnUnmount={false} />
+        </div>
+      ))}
+    </div>
   )
 }

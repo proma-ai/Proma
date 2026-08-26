@@ -12,7 +12,7 @@ import {
   GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS,
   FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS,
   AUTOMATION_IPC_CHANNELS, CLOUD_IPC_CHANNELS, SYNC_IPC_CHANNELS,
-  PLANNING_IPC_CHANNELS, AGENT_ISLAND_IPC_CHANNELS,
+  PLANNING_IPC_CHANNELS, AGENT_ISLAND_IPC_CHANNELS, TERMINAL_IPC_CHANNELS,
 } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS } from '../types'
 import type {
@@ -45,6 +45,7 @@ import type {
   RecentMessagesResult,
   MessageSearchResult,
   AgentSessionMeta,
+  AgentActiveSessionSnapshot,
   SetAgentSessionActiveWorktreeInput,
   SDKMessage,
   AgentSendInput,
@@ -188,6 +189,16 @@ import type {
   ResolvePlanningNativeSyncConflictInput,
   PlanningSyncProfile,
   SavePlanningSyncProfileInput,
+  AgentTerminalCloseEvent,
+  AgentTerminalOpenEvent,
+  TerminalCreateInput,
+  TerminalInput,
+  TerminalResizeInput,
+  TerminalState,
+  TerminalOutputEvent,
+  TerminalOutputAck,
+  TerminalSnapshot,
+  TerminalExitEvent,
 } from '@proma/shared'
 import type {
   UserProfile,
@@ -235,6 +246,18 @@ export interface ElectronAPI {
    * 用户安装完 Git / Node 后触发，强制刷新缓存
    */
   reinitRuntime: () => Promise<RuntimeStatus>
+
+  // ===== 本地终端 =====
+  createTerminal: (input: TerminalCreateInput) => Promise<TerminalState>
+  writeTerminal: (input: TerminalInput) => Promise<void>
+  resizeTerminal: (input: TerminalResizeInput) => Promise<void>
+  killTerminal: (terminalId: string) => Promise<void>
+  getTerminalSnapshot: (terminalId: string) => Promise<TerminalSnapshot>
+  acknowledgeTerminalOutput: (input: TerminalOutputAck) => void
+  onAgentTerminalOpen: (callback: (event: AgentTerminalOpenEvent) => void) => () => void
+  onAgentTerminalClose: (callback: (event: AgentTerminalCloseEvent) => void) => () => void
+  onTerminalOutput: (callback: (event: TerminalOutputEvent) => void) => () => void
+  onTerminalExit: (callback: (event: TerminalExitEvent) => void) => () => void
 
   /**
    * 获取指定目录的 Git 仓库状态
@@ -565,6 +588,9 @@ export interface ElectronAPI {
   /** 创建 Agent 会话 */
   createAgentSession: (title?: string, channelId?: string, workspaceId?: string, modelId?: string) => Promise<AgentSessionMeta>
 
+  /** 获取当前主进程仍在执行的 Agent 会话，供 renderer 重载后恢复运行态 */
+  listActiveAgentSessionSnapshots: () => Promise<AgentActiveSessionSnapshot[]>
+
   /** 获取 Agent 会话 SDKMessage（Phase 4 新格式） */
   getAgentSessionSDKMessages: (id: string) => Promise<SDKMessage[]>
 
@@ -753,7 +779,7 @@ export interface ElectronAPI {
   readWorkspaceAgentsMd: (workspaceSlug: string) => Promise<import('@proma/shared').SkillFileContent>
 
   /** 写入工作区 AGENTS.md */
-  writeWorkspaceAgentsMd: (workspaceSlug: string, content: string) => Promise<void>
+  writeWorkspaceAgentsMd: (workspaceSlug: string, content: string, expectedContent?: string) => Promise<void>
 
   /** 列出工作区长期记忆文件树 */
   listWorkspaceAutoMemoryFiles: (workspaceSlug: string) => Promise<import('@proma/shared').SkillFileNode[]>
@@ -762,7 +788,7 @@ export interface ElectronAPI {
   readWorkspaceAutoMemoryFile: (workspaceSlug: string, relativePath: string) => Promise<import('@proma/shared').SkillFileContent>
 
   /** 写入工作区长期记忆文件 */
-  writeWorkspaceAutoMemoryFile: (workspaceSlug: string, relativePath: string, content: string) => Promise<void>
+  writeWorkspaceAutoMemoryFile: (workspaceSlug: string, relativePath: string, content: string, expectedContent?: string) => Promise<void>
 
   /** 打开或聚焦当前 workspace 的独立 Memory 编辑窗口，可选定位到某个记忆文件。 */
   openWorkspaceMemoryWindow: (workspaceSlug: string, relativePath?: string) => Promise<void>
@@ -937,7 +963,7 @@ export interface ElectronAPI {
   showItemInFolder: (filePath: string, candidateBasePaths?: string[]) => Promise<boolean>
 
   /** 解析文件路径并读取内容（供内联预览使用） */
-  resolveAndReadFile: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => Promise<{ resolvedPath: string; content: string; isBinary: boolean; isTooLarge: boolean } | null>
+  resolveAndReadFile: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => Promise<import('@proma/shared').FilePreviewReadResult | null>
 
   /** 写入文本文件（供 Markdown 内联编辑使用） */
   writeTextFile: (filePath: string, content: string, access?: import('@proma/shared').FileAccessOptions) => Promise<boolean>
@@ -1460,6 +1486,33 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(IPC_CHANNELS.REINIT_RUNTIME)
   },
 
+  createTerminal: (input: TerminalCreateInput) => ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.CREATE, input),
+  writeTerminal: (input: TerminalInput) => ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.INPUT, input),
+  resizeTerminal: (input: TerminalResizeInput) => ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.RESIZE, input),
+  killTerminal: (terminalId: string) => ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.KILL, terminalId),
+  getTerminalSnapshot: (terminalId: string) => ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.SNAPSHOT, terminalId),
+  acknowledgeTerminalOutput: (input: TerminalOutputAck) => ipcRenderer.send(TERMINAL_IPC_CHANNELS.ACK_OUTPUT, input),
+  onAgentTerminalOpen: (callback: (event: AgentTerminalOpenEvent) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, event: AgentTerminalOpenEvent): void => callback(event)
+    ipcRenderer.on(TERMINAL_IPC_CHANNELS.AGENT_OPEN, listener)
+    return () => ipcRenderer.removeListener(TERMINAL_IPC_CHANNELS.AGENT_OPEN, listener)
+  },
+  onAgentTerminalClose: (callback: (event: AgentTerminalCloseEvent) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, event: AgentTerminalCloseEvent): void => callback(event)
+    ipcRenderer.on(TERMINAL_IPC_CHANNELS.AGENT_CLOSE, listener)
+    return () => ipcRenderer.removeListener(TERMINAL_IPC_CHANNELS.AGENT_CLOSE, listener)
+  },
+  onTerminalOutput: (callback: (event: TerminalOutputEvent) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, event: TerminalOutputEvent): void => callback(event)
+    ipcRenderer.on(TERMINAL_IPC_CHANNELS.OUTPUT, listener)
+    return () => ipcRenderer.removeListener(TERMINAL_IPC_CHANNELS.OUTPUT, listener)
+  },
+  onTerminalExit: (callback: (event: TerminalExitEvent) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, event: TerminalExitEvent): void => callback(event)
+    ipcRenderer.on(TERMINAL_IPC_CHANNELS.EXIT, listener)
+    return () => ipcRenderer.removeListener(TERMINAL_IPC_CHANNELS.EXIT, listener)
+  },
+
   getGitRepoStatus: (dirPath: string) => {
     return ipcRenderer.invoke(IPC_CHANNELS.GET_GIT_REPO_STATUS, dirPath)
   },
@@ -1913,6 +1966,10 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.CREATE_SESSION, title, channelId, workspaceId, modelId)
   },
 
+  listActiveAgentSessionSnapshots: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.ACTIVE_SESSIONS_SNAPSHOT)
+  },
+
   getAgentSessionSDKMessages: (id: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_SDK_MESSAGES, id)
   },
@@ -2182,8 +2239,8 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.READ_WORKSPACE_AGENTS_MD, workspaceSlug)
   },
 
-  writeWorkspaceAgentsMd: (workspaceSlug: string, content: string) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.WRITE_WORKSPACE_AGENTS_MD, workspaceSlug, content)
+  writeWorkspaceAgentsMd: (workspaceSlug: string, content: string, expectedContent?: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.WRITE_WORKSPACE_AGENTS_MD, workspaceSlug, content, expectedContent)
   },
 
   listWorkspaceAutoMemoryFiles: (workspaceSlug: string) => {
@@ -2194,8 +2251,8 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.READ_WORKSPACE_AUTO_MEMORY_FILE, workspaceSlug, relativePath)
   },
 
-  writeWorkspaceAutoMemoryFile: (workspaceSlug: string, relativePath: string, content: string) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.WRITE_WORKSPACE_AUTO_MEMORY_FILE, workspaceSlug, relativePath, content)
+  writeWorkspaceAutoMemoryFile: (workspaceSlug: string, relativePath: string, content: string, expectedContent?: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.WRITE_WORKSPACE_AUTO_MEMORY_FILE, workspaceSlug, relativePath, content, expectedContent)
   },
 
   openWorkspaceMemoryWindow: (workspaceSlug: string, relativePath?: string) => {
@@ -2464,7 +2521,7 @@ const electronAPI: ElectronAPI = {
   },
 
   resolveAndReadFile: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => {
-    return ipcRenderer.invoke('file:resolve-and-read', filePath, access) as Promise<{ resolvedPath: string; content: string; isBinary: boolean; isTooLarge: boolean } | null>
+    return ipcRenderer.invoke('file:resolve-and-read', filePath, access) as Promise<import('@proma/shared').FilePreviewReadResult | null>
   },
 
   writeTextFile: (filePath: string, content: string, access?: import('@proma/shared').FileAccessOptions) => {

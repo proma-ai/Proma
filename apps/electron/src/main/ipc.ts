@@ -9,7 +9,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { existsSync, realpathSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, AGENT_ISLAND_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, PLANNING_CONFLICT_ERROR, MAX_ATTACHMENT_SIZE, isPromaPermissionMode, normalizePathForCompare } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, AGENT_ISLAND_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, PLANNING_CONFLICT_ERROR, MAX_ATTACHMENT_SIZE, isPromaPermissionMode, normalizePathForCompare, TERMINAL_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS, WINDOWS_AGENT_ISLAND_IPC_CHANNELS, TRAY_IPC_CHANNELS } from '../types'
 import type {
   QuickTaskSubmitInput,
@@ -47,6 +47,7 @@ import type {
   FileOrFolderDialogResult,
   RecentMessagesResult,
   AgentSessionMeta,
+  AgentActiveSessionSnapshot,
   SetAgentSessionActiveWorktreeInput,
   AgentSendInput,
   AgentThinkingLevel,
@@ -155,6 +156,8 @@ import type {
 import type { UserProfile, AppSettings } from '../types'
 import { getRuntimeStatus, getGitRepoStatus, reinitializeRuntime } from './lib/runtime-init'
 import { browserController } from './lib/browser-controller'
+import { acknowledgeTerminalOutput, closeTerminalsForSession, createTerminal, getTerminalSnapshot, killTerminal, resizeTerminal, writeTerminal } from './lib/terminal-service'
+import { getMainWindow } from './lib/main-window-store'
 import { resolveBrowserProfileKey } from './lib/browser-profile-policy'
 import { getUnstagedChanges, invalidateGitDiffCache, getFileDiff, getUntrackedContent, revertFile, getDiffContents, listWorktrees, getWorktreeChanges, getMainRepoRoot } from './lib/git-diff-service'
 import { registerPromaDirectoryPath, registerPromaFilePath } from './lib/local-file-protocol'
@@ -280,7 +283,7 @@ import {
   searchAgentSessionMessages,
   searchAgentSessionReferences,
 } from './lib/agent-session-manager'
-import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive, isAgentSessionBusy, reserveAgentSessionStart, queueAgentMessage, submitOrEnqueueAgentMessage, enqueueAgentQueuedMessage, cancelAgentQueuedMessage, moveAgentQueuedMessage, clearAgentQueuedMessages, updateAgentPermissionMode, rewindAgentSession, setVisibleAgentSession } from './lib/agent-service'
+import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive, isAgentSessionBusy, listActiveAgentSessionSnapshots, reserveAgentSessionStart, queueAgentMessage, submitOrEnqueueAgentMessage, enqueueAgentQueuedMessage, cancelAgentQueuedMessage, moveAgentQueuedMessage, clearAgentQueuedMessages, updateAgentPermissionMode, rewindAgentSession, setVisibleAgentSession } from './lib/agent-service'
 import { permissionService } from './lib/agent-permission-service'
 import { askUserService } from './lib/agent-ask-user-service'
 import { exitPlanService } from './lib/agent-exit-plan-service'
@@ -1015,6 +1018,41 @@ async function withOAuthDeviceCodeQr<T extends CodexOAuthDeviceCode | XaiOAuthDe
 }
 
 export function registerIpcHandlers(): void {
+  // ===== 本地终端（仅主 renderer 可操作，不能指定可执行文件） =====
+  const assertMainTerminalRenderer = (senderId: number): void => {
+    const mainWindow = getMainWindow()
+    if (!mainWindow || mainWindow.webContents.id !== senderId) {
+      throw new Error('仅主窗口可以操作本地终端。')
+    }
+  }
+  ipcMain.handle(TERMINAL_IPC_CHANNELS.CREATE, async (event, input) => {
+    assertMainTerminalRenderer(event.sender.id)
+    if (!input.sessionId || !getAgentSessionMeta(input.sessionId)) {
+      throw new Error('终端所属 Agent 会话不存在。')
+    }
+    return createTerminal(input)
+  })
+  ipcMain.handle(TERMINAL_IPC_CHANNELS.INPUT, async (event, input) => {
+    assertMainTerminalRenderer(event.sender.id)
+    return writeTerminal(input)
+  })
+  ipcMain.handle(TERMINAL_IPC_CHANNELS.RESIZE, async (event, input) => {
+    assertMainTerminalRenderer(event.sender.id)
+    return resizeTerminal(input)
+  })
+  ipcMain.handle(TERMINAL_IPC_CHANNELS.KILL, async (event, terminalId: string) => {
+    assertMainTerminalRenderer(event.sender.id)
+    return killTerminal(terminalId)
+  })
+  ipcMain.handle(TERMINAL_IPC_CHANNELS.SNAPSHOT, async (event, terminalId: string) => {
+    assertMainTerminalRenderer(event.sender.id)
+    return getTerminalSnapshot(terminalId)
+  })
+  ipcMain.on(TERMINAL_IPC_CHANNELS.ACK_OUTPUT, (event, input) => {
+    assertMainTerminalRenderer(event.sender.id)
+    acknowledgeTerminalOutput(input)
+  })
+
   console.log('[IPC] 正在注册 IPC 处理器...')
 
   // ===== 运行时相关 =====
@@ -2074,6 +2112,12 @@ export function registerIpcHandlers(): void {
     async (): Promise<AgentSessionMeta[]> => listActiveAgentSessions(),
   )
 
+  // 获取当前主进程仍在执行的 Agent 会话快照，供 renderer 重载后恢复运行态
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.ACTIVE_SESSIONS_SNAPSHOT,
+    async (): Promise<AgentActiveSessionSnapshot[]> => listActiveAgentSessionSnapshots(),
+  )
+
   // 获取归档会话列表（进入归档视图时按需加载）
   ipcMain.handle(
     AGENT_IPC_CHANNELS.LIST_ARCHIVED_SESSIONS,
@@ -2273,6 +2317,7 @@ export function registerIpcHandlers(): void {
       exitPlanService.clearSessionPending(id)
       clearAgentQueuedMessages(id)
       await browserController.close(id)
+      closeTerminalsForSession(id)
       deleteAgentSession(id)
       releaseAttachedFileWatchers(attachedFiles)
     }
@@ -2533,6 +2578,7 @@ export function registerIpcHandlers(): void {
         if (isAgentSessionActive(sessionId)) {
           stopAgent(sessionId)
         }
+        closeTerminalsForSession(sessionId)
         deleteAgentSession(sessionId)
       }
       for (const automationId of affectedAutomationIds) {
@@ -2752,8 +2798,8 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(
     AGENT_IPC_CHANNELS.WRITE_WORKSPACE_AGENTS_MD,
-    async (_, workspaceSlug: string, content: string): Promise<void> => {
-      writeWorkspaceAgentsMd(workspaceSlug, content)
+    async (_, workspaceSlug: string, content: string, expectedContent?: string): Promise<void> => {
+      writeWorkspaceAgentsMd(workspaceSlug, content, expectedContent)
     }
   )
 
@@ -2773,8 +2819,8 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(
     AGENT_IPC_CHANNELS.WRITE_WORKSPACE_AUTO_MEMORY_FILE,
-    async (_, workspaceSlug: string, relativePath: string, content: string): Promise<void> => {
-      writeWorkspaceAutoMemoryFile(workspaceSlug, relativePath, content)
+    async (_, workspaceSlug: string, relativePath: string, content: string, expectedContent?: string): Promise<void> => {
+      writeWorkspaceAutoMemoryFile(workspaceSlug, relativePath, content, expectedContent)
     }
   )
 
@@ -3580,7 +3626,7 @@ export function registerIpcHandlers(): void {
   // 解析文件路径并读取内容（供内联预览使用）
   ipcMain.handle(
     'file:resolve-and-read',
-    async (_, filePath: string, access?: FileAccessOptions | string[]): Promise<{ resolvedPath: string; content: string; isBinary: boolean; isTooLarge: boolean } | null> => {
+    async (_, filePath: string, access?: FileAccessOptions | string[]): Promise<import('@proma/shared').FilePreviewReadResult | null> => {
       const { resolveAndReadFile, resolveFilePath } = await import('./lib/file-preview-service')
       const options = normalizeFileAccessOptions(access)
       const resolved = resolveFilePath(filePath, getPreviewCandidateBasePaths(options))

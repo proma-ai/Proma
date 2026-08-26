@@ -35,6 +35,7 @@ export * from './sync'
 // Agent Provider 适配器接口
 export * from './agent-provider'
 export * from './agent-runtime'
+export * from './terminal'
 
 // 环境检测相关类型
 export * from './environment'

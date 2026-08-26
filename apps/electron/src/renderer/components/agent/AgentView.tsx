@@ -2958,7 +2958,9 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
           onModelSelect={handleModelSelect}
           showChannelInTrigger
           useAgentModels
-          useSharedOpenState
+          // 全局打开状态只供主会话的“选择模型”引导使用；右侧嵌入会话必须保持独立，
+          // 否则任一触发器打开时会同时挂载两侧的 Popover，遮挡并阻断模型切换。
+          useSharedOpenState={!embedded}
         />
       </div>
       {sendControl}
