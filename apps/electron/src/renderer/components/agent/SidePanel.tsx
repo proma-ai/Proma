@@ -899,6 +899,9 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   }, [activeBrowserTabId, browserState?.tabs, onTabChange])
 
   const showBrowserActivity = Boolean(browserState?.activity && browserState.executionSource !== 'user')
+  // WebContentsView 是原生子视图，会盖住 renderer 的 portal。加号菜单打开时，
+  // BrowserPanel 为它保留一个固定避让区，而非 setVisible(false)。
+  const [isAddTabMenuOpen, setIsAddTabMenuOpen] = React.useState(false)
   const workspaceTabs = React.useMemo<WorkspacePanelTab[]>(() => [
     { id: 'files', label: '文件', icon: <FolderOpen className="size-3.5" /> },
     { id: 'changes', label: '改动', icon: <FileDiff className="size-3.5" /> },
@@ -998,7 +1001,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
             onTabChange={handleWorkspaceTabChange}
             onCloseTab={handleCloseWorkspaceTab}
             onOpenBrowser={() => void handleOpenBrowserTab()}
-            onOpenFile={() => handleWorkspaceTabChange('files')}
+            onAddTabMenuOpenChange={setIsAddTabMenuOpen}
             onOpenWorkspaceComponent={(component) => {
               setWorkspaceComponentTabs((previous) => previous.includes(component) ? previous : [...previous, component])
               onTabChange(component)
@@ -1015,7 +1018,12 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
           ) : activeBrowserTabId ? (
             browserState && browserState.tabs.some((tab) => tab.tabId === activeBrowserTabId) ? (
               <div className="min-h-0 flex-1 overflow-hidden">
-                <BrowserPanel sessionId={sessionId} tabId={activeBrowserTabId} state={browserState} />
+                <BrowserPanel
+                  sessionId={sessionId}
+                  tabId={activeBrowserTabId}
+                  state={browserState}
+                  isAddTabMenuOpen={isAddTabMenuOpen}
+                />
               </div>
             ) : (
               <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">浏览器标签已关闭</div>

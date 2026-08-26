@@ -6,7 +6,7 @@
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { Blocks, Brain, CalendarDays, FolderOpen, Globe, ListTodo, MessageCircle, PanelRight, Plus, Repeat2, ServerCog, X } from 'lucide-react'
+import { Blocks, Brain, CalendarDays, Clock, Globe, ListTodo, MessageCircle, PanelRight, Plus, ServerCog, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
@@ -34,7 +34,8 @@ interface DiffPanelTabBarProps {
   onTabChange: (tab: AgentSidePanelTab) => void
   onCloseTab: (tab: AgentSidePanelTab) => void
   onOpenBrowser: () => void
-  onOpenFile: () => void
+  /** 加号菜单是否展开；供原生浏览器视图临时避让。 */
+  onAddTabMenuOpenChange?: (open: boolean) => void
   onOpenWorkspaceComponent?: (component: WorkspaceComponentTab) => void
   onOpenChat?: () => void
   /** 仅当前右侧 Tab 需要的紧凑动作，渲染于标签列表之后，不影响内容区布局。 */
@@ -49,7 +50,7 @@ export function DiffPanelTabBar({
   onTabChange,
   onCloseTab,
   onOpenBrowser,
-  onOpenFile,
+  onAddTabMenuOpenChange,
   onOpenWorkspaceComponent,
   onOpenChat,
   activeTabAction,
@@ -60,6 +61,17 @@ export function DiffPanelTabBar({
   const setUnseenMap = useSetAtom(agentDiffUnseenChangesAtom)
   const currentSessionId = useAtomValue(currentAgentSessionIdAtom)
   const unseenChanges = unseenMap.get(currentSessionId ?? '') ?? false
+  const [isAddTabMenuOpen, setIsAddTabMenuOpen] = React.useState(false)
+  // 仅鼠标在菜单外取消时抑制 Radix 的回焦；Esc 与键盘选择必须保留可见焦点。
+  const suppressPointerDismissFocusRestoreRef = React.useRef(false)
+
+  React.useEffect(() => () => onAddTabMenuOpenChange?.(false), [onAddTabMenuOpenChange])
+
+  const handleAddTabMenuOpenChange = React.useCallback((open: boolean) => {
+    if (open) suppressPointerDismissFocusRestoreRef.current = false
+    setIsAddTabMenuOpen(open)
+    onAddTabMenuOpenChange?.(open)
+  }, [onAddTabMenuOpenChange])
 
   const selectTab = React.useCallback((tab: AgentSidePanelTab) => {
     if (tab === 'changes' && currentSessionId) {
@@ -125,7 +137,7 @@ export function DiffPanelTabBar({
           })}
         </div>
         {activeTabAction && <div className="ml-1 flex shrink-0 items-center titlebar-no-drag">{activeTabAction}</div>}
-        <DropdownMenu>
+        <DropdownMenu open={isAddTabMenuOpen} onOpenChange={handleAddTabMenuOpenChange}>
           <Tooltip>
             <TooltipTrigger asChild>
               <DropdownMenuTrigger asChild>
@@ -140,14 +152,19 @@ export function DiffPanelTabBar({
             </TooltipTrigger>
             <TooltipContent side="bottom">添加标签</TooltipContent>
           </Tooltip>
-          <DropdownMenuContent align="end" className="z-[100] min-w-40 titlebar-no-drag">
+          <DropdownMenuContent
+            align="end"
+            className="z-[100] min-w-40 titlebar-no-drag"
+            onPointerDownOutside={() => { suppressPointerDismissFocusRestoreRef.current = true }}
+            onCloseAutoFocus={(event) => {
+              if (!suppressPointerDismissFocusRestoreRef.current) return
+              suppressPointerDismissFocusRestoreRef.current = false
+              event.preventDefault()
+            }}
+          >
             <DropdownMenuItem onSelect={onOpenBrowser}>
               <Globe className="size-3.5" />
               新建浏览器标签
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={onOpenFile}>
-              <FolderOpen className="size-3.5" />
-              打开文件
             </DropdownMenuItem>
             {onOpenWorkspaceComponent && (
               <>
@@ -159,10 +176,6 @@ export function DiffPanelTabBar({
                 <DropdownMenuItem onSelect={() => onOpenWorkspaceComponent('calendar')}>
                   <CalendarDays className="size-3.5" />
                   打开日程
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onOpenWorkspaceComponent('automations')}>
-                  <Repeat2 className="size-3.5" />
-                  打开定时任务
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => onOpenWorkspaceComponent('skills')}>
                   <Blocks className="size-3.5" />
@@ -186,6 +199,12 @@ export function DiffPanelTabBar({
                   打开问答
                 </DropdownMenuItem>
               </>
+            )}
+            {onOpenWorkspaceComponent && (
+              <DropdownMenuItem onSelect={() => onOpenWorkspaceComponent('automations')}>
+                <Clock className="size-3.5" />
+                打开定时任务
+              </DropdownMenuItem>
             )}
           </DropdownMenuContent>
         </DropdownMenu>
