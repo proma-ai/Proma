@@ -56,6 +56,7 @@ import {
   updateShortcutOverrides,
 } from '@/lib/shortcut-registry'
 import { getFileParentPath } from '@/lib/file-utils'
+import { getLastInteractedStopTarget, resolveStopGenerationTarget } from '@/lib/stop-generation-target'
 import { CLOSE_ACTIVE_RIGHT_WORKSPACE_TAB_EVENT } from '@/lib/right-workspace-events'
 import {
   shouldFallbackVoiceDictationToActiveTab,
@@ -218,12 +219,16 @@ export function GlobalShortcuts(): null {
     }, []),
   )
 
-  // Cmd+Shift+Backspace → 停止 Agent（通过 CustomEvent 分发到 ChatView/AgentView）
+  // Cmd+Shift+Backspace → 停止光标所在、或最近点击过的 Chat / Agent。
+  // 父会话与右侧委派子会话可能同时挂载，因此事件必须带目标，不能广播给全部视图。
   useShortcut(
     'stop-generation',
     useCallback(() => {
-      window.dispatchEvent(new CustomEvent('proma:stop-generation'))
-    }, []),
+      const target = getLastInteractedStopTarget()
+        ?? resolveStopGenerationTarget(activeTab, activeAgentSidePanelTab)
+      if (!target) return
+      window.dispatchEvent(new CustomEvent('proma:stop-generation', { detail: target }))
+    }, [activeAgentSidePanelTab, activeTab]),
   )
 
   // ===== 快速任务窗口 → 创建会话并自动发送 =====

@@ -732,24 +732,24 @@ export const currentSessionSidePanelOpenAtom = atom(
 )
 
 /**
- * 工作区组件的打开状态，按 workspaceId 持久化。这里故意只保存组件类型，
- * 具体的筛选、选中项等仍由各组件自己的状态管理，避免把短期 UI 草稿污染为项目数据。
+ * 项目级能力的右侧 Tab 打开状态按 Agent session 持久化。能力的数据仍归属于 workspace，
+ * 但同一 workspace 的后台会话不得改变彼此的右侧 Tab，避免抢走用户焦点。
  */
-export const workspaceComponentOpenMapAtom = atomWithStorage<Record<string, WorkspaceComponentTab[]>>(
-  'proma-workspace-component-tabs',
+export const agentSessionComponentOpenMapAtom = atomWithStorage<Record<string, WorkspaceComponentTab[]>>(
+  'proma-agent-session-component-tabs',
   {},
   undefined,
   { getOnInit: true },
 )
 
-export const workspaceComponentTabsAtomFamily = atomFamily((workspaceId: string) => atom(
-  (get) => get(workspaceComponentOpenMapAtom)[workspaceId] ?? [],
+export const agentSessionComponentTabsAtomFamily = atomFamily((sessionId: string) => atom(
+  (get) => get(agentSessionComponentOpenMapAtom)[sessionId] ?? [],
   (_get, set, update: WorkspaceComponentTab[] | ((previous: WorkspaceComponentTab[]) => WorkspaceComponentTab[])) => {
-    set(workspaceComponentOpenMapAtom, (previous) => {
-      const current = previous[workspaceId] ?? []
+    set(agentSessionComponentOpenMapAtom, (previous) => {
+      const current = previous[sessionId] ?? []
       const next = typeof update === 'function' ? update(current) : update
       if (next === current) return previous
-      return { ...previous, [workspaceId]: next }
+      return { ...previous, [sessionId]: next }
     })
   },
 ))
@@ -757,16 +757,23 @@ export const workspaceComponentTabsAtomFamily = atomFamily((workspaceId: string)
 /** 侧面板当前工作区：基础视图或某个浏览器网页（per-session Map）。 */
 export const agentDiffPanelTabAtom = atom<Map<string, AgentSidePanelTab | 'browser' | 'preview'>>(new Map())
 
+/** Agent 历史中的 Skill 引用请求在 Skills Tab 内打开对应详情。 */
+export interface SkillDetailNavigationRequest {
+  skillSlug: string
+  /** 用于防止跨项目会话误打开同名 Skill。 */
+  workspaceSlug?: string
+}
+
+/** 历史引用导航属于会话级短暂 UI 状态，避免其他会话的 Skills 视图消费请求。 */
+export const skillDetailNavigationAtomFamily = atomFamily((sessionId: string) => atom<SkillDetailNavigationRequest | null>(null))
+
 /** 在当前 Agent 会话中打开并聚焦一个项目级组件。 */
 export const openWorkspaceComponentAtom = atom(
   null,
   (get, set, component: WorkspaceComponentTab) => {
     const sessionId = get(currentAgentSessionIdAtom)
     if (!sessionId) return
-    const workspaceId = get(agentSessionsAtom).find((session) => session.id === sessionId)?.workspaceId
-      ?? get(currentAgentWorkspaceIdAtom)
-    if (!workspaceId) return
-    set(workspaceComponentTabsAtomFamily(workspaceId), (previous) => (
+    set(agentSessionComponentTabsAtomFamily(sessionId), (previous) => (
       previous.includes(component) ? previous : [...previous, component]
     ))
     set(agentSidePanelOpenAtomFamily(sessionId), true)
@@ -780,19 +787,13 @@ export const openWorkspaceComponentAtom = atom(
 )
 
 /**
- * Agent 改动项目级数据时展示对应 Tab。若用户当前正在查看 Skills 或项目记忆，
- * 仅打开变更对应的 Tab，不改变用户显式选择的焦点。
+ * Agent 改动项目级数据时，仅在产生改动的 session 展示对应 Tab。
+ * 若该 session 正在查看 Skills 或项目记忆，保留用户显式选择的焦点。
  */
 export const revealChangedWorkspaceComponentAtom = atom(
   null,
-  (get, set, component: WorkspaceComponentTab) => {
-    const sessionId = get(currentAgentSessionIdAtom)
-    if (!sessionId) return
-    const workspaceId = get(agentSessionsAtom).find((session) => session.id === sessionId)?.workspaceId
-      ?? get(currentAgentWorkspaceIdAtom)
-    if (!workspaceId) return
-
-    set(workspaceComponentTabsAtomFamily(workspaceId), (previous) => (
+  (get, set, { sessionId, component }: { sessionId: string; component: WorkspaceComponentTab }) => {
+    set(agentSessionComponentTabsAtomFamily(sessionId), (previous) => (
       previous.includes(component) ? previous : [...previous, component]
     ))
 
@@ -811,16 +812,13 @@ export const revealChangedWorkspaceComponentAtom = atom(
   },
 )
 
-/** 关闭当前项目的一个组件；若它正被当前会话查看，回退到文件。 */
+/** 关闭当前 session 的一个组件；若它正被当前会话查看，回退到文件。 */
 export const closeWorkspaceComponentAtom = atom(
   null,
   (get, set, component: WorkspaceComponentTab) => {
     const sessionId = get(currentAgentSessionIdAtom)
     if (!sessionId) return
-    const workspaceId = get(agentSessionsAtom).find((session) => session.id === sessionId)?.workspaceId
-      ?? get(currentAgentWorkspaceIdAtom)
-    if (!workspaceId) return
-    set(workspaceComponentTabsAtomFamily(workspaceId), (previous) => previous.filter((item) => item !== component))
+    set(agentSessionComponentTabsAtomFamily(sessionId), (previous) => previous.filter((item) => item !== component))
     set(agentDiffPanelTabAtom, (previous) => {
       if (previous.get(sessionId) !== component) return previous
       const next = new Map(previous)

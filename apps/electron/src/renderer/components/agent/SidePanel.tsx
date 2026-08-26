@@ -40,12 +40,12 @@ import {
   agentDiffRefreshVersionAtom,
   agentNonGitFileChangesAtom,
   agentFileChangesCurrentRunAtom,
-  workspaceComponentTabsAtomFamily,
+  agentSessionComponentTabsAtomFamily,
+  agentSessionStreamingStateAtomFamily,
   isWorkspaceComponentTab,
   isUserPriorityWorkspaceComponentTab,
   sanitizeWorkspaceComponentTabs,
   getDelegationTabLabel,
-  agentSessionStreamingStateAtomFamily,
   fileBrowserAutoRevealAtom,
   agentSelectedWorktreeAtom,
   agentSideTemporaryAgentMapAtom,
@@ -91,6 +91,12 @@ import { useOpenPreview } from '@/components/diff/preview-opener'
 import type { FileEntry, AgentPendingFile, AgentSessionMeta, SDKMessage, WorktreeInfo } from '@proma/shared'
 import { setFilePanelDragData, getMediaTypeFromFilename, dispatchInsertFileMention } from '@/lib/file-panel-drag'
 import { CLOSE_ACTIVE_RIGHT_WORKSPACE_TAB_EVENT } from '@/lib/right-workspace-events'
+import {
+  getPreviousRightPanelTab,
+  recordRightPanelTabVisit,
+  removeRightPanelTabFromHistory,
+} from '@/lib/right-panel-tab-history'
+import { rememberStopGenerationTarget } from '@/lib/stop-generation-target'
 import { TerminalTabContent } from '@/components/tabs/TerminalTabContent'
 import { shouldShowBothFileSources } from './file-panel-layout'
 
@@ -251,6 +257,31 @@ interface SidePanelProps {
 }
 
 export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, width = 460 }: SidePanelProps): React.ReactElement {
+  // 按会话保存最近访问顺序。该历史仅存在于当前 renderer 进程，避免恢复失效的临时 Tab。
+  const rightPanelTabHistoryRef = React.useRef(new Map<string, AgentSidePanelTab[]>())
+  const workspaceTabsRef = React.useRef<WorkspacePanelTab[]>([])
+
+  React.useEffect(() => {
+    const history = rightPanelTabHistoryRef.current.get(sessionId) ?? []
+    rightPanelTabHistoryRef.current.set(sessionId, recordRightPanelTabVisit(history, activeTab))
+  }, [activeTab, sessionId])
+
+  const getPreviousTabBeforeClose = React.useCallback((closingTab: AgentSidePanelTab): AgentSidePanelTab => {
+    const history = rightPanelTabHistoryRef.current.get(sessionId) ?? []
+    const availableTabs = new Set(workspaceTabsRef.current
+      .map((tab) => tab.id)
+      .filter((tab) => tab !== closingTab))
+    const nextTab = getPreviousRightPanelTab(history, closingTab, availableTabs)
+    rightPanelTabHistoryRef.current.set(sessionId, removeRightPanelTabFromHistory(history, closingTab))
+    return nextTab
+  }, [sessionId])
+
+  const returnToPreviousTabAfterClose = React.useCallback((closingTab: AgentSidePanelTab): AgentSidePanelTab => {
+    const nextTab = getPreviousTabBeforeClose(closingTab)
+    if (activeTab === closingTab) onTabChange(nextTab)
+    return nextTab
+  }, [activeTab, getPreviousTabBeforeClose, onTabChange])
+
   const showBothFileSources = shouldShowBothFileSources(width)
   // 侧面板状态按 sessionId 持久化，切换会话不会互相覆盖。
   const [isOpen, setIsOpen] = useAtom(currentSessionSidePanelOpenAtom)
@@ -644,8 +675,8 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   const activeExplorationBranch = activeExplorationSessionId
     ? sideTemporaryAgents.find((branch) => branch.sessionId === activeExplorationSessionId) ?? null
     : null
-  // Todo / 日程 / 能力 / 记忆是工作区组件，而不是会话附件；同一项目下切换会话仍保留打开状态。
-  const [workspaceComponentTabs, setWorkspaceComponentTabs] = useAtom(workspaceComponentTabsAtomFamily(currentWorkspaceId ?? ''))
+  // Todo / 日程 / 能力 / 记忆的数据仍归属于 workspace，但右侧 Tab 仅属于当前 session。
+  const [workspaceComponentTabs, setWorkspaceComponentTabs] = useAtom(agentSessionComponentTabsAtomFamily(sessionId))
   const automationFormOpen = useAtomValue(automationFormAtom).open
 
   React.useEffect(() => {
@@ -668,10 +699,8 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
         ? 'files'
         : activeTab
 
-  // Agent 对当前项目记忆写入后，默认展开并激活完整编辑器这个独立工作区 Tab。
-  // 记忆 watcher 按 workspace 缓存最新事件，必须排除本轮开始前的陈旧事件。
-  // 用户正在查看 Skills 或项目记忆时，变更只在后台保留为可见的 Memory Tab，
-  // 不抢焦点，也不重置其正在阅读或编辑的文件。
+  // memory 写入不能沿用通用组件激活：只有 watcher 捕获真实文件变更后才能生成受限 Diff。
+  // SidePanel 按 session 挂载，因此只会为正在运行的来源 session 路由这次 Diff；其他会话不受影响。
   React.useEffect(() => {
     const runStartedAt = agentStreamState?.startedAt
     if (!agentStreamState?.running || !runStartedAt || !latestMemoryChange || latestMemoryChange.changedAt < runStartedAt) return
@@ -680,6 +709,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     lastActivatedMemoryChangeRef.current = changeId
     setWorkspaceComponentTabs((previous) => previous.includes('memory') ? previous : [...previous, 'memory'])
 
+    // 用户正在阅读 Skills 或项目记忆时，只保留新变更，不抢焦点或覆盖其当前文件。
     if (isOpen && isUserPriorityWorkspaceComponentTab(effectiveActiveTab)) return
 
     setMemoryNavigationRequest({ workspaceSlug: workspaceSlug!, relativePath: latestMemoryChange.relativePath, mode: 'change' })
@@ -701,8 +731,8 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       next.set(sessionId, fallback !== null)
       return next
     })
-    if (getPreviewIdFromSidePanelTab(activeTab) === previewId) onTabChange(fallback ? getPreviewSidePanelTab(getPreviewFileId(fallback)) : 'files')
-  }, [activeTab, onTabChange, previewFiles, sessionId, setPreviewFilesMap, setPreviewOpenMap])
+    if (getPreviewIdFromSidePanelTab(activeTab) === previewId) returnToPreviousTabAfterClose(getPreviewSidePanelTab(previewId))
+  }, [activeTab, previewFiles, returnToPreviousTabAfterClose, sessionId, setPreviewFilesMap, setPreviewOpenMap])
 
   const handleCloseChatTab = React.useCallback(() => {
     setSideChatMap((prev) => {
@@ -711,10 +741,8 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       next.delete(sessionId)
       return next
     })
-    if (activeTab === 'chat') {
-      onTabChange('files')
-    }
-  }, [activeTab, onTabChange, sessionId, setSideChatMap])
+    if (activeTab === 'chat') returnToPreviousTabAfterClose('chat')
+  }, [activeTab, returnToPreviousTabAfterClose, sessionId, setSideChatMap])
 
   const handleCloseExplorationTab = React.useCallback((branchSessionId: string) => {
     setSideTemporaryAgentMap((prev) => {
@@ -726,8 +754,10 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       else next.delete(sessionId)
       return next
     })
-    if (getExplorationSessionIdFromSidePanelTab(activeTab) === branchSessionId) onTabChange('files')
-  }, [activeTab, onTabChange, sessionId, setSideTemporaryAgentMap])
+    if (getExplorationSessionIdFromSidePanelTab(activeTab) === branchSessionId) {
+      returnToPreviousTabAfterClose(getExplorationSidePanelTab(branchSessionId))
+    }
+  }, [activeTab, returnToPreviousTabAfterClose, sessionId, setSideTemporaryAgentMap])
 
   const handleCloseDelegationTab = React.useCallback((childSessionId: string) => {
     setSideDelegationMap((prev) => {
@@ -739,8 +769,10 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       else next.delete(sessionId)
       return next
     })
-    if (getDelegationSessionIdFromSidePanelTab(activeTab) === childSessionId) onTabChange('files')
-  }, [activeTab, onTabChange, sessionId, setSideDelegationMap])
+    if (getDelegationSessionIdFromSidePanelTab(activeTab) === childSessionId) {
+      returnToPreviousTabAfterClose(getDelegationSidePanelTab(childSessionId))
+    }
+  }, [activeTab, returnToPreviousTabAfterClose, sessionId, setSideDelegationMap])
 
   // 分支是正常持久化会话，但若用户从左侧删除了它，右侧不能保留悬空 Tab。
   React.useEffect(() => {
@@ -756,8 +788,10 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       else next.delete(sessionId)
       return next
     })
-    if (activeExplorationSessionId && !validBranchIds.has(activeExplorationSessionId)) onTabChange('files')
-  }, [activeExplorationSessionId, onTabChange, sessionId, sessions, setSideTemporaryAgentMap, sideTemporaryAgents])
+    if (activeExplorationSessionId && !validBranchIds.has(activeExplorationSessionId)) {
+      returnToPreviousTabAfterClose(getExplorationSidePanelTab(activeExplorationSessionId))
+    }
+  }, [activeExplorationSessionId, returnToPreviousTabAfterClose, sessionId, sessions, setSideTemporaryAgentMap, sideTemporaryAgents])
 
   // 子 Agent 被从左侧删除后，同样移除右侧的悬空观察 Tab；不改变左侧树的现有渲染与排序。
   React.useEffect(() => {
@@ -775,8 +809,10 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       else next.delete(sessionId)
       return next
     })
-    if (activeDelegationSessionId && !validChildIds.has(activeDelegationSessionId)) onTabChange('files')
-  }, [activeDelegationSessionId, onTabChange, sessionId, sessions, setSideDelegationMap, sideDelegationSessionIds])
+    if (activeDelegationSessionId && !validChildIds.has(activeDelegationSessionId)) {
+      returnToPreviousTabAfterClose(getDelegationSidePanelTab(activeDelegationSessionId))
+    }
+  }, [activeDelegationSessionId, returnToPreviousTabAfterClose, sessionId, sessions, setSideDelegationMap, sideDelegationSessionIds])
 
   // 浏览器状态由 MainArea 的全局订阅同步到 atom；右侧工作区只负责呈现和显式打开。
   // 这样切换文件/改动时 BrowserSlot 会正确隐藏原生 WebContentsView，而不会销毁网页会话。
@@ -847,6 +883,20 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   }, [publishBrowserState, sessionId])
 
   const handleWorkspaceTabChange = React.useCallback((tab: AgentSidePanelTab) => {
+    // 点击会话类右侧 Tab 本身即代表用户将停止目标切换到其可见会话；
+    // 否则父会话的旧交互记录会抢在当前右侧会话之前被快捷键使用。
+    const delegatedSessionId = getDelegationSessionIdFromSidePanelTab(tab)
+    if (delegatedSessionId && sideDelegationSessionIds.includes(delegatedSessionId)) {
+      rememberStopGenerationTarget({ kind: 'agent', sessionId: delegatedSessionId })
+    } else {
+      const explorationSessionId = getExplorationSessionIdFromSidePanelTab(tab)
+      if (explorationSessionId && sideTemporaryAgents.some((branch) => branch.sessionId === explorationSessionId)) {
+        rememberStopGenerationTarget({ kind: 'agent', sessionId: explorationSessionId })
+      } else if (tab === 'chat' && sideChatConversationId) {
+        rememberStopGenerationTarget({ kind: 'chat', sessionId: sideChatConversationId })
+      }
+    }
+
     // 记忆编辑器采用防抖自动保存，并在组件卸载时 flush；切换组件不丢草稿。
     const previewId = getPreviewIdFromSidePanelTab(tab)
     if (previewId) {
@@ -864,7 +914,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     if (!browserTabId) return
     desiredBrowserTabIdRef.current = browserTabId
     flushBrowserTabSelection()
-  }, [flushBrowserTabSelection, onTabChange, previewFiles, sessionId, setPreviewFileMap])
+  }, [flushBrowserTabSelection, onTabChange, previewFiles, sessionId, setPreviewFileMap, sideChatConversationId, sideDelegationSessionIds, sideTemporaryAgents])
 
   const handleOpenBrowserTab = React.useCallback(async () => {
     try {
@@ -899,7 +949,9 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       if (state) {
         publishBrowserState(state)
         if (getBrowserTabIdFromSidePanelTab(activeTab) === browserTabId) {
-          onTabChange(getBrowserSidePanelTab(state.activeTabId))
+          handleWorkspaceTabChange(getPreviousTabBeforeClose(getBrowserSidePanelTab(browserTabId)))
+        } else {
+          getPreviousTabBeforeClose(getBrowserSidePanelTab(browserTabId))
         }
         return
       }
@@ -923,18 +975,18 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
         next.delete(sessionId)
         return next
       })
-      onTabChange('files')
+      returnToPreviousTabAfterClose(getBrowserSidePanelTab(browserTabId))
     } catch (error) {
       console.error('[SidePanel] 关闭受管浏览器标签失败:', error)
     }
-  }, [activeTab, onTabChange, publishBrowserState, sessionId, setBrowserMinimizedMap, setBrowserOpenMap, setBrowserStateMap, setPendingNavigationMap])
+  }, [activeTab, getPreviousTabBeforeClose, handleWorkspaceTabChange, publishBrowserState, returnToPreviousTabAfterClose, sessionId, setBrowserMinimizedMap, setBrowserOpenMap, setBrowserStateMap, setPendingNavigationMap])
 
   const activeBrowserTabId = getBrowserTabIdFromSidePanelTab(effectiveActiveTab)
   React.useEffect(() => {
     if (activeBrowserTabId && !browserState?.tabs.some((tab) => tab.tabId === activeBrowserTabId)) {
-      onTabChange('files')
+      returnToPreviousTabAfterClose(getBrowserSidePanelTab(activeBrowserTabId))
     }
-  }, [activeBrowserTabId, browserState?.tabs, onTabChange])
+  }, [activeBrowserTabId, browserState?.tabs, returnToPreviousTabAfterClose])
 
   const showBrowserActivity = Boolean(browserState?.activity && browserState.executionSource !== 'user')
   // WebContentsView 是原生子视图，会盖住 renderer 的 portal。加号菜单打开时，
@@ -994,6 +1046,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       activity: showBrowserActivity && activeBrowserTabId !== tab.tabId && browserState.activeTabId === tab.tabId,
     })) ?? []),
   ], [activeBrowserTabId, browserState, previewFiles, sessions, sessionId, showBrowserActivity, sideChatConversationId, sideDelegationSessionIds, sideTemporaryAgents, terminalTabs, workspaceComponentTabs])
+  workspaceTabsRef.current = workspaceTabs
 
   const handleCloseWorkspaceTab = React.useCallback((tab: AgentSidePanelTab) => {
     const terminalId = getTerminalIdFromSidePanelTab(tab)
@@ -1008,12 +1061,12 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
         else next.delete(sessionId)
         return next
       })
-      if (activeTab === tab) onTabChange('files')
+      returnToPreviousTabAfterClose(tab)
       return
     }
     if (isWorkspaceComponentTab(tab)) {
       setWorkspaceComponentTabs((previous) => previous.filter((component) => component !== tab))
-      if (activeTab === tab) onTabChange('files')
+      returnToPreviousTabAfterClose(tab)
       return
     }
     const previewId = getPreviewIdFromSidePanelTab(tab)
@@ -1025,7 +1078,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     if (delegationSessionId) { handleCloseDelegationTab(delegationSessionId); return }
     const browserTabId = getBrowserTabIdFromSidePanelTab(tab)
     if (browserTabId && browserTabId !== browserState?.agentTabId) void handleCloseBrowserTab(browserTabId)
-  }, [activeTab, browserState?.agentTabId, handleCloseBrowserTab, handleCloseChatTab, handleCloseDelegationTab, handleCloseExplorationTab, handleClosePreviewTab, onTabChange, sessionId, setTerminalTabsMap, setWorkspaceComponentTabs])
+  }, [browserState?.agentTabId, handleCloseBrowserTab, handleCloseChatTab, handleCloseDelegationTab, handleCloseExplorationTab, handleClosePreviewTab, returnToPreviousTabAfterClose, sessionId, setTerminalTabsMap, setWorkspaceComponentTabs])
 
   React.useEffect(() => {
     const handleCloseActiveWorkspaceTab = (event: Event) => {
@@ -1153,11 +1206,11 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
           ) : effectiveActiveTab === 'automations' ? (
             automationFormOpen ? <AutomationFormView embedded /> : <PlanningView embedded componentTab="automations" />
           ) : effectiveActiveTab === 'skills' ? (
-            <AgentSkillsView embedded componentTab="skills" workspaceId={currentWorkspaceId ?? undefined} />
+            <AgentSkillsView embedded componentTab="skills" workspaceId={currentWorkspaceId ?? undefined} sessionId={sessionId} />
           ) : effectiveActiveTab === 'enterprise' ? (
-            <AgentSkillsView embedded componentTab="enterprise" workspaceId={currentWorkspaceId ?? undefined} />
+            <AgentSkillsView embedded componentTab="enterprise" workspaceId={currentWorkspaceId ?? undefined} sessionId={sessionId} />
           ) : effectiveActiveTab === 'mcp' ? (
-            <AgentSkillsView embedded componentTab="mcp" workspaceId={currentWorkspaceId ?? undefined} />
+            <AgentSkillsView embedded componentTab="mcp" workspaceId={currentWorkspaceId ?? undefined} sessionId={sessionId} />
           ) : effectiveActiveTab === 'memory' ? (
             workspaceSlug ? (
               <div className="min-h-0 flex-1 overflow-hidden p-2">

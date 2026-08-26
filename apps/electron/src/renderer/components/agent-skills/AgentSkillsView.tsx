@@ -6,11 +6,11 @@
  * 结构：
  * - 顶部：标题 + 工作区切换下拉
  * - 工具条：Skills / 企业库 / MCP / 记忆切换 + 搜索 + 上下文操作入口
- * - 内容：能力卡片网格（商店风），点击卡片打开右侧详情抽屉
+ * - 内容：能力卡片网格（商店风），点击卡片在当前 Skills 视图中预览详情
  */
 
 import * as React from 'react'
-import { useAtom, useSetAtom } from 'jotai'
+import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { toast } from 'sonner'
 import { Blocks, ChevronDown, ChevronRight, Search, Plus, FolderOpen, Check, Sparkles, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -21,7 +21,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
-import { agentPendingPromptAtom, workspaceCapabilitiesVersionAtom } from '@/atoms/agent-atoms'
+import { agentPendingPromptAtom, skillDetailNavigationAtomFamily, workspaceCapabilitiesVersionAtom } from '@/atoms/agent-atoms'
 import { agentSkillsTabAtom } from '@/atoms/active-view'
 import { settingsOpenAtom, settingsTabAtom, toolSettingsFocusAtom, type ToolSettingsFocus } from '@/atoms/settings-tab'
 import { useProjectActions } from '@/hooks/useProjectActions'
@@ -32,7 +32,7 @@ import type { BuiltinMcpServerSummary, McpServerEntry, SkillMeta } from '@proma/
 import { useAgentSkillsData } from './useAgentSkillsData'
 import { SkillCard } from './SkillCard'
 import { McpCard } from './McpCard'
-import { SkillDetailSheet } from './SkillDetailSheet'
+import { SkillDetailView } from './SkillDetailView'
 import { McpDetailSheet } from './McpDetailSheet'
 import { BuiltinMcpDetailSheet } from './BuiltinMcpDetailSheet'
 import { ImportSkillDialog } from './ImportSkillDialog'
@@ -93,13 +93,16 @@ export function AgentSkillsView({
   embedded = false,
   componentTab,
   workspaceId,
-}: { embedded?: boolean; componentTab?: 'skills' | 'enterprise' | 'mcp'; workspaceId?: string } = {}): React.ReactElement {
+  sessionId,
+}: { embedded?: boolean; componentTab?: 'skills' | 'enterprise' | 'mcp'; workspaceId?: string; sessionId?: string } = {}): React.ReactElement {
   const data = useAgentSkillsData(workspaceId)
   const bumpCapabilities = useSetAtom(workspaceCapabilitiesVersionAtom)
   const setPendingPrompt = useSetAtom(agentPendingPromptAtom)
   const setSettingsOpen = useSetAtom(settingsOpenAtom)
   const setSettingsTab = useSetAtom(settingsTabAtom)
   const setToolSettingsFocus = useSetAtom(toolSettingsFocusAtom)
+  const skillDetailNavigation = useAtomValue(skillDetailNavigationAtomFamily(sessionId ?? ''))
+  const setSkillDetailNavigation = useSetAtom(skillDetailNavigationAtomFamily(sessionId ?? ''))
   const { workspaces, currentWorkspaceId: selectedWorkspaceId, selectProject } = useProjectActions()
   const { createAgent } = useCreateSession()
   const currentWorkspace = workspaces.find((workspace) => workspace.id === (workspaceId ?? selectedWorkspaceId))
@@ -195,6 +198,22 @@ export function AgentSkillsView({
     if (enterpriseSkillsAvailability === 'disabled' && tab === 'enterprise') setTab('skills')
   }, [enterpriseSkillsAvailability, setTab, tab])
 
+  React.useEffect(() => {
+    if (!skillDetailNavigation || data.loading) return
+    if (skillDetailNavigation.workspaceSlug && skillDetailNavigation.workspaceSlug !== data.workspaceSlug) {
+      toast.error('该 Skill 属于另一个项目，无法在当前 Skills 中打开')
+      setSkillDetailNavigation(null)
+      return
+    }
+    if (!data.skills.some((skill) => skill.slug === skillDetailNavigation.skillSlug)) {
+      toast.error('当前项目未找到该 Skill')
+      setSkillDetailNavigation(null)
+      return
+    }
+    setSelectedSkillSlug(skillDetailNavigation.skillSlug)
+    setSkillDetailNavigation(null)
+  }, [data.loading, data.skills, data.workspaceSlug, setSkillDetailNavigation, skillDetailNavigation])
+
   const openSkillFolder = (slug: string): void => {
     if (data.skillsDir) window.electronAPI.openFile(`${data.skillsDir}/${slug}`)
   }
@@ -241,6 +260,26 @@ export function AgentSkillsView({
     }
   }, [classifyingSkills, createAgent, data.skills, data.skillsDir, data.workspaceName, setPendingPrompt])
 
+  const skillDeleteDialog = (
+    <ConfirmDialog
+      open={pendingDeleteSkill !== null}
+      onOpenChange={(open) => { if (!open) setPendingDeleteSkill(null) }}
+      title={`确认删除 Skill「${pendingDeleteSkill?.name}」？`}
+      description="删除后将无法恢复，确定要卸载这个 Skill 吗？"
+      confirmLabel="删除"
+      loadingLabel="删除中..."
+      loading={isDeletingSkill}
+      onConfirm={async () => {
+        if (!pendingDeleteSkill || isDeletingSkill) return
+        setIsDeletingSkill(true)
+        const ok = await data.deleteSkill(pendingDeleteSkill.slug, pendingDeleteSkill.name)
+        setIsDeletingSkill(false)
+        setPendingDeleteSkill(null)
+        if (ok) setSelectedSkillSlug(null)
+      }}
+    />
+  )
+
   if (!data.hasWorkspace) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
@@ -251,6 +290,27 @@ export function AgentSkillsView({
         <div className="max-w-sm text-[13px] text-foreground/50">
           请先在 Agent 模式下选择或创建一个项目，再来管理它的 Skills 与 MCP。
         </div>
+      </div>
+    )
+  }
+
+  if (selectedSkill) {
+    return (
+      <div className="flex h-full min-h-0 flex-col overflow-hidden">
+        <SkillDetailView
+          key={selectedSkill.slug}
+          skill={selectedSkill}
+          workspaceSlug={data.workspaceSlug}
+          isBuiltin={selectedIsBuiltin}
+          updating={data.updatingSkill === selectedSkill.slug}
+          onBack={() => setSelectedSkillSlug(null)}
+          onToggle={(enabled) => data.toggleSkill(selectedSkill.slug, enabled)}
+          onUpdate={() => data.updateSkill(selectedSkill.slug)}
+          onRequestDelete={() => setPendingDeleteSkill(selectedSkill)}
+          onOpenFolder={() => openSkillFolder(selectedSkill.slug)}
+          onChanged={() => bumpCapabilities((v) => v + 1)}
+        />
+        {skillDeleteDialog}
       </div>
     )
   }
@@ -452,38 +512,7 @@ export function AgentSkillsView({
         </div>
       </div>
 
-      {/* 详情抽屉 */}
-      <SkillDetailSheet
-        skill={selectedSkill}
-        workspaceSlug={data.workspaceSlug}
-        isBuiltin={selectedIsBuiltin}
-        updating={data.updatingSkill === selectedSkill?.slug}
-        onOpenChange={(open) => { if (!open) setSelectedSkillSlug(null) }}
-        onToggle={(enabled) => selectedSkill && data.toggleSkill(selectedSkill.slug, enabled)}
-        onUpdate={() => selectedSkill && data.updateSkill(selectedSkill.slug)}
-        onRequestDelete={() => selectedSkill && setPendingDeleteSkill(selectedSkill)}
-        onOpenFolder={() => selectedSkill && openSkillFolder(selectedSkill.slug)}
-        onChanged={() => bumpCapabilities((v) => v + 1)}
-      />
-
-      {/* Skill 删除确认 */}
-      <ConfirmDialog
-        open={pendingDeleteSkill !== null}
-        onOpenChange={(open) => { if (!open) setPendingDeleteSkill(null) }}
-        title={`确认删除 Skill「${pendingDeleteSkill?.name}」？`}
-        description="删除后将无法恢复，确定要卸载这个 Skill 吗？"
-        confirmLabel="删除"
-        loadingLabel="删除中..."
-        loading={isDeletingSkill}
-        onConfirm={async () => {
-          if (!pendingDeleteSkill || isDeletingSkill) return
-          setIsDeletingSkill(true)
-          const ok = await data.deleteSkill(pendingDeleteSkill.slug, pendingDeleteSkill.name)
-          setIsDeletingSkill(false)
-          setPendingDeleteSkill(null)
-          if (ok) setSelectedSkillSlug(null)
-        }}
-      />
+      {skillDeleteDialog}
 
       {/* MCP 删除确认 */}
       <ConfirmDialog

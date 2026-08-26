@@ -48,6 +48,11 @@ import { registerPendingTitle } from '@/hooks/useGlobalChatListeners'
 import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
 import { cn } from '@/lib/utils'
 import { buildQuotedSelectionBlock } from '@/lib/quoted-selection'
+import {
+  clearStopGenerationTarget,
+  getStopGenerationTarget,
+  rememberStopGenerationTarget,
+} from '@/lib/stop-generation-target'
 import type {
   ChatMessage,
   ChatSendInput,
@@ -86,6 +91,14 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
   const [messagesLoaded, setMessagesLoaded] = React.useState(false)
   const [inlineEditingMessageId, setInlineEditingMessageId] = React.useState<string | null>(null)
   const store = useStore()
+  const stopShortcutTarget = React.useMemo(() => ({ kind: 'chat' as const, sessionId: conversationId }), [conversationId])
+  const markStopShortcutTarget = React.useCallback(() => {
+    rememberStopGenerationTarget(stopShortcutTarget)
+  }, [stopShortcutTarget])
+
+  React.useEffect(() => {
+    return () => clearStopGenerationTarget(stopShortcutTarget)
+  }, [stopShortcutTarget])
 
   // ===== Per-conversation hooks（分屏独立） =====
   const [selectedModel, setSelectedModel] = useConversationModel()
@@ -468,14 +481,15 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
     window.electronAPI.stopGeneration(conversationId).catch(console.error)
   }, [conversationId, setStreamingStates])
 
-  // 监听快捷键系统分发的 stop-generation 事件
+  // 仅处理全局快捷键明确指向本对话的停止事件。
   React.useEffect(() => {
-    const handler = (): void => {
-      if (isStreaming) handleStop()
+    const handler = (event: Event): void => {
+      const target = getStopGenerationTarget(event)
+      if (target?.kind === 'chat' && target.sessionId === conversationId && isStreaming) handleStop()
     }
     window.addEventListener('proma:stop-generation', handler)
     return () => window.removeEventListener('proma:stop-generation', handler)
-  }, [isStreaming, handleStop])
+  }, [conversationId, isStreaming, handleStop])
 
   /** 删除消息 */
   const handleDeleteMessage = React.useCallback(async (messageId: string): Promise<void> => {
@@ -626,7 +640,11 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
   }, [setPendingAttachments])
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div
+      className="flex h-full overflow-hidden"
+      onFocusCapture={markStopShortcutTarget}
+      onPointerDownCapture={markStopShortcutTarget}
+    >
       {/* 主内容区域 */}
       <div className="flex flex-col h-full flex-1 min-w-0">
         {/* Header 在 max-w 外，按钮可到达最右侧 */}

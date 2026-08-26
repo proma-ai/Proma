@@ -2,7 +2,7 @@
  * SKILL.md frontmatter 解析与重写工具
  *
  * 从 SKILL.md 文本中提取正文，以及在保留 frontmatter 的前提下
- * 重写 name / description / body 字段。供 Agent 技能详情抽屉编辑使用。
+ * 重写 name / description / body 字段。供 Skills Tab 内的详情编辑使用。
  */
 
 /** 提取 SKILL.md 的正文（去除 frontmatter） */

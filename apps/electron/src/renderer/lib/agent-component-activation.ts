@@ -45,6 +45,7 @@ function getWorkspaceManagedFileComponent(path: string): WorkspaceComponentTab |
   // 只响应 Proma workspace 下的配置，避免用户项目中同名 skills/ 或 mcp.json 误触发。
   if (!normalized.includes('/agent-workspaces/')) return null
   if (normalized.includes('/skills/')) return 'skills'
+  if (normalized.includes('/memory/')) return 'memory'
   if (normalized.endsWith('/mcp.json')) return 'mcp'
   return null
 }
@@ -81,6 +82,13 @@ export function getChangedWorkspaceComponentForTool(
     return getWorkspaceManagedFileComponent(input.command)
   }
   return null
+}
+
+/**
+ * 记忆写入必须等待文件 watcher 生成真实的受限 Diff 后再打开；其他组件可在工具调用时立即展示。
+ */
+export function shouldRevealChangedWorkspaceComponentImmediately(component: WorkspaceComponentTab): boolean {
+  return component !== 'memory'
 }
 
 /** 从一条 SDK assistant 消息提取本轮第一个会改变项目组件数据的工具。 */

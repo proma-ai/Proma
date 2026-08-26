@@ -62,6 +62,11 @@ import { cn } from '@/lib/utils'
 import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-registry'
 import { registerShortcut } from '@/lib/shortcut-registry'
 import { supportsChannelPlanQuota } from '@/lib/channel-plan-quota'
+import {
+  clearStopGenerationTarget,
+  getStopGenerationTarget,
+  rememberStopGenerationTarget,
+} from '@/lib/stop-generation-target'
 import { previewFileMapAtom, previewPanelOpenMapAtom, quotedSelectionMapAtom, currentQuotedSelectionAtom } from '@/atoms/preview-atoms'
 import type { QuotedSelection } from '@/atoms/preview-atoms'
 import {
@@ -437,6 +442,15 @@ interface AgentViewProps {
 
 export function AgentView({ sessionId, embedded = false }: AgentViewProps): React.ReactElement {
   const store = useStore()
+  const stopShortcutTarget = React.useMemo(() => ({ kind: 'agent' as const, sessionId }), [sessionId])
+  const markStopShortcutTarget = React.useCallback(() => {
+    rememberStopGenerationTarget(stopShortcutTarget)
+  }, [stopShortcutTarget])
+
+  React.useEffect(() => {
+    return () => clearStopGenerationTarget(stopShortcutTarget)
+  }, [stopShortcutTarget])
+
   const initialCachedMessages = store.get(agentSDKMessagesCacheAtom).get(sessionId)
   const [persistedSDKMessages, setPersistedSDKMessages] = React.useState<SDKMessage[]>(
     () => initialCachedMessages ?? [],
@@ -2624,14 +2638,15 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
     }
   }, [rewindTargetUuid, sessionId, store])
 
-  // 监听快捷键系统分发的 stop-generation 事件
+  // 仅处理全局快捷键明确指向本会话的停止事件；父/子会话可同时挂载。
   React.useEffect(() => {
-    const handler = (): void => {
-      if (streaming) handleStop()
+    const handler = (event: Event): void => {
+      const target = getStopGenerationTarget(event)
+      if (target?.kind === 'agent' && target.sessionId === sessionId && streaming) handleStop()
     }
     window.addEventListener('proma:stop-generation', handler)
     return () => window.removeEventListener('proma:stop-generation', handler)
-  }, [streaming, handleStop])
+  }, [sessionId, streaming, handleStop])
 
   // 监听快捷键系统分发的 focus-input 事件（Cmd+L）
   React.useEffect(() => {
@@ -2983,7 +2998,11 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
 
   return (
     <>
-      <div className="flex h-full min-h-0 flex-1 min-w-0 flex-col overflow-hidden">
+      <div
+        className="flex h-full min-h-0 flex-1 min-w-0 flex-col overflow-hidden"
+        onFocusCapture={markStopShortcutTarget}
+        onPointerDownCapture={markStopShortcutTarget}
+      >
         {/* 临时 Agent 已由右侧 Tab 表明归属，避免在窄面板重复渲染全局标题栏。 */}
         {!embedded && <AgentHeader sessionId={sessionId} />}
 

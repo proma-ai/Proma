@@ -1,11 +1,10 @@
 import * as React from 'react'
-import { useAtomValue } from 'jotai'
+import { useAtomValue, useSetAtom } from 'jotai'
 import { Sparkles } from 'lucide-react'
 import { collectSkillActivations } from '@proma/shared'
 import type { SDKMessage, SDKUserMessage, SkillActivation } from '@proma/shared'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { useOpenPreview } from '@/components/diff/preview-opener'
-import { currentAgentSessionIdAtom } from '@/atoms/agent-atoms'
+import { currentAgentSessionIdAtom, openWorkspaceComponentAtom, skillDetailNavigationAtomFamily } from '@/atoms/agent-atoms'
 import { cn } from '@/lib/utils'
 
 export interface TurnSkillUsageSummaryProps {
@@ -17,30 +16,21 @@ export interface TurnSkillUsageSummaryProps {
 
 function SkillUsageChip({ activation }: { activation: SkillActivation }): React.ReactElement {
   const sessionId = useAtomValue(currentAgentSessionIdAtom)
-  const openPreview = useOpenPreview()
-  const hasWorkspaceLocator = Boolean(activation.workspaceSlug && activation.workspaceSkillPath)
-  const canPreview = Boolean(sessionId && (hasWorkspaceLocator || activation.filePath))
-  const handleOpenPreview = React.useCallback(() => {
+  const openWorkspaceComponent = useSetAtom(openWorkspaceComponentAtom)
+  const setSkillDetailNavigation = useSetAtom(skillDetailNavigationAtomFamily(sessionId ?? ''))
+  const canOpen = Boolean(sessionId && activation.slug)
+  const handleOpenSkill = React.useCallback(() => {
     if (!sessionId) return
-    if (activation.workspaceSlug && activation.workspaceSkillPath) {
-      openPreview(sessionId, {
-        filePath: activation.workspaceSkillPath,
-        workspaceSkillSlug: activation.workspaceSlug,
-        ...(activation.filePath ? { legacySkillFilePath: activation.filePath } : {}),
-        previewOnly: true,
-      }, { mode: 'split' })
-      return
-    }
-    if (!activation.filePath) return
-    openPreview(sessionId, {
-      filePath: activation.filePath,
-      previewOnly: true,
-    }, { mode: 'split' })
-  }, [activation.filePath, activation.workspaceSkillPath, activation.workspaceSlug, openPreview, sessionId])
+    setSkillDetailNavigation({
+      skillSlug: activation.slug,
+      ...(activation.workspaceSlug ? { workspaceSlug: activation.workspaceSlug } : {}),
+    })
+    openWorkspaceComponent('skills')
+  }, [activation.slug, activation.workspaceSlug, openWorkspaceComponent, sessionId, setSkillDetailNavigation])
   const chipClassName = cn(
     'inline-flex max-w-[240px] items-center gap-[0.25em] rounded-md px-[0.35em] py-[0.15em] text-[0.875em] font-medium leading-none',
     'bg-[hsl(270_60%_60%/0.15)] text-[hsl(270_60%_50%)]',
-    canPreview && 'cursor-pointer transition-colors hover:bg-[hsl(270_60%_60%/0.24)]',
+    canOpen && 'cursor-pointer transition-colors hover:bg-[hsl(270_60%_60%/0.24)]',
   )
   const chipContent = <>
     <Sparkles className="size-3 shrink-0" />
@@ -50,12 +40,12 @@ function SkillUsageChip({ activation }: { activation: SkillActivation }): React.
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        {canPreview ? (
+        {canOpen ? (
           <button
             type="button"
             className={chipClassName}
-            onClick={handleOpenPreview}
-            aria-label={`在预览中打开 Skill ${activation.name}`}
+            onClick={handleOpenSkill}
+            aria-label={`在 Skills 中打开 ${activation.name}`}
           >
             {chipContent}
           </button>
@@ -66,7 +56,7 @@ function SkillUsageChip({ activation }: { activation: SkillActivation }): React.
         )}
       </TooltipTrigger>
       <TooltipContent side="top">
-        <p>本轮已使用的 skill，点击以预览和修改</p>
+        <p>本轮已使用的 Skill，点击在右侧 Skills 中查看和修改</p>
       </TooltipContent>
     </Tooltip>
   )
