@@ -1671,6 +1671,8 @@ export const AGENT_IPC_CHANNELS = {
   UPDATE_SESSION_MODEL: 'agent:update-session-model',
   /** 选择或清除当前会话的活动 worktree */
   SET_ACTIVE_WORKTREE: 'agent:set-active-worktree',
+  /** 主进程通知 Renderer：Agent 主动切换了会话的活动 worktree */
+  ACTIVE_WORKTREE_UPDATED: 'agent:active-worktree-updated',
   /** 删除会话 */
   DELETE_SESSION: 'agent:delete-session',
   /** 迁移 Chat 对话记录到 Agent 会话 */

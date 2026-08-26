@@ -58,7 +58,7 @@ export function RightSidePanel({ width }: { width?: number }): React.ReactElemen
         const current = previous.get(event.sessionId) ?? []
         if (current.some((terminal) => terminal.terminalId === event.terminalId)) return previous
         const next = new Map(previous)
-        next.set(event.sessionId, [...current, { terminalId: event.terminalId, title: event.title }])
+        next.set(event.sessionId, [...current, { terminalId: event.terminalId, title: event.title, cwd: event.cwd }])
         return next
       })
       if (event.sessionId !== currentSessionId) return

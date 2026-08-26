@@ -61,6 +61,8 @@ interface DiffChangesListProps {
   workspaceSlug?: string
   /** 用于自动发现 worktree 的仓库候选路径 */
   worktreeRepoPaths?: string[]
+  /** 在指定 Worktree 根目录创建右侧终端 */
+  onOpenWorktreeTerminal?: (worktree: WorktreeInfo) => void
   /** 本会话在非 Git 目录中成功写入的文件 */
   nonGitFileChanges?: SessionFileChange[]
   /** 当前 Agent run ID，用于将文件变更划分为本轮和更早 */
@@ -80,6 +82,7 @@ export const DiffChangesList = React.memo(function DiffChangesList({
   extraPaths,
   workspaceSlug,
   worktreeRepoPaths,
+  onOpenWorktreeTerminal,
   nonGitFileChanges = [],
   currentFileChangeRunId,
   onPlainFileClick,
@@ -270,6 +273,7 @@ export const DiffChangesList = React.memo(function DiffChangesList({
           repoPaths={worktreeRepoPaths}
           selectedPath={selectedWorktreePath}
           onSelect={handleWorktreeSelect}
+          onOpenTerminal={onOpenWorktreeTerminal}
         />
       )}
 

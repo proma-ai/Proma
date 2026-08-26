@@ -770,6 +770,8 @@ export interface ElectronAPI {
 
   /** 订阅 Agent 标题自动更新事件 */
   onAgentTitleUpdated: (callback: (data: { sessionId: string; title: string }) => void) => () => void
+  /** 订阅 Agent 主动更新活动 Worktree 的事件 */
+  onAgentActiveWorktreeUpdated: (callback: (session: AgentSessionMeta) => void) => () => void
 
   // ===== Agent 权限系统 =====
 
@@ -2120,6 +2122,11 @@ const electronAPI: ElectronAPI = {
     const listener = (_: unknown, data: { sessionId: string; title: string }): void => callback(data)
     ipcRenderer.on(AGENT_IPC_CHANNELS.TITLE_UPDATED, listener)
     return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.TITLE_UPDATED, listener) }
+  },
+  onAgentActiveWorktreeUpdated: (callback: (session: AgentSessionMeta) => void) => {
+    const listener = (_: unknown, session: AgentSessionMeta): void => callback(session)
+    ipcRenderer.on(AGENT_IPC_CHANNELS.ACTIVE_WORKTREE_UPDATED, listener)
+    return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.ACTIVE_WORKTREE_UPDATED, listener) }
   },
 
   // Agent 权限系统

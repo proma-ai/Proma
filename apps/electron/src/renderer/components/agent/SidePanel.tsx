@@ -87,7 +87,7 @@ import { getPreviewFileId, previewFileMapAtom, previewFilesMapAtom, previewPanel
 import { PreviewPanel } from '@/components/diff/PreviewPanel'
 import { useOpenPreview } from '@/components/diff/preview-opener'
 import { detectIsWindows } from '@/lib/platform'
-import type { FileEntry, AgentPendingFile, AgentSessionMeta, SDKMessage } from '@proma/shared'
+import type { FileEntry, AgentPendingFile, AgentSessionMeta, SDKMessage, WorktreeInfo } from '@proma/shared'
 import { setFilePanelDragData, getMediaTypeFromFilename, dispatchInsertFileMention } from '@/lib/file-panel-drag'
 import { CLOSE_ACTIVE_RIGHT_WORKSPACE_TAB_EVENT } from '@/lib/right-workspace-events'
 import { TerminalTabContent } from '@/components/tabs/TerminalTabContent'
@@ -861,15 +861,19 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     }
   }, [browserState, ensureBrowserOpen, onTabChange, publishBrowserState, sessionId])
 
-  const handleOpenTerminal = React.useCallback(() => {
+  const handleOpenTerminal = React.useCallback((cwd?: string, title = '终端') => {
     const terminalId = crypto.randomUUID()
     setTerminalTabsMap((previous) => {
       const next = new Map(previous)
-      next.set(sessionId, [...(next.get(sessionId) ?? []), { terminalId, title: '终端' }])
+      next.set(sessionId, [...(next.get(sessionId) ?? []), { terminalId, title, cwd }])
       return next
     })
     onTabChange(getTerminalSidePanelTab(terminalId))
   }, [onTabChange, sessionId, setTerminalTabsMap])
+
+  const handleOpenWorktreeTerminal = React.useCallback((worktree: WorktreeInfo) => {
+    handleOpenTerminal(worktree.path, `终端 · ${worktree.branch}`)
+  }, [handleOpenTerminal])
 
   const handleCloseBrowserTab = React.useCallback(async (browserTabId: string) => {
     try {
@@ -1122,6 +1126,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
                 onFileClick={handleDiffFileClick}
                 workspaceSlug={workspaceSlug || undefined}
                 worktreeRepoPaths={worktreeRepoPathsMemo}
+                onOpenWorktreeTerminal={handleOpenWorktreeTerminal}
                 nonGitFileChanges={nonGitFileChanges}
                 currentFileChangeRunId={fileChangesCurrentRunId}
                 onPlainFileClick={handleFilePreview}
@@ -1992,7 +1997,7 @@ function SidePanelTerminalTabs({
   sessionId,
   cwd,
 }: {
-  terminals: Array<{ terminalId: string; title: string }>
+  terminals: Array<{ terminalId: string; title: string; cwd?: string }>
   activeTerminalId: string | null
   sessionId: string
   cwd?: string
@@ -2005,7 +2010,7 @@ function SidePanelTerminalTabs({
           className={cn('absolute inset-0', terminal.terminalId === activeTerminalId ? 'block' : 'hidden')}
           aria-hidden={terminal.terminalId !== activeTerminalId}
         >
-          <TerminalTabContent terminalId={terminal.terminalId} sessionId={sessionId} cwd={cwd} terminateOnUnmount={false} />
+          <TerminalTabContent terminalId={terminal.terminalId} sessionId={sessionId} cwd={terminal.cwd ?? cwd} terminateOnUnmount={false} />
         </div>
       ))}
     </div>

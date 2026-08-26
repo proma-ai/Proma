@@ -10,11 +10,14 @@
 import { Type } from 'typebox'
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 import type { AgentToolResult } from '@earendil-works/pi-agent-core'
+import { AGENT_IPC_CHANNELS, normalizePathForCompare } from '@proma/shared'
 import type {
   CreateAutomationInput,
   PromaPermissionMode,
   UpdateAutomationInput,
 } from '@proma/shared'
+import { realpathSync } from 'node:fs'
+import { resolve } from 'node:path'
 import {
   createAutomation,
   deleteAutomation,
@@ -28,7 +31,10 @@ import {
   broadcastChanged as broadcastAutomationsChanged,
   runAutomationNow,
 } from '../automation-scheduler'
-import { getAgentSessionMeta } from '../agent-session-manager'
+import { getAgentSessionMeta, updateAgentSessionMeta } from '../agent-session-manager'
+import { getMainWindow } from '../main-window-store'
+import { getMainRepoRoot, listWorktrees } from '../git-diff-service'
+import { getWorktreeRepos } from '../agent-workspace-manager'
 import { isBuiltinMcpUserEnabled } from '../builtin-mcp/settings'
 import { downloadInstaller, launchInstaller } from '../installer-downloader'
 import { fetchInstallerManifest, findInstallerSource } from '../installer-manifest'
@@ -1229,6 +1235,90 @@ function buildBrowserTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefiniti
   ] as ToolDefinition[]
 }
 
+function canonicalPath(path: string): string {
+  try {
+    return realpathSync(resolve(path))
+  } catch {
+    return resolve(path)
+  }
+}
+
+/**
+ * 仅允许绑定当前会话已授权仓库（或工作区已登记仓库）的 linked worktree。
+ * 这让 Agent 能在 `proma-worktree start` 后接管新目录，但不能借此扩大文件访问边界。
+ */
+async function selectAgentWorktree(ctx: PiBuiltinToolsContext, worktreePath: string) {
+  const requestedPath = resolve(ctx.agentCwd ?? process.cwd(), worktreePath)
+  const requestedKey = normalizePathForCompare(canonicalPath(requestedPath))
+  const selected = (await listWorktrees(requestedPath)).find((worktree) =>
+    !worktree.isMain && normalizePathForCompare(canonicalPath(worktree.path)) === requestedKey,
+  )
+  if (!selected) throw new Error('指定目录不是可用的 linked worktree')
+
+  const mainRepoRoot = await getMainRepoRoot(selected.path)
+  if (!mainRepoRoot) throw new Error('无法确认 worktree 的主仓库')
+  const targetMainRepo = normalizePathForCompare(canonicalPath(mainRepoRoot))
+  const authorizedRoots = [ctx.agentCwd, ...(ctx.allowedRoots ?? [])].filter((root): root is string => Boolean(root))
+  let authorized = false
+  for (const root of authorizedRoots) {
+    const rootMainRepo = await getMainRepoRoot(root)
+    if (rootMainRepo && normalizePathForCompare(canonicalPath(rootMainRepo)) === targetMainRepo) {
+      authorized = true
+      break
+    }
+  }
+  if (!authorized && ctx.workspaceSlug) {
+    const repos = await getWorktreeRepos(ctx.workspaceSlug)
+    for (const repo of repos) {
+      const repoMainRoot = await getMainRepoRoot(repo.repoPath)
+      if (repoMainRoot && normalizePathForCompare(canonicalPath(repoMainRoot)) === targetMainRepo) {
+        authorized = true
+        break
+      }
+    }
+  }
+  if (!authorized) throw new Error('该 worktree 不属于当前会话已授权或已登记的仓库')
+
+  const session = updateAgentSessionMeta(ctx.sessionId, {
+    activeWorktree: {
+      path: canonicalPath(selected.path),
+      mainRepoRoot: canonicalPath(mainRepoRoot),
+      branch: selected.branch,
+      selectedAt: Date.now(),
+    },
+  })
+  const mainWindow = getMainWindow()
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(AGENT_IPC_CHANNELS.ACTIVE_WORKTREE_UPDATED, session)
+  }
+  return session
+}
+
+function buildAgentWorktreeTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinition[] {
+  // 后台自动任务与子 Agent 不主动重定向交互会话的开发目录。
+  if (ctx.triggeredBy === 'automation' || ctx.triggeredBy === 'delegation' || ctx.triggeredBy === 'external') return []
+
+  return [sdk.defineTool({
+    name: 'SelectWorktree',
+    label: '选择 Agent Worktree',
+    description: 'Bind this Agent session to an existing linked Git worktree that belongs to an authorized or registered repository. Use immediately after creating or identifying the worktree, before editing its files. The binding updates the visible Changes tab now and makes the worktree the Agent cwd for subsequent runs.',
+    promptSnippet: 'After creating or locating a linked worktree for this task, select it before editing files so the session and Changes tab stay aligned.',
+    parameters: Type.Object({
+      worktreePath: Type.String({ description: 'Absolute path, or a path relative to the current Agent cwd, of the linked worktree to use.' }),
+    }),
+    async execute(_toolCallId, params) {
+      const value = (params as Record<string, unknown>).worktreePath
+      const worktreePath = typeof value === 'string' ? value.trim() : ''
+      if (!worktreePath) throw new Error('worktreePath 必填')
+      const session = await selectAgentWorktree(ctx, worktreePath)
+      return jsonToolResult({
+        activeWorktree: session.activeWorktree,
+        note: '已绑定到当前会话；本轮后续命令如未显式指定 cwd，请使用该目录。下一轮 Agent 将自动以此 Worktree 为 cwd。',
+      })
+    },
+  })] as ToolDefinition[]
+}
+
 function buildAgentTerminalTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinition[] {
   // 无用户在场的来源不能启动或驱动本地交互终端；这既没有可见性，也会扩大自动任务与外部 Bridge 的权限。
   if (ctx.triggeredBy === 'automation' || ctx.triggeredBy === 'delegation' || ctx.triggeredBy === 'external') return []
@@ -1388,6 +1478,13 @@ export async function buildPiBuiltinTools(
     tools.push(...buildWindowsShellInstallerTools(sdk, ctx))
   } catch (error) {
     console.error('[Pi 桥接] 注入 Windows Shell 安装工具失败:', error)
+  }
+
+  // Worktree 选择让 Agent 在创建或发现分支目录后主动绑定会话，不扩大既有授权范围。
+  try {
+    tools.push(...buildAgentWorktreeTools(sdk, ctx))
+  } catch (error) {
+    console.error('[Pi 桥接] 注入 Worktree 选择工具失败:', error)
   }
 
   // Agent 终端以可见 PTY 承接直接执行；无用户在场的自动任务/子 Agent 不会获得该能力。

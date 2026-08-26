@@ -47,6 +47,7 @@ import {
   agentSessionPathMapAtom,
   agentDiffRefreshVersionAtom,
   agentDiffPanelTabAtom,
+  agentSelectedWorktreeAtom,
   agentNonGitFileChangesAtom,
   agentFileChangesCurrentRunAtom,
   agentSidePanelOpenAtomFamily,
@@ -877,6 +878,18 @@ export function useGlobalAgentListeners(): void {
       ) return
 
       autoActivatedChangeTurns.set(sessionId, runId)
+      // 本轮由已绑定 Worktree 的 Agent 触发时，同步改动面板的临时选择。
+      // 否则 atom 中曾缓存的 null 会覆盖会话元数据，导致自动打开 Tab 后仍展示会话改动。
+      const activeWorktreePath = store.get(agentSessionsAtom)
+        .find((session) => session.id === sessionId)?.activeWorktree?.path
+      if (activeWorktreePath) {
+        store.set(agentSelectedWorktreeAtom, (previous) => {
+          if (previous.get(sessionId) === activeWorktreePath) return previous
+          const next = new Map(previous)
+          next.set(sessionId, activeWorktreePath)
+          return next
+        })
+      }
       store.set(agentSidePanelOpenAtomFamily(sessionId), true)
       store.set(agentDiffPanelTabAtom, (prev) => {
         const map = new Map(prev)
@@ -1743,6 +1756,16 @@ export function useGlobalAgentListeners(): void {
         .catch(console.error)
     })
 
+    const cleanupActiveWorktreeUpdated = window.electronAPI.onAgentActiveWorktreeUpdated((session) => {
+      store.set(agentSessionsAtom, (previous) => upsertAgentSession(previous, session))
+      store.set(agentSelectedWorktreeAtom, (previous) => {
+        const next = new Map(previous)
+        if (session.activeWorktree?.path) next.set(session.id, session.activeWorktree.path)
+        else next.delete(session.id)
+        return next
+      })
+    })
+
     // ===== 5. Windows Agent Island 提示音委托 =====
     const cleanupPlaySound = window.electronAPI.onWindowsAgentIslandPlaySound(({ type }) => {
       const sounds = store.get(notificationSoundsAtom)
@@ -1859,6 +1882,7 @@ export function useGlobalAgentListeners(): void {
       cleanupComplete()
       cleanupError()
       cleanupTitleUpdated()
+      cleanupActiveWorktreeUpdated()
       cleanupPlaySound()
       cleanupWatchedFileChanges()
       cleanupQueuedMessageStatus()
