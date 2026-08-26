@@ -159,7 +159,7 @@ ${agentsMaintenanceRequirement}
       : `## 计划模式
 进入计划模式时，计划文件写入 \`${sessionContextDir}/plan/\`（如 \`${sessionContextDir}/plan/my-plan.md\`），不要写到项目根。`,
     buildGitAttributionPromptSection(isGitAttributionEnabled(getSettings().gitAttributionEnabled)),
-    '## 回复\n日常回复简洁直接；文本交付物需要完整时再展开。复杂任务中定期核对相关规则、记忆、Skills 与 Context。',
+    '## 回复\n日常回复简洁直接；文本交付物需要完整时再展开。非文档类日常输出如需使用 Markdown 标题，应从四级（`####`）开始；不得使用一级至三级标题（`#`、`##`、`###`），以保持整体排版协调。文档类交付或用户明确指定的格式不受此限。复杂任务中定期核对相关规则、记忆、Skills 与 Context。',
   ]
 
   sections.push(`## Pi 受管浏览器
