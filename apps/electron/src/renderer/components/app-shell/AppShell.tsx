@@ -161,9 +161,7 @@ export function AppShell(): React.ReactElement {
   const canUseCollapsedSidebarSpace = sidebarCollapsed && (
     isExpandedRightWorkspace || rightPanelLayout.hasOpenedWideWorkspace
   )
-  const canAutoCollapseSidebarForRightPanel = !sidebarCollapsed && (
-    isExpandedRightWorkspace || rightPanelLayout.hasOpenedWideWorkspace
-  )
+  const canAutoCollapseSidebarForRightPanel = !sidebarCollapsed && isExpandedRightWorkspace
   const clampedRightPanelWidth = clampRightPanelWidth(
     rightPanelLayout.width,
     viewportWidth,
@@ -245,7 +243,7 @@ export function AppShell(): React.ReactElement {
         isExpandedRightWorkspace || rightPanelLayout.hasOpenedWideWorkspace
       )
 
-      if (shouldCollapseSidebar) {
+      if (shouldCollapseSidebar && !sidebarCollapsedDuringDrag) {
         sidebarCollapsedDuringDrag = true
         setSidebarCollapsed(true)
       }
