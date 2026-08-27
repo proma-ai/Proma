@@ -11,6 +11,23 @@ export function createApplicationMenu(): Menu {
    * 改为通知渲染进程关闭当前标签页。
    */
 
+  /**
+   * 重新加载当前窗口。
+   *
+   * 不使用 Electron 的 `reload` / `forceReload` role：这些 role 会自动注册
+   * CmdOrCtrl+R、F5 等系统快捷键。刷新只能从原生“视图”菜单显式触发。
+   */
+  const reloadFocusedWindow = (ignoreCache = false): void => {
+    const win = BrowserWindow.getFocusedWindow()
+    if (!win || win.isDestroyed()) return
+
+    if (ignoreCache) {
+      win.webContents.reloadIgnoringCache()
+    } else {
+      win.webContents.reload()
+    }
+  }
+
   const template: Electron.MenuItemConstructorOptions[] = [
     // 应用菜单 (仅 macOS)
     ...(isMac
@@ -86,8 +103,14 @@ export function createApplicationMenu(): Menu {
     {
       label: '视图',
       submenu: [
-        { role: 'reload' as const, label: '重新加载' },
-        { role: 'forceReload' as const, label: '强制重新加载' },
+        {
+          label: '重新加载',
+          click: () => reloadFocusedWindow(),
+        },
+        {
+          label: '强制重新加载',
+          click: () => reloadFocusedWindow(true),
+        },
         { role: 'toggleDevTools' as const, label: '切换开发者工具' },
         { type: 'separator' as const },
         { role: 'resetZoom' as const, label: '重置缩放' },
