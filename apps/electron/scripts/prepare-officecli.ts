@@ -2,8 +2,9 @@
 /**
  * 准备随 Proma 安装包分发的 OfficeCLI 二进制。
  *
- * 每次 Electron build / dev 启动前按当前宿主平台与架构从 OfficeCLI 官方 GitHub
+ * 每次 Electron build / dev 启动前按当前构建目标的平台与架构从 OfficeCLI 官方 GitHub
  * Release 取得固定版本，流式校验文件大小及 SHA-256，再原子写入 resources/officecli/。
+ * 对交叉架构打包，可通过 OFFICECLI_PLATFORM / OFFICECLI_ARCH 指定安装包目标；默认使用宿主。
  * 该目录被 gitignore，避免将大体积第三方二进制提交进源码仓库。
  */
 
@@ -16,7 +17,9 @@ const OFFICECLI_VERSION = 'v1.0.145'
 const RELEASE_BASE_URL = `https://github.com/iOfficeAI/OfficeCLI/releases/download/${OFFICECLI_VERSION}`
 const MAX_DOWNLOAD_SIZE = 50 * 1024 * 1024
 const OUTPUT_DIR = join(resolve(import.meta.dir, '..'), 'resources', 'officecli')
-const outputName = process.platform === 'win32' ? 'officecli.exe' : 'officecli'
+const targetPlatform = process.env.OFFICECLI_PLATFORM || process.platform
+const targetArch = process.env.OFFICECLI_ARCH || process.arch
+const outputName = targetPlatform === 'win32' ? 'officecli.exe' : 'officecli'
 
 interface Asset {
   url: string
@@ -129,21 +132,25 @@ async function downloadAndVerify(asset: Asset, destination: string): Promise<voi
   if (actual.toLowerCase() !== asset.sha256) fail(`SHA-256 校验失败：预期 ${asset.sha256}，实际 ${actual}`)
 }
 
-const key = `${process.platform}-${process.arch}`
+const key = `${targetPlatform}-${targetArch}`
 const asset = assets[key]
-if (!asset) fail(`当前构建平台不受支持：${key}`)
+if (!asset) fail(`当前构建目标不受支持：${key}`)
 const outputPath = join(OUTPUT_DIR, outputName)
+
+if (targetPlatform !== process.platform) {
+  fail(`OfficeCLI 资源必须在目标平台 Runner 上准备：目标 ${targetPlatform}，当前 ${process.platform}`)
+}
 
 await mkdir(OUTPUT_DIR, { recursive: true })
 if (await verifyExisting(outputPath, asset)) {
-  if (process.platform !== 'win32') await chmod(outputPath, 0o755)
+  if (targetPlatform !== 'win32') await chmod(outputPath, 0o755)
   console.log(`[prepare:officecli] 已验证 ${OFFICECLI_VERSION}（${key}）`)
 } else {
   const temporaryPath = `${outputPath}.download-${process.pid}-${Date.now()}`
   try {
     console.log(`[prepare:officecli] 下载并校验 ${OFFICECLI_VERSION}（${key}）`)
     await downloadAndVerify(asset, temporaryPath)
-    if (process.platform !== 'win32') await chmod(temporaryPath, 0o755)
+    if (targetPlatform !== 'win32') await chmod(temporaryPath, 0o755)
     await rename(temporaryPath, outputPath)
   } catch (error) {
     await rm(temporaryPath, { force: true }).catch(() => {})

@@ -43,6 +43,10 @@ jobs:
       - name: 安装依赖
         run: bun install --frozen-lockfile
 
+      # 准备当前 runner 架构的 OfficeCLI 资源
+      - name: 准备 OfficeCLI（macOS arm64）
+        run: bun run --filter='@proma/electron' prepare:officecli
+
       # macOS 代码签名准备
       - name: 导入 macOS 签名证书
         env:
@@ -113,6 +117,10 @@ jobs:
 
       - name: 安装依赖
         run: bun install --frozen-lockfile
+
+      # 准备当前 runner 架构的 OfficeCLI 资源
+      - name: 准备 OfficeCLI（macOS x64）
+        run: bun run --filter='@proma/electron' prepare:officecli
 
       # macOS 代码签名准备
       - name: 导入 macOS 签名证书
@@ -320,6 +328,10 @@ jobs:
 
       - name: 安装依赖
         run: bun install --frozen-lockfile
+
+      # 准备当前 runner 架构的 OfficeCLI 资源
+      - name: 准备 OfficeCLI（Windows x64）
+        run: bun run --filter='@proma/electron' prepare:officecli
 
       # 构建应用
       - name: 构建 Electron 应用
