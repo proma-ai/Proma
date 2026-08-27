@@ -3,6 +3,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import type { TerminalOutputEvent } from '@proma/shared'
 import '@xterm/xterm/css/xterm.css'
+import { detectIsWindows } from '@/lib/platform'
 
 export interface TerminalTabContentProps {
   terminalId: string
@@ -20,6 +21,7 @@ export function TerminalTabContent({ terminalId, sessionId, cwd, terminateOnUnmo
   const hostRef = React.useRef<HTMLDivElement>(null)
   const terminalRef = React.useRef<Terminal>()
   const fitAddonRef = React.useRef<FitAddon>()
+  const lastPtyDimensionsRef = React.useRef<{ cols: number; rows: number }>()
   // StrictMode 会模拟一次卸载再挂载；用单调 generation 区分真实关闭与这次重挂载。
   const lifecycleGenerationRef = React.useRef(0)
 
@@ -34,6 +36,7 @@ export function TerminalTabContent({ terminalId, sessionId, cwd, terminateOnUnmo
       fontSize: 13,
       lineHeight: 1.25,
       scrollback: 5_000,
+      windowsPty: detectIsWindows() ? { backend: 'conpty' } : undefined,
       theme: {
         background: '#111113',
         foreground: '#e6e6e9',
@@ -46,20 +49,28 @@ export function TerminalTabContent({ terminalId, sessionId, cwd, terminateOnUnmo
     terminal.open(host)
     terminalRef.current = terminal
     fitAddonRef.current = fitAddon
-
+    let ptyCreated = false
     const fit = (): void => {
       try {
+        // 不可见的 Tab 会得到 0×0；禁止把 PTY 缩成 FitAddon 的最小 2×1，
+        // 否则 Windows ConPTY 会重排屏幕并让交互光标跳动。
+        if (host.clientWidth <= 0 || host.clientHeight <= 0 || host.offsetParent === null) return
+
         fitAddon.fit()
         const { cols, rows } = terminal
-        if (cols > 0 && rows > 0) {
+        const previous = lastPtyDimensionsRef.current
+        if (ptyCreated && cols > 0 && rows > 0 && (previous?.cols !== cols || previous.rows !== rows)) {
+          lastPtyDimensionsRef.current = { cols, rows }
           void window.electronAPI.resizeTerminal({ terminalId, cols, rows }).catch(console.error)
         }
       } catch {
-        // 容器在不可见 Tab 中宽高为 0 时忽略，激活后 ResizeObserver 会再次 fit。
+        // 终端字体尚未完成测量时忽略；下一次布局变化会再次尝试。
       }
     }
     const resizeObserver = new ResizeObserver(fit)
     resizeObserver.observe(host)
+    // 同步完成首帧测量，创建 PTY 时直接使用真实行列，避免 Windows 首次 80×24 → 实际尺寸的重排。
+    fit()
     requestAnimationFrame(fit)
 
     let disposed = false
@@ -100,15 +111,20 @@ export function TerminalTabContent({ terminalId, sessionId, cwd, terminateOnUnmo
     let creation: Promise<unknown> | undefined
     const create = async (): Promise<void> => {
       try {
+        const initialCols = Math.max(terminal.cols, 1)
+        const initialRows = Math.max(terminal.rows, 1)
+        lastPtyDimensionsRef.current = { cols: initialCols, rows: initialRows }
         creation = window.electronAPI.createTerminal({
           terminalId,
           sessionId,
           cwd,
-          cols: Math.max(terminal.cols, 1),
-          rows: Math.max(terminal.rows, 1),
+          cols: initialCols,
+          rows: initialRows,
         })
         await creation
         if (disposed) return
+        ptyCreated = true
+        fit()
         const snapshot = await window.electronAPI.getTerminalSnapshot(terminalId)
         terminal.write(snapshot.output, () => {
           if (disposed) return
@@ -149,5 +165,9 @@ export function TerminalTabContent({ terminalId, sessionId, cwd, terminateOnUnmo
     }
   }, [cwd, sessionId, terminalId, terminateOnUnmount])
 
-  return <div ref={hostRef} className="h-full w-full overflow-hidden bg-[#111113] p-2" />
+  return (
+    <div className="h-full w-full overflow-hidden bg-[#111113] p-2">
+      <div ref={hostRef} className="h-full min-h-0 w-full min-w-0" />
+    </div>
+  )
 }
