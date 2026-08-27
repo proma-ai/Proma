@@ -3694,22 +3694,7 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // DOCX 转 HTML（内联预览使用 mammoth）
-  ipcMain.handle(
-    'file:docx-to-html',
-    async (_, filePath: string, access?: FileAccessOptions | string[]): Promise<{ resolvedPath: string; html: string } | null> => {
-      const { convertDocxToHtml, resolveFilePath } = await import('./lib/file-preview-service')
-      const options = normalizeFileAccessOptions(access)
-      const resolved = resolveFilePath(filePath, getPreviewCandidateBasePaths(options))
-      if (!resolved) {
-        return null
-      }
-      const result = await convertDocxToHtml(resolved)
-      return result
-    }
-  )
-
-  // XLSX/PPTX 转 HTML（内联预览使用 OOXML 解析）
+  // Office 文件转高保真 HTML（内联预览；失败时由服务层降级到内置解析器）
   ipcMain.handle(
     'file:office-to-html',
     async (_, filePath: string, access?: FileAccessOptions | string[]): Promise<import('@proma/shared').OfficePreviewResult | null> => {

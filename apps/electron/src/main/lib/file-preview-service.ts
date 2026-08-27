@@ -724,21 +724,6 @@ export async function preparePdfPreview(filePath: string, basePaths?: string[]):
 }
 
 /** 将 DOCX 文件转换为 HTML（供内联预览使用） */
-export async function convertDocxToHtml(filePath: string, basePaths?: string[]): Promise<{ resolvedPath: string; html: string } | null> {
-  const safePath = resolveTargetPath(filePath, basePaths)
-  if (!existsSync(safePath)) return null
-  try {
-    const st = statSync(safePath)
-    if (st.size > MAX_FILE_SIZE) return null
-    const mammoth = await import('mammoth')
-    const result = await mammoth.convertToHtml({ path: safePath })
-    return { resolvedPath: safePath, html: result.value }
-  } catch (err) {
-    console.error('[file-preview] convertDocxToHtml failed:', err)
-    return null
-  }
-}
-
 function renderOfficeTextFallback(filePath: string, text: string, kind: OfficePreviewResult['kind']): string {
   const title = escapeHtml(basename(filePath))
   const paragraphs = text
@@ -767,9 +752,12 @@ function isExecutableFile(path: string): boolean {
 }
 
 function restrictOfficeCliHtml(html: string): string {
-  const contentSecurityPolicy = "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'"
+  const contentSecurityPolicy = "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'; frame-src 'none'; media-src data: blob:"
   const policyTag = `<meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}">`
-  return html.replace(/<head(?:\s[^>]*)?>/i, (head) => `${head}${policyTag}`)
+  if (/<head(?:\s[^>]*)?>/i.test(html)) {
+    return html.replace(/<head(?:\s[^>]*)?>/i, (head) => `${head}${policyTag}`)
+  }
+  return html.replace(/<html(?:\s[^>]*)?>/i, (htmlTag) => `${htmlTag}<head>${policyTag}</head>`)
 }
 
 async function registerOfficeCliOutputFile(path: string): Promise<string> {

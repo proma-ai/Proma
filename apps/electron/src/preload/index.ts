@@ -926,10 +926,7 @@ export interface ElectronAPI {
   /** 读取文件为 base64（带路径校验，供内联图片预览等） */
   readBinaryBase64: (filePath: string, access?: import('@proma/shared').FileAccessOptions, maxSize?: number) => Promise<string | null>
 
-  /** DOCX 转 HTML（内联预览） */
-  docxToHtml: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => Promise<{ resolvedPath: string; html: string } | null>
-
-  /** XLSX/PPTX 转 HTML（内联预览） */
+  /** Office 文件转高保真 HTML（内联预览） */
   officeToHtml: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => Promise<import('@proma/shared').OfficePreviewResult | null>
 
   /** 截图导出：将 HTML 渲染为 PNG 并复制到剪贴板或保存文件 */
@@ -2346,10 +2343,6 @@ const electronAPI: ElectronAPI = {
 
   readBinaryBase64: (filePath: string, access?: import('@proma/shared').FileAccessOptions, maxSize?: number) => {
     return ipcRenderer.invoke('file:read-binary-base64', filePath, access, maxSize) as Promise<string | null>
-  },
-
-  docxToHtml: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => {
-    return ipcRenderer.invoke('file:docx-to-html', filePath, access) as Promise<{ resolvedPath: string; html: string } | null>
   },
 
   officeToHtml: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => {

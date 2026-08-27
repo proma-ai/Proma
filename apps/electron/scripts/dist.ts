@@ -156,6 +156,15 @@ function parseArgs(): DistOptions {
 function main(): void {
   const opts = parseArgs()
   const arch = process.arch // arm64 或 x64
+  const hostPlatform: DistOptions['platform'] = process.platform === 'darwin'
+    ? 'mac'
+    : process.platform === 'win32'
+      ? 'win'
+      : 'linux'
+  if (opts.platform !== hostPlatform) {
+    console.error(`[dist] 当前可视化打包脚本只能在目标平台 Runner 上运行：目标 ${opts.platform}，当前 ${hostPlatform}`)
+    process.exit(1)
+  }
   const results: StepResult[] = []
 
   // 打印配置信息
@@ -167,10 +176,19 @@ function main(): void {
   console.log(`  ${color.bold}详细日志${color.reset}: ${opts.verbose ? '开启' : '关闭'}`)
   printSeparator()
 
-  const totalSteps = 7
+  const totalSteps = 8
   let step = 0
 
-  // ── 步骤 1: 构建主进程 ──
+  // ── 步骤 1: 准备与当前目标平台/架构匹配的 OfficeCLI ──
+  step++
+  printStepStart(step, totalSteps, '准备 OfficeCLI 资源')
+  results.push(
+    runStep('准备 OfficeCLI 资源', 'bun', ['run', 'prepare:officecli'], { verbose: opts.verbose })
+  )
+  printStepResult(results[results.length - 1])
+  if (!results[results.length - 1].success) return printSummary(results)
+
+  // ── 步骤 2: 构建主进程 ──
   step++
   printStepStart(step, totalSteps, '构建主进程 (esbuild)')
   results.push(
@@ -179,7 +197,7 @@ function main(): void {
   printStepResult(results[results.length - 1])
   if (!results[results.length - 1].success) return printSummary(results)
 
-  // ── 步骤 2: 构建 Preload ──
+  // ── 步骤 3: 构建 Preload ──
   step++
   printStepStart(step, totalSteps, '构建 Preload (esbuild)')
   results.push(
@@ -188,7 +206,7 @@ function main(): void {
   printStepResult(results[results.length - 1])
   if (!results[results.length - 1].success) return printSummary(results)
 
-  // ── 步骤 3: 构建渲染进程 ──
+  // ── 步骤 4: 构建渲染进程 ──
   step++
   printStepStart(step, totalSteps, '构建渲染进程 (Vite)')
   results.push(
@@ -197,7 +215,7 @@ function main(): void {
   printStepResult(results[results.length - 1])
   if (!results[results.length - 1].success) return printSummary(results)
 
-  // ── 步骤 4: 编译 proma CLI 二进制 ──
+  // ── 步骤 5: 编译 proma CLI 二进制 ──
   step++
   printStepStart(step, totalSteps, '编译 proma CLI (bun --compile)')
   results.push(
@@ -206,7 +224,7 @@ function main(): void {
   printStepResult(results[results.length - 1])
   if (!results[results.length - 1].success) return printSummary(results)
 
-  // ── 步骤 5: 编译 macOS 原生 helpers ──
+  // ── 步骤 6: 编译 macOS 原生 helpers ──
   step++
   printStepStart(step, totalSteps, '编译 macOS 原生 Helpers')
   results.push(
@@ -215,7 +233,7 @@ function main(): void {
   printStepResult(results[results.length - 1])
   if (!results[results.length - 1].success) return printSummary(results)
 
-  // ── 步骤 6: 复制资源文件 ──
+  // ── 步骤 7: 复制资源文件 ──
   step++
   printStepStart(step, totalSteps, '复制资源文件')
   results.push(
@@ -223,7 +241,7 @@ function main(): void {
   )
   printStepResult(results[results.length - 1])
 
-  // ── 步骤 7: electron-builder 打包 ──
+  // ── 步骤 8: electron-builder 打包 ──
   step++
   printStepStart(step, totalSteps, 'Electron Builder 打包')
 

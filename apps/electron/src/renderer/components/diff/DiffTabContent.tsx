@@ -92,7 +92,6 @@ type CacheEntry = {
   pdfSrc?: string
   imageDataUrl?: string
   imagePath?: string
-  docxHtml?: string
   officeHtml?: string
   officeHtmlUrl?: string
   officeText?: string
@@ -343,7 +342,6 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   const pendingPreviewScrollRestoreRef = React.useRef<MarkdownScrollPosition | null>(null)
   const preserveScrollOnNextRefreshRef = React.useRef(false)
   const [previewScrollRestoreVersion, setPreviewScrollRestoreVersion] = React.useState(0)
-  const [docxHtml, setDocxHtml] = React.useState('')
   const [officeHtml, setOfficeHtml] = React.useState('')
   const [officeHtmlUrl, setOfficeHtmlUrl] = React.useState('')
   const [officeText, setOfficeText] = React.useState('')
@@ -406,14 +404,13 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     loading,
     newLength: newContent.length,
     oldLength: oldContent.length,
-    docxLength: docxHtml.length,
     officeLength: officeHtml.length,
     officeHtmlUrl,
     htmlPreviewUrl,
     htmlSourceMode,
     markdownEditing: activeMarkdownEditing,
     markdownSourceMode: activeMarkdownEditing && markdownSourceMode,
-  }), [docxHtml.length, filePath, loading, activeMarkdownEditing, markdownSourceMode, newContent.length, officeHtml.length, officeHtmlUrl, htmlPreviewUrl, htmlSourceMode, oldContent.length, previewOnly, viewMode])
+  }), [filePath, loading, activeMarkdownEditing, markdownSourceMode, newContent.length, officeHtml.length, officeHtmlUrl, htmlPreviewUrl, htmlSourceMode, oldContent.length, previewOnly, viewMode])
 
   // 目录提取只需在「文件本身或其内容」变化时重建，避免 loading/编辑态切换造成的抖动
   const tocContentKey = React.useMemo(
@@ -646,7 +643,6 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
 
     setOldContent('')
     setNewContent('')
-    setDocxHtml('')
     setOfficeHtml('')
     setOfficeHtmlUrl('')
     setOfficeText('')
@@ -811,7 +807,6 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
       lastOldContentRef.current = cached.oldContent
       setOldContent(cached.oldContent)
       setNewContent(cached.newContent)
-      setDocxHtml(cached.docxHtml ?? '')
       setOfficeHtml(cached.officeHtml ?? '')
       setOfficeHtmlUrl(cached.officeHtmlUrl ?? '')
       setOfficeText(cached.officeText ?? '')
@@ -835,7 +830,6 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
       if (!preserveMarkdownEditor) {
         setOldContent('')
         setNewContent('')
-        setDocxHtml('')
         setOfficeHtml('')
         setOfficeHtmlUrl('')
         setOfficeText('')
@@ -1027,7 +1021,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
       toastedPreviewFailRef.current = key
       toast.warning(message)
     }
-  }, [previewOnly, isOfficePreview, loading, filePath, ext, isLegacyOffice, isPdf, pdfSrc, docxHtml, officeHtml, officeHtmlUrl, isImage, imageDataUrl])
+  }, [previewOnly, isOfficePreview, loading, filePath, ext, isLegacyOffice, isPdf, pdfSrc, officeHtml, officeHtmlUrl, isImage, imageDataUrl])
 
   // scrollPosition persistent: module-level Map scoped by session, file path, and resolution context
   // content changes (refreshVersion bump) → delete stored position;
