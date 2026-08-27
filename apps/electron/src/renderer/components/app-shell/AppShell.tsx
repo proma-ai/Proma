@@ -15,6 +15,7 @@ import { appModeAtom } from '@/atoms/app-mode'
 import { agentDiffPanelTabAtom, agentSessionsAtom, agentSidePanelLayoutAtomFamily, agentSidePanelLayoutMapAtom, currentAgentSessionIdAtom, currentSessionSidePanelOpenAtom, isWorkspaceComponentTab, pruneAgentSidePanelLayouts } from '@/atoms/agent-atoms'
 import { leftSidebarWidthAtom } from '@/atoms/sidebar-atoms'
 import { sidebarCollapsedAtom } from '@/atoms/tab-atoms'
+import { clampRightPanelWidth, getRightPanelMaxWidth } from './right-panel-layout'
 import { automationFormAtom } from '@/atoms/automation-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
 import { useProjectActions } from '@/hooks/useProjectActions'
@@ -28,15 +29,12 @@ import { getWindowTitlebarContentInsetClass } from '@/lib/window-titlebar-layout
 import { cn } from '@/lib/utils'
 import { Toaster } from '@/components/ui/sonner'
 
-const MIN_RIGHT_PANEL_WIDTH = 360
-// 日程、定时任务、能力、记忆、探索、协作、终端及浏览/预览统一采用可读的工作区宽度。
-const MIN_EXPANDED_WORKSPACE_PANEL_WIDTH = 480
-// Todo 选中任务后同时展示导航、列表与详情三栏，需要比其他工作区组件更宽的可读空间。
-const MIN_TODO_PANEL_WIDTH = 720
-const RIGHT_PANEL_MAX_VIEWPORT_RATIO = 3 / 5
+const MIN_RIGHT_PANEL_WIDTH = 300
+// 浏览器、预览、终端等工作区在窄视图中优先允许连续阅读和基础操作；需要更多空间时可继续向左拖拽并折叠左栏。
+const MIN_EXPANDED_WORKSPACE_PANEL_WIDTH = 360
+// Todo 在 600px 起切换为双栏，避免将三栏导航、列表、详情强行压缩。
+const MIN_TODO_PANEL_WIDTH = 600
 const EXPANDED_WORKSPACE_DEFAULT_VIEWPORT_RATIO = 2 / 5
-// 窄窗口时优先保留主会话的最小可读宽度；扩展工作区的 480px 仅在空间足够时强制。
-const MIN_MAIN_AREA_WIDTH = 320
 const COLLAPSED_LEFT_SIDEBAR_WIDTH = 60
 const CLASSIC_LEFT_SIDEBAR_LEADING_PADDING = 8
 
@@ -62,26 +60,6 @@ function getRightPanelMinWidth(isTodoTab: boolean, isExpandedWorkspace: boolean)
     : isExpandedWorkspace
       ? MIN_EXPANDED_WORKSPACE_PANEL_WIDTH
       : MIN_RIGHT_PANEL_WIDTH
-}
-
-function getRightPanelMaxWidth(viewportWidth: number, leftSidebarOccupiedWidth: number): number {
-  // 宽视图不超过 3/5；更重要的是右栏不能侵占主工作区的最小可读宽度。
-  return Math.max(0, Math.min(
-    Math.floor(viewportWidth * RIGHT_PANEL_MAX_VIEWPORT_RATIO),
-    viewportWidth - leftSidebarOccupiedWidth - MIN_MAIN_AREA_WIDTH,
-  ))
-}
-
-function clampRightPanelWidth(
-  width: number,
-  viewportWidth: number,
-  minimumWidth = MIN_RIGHT_PANEL_WIDTH,
-  leftSidebarOccupiedWidth = 0,
-): number {
-  const maximumWidth = getRightPanelMaxWidth(viewportWidth, leftSidebarOccupiedWidth)
-  // 480px 是 Agent 会话的理想下限；在窄窗口中放宽它，而不是把中间会话挤到不可用。
-  const effectiveMinimumWidth = Math.min(minimumWidth, maximumWidth)
-  return Math.max(effectiveMinimumWidth, Math.min(maximumWidth, width))
 }
 
 const MIN_LEFT_SIDEBAR_WIDTH = 240
@@ -110,7 +88,7 @@ export function AppShell(): React.ReactElement {
 
   // 左侧边栏可拖拽宽度
   const [leftSidebarWidth, setLeftSidebarWidth] = useAtom(leftSidebarWidthAtom)
-  const sidebarCollapsed = useAtomValue(sidebarCollapsedAtom)
+  const [sidebarCollapsed, setSidebarCollapsed] = useAtom(sidebarCollapsedAtom)
   const leftDragging = React.useRef(false)
   const [isDraggingLeftSidebar, setIsDraggingLeftSidebar] = React.useState(false)
   const clampedLeftSidebarWidth = clampLeftSidebarWidth(leftSidebarWidth)
@@ -180,15 +158,34 @@ export function AppShell(): React.ReactElement {
   )
   const leftSidebarContentWidth = sidebarCollapsed ? COLLAPSED_LEFT_SIDEBAR_WIDTH : clampedLeftSidebarWidth
   const leftSidebarOccupiedWidth = leftSidebarContentWidth + (isClassic ? CLASSIC_LEFT_SIDEBAR_LEADING_PADDING : 1)
+  const canUseCollapsedSidebarSpace = sidebarCollapsed && (
+    isExpandedRightWorkspace || rightPanelLayout.hasOpenedWideWorkspace
+  )
+  const canAutoCollapseSidebarForRightPanel = !sidebarCollapsed && (
+    isExpandedRightWorkspace || rightPanelLayout.hasOpenedWideWorkspace
+  )
   const clampedRightPanelWidth = clampRightPanelWidth(
     rightPanelLayout.width,
     viewportWidth,
     rightPanelMinimumWidth,
     leftSidebarOccupiedWidth,
+    canUseCollapsedSidebarSpace,
   )
   const effectiveWidePanelWidth = rightPanelLayout.widePanelWidthOverride === null
-    ? clampRightPanelWidth(Math.floor(viewportWidth * EXPANDED_WORKSPACE_DEFAULT_VIEWPORT_RATIO), viewportWidth, rightPanelMinimumWidth, leftSidebarOccupiedWidth)
-    : clampRightPanelWidth(rightPanelLayout.widePanelWidthOverride, viewportWidth, rightPanelMinimumWidth, leftSidebarOccupiedWidth)
+    ? clampRightPanelWidth(
+      Math.floor(viewportWidth * EXPANDED_WORKSPACE_DEFAULT_VIEWPORT_RATIO),
+      viewportWidth,
+      rightPanelMinimumWidth,
+      leftSidebarOccupiedWidth,
+      canUseCollapsedSidebarSpace,
+    )
+    : clampRightPanelWidth(
+      rightPanelLayout.widePanelWidthOverride,
+      viewportWidth,
+      rightPanelMinimumWidth,
+      leftSidebarOccupiedWidth,
+      canUseCollapsedSidebarSpace,
+    )
   // 打开任一扩展工作区后，当前会话保持该宽度，避免在右侧 Tab 间切换时反复缩放。
   const usesWidePanelLayout = rightPanelLayout.hasOpenedWideWorkspace
   const persistedRightPanelWidth = usesWidePanelLayout ? effectiveWidePanelWidth : clampedRightPanelWidth
@@ -229,7 +226,8 @@ export function AppShell(): React.ReactElement {
     const dragSessionId = currentSessionId
     const startX = e.clientX
     const startWidth = displayedRightPanelWidth
-    const isWideWorkspace = usesWidePanelLayout
+    const isWideWorkspace = usesWidePanelLayout || isExpandedRightWorkspace
+    let sidebarCollapsedDuringDrag = sidebarCollapsed
     // 记录最新光标位置，rAF 回调读取它而非调度时捕获的旧事件，避免快拖时坐标滞后
     let latestClientX = startX
     let latestWidth = startWidth
@@ -237,8 +235,27 @@ export function AppShell(): React.ReactElement {
     let cancelDrag: () => void
 
     const applyWidth = () => {
-      const delta = startX - latestClientX
-      latestWidth = clampRightPanelWidth(startWidth + delta, viewportWidth, rightPanelMinimumWidth, leftSidebarOccupiedWidth)
+      const requestedWidth = startWidth + startX - latestClientX
+      const normalMaximumWidth = getRightPanelMaxWidth(viewportWidth, leftSidebarOccupiedWidth)
+      const shouldCollapseSidebar = canAutoCollapseSidebarForRightPanel && requestedWidth > normalMaximumWidth
+      const nextSidebarCollapsed = sidebarCollapsedDuringDrag || shouldCollapseSidebar
+      const nextLeftSidebarContentWidth = nextSidebarCollapsed ? COLLAPSED_LEFT_SIDEBAR_WIDTH : clampedLeftSidebarWidth
+      const nextLeftSidebarOccupiedWidth = nextLeftSidebarContentWidth + (isClassic ? CLASSIC_LEFT_SIDEBAR_LEADING_PADDING : 1)
+      const allowFullAvailableWidth = nextSidebarCollapsed && (
+        isExpandedRightWorkspace || rightPanelLayout.hasOpenedWideWorkspace
+      )
+
+      if (shouldCollapseSidebar) {
+        sidebarCollapsedDuringDrag = true
+        setSidebarCollapsed(true)
+      }
+      latestWidth = clampRightPanelWidth(
+        requestedWidth,
+        viewportWidth,
+        rightPanelMinimumWidth,
+        nextLeftSidebarOccupiedWidth,
+        allowFullAvailableWidth,
+      )
       setDraggedRightPanelWidth(latestWidth)
     }
 
@@ -281,7 +298,7 @@ export function AppShell(): React.ReactElement {
     rightPanelDragCleanup.current = cancelDrag
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp)
-  }, [currentSessionId, displayedRightPanelWidth, leftSidebarOccupiedWidth, rightPanelMinimumWidth, setRightPanelLayout, usesWidePanelLayout, viewportWidth])
+  }, [canAutoCollapseSidebarForRightPanel, clampedLeftSidebarWidth, currentSessionId, displayedRightPanelWidth, isClassic, isExpandedRightWorkspace, leftSidebarOccupiedWidth, rightPanelLayout.hasOpenedWideWorkspace, rightPanelMinimumWidth, setRightPanelLayout, setSidebarCollapsed, sidebarCollapsed, usesWidePanelLayout, viewportWidth])
 
   return (
     <>
