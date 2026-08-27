@@ -65,6 +65,11 @@ extraResources:
     to: bin
     filter:
       - "**/*"
+  # OfficeCLI Excel 高保真渲染器；由 prepare:officecli 下载、固定版本并校验 SHA-256。
+  - from: resources/officecli
+    to: officecli
+    filter:
+      - "**/*"
   # 默认 Skills 模板（首次启动时同步到 ~/.proma/default-skills/）
   - from: default-skills
     to: default-skills
@@ -103,6 +108,7 @@ mac:
   binaries:
     - resources/agent-island/macos-agent-island-helper
     - resources/eventkit/macos-eventkit.node
+    - resources/officecli/officecli
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: resources/entitlements.mac.plist

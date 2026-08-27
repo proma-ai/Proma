@@ -59,8 +59,7 @@ const MD_EXTS = new Set(['.md', '.markdown'])
 const HTML_EXTS = new Set(['.html', '.htm'])
 const PLAIN_TEXT_EDIT_EXTS = new Set(['.txt', '.text', '.log'])
 const PDF_EXTS = new Set(['.pdf'])
-const DOCX_EXTS = new Set(['.docx'])
-const OFFICE_PREVIEW_EXTS = new Set(['.xlsx', '.pptx'])
+const OFFICE_PREVIEW_EXTS = new Set(['.docx', '.xlsx', '.pptx'])
 const LEGACY_OFFICE_EXTS = new Set(['.doc', '.xls', '.ppt'])
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico'])
 
@@ -95,6 +94,7 @@ type CacheEntry = {
   imagePath?: string
   docxHtml?: string
   officeHtml?: string
+  officeHtmlUrl?: string
   officeText?: string
   /** HTML 预览的目录级 token URL，允许加载同目录相对资源 */
   htmlPreviewUrl?: string
@@ -281,8 +281,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   const isPlainTextEditable = previewOnly && PLAIN_TEXT_EDIT_EXTS.has(ext)
   const isEditableText = isMarkdown || isPlainTextEditable
   const isPdf = previewOnly && PDF_EXTS.has(ext)
-  const isDocx = previewOnly && DOCX_EXTS.has(ext)
-  // XLSX/PPTX 没有可读的文本 diff；无论从文件区还是改动区打开都走 Office 预览。
+  // DOCX/XLSX/PPTX 没有可读的文本 diff；无论从文件区还是改动区打开都走 Office 预览。
   const isOfficePreview = OFFICE_PREVIEW_EXTS.has(ext)
   const isLegacyOffice = previewOnly && LEGACY_OFFICE_EXTS.has(ext)
   const isImage = previewOnly && IMAGE_EXTS.has(ext)
@@ -346,6 +345,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   const [previewScrollRestoreVersion, setPreviewScrollRestoreVersion] = React.useState(0)
   const [docxHtml, setDocxHtml] = React.useState('')
   const [officeHtml, setOfficeHtml] = React.useState('')
+  const [officeHtmlUrl, setOfficeHtmlUrl] = React.useState('')
   const [officeText, setOfficeText] = React.useState('')
   // HTML 默认展示运行后的页面；用户可随时切换回源码高亮预览。
   const [htmlPreviewUrl, setHtmlPreviewUrl] = React.useState('')
@@ -380,7 +380,6 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     (!isHtml || htmlSourceMode) &&
     !isPdf &&
     !isImage &&
-    !isDocx &&
     !isOfficePreview &&
     !isLegacyOffice &&
     newContent.length > 0 &&
@@ -409,11 +408,12 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     oldLength: oldContent.length,
     docxLength: docxHtml.length,
     officeLength: officeHtml.length,
+    officeHtmlUrl,
     htmlPreviewUrl,
     htmlSourceMode,
     markdownEditing: activeMarkdownEditing,
     markdownSourceMode: activeMarkdownEditing && markdownSourceMode,
-  }), [docxHtml.length, filePath, loading, activeMarkdownEditing, markdownSourceMode, newContent.length, officeHtml.length, htmlPreviewUrl, htmlSourceMode, oldContent.length, previewOnly, viewMode])
+  }), [docxHtml.length, filePath, loading, activeMarkdownEditing, markdownSourceMode, newContent.length, officeHtml.length, officeHtmlUrl, htmlPreviewUrl, htmlSourceMode, oldContent.length, previewOnly, viewMode])
 
   // 目录提取只需在「文件本身或其内容」变化时重建，避免 loading/编辑态切换造成的抖动
   const tocContentKey = React.useMemo(
@@ -648,6 +648,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     setNewContent('')
     setDocxHtml('')
     setOfficeHtml('')
+    setOfficeHtmlUrl('')
     setOfficeText('')
     setHtmlPreviewUrl('')
     setHtmlSourceMode(false)
@@ -812,6 +813,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
       setNewContent(cached.newContent)
       setDocxHtml(cached.docxHtml ?? '')
       setOfficeHtml(cached.officeHtml ?? '')
+      setOfficeHtmlUrl(cached.officeHtmlUrl ?? '')
       setOfficeText(cached.officeText ?? '')
       setHtmlPreviewUrl(cached.htmlPreviewUrl ?? '')
       setUnsupportedPreviewReason(cached.unsupportedPreviewReason ?? '')
@@ -835,6 +837,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
         setNewContent('')
         setDocxHtml('')
         setOfficeHtml('')
+        setOfficeHtmlUrl('')
         setOfficeText('')
         setHtmlPreviewUrl('')
         setUnsupportedPreviewReason('')
@@ -867,10 +870,12 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
             const result = await window.electronAPI.officeToHtml(filePath, fileAccess)
             if (cancelled) return
             const html = DOMPurify.sanitize(result?.html ?? '')
+            const htmlUrl = result?.htmlUrl ?? ''
             const text = result?.text ?? ''
             setOfficeHtml(html)
+            setOfficeHtmlUrl(htmlUrl)
             setOfficeText(text)
-            cacheSet(cacheKey, { oldContent: '', newContent: '', officeHtml: html, officeText: text })
+            cacheSet(cacheKey, { oldContent: '', newContent: '', officeHtml: html, officeHtmlUrl: htmlUrl, officeText: text })
             return
           }
           if (previewOnly) {
@@ -894,14 +899,6 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
                 setImageDataUrl('')
                 cacheSet(cacheKey, { oldContent: '', newContent: '', imagePath: '', imageDataUrl: '' })
               }
-              return
-            }
-            if (isDocx) {
-              const result = await window.electronAPI.docxToHtml(filePath, fileAccess)
-              if (cancelled) return
-              const html = DOMPurify.sanitize(result?.html ?? '')
-              setDocxHtml(html)
-              cacheSet(cacheKey, { oldContent: '', newContent: '', docxHtml: html })
               return
             }
             if (isLegacyOffice) {
@@ -961,7 +958,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     load()
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filePath, dirPath, gitRoot, previewOnly, previewContentVersion, fileAccess, isPdf, isDocx, isOfficePreview, isLegacyOffice, isImage, isHtml, sessionId, ext, getContentCacheKey])
+  }, [filePath, dirPath, gitRoot, previewOnly, previewContentVersion, fileAccess, isPdf, isOfficePreview, isLegacyOffice, isImage, isHtml, sessionId, ext, getContentCacheKey])
 
   // refreshVersion 触发的静默刷新：仅 diff 模式、内容有变化时才更新 state
   const prevRefreshRef = React.useRef(-1)
@@ -1021,10 +1018,8 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
       message = `暂不支持 ${ext.toUpperCase().slice(1)} 格式内联预览`
     } else if (isPdf && !pdfSrc) {
       message = 'PDF 文件过大，无法在此预览'
-    } else if (isDocx && !docxHtml) {
-      message = '无法加载 DOCX 预览'
-    } else if (isOfficePreview && !officeHtml) {
-      message = `无法加载 ${ext === '.pptx' ? 'PPTX' : 'Excel'} 预览`
+    } else if (isOfficePreview && !officeHtml && !officeHtmlUrl) {
+      message = `无法加载 ${ext === '.pptx' ? 'PPTX' : ext === '.docx' ? 'DOCX' : 'Excel'} 预览`
     } else if (isImage && !imageDataUrl) {
       message = '图片文件过大，无法在此预览'
     }
@@ -1032,7 +1027,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
       toastedPreviewFailRef.current = key
       toast.warning(message)
     }
-  }, [previewOnly, isOfficePreview, loading, filePath, ext, isLegacyOffice, isPdf, pdfSrc, isDocx, docxHtml, officeHtml, isImage, imageDataUrl])
+  }, [previewOnly, isOfficePreview, loading, filePath, ext, isLegacyOffice, isPdf, pdfSrc, docxHtml, officeHtml, officeHtmlUrl, isImage, imageDataUrl])
 
   // scrollPosition persistent: module-level Map scoped by session, file path, and resolution context
   // content changes (refreshVersion bump) → delete stored position;
@@ -1714,7 +1709,14 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
             <TooltipContent side="right">展开目录</TooltipContent>
           </Tooltip>
         )}
-        <div ref={scrollContainerRef} onScroll={handleScroll} className="h-full flex-1 min-w-0 overflow-auto scrollbar-thin relative">
+        <div
+          ref={scrollContainerRef}
+          onScroll={handleScroll}
+          className={cn(
+            'h-full flex-1 min-w-0 scrollbar-thin relative',
+            isOfficePreview ? 'overflow-hidden' : 'overflow-auto',
+          )}
+        >
           {loading ? (
             <div className="flex items-center justify-center h-full text-muted-foreground text-[12px]">加载中...</div>
           ) : (previewOnly || isOfficePreview) ? (
@@ -1805,15 +1807,16 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
                 </div>
               </div>
               ) : null
-            ) : isDocx ? (
-              docxHtml ? (
-                <div
-                  className="prose prose-sm dark:prose-invert max-w-none px-4 py-3"
-                  dangerouslySetInnerHTML={{ __html: docxHtml }}
-                />
-              ) : null
             ) : isOfficePreview ? (
-              officeHtml ? (
+              officeHtmlUrl ? (
+                <iframe
+                  src={officeHtmlUrl}
+                  className="office-preview-iframe"
+                  title={`${filePath.split('/').pop() || 'Office'} 高保真预览`}
+                  sandbox="allow-scripts"
+                  referrerPolicy="no-referrer"
+                />
+              ) : officeHtml ? (
                 <div
                   className="office-preview-host"
                   dangerouslySetInnerHTML={{ __html: officeHtml }}

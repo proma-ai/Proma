@@ -14,6 +14,8 @@
     "electron:build": "bun run --filter='@proma/electron' build",
     "electron:start": "bun run --filter='@proma/electron' start",
     "dist:mac": "bun run --filter='@proma/electron' dist:mac",
+  "dist:win": "bun run --filter='@proma/electron' dist:win",
+  "dist:linux": "bun run --filter='@proma/electron' dist:linux",
     "build": "bun run --filter='*' build",
     "typecheck": "bun run --filter='*' typecheck",
     "test": "bun test"

@@ -12,6 +12,8 @@ apps/electron/resources/bin/
 apps/electron/resources/agent-island/
 # Objective-C++ 编译的 macOS EventKit N-API addon（构建时生成，按宿主架构分发）
 apps/electron/resources/eventkit/
+# OfficeCLI 随构建脚本下载、校验并嵌入安装包，不提交大体积第三方二进制。
+apps/electron/resources/officecli/
 # bun build --compile 的临时中间产物
 *.bun-build
 

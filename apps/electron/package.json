@@ -1,6 +1,6 @@
 {
   "name": "@proma/electron",
-  "version": "0.18.2",
+  "version": "0.18.3",
   "description": "Proma next gen ai software with general agents - Electron App",
   "main": "dist/main.cjs",
   "author": {
@@ -14,7 +14,7 @@
     "dev:split": "bash scripts/dev-split.sh",
     "dev:vite": "vite dev",
     "dev:kill": "bun run scripts/dev-kill.ts",
-    "dev:electron": "bun run dev:kill && bun run sync:runtime-deps:dev && bun run rebuild:node-pty && bun run build:native-helpers && bun run build:resources && bun run scripts/dev-bundle-readiness.ts --prepare && concurrently -k -n main,agent-runtime,terminal-runtime,preload,app -c yellow,red,blue,magenta,cyan \"bun run watch:main\" \"bun run watch:agent-runtime\" \"bun run watch:terminal-runtime\" \"bun run watch:preload\" \"bun run scripts/dev-bundle-readiness.ts --wait && bunx electronmon .\"",
+    "dev:electron": "bun run dev:kill && bun run sync:runtime-deps:dev && bun run rebuild:node-pty && bun run build:native-helpers && bun run prepare:officecli && bun run build:resources && bun run scripts/dev-bundle-readiness.ts --prepare && concurrently -k -n main,agent-runtime,terminal-runtime,preload,app -c yellow,red,blue,magenta,cyan \"bun run watch:main\" \"bun run watch:agent-runtime\" \"bun run watch:terminal-runtime\" \"bun run watch:preload\" \"bun run scripts/dev-bundle-readiness.ts --wait && bunx electronmon .\"",
     "build:main": "esbuild src/main/index.ts --bundle --platform=node --format=cjs --outfile=dist/main.cjs --external:electron --external:@earendil-works/pi-coding-agent --external:@earendil-works/pi-agent-core --external:@earendil-works/pi-ai --external:sharp",
     "build:agent-runtime": "esbuild src/utility/agent-runtime.ts --bundle --platform=node --format=cjs --outfile=dist/agent-runtime.cjs --external:electron --external:@earendil-works/pi-coding-agent --external:@earendil-works/pi-agent-core --external:@earendil-works/pi-ai --external:sharp",
     "build:terminal-runtime": "esbuild src/utility/terminal-runtime.ts --bundle --platform=node --format=cjs --outfile=dist/terminal-runtime.cjs --external:electron --external:node-pty",
@@ -29,9 +29,10 @@
     "build:eventkit-native": "bun run scripts/build-eventkit-native.ts",
     "build:native-helpers": "bun run build:agent-island-native && bun run build:eventkit-native",
     "build:cli": "bun run scripts/build-cli.ts",
+    "prepare:officecli": "bun run scripts/prepare-officecli.ts",
     "sync:runtime-deps": "bun run scripts/sync-runtime-deps.ts",
     "sync:runtime-deps:dev": "bun run scripts/sync-runtime-deps.ts --no-clean",
-    "build": "bun run build:main && bun run build:agent-runtime && bun run build:terminal-runtime && bun run build:preload && bun run build:renderer && bun run build:cli && bun run build:native-helpers && bun run build:resources",
+    "build": "bun run prepare:officecli && bun run build:main && bun run build:agent-runtime && bun run build:terminal-runtime && bun run build:preload && bun run build:renderer && bun run build:cli && bun run build:native-helpers && bun run build:resources",
     "rebuild:node-pty": "electron-rebuild -f -w node-pty && bun run ensure:node-pty-helper",
     "ensure:node-pty-helper": "bun run scripts/ensure-node-pty-helper-executable.ts",
     "start": "bun run build && bunx electron .",
