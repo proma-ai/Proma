@@ -123,6 +123,14 @@ import {
 } from '@/lib/right-workspace-split'
 import type { RightWorkspacePane, RightWorkspaceSplitState } from '@/lib/right-workspace-split'
 
+function BrowserTabIcon({ favicon }: { favicon?: string }): React.ReactElement {
+  const [loadFailed, setLoadFailed] = React.useState(false)
+  React.useEffect(() => setLoadFailed(false), [favicon])
+
+  if (!favicon || loadFailed) return <Globe className="size-3.5" />
+  return <img src={favicon} alt="" aria-hidden="true" referrerPolicy="no-referrer" className="size-3.5 shrink-0 rounded-sm object-contain" onError={() => setLoadFailed(true)} />
+}
+
 function MeasuredWorkspacePane({ children }: { children: (width: number) => React.ReactNode }): React.ReactElement {
   const ref = React.useRef<HTMLDivElement>(null)
   const [width, setWidth] = React.useState<number | null>(null)
@@ -1266,7 +1274,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     ...(browserState?.tabs.map((tab) => ({
       id: getBrowserSidePanelTab(tab.tabId),
       label: tab.title || '新建标签页',
-      icon: <Globe className="size-3.5" />,
+      icon: <BrowserTabIcon favicon={tab.favicon} />,
       // 用户可关闭任何浏览器标签；关闭 Agent 工作标签后，后续未指定 tabId 的工具会提示新建或选择工作标签。
       closable: true,
       activity: showBrowserActivity && activeBrowserTabId !== tab.tabId && browserState.activeTabId === tab.tabId,

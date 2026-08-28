@@ -52,6 +52,8 @@ export interface BrowserTabSummary {
   tabId: string
   url: string
   title: string
+  /** 页面声明的 HTTP(S) favicon；未提供或加载失败时 renderer 使用默认图标。 */
+  favicon?: string
   loading: boolean
   /** 此标签由 Agent 创建（与当前默认工作标签无关）。 */
   openedByAgent: boolean

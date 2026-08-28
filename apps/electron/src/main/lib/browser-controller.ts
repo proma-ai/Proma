@@ -72,6 +72,8 @@ type BrowserTabRecord = {
   popupInitialNavigationPending: boolean
   /** 用于在超限时优先回收最久未使用的 Agent 标签。 */
   lastActivityAt: number
+  /** 页面声明的 HTTP(S) favicon；仅用于 renderer 标签图标。 */
+  favicon: string | null
   highlightTimer?: ReturnType<typeof setTimeout>
   lastBounds?: BrowserViewLayout['bounds']
   /** 仅记录当前实际挂载的 owner；隐藏时 detach，但保留 WebContents 及页面状态。 */
@@ -292,6 +294,7 @@ export class BrowserController {
         tabId: tab.tabId,
         url: tab.state.url,
         title: tab.state.title,
+        ...(tab.favicon ? { favicon: tab.favicon } : {}),
         loading: tab.state.loading,
         openedByAgent: tab.openedByAgent,
         openedByPopup: tab.openedByPopup,
@@ -616,6 +619,7 @@ export class BrowserController {
       popupInitialUrl,
       popupInitialNavigationPending: popupInitialUrl !== null && isTransientBrowserPopupUrl(popupInitialUrl),
       lastActivityAt: Date.now(),
+      favicon: null,
       attachedOwner: null,
     }
     view.setVisible(false)
@@ -671,10 +675,32 @@ export class BrowserController {
       this.emit(browserSession)
       this.emitFocusedTab(browserSession, tab)
     })
-    view.webContents.on('did-start-loading', () => { this.invalidateTabDocument(tab); this.updateNavigationState(browserSession, tab) })
+    view.webContents.on('did-start-loading', () => {
+      // 加载状态会因子资源再次开始，不能在此清 favicon，否则已获取的页面图标会被覆盖回默认图标。
+      this.invalidateTabDocument(tab)
+      this.updateNavigationState(browserSession, tab)
+    })
+    view.webContents.on('page-favicon-updated', (_event, faviconUrls: string[]) => {
+      // favicon URL 来自不可信页面，renderer 仅允许加载普通 HTTP(S) 图片，避免 data/blob 等任意 scheme。
+      tab.favicon = faviconUrls.find((faviconUrl) => {
+        try {
+          const protocol = new URL(faviconUrl).protocol
+          return protocol === 'https:' || protocol === 'http:'
+        } catch {
+          return false
+        }
+      }) ?? null
+      this.emit(browserSession)
+    })
     view.webContents.on('did-stop-loading', () => this.updateNavigationState(browserSession, tab))
     view.webContents.on('page-title-updated', () => this.updateNavigationState(browserSession, tab))
-    view.webContents.on('did-navigate', () => { tab.popupInitialNavigationPending = false; this.invalidateTabDocument(tab); this.updateNavigationState(browserSession, tab) })
+    view.webContents.on('did-navigate', () => {
+      // 只在主框架真正完成跨文档导航时清理旧站点图标；新页面随后会通过 page-favicon-updated 重新发布。
+      tab.favicon = null
+      tab.popupInitialNavigationPending = false
+      this.invalidateTabDocument(tab)
+      this.updateNavigationState(browserSession, tab)
+    })
     view.webContents.on('did-navigate-in-page', () => { tab.popupInitialNavigationPending = false; this.invalidateTabDocument(tab); this.updateNavigationState(browserSession, tab) })
     view.webContents.on('destroyed', () => {
       if (!browserSession.tabs.has(tab.tabId)) return
