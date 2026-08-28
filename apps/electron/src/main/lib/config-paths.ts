@@ -5,10 +5,12 @@
  * 所有用户配置存储在 ~/.proma/ 目录下。
  */
 
+import { createHash } from 'node:crypto'
 import { join, basename } from 'node:path'
-import { mkdirSync, existsSync, cpSync, rmSync, readdirSync, readFileSync } from 'node:fs'
+import { mkdirSync, existsSync, cpSync, rmSync, readdirSync, readFileSync, copyFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { rmSyncWithRetry } from './fs-retry'
+import { readJsonFileSafe, writeJsonFileAtomic } from './safe-file'
 
 /**
  * 获取配置目录名称
@@ -168,6 +170,35 @@ export function resolveAttachmentPath(localPath: string): string {
  */
 export function getSettingsPath(): string {
   return join(getConfigDir(), 'settings.json')
+}
+
+/**
+ * 获取用户授权的 Markdown Vault 配置路径。
+ * 内容仅保存 Vault 根目录与用户授予的能力，不保存笔记正文或索引。
+ */
+export function getVaultConfigPath(): string {
+  return join(getConfigDir(), 'vault.json')
+}
+
+/**
+ * 解析 Proma 管理的默认 Markdown Vault 目录。
+ */
+export function resolveDefaultVaultDir(configDir: string): string {
+  return join(configDir, 'vault')
+}
+
+/**
+ * 获取 Proma 管理的默认 Markdown Vault 目录，并在首次使用时创建。
+ *
+ * @returns 正式版本 ~/.proma/vault/，开发模式 ~/.proma-dev/vault/
+ */
+export function getDefaultVaultDir(configDir = getConfigDir()): string {
+  const dir = resolveDefaultVaultDir(configDir)
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true })
+    console.log(`[配置] 已创建默认 Vault 目录: ${dir}`)
+  }
+  return dir
 }
 
 /**
@@ -485,6 +516,7 @@ function compareSemver(a: string, b: string): number {
  */
 export const RETIRED_DEFAULT_SKILL_SLUGS: readonly string[] = [
   'brainstorming',
+  'vault',
 ]
 
 const RETIRED_DEFAULT_SKILL_SLUG_SET = new Set(RETIRED_DEFAULT_SKILL_SLUGS)
@@ -730,13 +762,102 @@ export function getSdkConfigDir(): string {
   return dir
 }
 
+interface ScratchPadMigrationState {
+  version: 1
+  legacyContentSha256: string
+  migratedAt: number
+}
+
+function getScratchPadMigrationStatePath(configDir: string): string {
+  return join(configDir, 'scratch-pad-migration.json')
+}
+
+function scratchPadContentSha256(path: string): string {
+  return createHash('sha256').update(readFileSync(path)).digest('hex')
+}
+
+function readScratchPadMigrationState(path: string): ScratchPadMigrationState | null {
+  const state = readJsonFileSafe<unknown>(path)
+  if (!state || typeof state !== 'object') return null
+  const candidate = state as Partial<ScratchPadMigrationState>
+  return candidate.version === 1
+    && typeof candidate.legacyContentSha256 === 'string'
+    && typeof candidate.migratedAt === 'number'
+    ? candidate as ScratchPadMigrationState
+    : null
+}
+
+function nextScratchPadMigrationPath(vaultDir: string): string {
+  const firstPath = join(vaultDir, '草稿.md')
+  if (!existsSync(firstPath)) return firstPath
+  let suffix = 2
+  while (existsSync(join(vaultDir, `草稿 ${suffix}.md`))) suffix += 1
+  return join(vaultDir, `草稿 ${suffix}.md`)
+}
+
+/** Returns a previous destination for recovery when a crash happened after copying but before writing the marker. */
+function findScratchPadMigrationDestination(vaultDir: string, legacyContentSha256: string): string | null {
+  const candidates = readdirSync(vaultDir)
+    .filter((name) => name.endsWith('.md'))
+    .sort()
+
+  for (const candidate of candidates) {
+    const path = join(vaultDir, candidate)
+    try {
+      if (scratchPadContentSha256(path) === legacyContentSha256) return path
+    } catch {
+      // An unreadable candidate cannot establish successful migration; keep looking.
+    }
+  }
+  return null
+}
+
 /**
- * 获取 Scratch Pad 文件路径
+ * 获取 Scratch Pad 文件路径。
  *
- * @returns ~/.proma/scratch-pad.md
+ * 保留原始旧版 scratch-pad.md，并按其内容指纹仅复制到 Proma 管理的默认 Vault 一次。
+ * 已存在的 Vault 内容绝不覆盖；旧文件优先复制为草稿.md，重名时使用草稿 N.md。
+ * 内容复制成功后以崩溃安全的状态文件记录指纹；重启或重复调用只返回 canonical Vault 路径。
+ * 迁移失败时继续使用旧路径，以便下次安全重试。
+ *
+ * @returns 正式版本 ~/.proma/vault/scratch-pad.md，开发模式 ~/.proma-dev/vault/scratch-pad.md
  */
-export function getScratchPadPath(): string {
-  return join(getConfigDir(), 'scratch-pad.md')
+export function getScratchPadPath(configDir = getConfigDir()): string {
+  const legacyPath = join(configDir, 'scratch-pad.md')
+  const vaultDir = getDefaultVaultDir(configDir)
+  const vaultPath = join(vaultDir, 'scratch-pad.md')
+  if (!existsSync(legacyPath)) return vaultPath
+
+  try {
+    const legacyContentSha256 = scratchPadContentSha256(legacyPath)
+    const migrationStatePath = getScratchPadMigrationStatePath(configDir)
+    const previousMigration = readScratchPadMigrationState(migrationStatePath)
+    if (previousMigration?.legacyContentSha256 === legacyContentSha256) return vaultPath
+
+    const recoveredDestination = findScratchPadMigrationDestination(vaultDir, legacyContentSha256)
+    const destination = recoveredDestination ?? nextScratchPadMigrationPath(vaultDir)
+
+    if (!recoveredDestination) {
+      copyFileSync(legacyPath, destination)
+      console.log(`[配置] 已复制旧 Scratch Pad 到默认 Vault: ${destination}`)
+    }
+
+    try {
+      writeJsonFileAtomic(migrationStatePath, {
+        version: 1,
+        legacyContentSha256,
+        migratedAt: Date.now(),
+      } satisfies ScratchPadMigrationState)
+    } catch (error) {
+      // The copied destination is content-identifiable and will be marked on the next access without another import.
+      console.error(`[配置] Scratch Pad 迁移标记写入失败，将在下次访问恢复: ${migrationStatePath}`, error)
+    }
+
+    return vaultPath
+  } catch (error) {
+    console.error(`[配置] Scratch Pad 迁移失败，继续使用旧文件: ${legacyPath}`, error)
+    return legacyPath
+  }
 }
 
 /**

@@ -6,7 +6,9 @@
  * - 读取：主文件 → .tmp 残留 → .bak 回退，多层容错
  */
 
-import { writeFileSync, renameSync, existsSync, copyFileSync, readFileSync, unlinkSync } from 'node:fs'
+import { closeSync, copyFileSync, existsSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import { basename, dirname, join } from 'node:path'
 
 /**
  * 原子写入 JSON 文件：write-to-temp → rename
@@ -32,11 +34,42 @@ export function writeJsonFileAtomic(filePath: string, data: object, skipBackup =
   renameSync(tmpPath, filePath)
 }
 
-/** 原子重写文本文件（用于 JSONL 会话等非单个 JSON 文档）。 */
+/**
+ * 原子重写文本文件（用于 JSONL 会话等非单个 JSON 文档）。
+ *
+ * Never use a predictable `<target>.tmp`: an attacker with access to the
+ * directory could pre-create it as a symlink. `wx` creates a private sibling
+ * exclusively, and rename replaces the target itself rather than following it.
+ */
 export function writeTextFileAtomic(filePath: string, content: string): void {
-  const tmpPath = filePath + '.tmp'
-  writeFileSync(tmpPath, content, 'utf-8')
-  renameSync(tmpPath, filePath)
+  const parent = dirname(filePath)
+  const stem = basename(filePath)
+  let tmpPath: string | null = null
+  let descriptor: number | null = null
+  try {
+    for (let attempt = 0; attempt < 16; attempt++) {
+      const candidate = join(parent, `.${stem}.proma-${randomBytes(12).toString('hex')}.tmp`)
+      try {
+        descriptor = openSync(candidate, 'wx', 0o600)
+        tmpPath = candidate
+        break
+      } catch (error) {
+        if (error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST') continue
+        throw error
+      }
+    }
+    if (descriptor === null || tmpPath === null) throw new Error(`无法为原子写入创建临时文件: ${filePath}`)
+    writeFileSync(descriptor, content, 'utf-8')
+    closeSync(descriptor)
+    descriptor = null
+    renameSync(tmpPath, filePath)
+    tmpPath = null
+  } finally {
+    if (descriptor !== null) closeSync(descriptor)
+    if (tmpPath !== null) {
+      try { unlinkSync(tmpPath) } catch { /* best-effort cleanup */ }
+    }
+  }
 }
 
 /**

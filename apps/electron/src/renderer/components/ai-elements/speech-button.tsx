@@ -56,7 +56,7 @@ export function SpeechButton({
       const detail = (event as CustomEvent<Partial<InlineVoiceStatus>>).detail
       if (!detail?.status) return
       // 整个会话状态只归属到发起听写的输入框；其他按钮始终保持 idle，
-      // 避免并排布局（草稿页 + Agent 输入框）下重复显示听写或终态反馈。
+      // 避免多个输入框同时显示听写或终态反馈。
       if (detail.sourceId !== voiceInputId) {
         setVoiceStatus(IDLE_VOICE_STATUS)
         return

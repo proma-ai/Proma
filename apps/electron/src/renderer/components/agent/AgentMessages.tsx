@@ -21,7 +21,6 @@ import {
 } from '@/components/ai-elements/conversation'
 import { ScrollMinimap } from '@/components/ai-elements/scroll-minimap'
 import type { MinimapItem } from '@/components/ai-elements/scroll-minimap'
-import { StickyUserMessage } from '@/components/ai-elements/sticky-user-message'
 import { useStickToBottomContext } from 'use-stick-to-bottom'
 import { formatMessageTime } from '@/components/chat/ChatMessageItem'
 import { resolveModelDisplayName } from '@/lib/model-logo'
@@ -32,7 +31,7 @@ import { ScrollPositionManager } from '@/hooks/useScrollPositionMemory'
 import { cn } from '@/lib/utils'
 import { Spinner } from '@/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { groupIntoTurns, AssistantLogo, MessageGroupRenderer, getGroupId, getGroupPreview, extractUserText, parseAttachedFiles as sdkParseAttachedFiles, isImageFile as sdkIsImageFile, buildTaskProgressDataForTurn, type MessageGroup } from './SDKMessageRenderer'
+import { groupIntoTurns, AssistantLogo, MessageGroupRenderer, getGroupId, getGroupPreview, extractUserText, buildTaskProgressDataForTurn, type MessageGroup } from './SDKMessageRenderer'
 import { buildLiveGroupSet } from './live-group-set'
 import { AgentBrowserLinkProvider } from '@/components/browser/AgentBrowserLinkProvider'
 import { AgentHistorySelectionLayer } from './AgentHistorySelectionLayer'
@@ -1140,22 +1139,6 @@ export const AgentMessages = React.memo(function AgentMessages({
     })
   }, [sessionId, minimapItems, streaming, setMinimapCache])
 
-  // 所有用户消息的数据 — 供 StickyUserMessage 使用；只依赖结构快照，
-  // 避免流式期间重复解析已存在用户消息的附件标记。
-  const allUserMessagesData = React.useMemo(() => {
-    return structuralGroups
-      .filter((g): g is MessageGroup & { type: 'user' } => g.type === 'user')
-      .map((g) => {
-        const rawText = extractUserText(g.message) ?? ''
-        const { files, text } = sdkParseAttachedFiles(rawText)
-        return {
-          id: getGroupId(g),
-          text,
-          attachments: files.map((f) => ({ filename: f.filename, isImage: sdkIsImageFile(f.filename) })),
-        }
-      })
-  }, [structuralGroups])
-
   // 只有 assistant turn 产生实际内容后，才把计时器从乐观消息壳迁移到历史区。
   // Pi 会先推送空 assistant snapshot；若立即迁移，空消息头会把计时器下推，
   // 直到首个过程/文本块到达才填补空白。
@@ -1179,11 +1162,6 @@ export const AgentMessages = React.memo(function AgentMessages({
       turns.set(getGroupId(group), Math.max(turn, 1))
     }
     return turns
-  }, [structuralGroups])
-
-  const stickyLayoutSignature = React.useMemo(() => {
-    const firstGroup = structuralGroups[0]
-    return `${structuralGroups.length}:${firstGroup ? getGroupId(firstGroup) : ''}`
   }, [structuralGroups])
 
   return (
@@ -1262,12 +1240,6 @@ export const AgentMessages = React.memo(function AgentMessages({
           streaming={streaming}
           contextCompaction={contextCompaction}
         />
-        {allUserMessagesData.length > 0 && (
-          <StickyUserMessage
-            userMessages={allUserMessagesData}
-            layoutSignature={stickyLayoutSignature}
-          />
-        )}
           </Conversation>
           <AgentHistorySelectionLayer
             sessionId={sessionId}

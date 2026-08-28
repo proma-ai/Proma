@@ -38,6 +38,7 @@ interface MarkdownRichEditorProps {
   onSave: () => void
   onCancel: () => void
   onRequestEdit?: () => void
+  showToolbar?: boolean
   /** 由外层源码编辑器接管 Mermaid 源码编辑时，富文本态持续显示图表预览。 */
   renderMermaidInEditor?: boolean
   disabled?: boolean
@@ -56,6 +57,7 @@ export function MarkdownRichEditor({
   onSave,
   onCancel,
   onRequestEdit,
+  showToolbar = true,
   renderMermaidInEditor = false,
   disabled,
   fileAccess,
@@ -348,7 +350,7 @@ export function MarkdownRichEditor({
     // 不依赖 position:sticky，彻底避免被内容滚走）。
     // 预览态：内容驱动高度，由外层容器滚动（保持 TOC / 查找栏对外层滚动容器的依赖）。
     <div className={cn('flex flex-col', editing ? 'h-full' : 'min-h-full')}>
-      {editing && editor && <MarkdownEditorToolbar editor={editor} />}
+      {editing && editor && showToolbar && <MarkdownEditorToolbar editor={editor} />}
       <EditorContent
         ref={editorContentRef}
         editor={editor}

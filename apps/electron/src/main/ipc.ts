@@ -10,7 +10,7 @@ import { existsSync, realpathSync, readFileSync, writeFileSync, mkdirSync, statS
 import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, AGENT_ISLAND_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, PLANNING_CONFLICT_ERROR, MAX_ATTACHMENT_SIZE, isPromaPermissionMode, normalizePathForCompare, TERMINAL_IPC_CHANNELS } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, AGENT_ISLAND_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, VAULT_IPC_CHANNELS, PLANNING_CONFLICT_ERROR, MAX_ATTACHMENT_SIZE, isPromaPermissionMode, normalizePathForCompare, TERMINAL_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS, WINDOWS_AGENT_ISLAND_IPC_CHANNELS, TRAY_IPC_CHANNELS } from '../types'
 import type {
   QuickTaskSubmitInput,
@@ -162,6 +162,20 @@ import { getMainWindow } from './lib/main-window-store'
 import { resolveBrowserProfileKey } from './lib/browser-profile-policy'
 import { getUnstagedChanges, invalidateGitDiffCache, getFileDiff, getUntrackedContent, revertFile, getDiffContents, listWorktrees, getWorktreeChanges, getMainRepoRoot } from './lib/git-diff-service'
 import { registerPromaDirectoryPath, registerPromaFilePath } from './lib/local-file-protocol'
+import {
+  authorizeDiscoveredVault,
+  configureVault,
+  createUntitledVaultFile,
+  createUntitledVaultFileInFolder,
+  createVaultFolder,
+  discoverObsidianVaultCandidates,
+  discoverVaultCandidates,
+  selectDefaultVault,
+  getConfiguredVaultFileSystem,
+  getVaultSummary,
+  setVaultUserContext,
+  clearVaultUserContext,
+} from './lib/vault-service'
 import { registerUpdaterIpc } from './lib/updater/updater-ipc'
 import {
   listChannels,
@@ -5856,6 +5870,119 @@ export function registerIpcHandlers(): void {
       markAgentIslandSessionViewed(sessionId)
     }
   )
+
+  // ===== 用户授权的 Markdown Vault =====
+
+  ipcMain.handle(VAULT_IPC_CHANNELS.GET_CONFIG, async () => getVaultSummary())
+
+  ipcMain.handle(VAULT_IPC_CHANNELS.SELECT_DEFAULT, async () => selectDefaultVault())
+
+  ipcMain.handle(VAULT_IPC_CHANNELS.LIST_CANDIDATES, async () => discoverVaultCandidates())
+
+  ipcMain.handle(VAULT_IPC_CHANNELS.SELECT, async (_, options: unknown) => {
+    const input = options && typeof options === 'object' ? options as Record<string, unknown> : {}
+    const inboxPath = typeof input.inboxPath === 'string' ? input.inboxPath : undefined
+    const allowAgentWrites = input.allowAgentWrites === true
+    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+    if (!win) return null
+    const result = await dialog.showOpenDialog(win, {
+      properties: ['openDirectory'],
+      title: '选择 Vault 文件夹',
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    return configureVault(result.filePaths[0]!, { inboxPath, allowAgentWrites })
+  })
+
+  ipcMain.handle(VAULT_IPC_CHANNELS.AUTHORIZE_CANDIDATE, async (_, rootPath: unknown, options: unknown) => {
+    if (typeof rootPath !== 'string') throw new Error('Vault 候选路径非法')
+    const input = options && typeof options === 'object' ? options as Record<string, unknown> : {}
+    return authorizeDiscoveredVault(rootPath, {
+      inboxPath: typeof input.inboxPath === 'string' ? input.inboxPath : undefined,
+      allowAgentWrites: input.allowAgentWrites === true,
+    })
+  })
+
+
+  ipcMain.handle(VAULT_IPC_CHANNELS.LIST_FILES, async () => getConfiguredVaultFileSystem().listFiles())
+
+  ipcMain.handle(VAULT_IPC_CHANNELS.READ_FILE, async (_, relativePath: unknown) => {
+    if (typeof relativePath !== 'string') throw new Error('Vault relativePath 必填')
+    return getConfiguredVaultFileSystem().readFile(relativePath)
+  })
+
+  ipcMain.handle(VAULT_IPC_CHANNELS.WRITE_FILE, async (_, input: unknown) => {
+    if (!input || typeof input !== 'object') throw new Error('Vault 写入参数非法')
+    const value = input as Record<string, unknown>
+    if (typeof value.relativePath !== 'string' || typeof value.content !== 'string') {
+      throw new Error('Vault relativePath 和 content 必填')
+    }
+    return getConfiguredVaultFileSystem().writeFile({
+      relativePath: value.relativePath,
+      content: value.content,
+      expectedSha256: typeof value.expectedSha256 === 'string' ? value.expectedSha256 : undefined,
+      createOnly: value.createOnly === true,
+    })
+  })
+
+
+  ipcMain.handle(VAULT_IPC_CHANNELS.CREATE_UNTITLED_FILE, async () => createUntitledVaultFile())
+
+  ipcMain.handle(VAULT_IPC_CHANNELS.CREATE_UNTITLED_FILE_IN_FOLDER, async (_, folderPath: unknown) => {
+    if (typeof folderPath !== 'string') throw new Error('Vault 文件夹路径非法')
+    return createUntitledVaultFileInFolder(folderPath)
+  })
+
+  ipcMain.handle(VAULT_IPC_CHANNELS.CREATE_FOLDER, async (_, relativePath: unknown): Promise<void> => {
+    if (typeof relativePath !== 'string') throw new Error('Vault 文件夹路径非法')
+    createVaultFolder(relativePath)
+  })
+
+  ipcMain.handle(VAULT_IPC_CHANNELS.RENAME_FILE, async (_, input: unknown) => {
+    if (!input || typeof input !== 'object') throw new Error('Vault 重命名参数非法')
+    const value = input as Record<string, unknown>
+    if (typeof value.relativePath !== 'string' || typeof value.name !== 'string') {
+      throw new Error('Vault relativePath 和 name 必填')
+    }
+    return getConfiguredVaultFileSystem().renameFile({
+      relativePath: value.relativePath,
+      name: value.name,
+      expectedSha256: typeof value.expectedSha256 === 'string' ? value.expectedSha256 : undefined,
+    })
+  })
+
+  ipcMain.handle(VAULT_IPC_CHANNELS.DELETE_FILE, async (_, input: unknown): Promise<void> => {
+    if (!input || typeof input !== 'object') throw new Error('Vault 删除参数非法')
+    const value = input as Record<string, unknown>
+    if (typeof value.relativePath !== 'string') throw new Error('Vault relativePath 必填')
+    getConfiguredVaultFileSystem().deleteFile({
+      relativePath: value.relativePath,
+      expectedSha256: typeof value.expectedSha256 === 'string' ? value.expectedSha256 : undefined,
+    })
+  })
+
+
+
+  ipcMain.handle(VAULT_IPC_CHANNELS.SET_USER_CONTEXT, async (_, sessionId: unknown, focus: unknown, open: unknown): Promise<void> => {
+    if (typeof sessionId !== 'string' || sessionId.trim().length === 0) throw new Error('Vault 会话 ID 非法')
+    if (open === false || focus === null || focus === undefined) {
+      clearVaultUserContext(sessionId)
+      return
+    }
+    if (!focus || typeof focus !== 'object') throw new Error('Vault focus 非法')
+    const value = focus as Record<string, unknown>
+    if (
+      (value.kind !== 'file' && value.kind !== 'folder')
+      || typeof value.relativePath !== 'string'
+      || !Number.isSafeInteger(value.sequence)
+    ) {
+      throw new Error('Vault focus 非法')
+    }
+    setVaultUserContext(sessionId, {
+      kind: value.kind,
+      relativePath: value.relativePath,
+      sequence: value.sequence as number,
+    })
+  })
 
   // ===== Windows Agent Island =====
 

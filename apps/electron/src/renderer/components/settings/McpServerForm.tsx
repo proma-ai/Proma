@@ -31,8 +31,12 @@ interface McpServerFormProps {
   /** 当前工作区 slug */
   workspaceSlug: string
   onSaved: () => void
-  onChanged?: () => void
-  onCancel: () => void
+  onChanged?: () => void | Promise<void>
+  onCancel: () => void | Promise<void>
+  /** 外部详情页请求关闭的递增标记；表单会先 flush 自动保存再触发 onCancel。 */
+  closeRequestId?: number
+  /** 由 MCP 内部详情页托管标题与返回操作时隐藏表单标题栏。 */
+  showHeader?: boolean
 }
 
 /** 传输类型选项 */
@@ -120,7 +124,7 @@ function buildEntryFromValues(values: McpFormValues, includeTestResult = false):
   return base
 }
 
-export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCancel }: McpServerFormProps): React.ReactElement {
+export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCancel, closeRequestId, showHeader = true }: McpServerFormProps): React.ReactElement {
   const isEdit = server !== null
   const isBuiltin = server?.entry.isBuiltin === true
 
@@ -129,10 +133,17 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
   const [transportType, setTransportType] = React.useState<McpTransportType>(server?.entry.type ?? 'stdio')
   const [enabled, setEnabled] = React.useState(server?.entry.enabled ?? false) // 默认关闭
   const explicitlyDisabledRef = React.useRef(false)
+  // Strict Mode 会重复执行 mount effect；只有真实用户操作才能解锁自动保存，
+  // 以保证“查看配置”不会触发 SAVE_MCP_CONFIG → 禁用 → 验证 → 重启用。
+  const hasUserEditedRef = React.useRef(false)
+  const markUserEdited = React.useCallback((): void => {
+    hasUserEditedRef.current = true
+  }, [])
   const handleEnabledChange = React.useCallback((nextEnabled: boolean): void => {
+    markUserEdited()
     if (!nextEnabled) explicitlyDisabledRef.current = true
     setEnabled(nextEnabled)
-  }, [])
+  }, [markUserEdited])
 
   // stdio 字段
   const [command, setCommand] = React.useState(server?.entry.command ?? '')
@@ -156,7 +167,6 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
   // 自动保存状态（仅编辑模式）
   const AUTO_SAVE_DELAY = 600
   const autoSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
-  const isFirstRenderRef = React.useRef(true)
   const mountedRef = React.useRef(true)
   const [saveStatus, setSaveStatus] = React.useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
 
@@ -225,7 +235,7 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
       if (generation === saveGenerationRef.current && mountedRef.current) {
         // 编辑抽屉外的 MCP 卡片使用独立快照；每次持久化后通知其局部重读，
         // 让测试结果无需离开再进入页面即可同步显示。
-        onChanged?.()
+        await onChanged?.()
         setSaveStatus('saved')
         setTimeout(() => {
           if (generation === saveGenerationRef.current && mountedRef.current) {
@@ -247,12 +257,8 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
 
   // 编辑模式下监听字段变化，防抖自动保存
   React.useEffect(() => {
-    if (!isEdit) return
-    // 首次渲染跳过，避免加载时触发 auto-save
-    if (isFirstRenderRef.current) {
-      isFirstRenderRef.current = false
-      return
-    }
+    // 仅用户修改配置或主动测试后保存；不要让详情预览的挂载（含 Strict Mode 二次 effect）写回配置。
+    if (!isEdit || !hasUserEditedRef.current) return
     const serverName = name.trim()
     if (!serverName) return
     if (transportType === 'stdio' && !command.trim()) return
@@ -283,8 +289,10 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
     testResult,
   ])
 
-  // 组件卸载时 flush 待保存的变更，并标记 unmounted
+  // Strict Mode 会执行一次 setup → cleanup → setup；每次 setup 都恢复 mounted 状态。
+  // 正常“返回”会先走 handleCancel 的 await flush，再卸载，不依赖这里的异步兜底同步 UI。
   React.useEffect(() => {
+    mountedRef.current = true
     return () => {
       mountedRef.current = false
       if (autoSaveTimerRef.current) {
@@ -314,12 +322,14 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
     try {
       const entry = buildEntry(false) // 测试时不包含旧的测试结果
       const result = await window.electronAPI.testMcpServer(workspaceSlug, serverName, entry)
+      markUserEdited()
       setTestResult({
         success: result.success,
         message: result.message,
         timestamp: Date.now(),
       })
     } catch (error) {
+      markUserEdited()
       setTestResult({
         success: false,
         message: error instanceof Error ? error.message : '测试失败',
@@ -379,7 +389,7 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
   }
 
   /** 返回/关闭：编辑模式下先 flush 待保存变更 */
-  const handleCancel = async (): Promise<void> => {
+  const handleCancel = React.useCallback(async (): Promise<void> => {
     if (isEdit && autoSaveTimerRef.current) {
       clearTimeout(autoSaveTimerRef.current)
       autoSaveTimerRef.current = null
@@ -395,39 +405,48 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
         }
       }
     }
-    onCancel()
-  }
+    await onCancel()
+  }, [isEdit, onCancel])
+
+  const handledCloseRequestRef = React.useRef(closeRequestId ?? 0)
+  React.useEffect(() => {
+    if (closeRequestId === undefined || closeRequestId === handledCloseRequestRef.current) return
+    handledCloseRequestRef.current = closeRequestId
+    void handleCancel()
+  }, [closeRequestId, handleCancel])
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      {/* 标题栏 + 操作按钮 */}
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" className="h-8 w-8" type="button" onClick={() => void handleCancel()}>
-          <ArrowLeft size={18} />
-        </Button>
-        <h3 className="text-lg font-medium text-foreground flex-1">
-          {isEdit ? '编辑 MCP 服务器' : '添加 MCP 服务器'}
-        </h3>
-        {isEdit && (saveStatus === 'saved' || saveStatus === 'error') && (
-          <div className={cn(
-            'flex items-center gap-1.5 text-xs',
-            saveStatus === 'error' ? 'text-destructive' : 'text-muted-foreground',
-          )}>
-            {saveStatus === 'saved' && <CheckCircle2 size={12} className="text-emerald-600" />}
-            {saveStatus === 'error' && <XCircle size={12} />}
-            <span>
-              {saveStatus === 'saved' && '已保存'}
-              {saveStatus === 'error' && '保存失败'}
-            </span>
-          </div>
-        )}
-        {!isEdit && (
-          <Button size="sm" type="submit" disabled={saving || !canSubmit()}>
-            {saving && <Loader2 size={14} className="animate-spin" />}
-            <span>创建服务器</span>
+      {/* 标题栏 + 操作按钮。内部详情页已提供统一标题与返回入口。 */}
+      {showHeader && (
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="icon" className="h-8 w-8" type="button" onClick={() => void handleCancel()}>
+            <ArrowLeft size={18} />
           </Button>
-        )}
-      </div>
+          <h3 className="text-lg font-medium text-foreground flex-1">
+            {isEdit ? '编辑 MCP 服务器' : '添加 MCP 服务器'}
+          </h3>
+          {isEdit && (saveStatus === 'saved' || saveStatus === 'error') && (
+            <div className={cn(
+              'flex items-center gap-1.5 text-xs',
+              saveStatus === 'error' ? 'text-destructive' : 'text-muted-foreground',
+            )}>
+              {saveStatus === 'saved' && <CheckCircle2 size={12} className="text-emerald-600" />}
+              {saveStatus === 'error' && <XCircle size={12} />}
+              <span>
+                {saveStatus === 'saved' && '已保存'}
+                {saveStatus === 'error' && '保存失败'}
+              </span>
+            </div>
+          )}
+          {!isEdit && (
+            <Button size="sm" type="submit" disabled={saving || !canSubmit()}>
+              {saving && <Loader2 size={14} className="animate-spin" />}
+              <span>创建服务器</span>
+            </Button>
+          )}
+        </div>
+      )}
 
       {/* 基本信息 */}
       <SettingsSection title="基本信息">
@@ -435,7 +454,7 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
           <SettingsInput
             label="服务器名称"
             value={name}
-            onChange={setName}
+            onChange={(value) => { markUserEdited(); setName(value) }}
             placeholder="例如: github-mcp"
             required
             disabled={isEdit}
@@ -443,7 +462,7 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
           <SettingsSelect
             label="传输类型"
             value={transportType}
-            onValueChange={(v) => setTransportType(v as McpTransportType)}
+            onValueChange={(v) => { markUserEdited(); setTransportType(v as McpTransportType) }}
             options={TRANSPORT_OPTIONS}
             placeholder="选择传输类型"
             disabled={isBuiltin}
@@ -455,7 +474,7 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
               <SettingsInput
                 label="命令"
                 value={command}
-                onChange={setCommand}
+                onChange={(value) => { markUserEdited(); setCommand(value) }}
                 placeholder="例如: npx"
                 required
                 disabled={isBuiltin}
@@ -463,7 +482,7 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
               <SettingsInput
                 label="参数"
                 value={argsText}
-                onChange={setArgsText}
+                onChange={(value) => { markUserEdited(); setArgsText(value) }}
                 placeholder="逗号分隔，例如: -y, @modelcontextprotocol/server-github"
                 description="多个参数用逗号分隔"
                 disabled={isBuiltin}
@@ -476,7 +495,7 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
                 </div>
                 <textarea
                   value={envText}
-                  onChange={(e) => setEnvText(e.target.value)}
+                  onChange={(e) => { markUserEdited(); setEnvText(e.target.value) }}
                   placeholder="GITHUB_TOKEN=ghp_xxx&#10;DEBUG=true"
                   rows={3}
                   className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 resize-y font-mono"
@@ -486,7 +505,7 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
                 label="启动超时（秒）"
                 description="MCP 服务器启动的最大等待时间，默认 30 秒"
                 value={timeoutStr}
-                onChange={setTimeoutStr}
+                onChange={(value) => { markUserEdited(); setTimeoutStr(value) }}
                 placeholder="30"
                 type="number"
               />
@@ -499,7 +518,7 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
               <SettingsInput
                 label="URL"
                 value={url}
-                onChange={setUrl}
+                onChange={(value) => { markUserEdited(); setUrl(value) }}
                 placeholder="例如: http://localhost:3000/mcp"
                 required
               />
@@ -511,7 +530,7 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
                 </div>
                 <textarea
                   value={headersText}
-                  onChange={(e) => setHeadersText(e.target.value)}
+                  onChange={(e) => { markUserEdited(); setHeadersText(e.target.value) }}
                   placeholder="Authorization: Bearer xxx&#10;X-Custom-Header: value"
                   rows={3}
                   className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 resize-y font-mono"

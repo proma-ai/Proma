@@ -23,6 +23,8 @@ declare module '*.mp3' {
   export default src
 }
 
+
+
 /** 更新状态（与 updater-types.ts 保持一致） */
 interface UpdateStatus {
   status: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'not-available' | 'error'

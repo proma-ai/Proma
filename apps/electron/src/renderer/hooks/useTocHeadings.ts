@@ -8,7 +8,8 @@ export interface TocHeading {
   el: HTMLElement
 }
 
-const HEADING_SELECTOR = 'h1, h2, h3, h4, h5, h6'
+// TipTap 输出 h1–h6；LiveMarkdown 基于 CodeMirror 输出 span，并为标题标注 data 属性。
+const HEADING_SELECTOR = 'h1, h2, h3, h4, h5, h6, [data-markdown-heading]'
 
 /**
  * 从滚动容器内的渲染结果中提取标题树，并为每个标题注入锚点 id。
@@ -44,9 +45,10 @@ export function useTocHeadings(
       const next: TocHeading[] = []
       const nodes = container.querySelectorAll<HTMLElement>(HEADING_SELECTOR)
       for (const el of Array.from(nodes)) {
-        const text = (el.textContent ?? '').trim()
+        const text = (el.dataset.tocText ?? el.textContent ?? '').trim()
         if (!text) continue
-        const level = Number(el.tagName.slice(1))
+        const level = el.dataset.tocLevel ? Number(el.dataset.tocLevel) : Number(el.tagName.slice(1))
+        if (!Number.isInteger(level) || level < 1 || level > 6) continue
         if (!el.id) el.id = slug(text)
         next.push({ id: el.id, level, text, el })
       }

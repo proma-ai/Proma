@@ -37,7 +37,7 @@ import { agentWorkspacesAtom, agentSessionsAtom, currentAgentWorkspaceIdAtom } f
 import { activeSessionIdAtom } from '@/atoms/tab-atoms'
 import { activeViewAtom, agentSkillsTabAtom } from '@/atoms/active-view'
 import { useOpenSession } from '@/hooks/useOpenSession'
-import { MarkdownRichEditor } from '@/components/diff/MarkdownRichEditor'
+import { LiveMarkdownEditor } from '@/components/markdown/LiveMarkdownEditor'
 import { LocalProjectBadge } from '@/components/agent/LocalProjectBadge'
 import type {
   AutomationFeishuNotificationTarget,
@@ -662,12 +662,9 @@ export function AutomationFormView({ embedded = false }: { embedded?: boolean } 
                 id="automation-prompt"
                 className="min-h-0 flex-1 overflow-y-auto rounded-xl bg-foreground/[0.03] shadow-inner scrollbar-thin"
               >
-                <MarkdownRichEditor
+                <LiveMarkdownEditor
                   value={form.prompt}
-                  editing
                   onChange={(value) => update({ prompt: value })}
-                  onSave={() => undefined}
-                  onCancel={() => undefined}
                 />
               </div>
             </div>

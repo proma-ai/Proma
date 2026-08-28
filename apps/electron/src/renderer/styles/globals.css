@@ -1523,7 +1523,6 @@ body {
   content: none;
 }
 
-
 /* ===== FileBrowser 层级引导线：默认隐藏，鼠标悬浮文件树时显示（VS Code 风格） ===== */
 .file-tree-guide {
   opacity: 0;
@@ -2320,76 +2319,6 @@ body {
   border-radius: 0 !important;
 }
 
-/* ===== 草稿区：待办清单排版 =====
- * TaskList/TaskItem 扩展带 not-prose，默认丢失了 prose 的行距/间距，且 flex 布局下
- * 空待办项的正文 div 会塌缩到 0 宽导致光标无处落脚。以下规则仅作用于草稿区
- * （.scratch-pad-editor），把待办项的行距、间距、字号对齐到正文与无序列表，
- * 并保证空项也能落下光标。不改共享的扩展配置，故不影响 diff 预览等其它用到该扩展处。
- */
-.scratch-pad-editor .ProseMirror ul[data-type="taskList"] {
-  margin: 0.75em 0;
-  padding-left: 0;
-  list-style: none;
-}
-.scratch-pad-editor .ProseMirror ul[data-type="taskList"] > li {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.5em;
-  margin: 0.25em 0;
-}
-/* 正文撑开：空待办项也有宽度，光标可正常显示与闪烁 */
-.scratch-pad-editor .ProseMirror ul[data-type="taskList"] > li > div {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-/* 待办项段落行距对齐正文（prose-sm 约 1.71） */
-.scratch-pad-editor .ProseMirror ul[data-type="taskList"] > li > div > p {
-  margin: 0;
-  line-height: 1.7142857;
-}
-/* 勾选后置灰划线 —— 用语义色，跟随各主题 */
-.scratch-pad-editor .ProseMirror ul[data-type="taskList"] > li[data-checked="true"] > div {
-  text-decoration: line-through;
-  color: hsl(var(--muted-foreground) / 0.6);
-  transition: color 0.15s ease, text-decoration-color 0.15s ease;
-}
-/* 复选框与首行文字对齐 */
-.scratch-pad-editor .ProseMirror ul[data-type="taskList"] > li > label {
-  flex: 0 0 auto;
-  margin-top: 0.28em;
-  user-select: none;
-}
-.scratch-pad-editor .ProseMirror ul[data-type="taskList"] > li > label > input {
-  cursor: pointer;
-}
-
-/* Scratch Pad 图片 resize handle */
-.scratch-pad-image-resize-container {
-  display: inline-flex;
-  max-width: 100%;
-}
-.scratch-pad-image-resize-wrapper {
-  position: relative;
-  display: inline-block;
-  max-width: 100%;
-}
-.scratch-pad-image-resize-handle {
-  width: 12px;
-  height: 12px;
-  border-radius: 2px;
-  background: hsl(var(--primary));
-  opacity: 0;
-  transition: opacity 0.15s ease;
-  cursor: nwse-resize;
-}
-.scratch-pad-image-resize-wrapper:hover .scratch-pad-image-resize-handle,
-.scratch-pad-image-resizing .scratch-pad-image-resize-handle {
-  opacity: 1;
-}
-.scratch-pad-image-resizing {
-  user-select: none;
-}
-
 /* Gapcursor: 在 atom block 节点前后显示光标 */
 .ProseMirror-gapcursor {
   display: none;
@@ -2411,7 +2340,6 @@ body {
 .ProseMirror-focused .ProseMirror-gapcursor {
   display: block;
 }
-
 /* 嵌入式 Skills 位于可拖拽的右侧工作区中，按容器实际宽度而非窗口宽度排版。 */
 .skills-embedded-container {
   container-type: inline-size;
@@ -2423,4 +2351,376 @@ body {
   .skills-embedded-card-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+@keyframes todo-complete {
+  0% { opacity: 1; transform: translateY(0); }
+  55% { opacity: 0.72; transform: translateY(2px); }
+  100% { opacity: 0; transform: translateY(5px); }
+}
+
+/* Vault uses ink-mde's hybrid editor with the workspace canvas and typography. */
+.vault-note-editor {
+  --vault-editor-horizontal-inset: 1rem;
+}
+.vault-note-editor-titlebar {
+  padding-inline: var(--vault-editor-horizontal-inset);
+}
+.vault-ink-mde {
+  --ink-color: hsl(var(--foreground));
+  --ink-font-family: inherit;
+  --ink-editor-font-size: var(--md-preview-font-size, 15px);
+  --ink-editor-line-height: 1.625;
+  --ink-border-radius: 0;
+  --ink-block-background-color: transparent;
+  --ink-block-background-color-on-hover: transparent;
+  /* 与 Markdown 预览及 Agent 历史的 Shiki 代码块共用主题背景。 */
+  --ink-code-background-color: hsl(var(--code-bg));
+}
+.vault-ink-mde .ink-mde,
+.vault-ink-mde .ink-mde-editor,
+.vault-ink-mde .cm-editor,
+.vault-ink-mde .cm-scroller,
+.vault-ink-mde .cm-content {
+  background: transparent !important;
+}
+.vault-ink-mde .ink-mde {
+  height: 100%;
+  border: 0 !important;
+  color: hsl(var(--foreground));
+}
+.vault-ink-mde .ink-mde-editor {
+  min-height: 0;
+  overflow: hidden !important;
+  padding: 0 !important;
+}
+.vault-ink-mde .cm-editor {
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.vault-ink-mde .cm-scroller {
+  height: 100% !important;
+  overflow: auto !important;
+  font-family: inherit !important;
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+}
+.vault-ink-mde .cm-scroller::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.vault-ink-mde .cm-scroller::-webkit-scrollbar-track,
+.vault-ink-mde .cm-scroller::-webkit-scrollbar-corner {
+  background: transparent;
+}
+.vault-ink-mde .cm-scroller::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 3px;
+}
+.vault-ink-mde .cm-scroller::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--muted-foreground) / 0.5);
+}
+
+/* Keep Markdown syntax visible only while editing its line, like Obsidian's live preview. */
+.live-markdown-editor .live-markdown-syntax-hidden,
+.live-markdown-editor .live-markdown-syntax-hidden *,
+.vault-ink-mde .vault-markdown-syntax-hidden,
+.vault-ink-mde .vault-markdown-syntax-hidden * {
+  display: none !important;
+}
+.vault-ink-mde .cm-editor.cm-focused,
+.vault-ink-mde .cm-editor:focus-visible,
+.vault-ink-mde .cm-content:focus-visible {
+  outline: none !important;
+}
+.vault-ink-mde .cm-content,
+.vault-ink-mde .cm-content[contenteditable='true'] {
+  caret-color: hsl(var(--foreground)) !important;
+}
+.vault-ink-mde .cm-cursor {
+  border-left-color: hsl(var(--foreground)) !important;
+}
+.vault-ink-mde .cm-content {
+  min-height: 100%;
+  padding: 0.75rem var(--vault-editor-horizontal-inset, 1rem) !important;
+}
+/* 预览/详情页的滚动由外层统一承接：TOC、查找与选区引用必须和正文
+ * 使用同一个 scroll root，避免 CodeMirror 内层滚动导致目录跳转、ScrollSpy 失联。 */
+.live-markdown-external-scroll,
+.live-markdown-external-scroll .ink-mde,
+.live-markdown-external-scroll .ink-mde-editor,
+.live-markdown-external-scroll .cm-editor,
+.live-markdown-external-scroll .cm-scroller {
+  height: auto !important;
+  min-height: 100%;
+}
+.live-markdown-external-scroll .cm-scroller {
+  overflow: visible !important;
+}
+.skill-detail-live-markdown {
+  min-height: 26.25rem;
+}
+.vault-ink-mde .cm-selectionBackground,
+.vault-ink-mde .cm-searchMatch,
+.vault-ink-mde .cm-searchMatch-selected {
+  background: transparent !important;
+}
+.vault-ink-mde .cm-cursor {
+  border-left-color: hsl(var(--foreground)) !important;
+}
+/* ink-mde applies a full block padding and a heavy rail to quotes. Keep them
+ * visually compact so a one-line quote shares the editor's normal line height. */
+.vault-ink-mde .ink-mde .cm-line.cm-blockquote {
+  min-height: 0 !important;
+  height: auto !important;
+  line-height: inherit !important;
+  background: transparent !important;
+  border-left: 2px solid hsl(var(--muted-foreground) / 0.5) !important;
+  padding: 0 0 0 0.375rem !important;
+}
+.vault-ink-mde .ink-mde .cm-line.cm-blockquote.cm-blockquote-open,
+.vault-ink-mde .ink-mde .cm-line.cm-blockquote.cm-blockquote-close {
+  border-radius: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+/* This marker is only added while a terminal `-` is temporarily parsed as a
+ * Setext H2 during list entry. It neutralizes the parser's heading theme. */
+.live-markdown-editor .live-markdown-pending-list-heading,
+.live-markdown-editor .live-markdown-pending-list-heading *,
+.vault-ink-mde .vault-pending-list-heading,
+.vault-ink-mde .vault-pending-list-heading * {
+  font-size: 1em !important;
+  font-weight: inherit !important;
+}
+.vault-ink-mde hr {
+  display: block !important;
+  width: 100%;
+  margin: 1.35rem 0;
+  border: 0;
+  border-top: 1px solid hsl(var(--border) / 0.75);
+}
+.vault-ink-mde .cm-line {
+  border-top: 0 !important;
+  border-bottom: 0 !important;
+}
+/*
+ * CodeMirror measures a block widget by its DOM rectangle. External vertical
+ * margins sit outside that rectangle, so they corrupt the height map used by
+ * posAtCoords after each rendered Markdown block. Keep the same visual gaps
+ * inside each measurable widget box instead.
+ */
+.vault-ink-mde .vault-markdown-table,
+.vault-ink-mde .vault-mermaid-block,
+.vault-ink-mde .vault-horizontal-rule {
+  display: block;
+  box-sizing: border-box;
+  max-width: 100%;
+  padding-block: 0.9rem;
+}
+.vault-ink-mde .vault-horizontal-rule {
+  width: 100%;
+  padding-block: 1.35rem;
+}
+.vault-ink-mde .vault-horizontal-rule hr {
+  margin: 0;
+}
+.live-markdown-editor .live-markdown-code-block {
+  display: block;
+  max-width: 100%;
+}
+.live-markdown-editor .live-markdown-math-block {
+  display: block;
+  overflow-x: auto;
+  padding: 0.9rem 0;
+  text-align: center;
+}
+.live-markdown-editor .live-markdown-math-inline {
+  display: inline-block;
+  vertical-align: -0.1em;
+}
+.vault-ink-mde .vault-markdown-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.94em;
+}
+.vault-ink-mde .vault-markdown-table th,
+.vault-ink-mde .vault-markdown-table td {
+  border-bottom: 1px solid hsl(var(--border) / 0.55);
+  padding: 0.5rem 0.7rem;
+  text-align: left;
+  vertical-align: top;
+}
+.vault-ink-mde .vault-markdown-table th {
+  background: hsl(var(--muted) / 0.45);
+  color: hsl(var(--foreground));
+  font-weight: 700;
+}
+.vault-ink-mde .vault-markdown-table td {
+  color: hsl(var(--foreground) / 0.88);
+}
+.vault-ink-mde .vault-properties {
+  display: block;
+  box-sizing: border-box;
+  width: min(100%, 52rem);
+  /* Preserves the former 1.35rem/1.6rem outer gaps plus inner padding. */
+  padding: 1.5rem 0 1.95rem;
+}
+.vault-ink-mde .vault-properties-heading {
+  margin: 0 0 0.8rem;
+  color: hsl(var(--foreground));
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.35;
+}
+.vault-ink-mde .vault-properties-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+}
+.vault-ink-mde .vault-property-row {
+  display: grid;
+  grid-template-columns: 1.55rem minmax(7.5rem, 0.36fr) minmax(0, 1fr) 1.4rem;
+  min-height: 2.45rem;
+  align-items: center;
+  column-gap: 0.35rem;
+  padding: 0.25rem 0;
+}
+.vault-ink-mde .vault-property-icon {
+  position: relative;
+  display: block;
+  width: 1.15rem;
+  height: 1.15rem;
+  color: hsl(var(--muted-foreground) / 0.72);
+}
+.vault-ink-mde .vault-property-icon-text::before,
+.vault-ink-mde .vault-property-icon-text::after {
+  position: absolute;
+  left: 0.12rem;
+  width: 1rem;
+  height: 0.12rem;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0.34rem 0 currentColor;
+  content: '';
+}
+.vault-ink-mde .vault-property-icon-text::before {
+  top: 0.25rem;
+}
+.vault-ink-mde .vault-property-icon-text::after {
+  top: 0.59rem;
+  width: 0.72rem;
+}
+.vault-ink-mde .vault-property-icon-date {
+  border: 0.12rem solid currentColor;
+  border-radius: 0.2rem;
+}
+.vault-ink-mde .vault-property-icon-date::before {
+  position: absolute;
+  top: 0.25rem;
+  right: 0;
+  left: 0;
+  border-top: 0.12rem solid currentColor;
+  content: '';
+}
+.vault-ink-mde .vault-property-icon-date::after {
+  position: absolute;
+  top: -0.22rem;
+  left: 0.2rem;
+  width: 0.12rem;
+  height: 0.3rem;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0.45rem 0 currentColor;
+  content: '';
+}
+.vault-ink-mde .vault-property-key {
+  min-width: 0;
+  overflow: hidden;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.92em;
+  font-weight: 400;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vault-ink-mde .vault-property-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: hsl(var(--foreground) / 0.92);
+  font-size: 0.94em;
+  font-weight: 400;
+  line-height: 1.45;
+}
+.vault-ink-mde .vault-property-input {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 0.3rem;
+  background: transparent;
+  outline: none;
+  padding: 0.22rem 0.35rem;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.vault-ink-mde .vault-property-input:hover,
+.vault-ink-mde .vault-property-input:focus {
+  border-color: hsl(var(--border) / 0.8);
+  background: hsl(var(--background) / 0.55);
+}
+.vault-ink-mde .vault-property-input:focus {
+  box-shadow: 0 0 0 2px hsl(var(--ring) / 0.18);
+}
+.vault-ink-mde .vault-property-remove {
+  display: inline-flex;
+  width: 1.4rem;
+  height: 1.4rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.3rem;
+  color: hsl(var(--muted-foreground) / 0.7);
+  font-size: 1.1rem;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+.vault-ink-mde .vault-property-row:hover .vault-property-remove,
+.vault-ink-mde .vault-property-remove:focus-visible {
+  opacity: 1;
+}
+.vault-ink-mde .vault-property-remove:hover {
+  background: hsl(var(--destructive) / 0.12);
+  color: hsl(var(--destructive));
+}
+.vault-ink-mde .vault-property-value-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.vault-ink-mde .vault-property-value-date::before {
+  display: inline-block;
+  width: 0.95rem;
+  height: 0.95rem;
+  flex: 0 0 auto;
+  border: 0.1rem solid hsl(var(--muted-foreground) / 0.72);
+  border-radius: 0.16rem;
+  content: '';
+}
+.vault-ink-mde .vault-property-value-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.vault-ink-mde .vault-property-value-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.45rem;
+  border-radius: 0.35rem;
+  background: hsl(var(--muted) / 0.72);
+  color: hsl(var(--foreground) / 0.88);
+  padding: 0.12rem 0.45rem;
+  font-size: 0.86em;
+}
+.vault-ink-mde .vault-mermaid-block .mermaid-block-wrapper {
+  margin: 0;
 }

@@ -17,10 +17,6 @@ import {
   sessionViewStateMapAtom,
   tabMruAtom,
   tabsAtom,
-  scratchPadPanelOpenAtom,
-  focusScratchPadTab,
-  SCRATCH_PAD_ID,
-  SCRATCH_PAD_TITLE,
 } from '@/atoms/tab-atoms'
 import { previewFileMapAtom } from '@/atoms/preview-atoms'
 import { getInitialTabSwitchIndex, promoteTabMru } from '@/lib/tab-switching'
@@ -42,10 +38,10 @@ import {
 } from '@/atoms/agent-atoms'
 import type { SessionIndicatorStatus } from '@/atoms/agent-atoms'
 import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
-import { Bot, GitBranch, MessageSquare, StickyNote } from 'lucide-react'
+import { Bot, GitBranch, MessageSquare } from 'lucide-react'
 
 type SwitchSectionId = 'collaboration' | 'recent'
-type SwitchCandidateType = 'chat' | 'agent' | 'scratch'
+type SwitchCandidateType = 'chat' | 'agent'
 
 interface SwitchCandidate {
   id: string
@@ -75,7 +71,6 @@ export function TabSwitcher(): ReactElement | null {
   const tabs = useAtomValue(tabsAtom)
   const setTabs = useSetAtom(tabsAtom)
   const setActiveTabId = useSetAtom(activeTabIdAtom)
-  const setScratchPadPanelOpen = useSetAtom(scratchPadPanelOpenAtom)
   // MRU 与 Ctrl+Tab 起始定位均按会话 ID 归一化：预览 Tab 复用其 owner 会话 ID，
   // 与候选列表（会话 ID）对齐，避免处于预览 Tab 时需按两下才能切换。
   const activeSessionId = useAtomValue(activeSessionIdAtom)
@@ -109,14 +104,6 @@ export function TabSwitcher(): ReactElement | null {
 
   const switcherModel = useMemo<SwitcherModel>(() => {
     const workspaceNameById = new Map(agentWorkspaces.map((workspace) => [workspace.id, workspace.name]))
-    const scratchPadCandidate: SwitchCandidate = {
-      id: SCRATCH_PAD_ID,
-      type: 'scratch',
-      title: SCRATCH_PAD_TITLE,
-      updatedAt: 0,
-      status: 'idle',
-    }
-
     const buildAgentCandidate = (session: AgentSessionMeta): SwitchCandidate => {
       const status = agentIndicatorMap.get(session.id)
         ?? (unviewedCompletedIds.has(session.id) ? 'completed' : 'idle')
@@ -146,7 +133,7 @@ export function TabSwitcher(): ReactElement | null {
       .filter((session) => !session.archived && !draftSessionIds.has(session.id))
       .map(buildAgentCandidate)
 
-    const allCandidates = [scratchPadCandidate, ...chatCandidates, ...agentCandidates]
+    const allCandidates = [...chatCandidates, ...agentCandidates]
 
     const candidateById = new Map(allCandidates.map((candidate) => [candidate.id, candidate]))
     const activeAgentSession = activeSessionId
@@ -262,24 +249,6 @@ export function TabSwitcher(): ReactElement | null {
       setAutomationForm({ open: false, draft: null })
       setActiveView('conversations')
 
-      if (candidate.type === 'scratch') {
-        const nextTab = focusScratchPadTab(tabsRef.current)
-        setTabs(nextTab.tabs)
-        setActiveTabId(nextTab.activeTabId)
-        setScratchPadPanelOpen(nextTab.scratchPanelOpen)
-        activeSessionIdRef.current = candidate.id
-        setTabMru((prev) => {
-          const next = promoteTabMru(prev, candidate.id)
-          tabMruRef.current = next
-          return next
-        })
-        setCurrentConversationId(null)
-        if (appMode !== 'agent') {
-          setCurrentAgentSessionId(null)
-        }
-        return
-      }
-
       // 切回 agent 会话时，若该会话上次开着预览 Tab 则一并重建并回到上次视图
       const restore = candidate.type === 'agent'
         ? buildOpenTabRestore(
@@ -334,7 +303,6 @@ export function TabSwitcher(): ReactElement | null {
       currentAgentSessionId,
       setActiveTabId,
       setActiveView,
-      setScratchPadPanelOpen,
       setAppMode,
       setAutomationForm,
       setCurrentAgentSessionId,
@@ -568,11 +536,6 @@ function SwitcherCandidateRow({
           <>
             <Bot className="size-2.5" />
             Agent
-          </>
-        ) : candidate.type === 'scratch' ? (
-          <>
-            <StickyNote className="size-2.5" />
-            草稿
           </>
         ) : (
           <>

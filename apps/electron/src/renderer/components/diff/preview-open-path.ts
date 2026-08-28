@@ -1,5 +1,6 @@
 import type { FileAccessOptions } from '@proma/shared'
 import type { PreviewFile } from '@/atoms/preview-atoms'
+import { arePathsEqual } from '@/lib/session-file-changes'
 
 export function isAbsoluteFilePath(filePath: string): boolean {
   return filePath.startsWith('/') || filePath.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(filePath)
@@ -32,6 +33,31 @@ export function getPreviewCandidateBasePaths(
   ...contextPaths: Array<string | null | undefined>
 ): string[] {
   return uniqueTruthyPaths([...(basePaths ?? []), ...contextPaths])
+}
+
+/** Returns every absolute candidate represented by a preview file descriptor. */
+export function getPreviewFileCandidatePaths(file: PreviewFile, sessionPath?: string): string[] {
+  if (isAbsoluteFilePath(file.filePath)) return [file.filePath]
+
+  return getPreviewCandidateBasePaths(
+    file.basePaths,
+    file.gitRoot,
+    file.dirPath,
+    sessionPath,
+  ).map((basePath) => joinFilePath(basePath, file.filePath))
+}
+
+/** Whether a workspace watcher event modifies the file represented by this preview. */
+export function doesWorkspaceChangeAffectPreview(
+  file: PreviewFile,
+  changedPaths: readonly string[],
+  sessionPath?: string,
+  caseInsensitive = false,
+): boolean {
+  const candidatePaths = getPreviewFileCandidatePaths(file, sessionPath)
+  return candidatePaths.some((candidatePath) => (
+    changedPaths.some((changedPath) => arePathsEqual(candidatePath, changedPath, caseInsensitive))
+  ))
 }
 
 /**

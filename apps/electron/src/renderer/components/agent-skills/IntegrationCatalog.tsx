@@ -196,6 +196,8 @@ function IntegrationCard({ name, description, capabilities, iconSlug, status, st
     'asset:dingtalk': dingtalkIcon,
     'asset:ctrip': ctripIcon,
   }[iconSlug]
+  const imageIconSizeClass = iconSlug === 'asset:feishu' ? 'size-[34px]' : 'size-7'
+
   return (
     <article className={cn(
       'group relative flex min-h-[144px] flex-col gap-2 rounded-lg bg-card p-3 text-left shadow-md',
@@ -203,14 +205,14 @@ function IntegrationCard({ name, description, capabilities, iconSlug, status, st
       <div className="flex items-start gap-2">
         <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
           {localIcon
-            ? <img className="size-[2.125rem] rounded-md object-contain outline outline-1 -outline-offset-1 outline-black/10 dark:outline-white/10" src={localIcon} alt="" />
+            ? <img className={cn(imageIconSizeClass, 'object-contain')} src={localIcon} alt="" />
             : DomainIcon
-              ? <DomainIcon size={21} strokeWidth={1.8} />
+              ? <DomainIcon size={28} strokeWidth={1.8} />
               : iconFailed
                 ? commandLine
-                  ? <Terminal size={21} className="text-muted-foreground" />
-                  : <CircleDashed size={21} className="text-muted-foreground" />
-                : <img className="size-6 object-contain outline outline-1 -outline-offset-1 outline-black/10 dark:outline-white/10" src={`https://cdn.simpleicons.org/${iconSlug}`} alt="" onError={() => setIconFailed(true)} />}
+                  ? <Terminal size={28} className="text-muted-foreground" />
+                  : <CircleDashed size={28} className="text-muted-foreground" />
+                : <img className="size-7 object-contain" src={`https://cdn.simpleicons.org/${iconSlug}`} alt="" onError={() => setIconFailed(true)} />}
         </div>
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-[15px] font-semibold text-foreground [text-wrap:balance]">{name}</h3>
@@ -225,7 +227,7 @@ function IntegrationCard({ name, description, capabilities, iconSlug, status, st
       </div>
 
       <div className="mt-auto flex items-center gap-1.5 pt-1.5">
-        <span className={cn('inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium', statusTone === 'success' ? 'bg-primary/12 text-primary' : 'bg-muted text-muted-foreground')}>
+        <span className={cn('inline-flex items-center gap-1 text-[11px] font-medium', statusTone === 'success' ? 'text-primary' : 'text-muted-foreground')}>
           {statusTone === 'success' ? <Check size={12} strokeWidth={2.5} /> : <CircleDashed size={12} />}
           <span className="truncate">{status}</span>
         </span>

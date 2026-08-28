@@ -68,7 +68,14 @@ import { tabsAtom, activeTabIdAtom, activeSessionIdAtom, openTab, updateTabTitle
 import type { AgentStreamState } from '@/atoms/agent-atoms'
 import { agentDiffUnseenChangesAtom, agentDiffUnseenFilesAtom } from '@/atoms/agent-atoms'
 import { channelsAtom } from '@/atoms/chat-atoms'
-import { previewFileMapAtom } from '@/atoms/preview-atoms'
+import {
+  getPreviewContentRefreshKey,
+  previewContentRefreshVersionAtom,
+  previewResolvedPathAtom,
+  previewFileMapAtom,
+  previewFilesMapAtom,
+  type PreviewFile,
+} from '@/atoms/preview-atoms'
 import type { NotificationSoundType } from '@/types/settings'
 import { toast } from 'sonner'
 import type { AgentStreamEvent, AgentStreamCompletePayload, AgentEvent, AgentStreamPayload, AgentAssistantDelta, AgentAssistantDeltaPayload, SDKAssistantMessage, SDKMessage, SDKUserMessage, SDKSystemMessage, PromaEvent, AgentSessionMeta, ProviderType, SDKContentBlock, SDKUserContentBlock } from '@proma/shared'
@@ -86,6 +93,7 @@ import {
 import { getPlanModeChangeFromToolName, updatePlanModeSessionSet } from '@/lib/agent-plan-mode'
 import { detectIsWindows } from '@/lib/platform'
 import { getSessionFileChangeKind, getOwnedSessionWatcherPaths, upsertSessionFileChange } from '@/lib/session-file-changes'
+import { doesWorkspaceChangeAffectPreview } from '@/components/diff/preview-open-path'
 import { removeQueuedMessage, createQueuedAgentStreamState } from '@/lib/agent-message-queue'
 import { createAgentStreamEventBatcher } from '@/lib/agent-stream-event-batcher'
 import { getChangedWorkspaceComponentFromSdkMessage, shouldRevealChangedWorkspaceComponentImmediately } from '@/lib/agent-component-activation'
@@ -98,7 +106,7 @@ const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Upda
 const GIT_MUTATING_SUBCOMMANDS = /\bgit\s+(commit|checkout|reset|restore|stash|clean|add|rm|mv|pull|merge|rebase|cherry-pick|revert|switch|am|apply)\b/
 
 function isAbsolutePath(path: string): boolean {
-  return path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)
+  return path.startsWith('/') || path.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(path)
 }
 
 function getParentDir(path: string): string {
@@ -860,8 +868,46 @@ export function useGlobalAgentListeners(): void {
     // startedAt 后仍需保留一个短生命周期的终态标记，避免迟到快照复活旧 run。
     const latestTerminalRunStartedAt = new Map<string, number>()
 
+    const bumpPreviewContentRefresh = (sessionId: string, file: PreviewFile): void => {
+      const key = getPreviewContentRefreshKey(sessionId, file)
+      store.set(previewContentRefreshVersionAtom, (previous) => {
+        const next = new Map(previous)
+        next.set(key, (previous.get(key) ?? 0) + 1)
+        return next
+      })
+    }
+
+    const refreshAffectedPreviews = (filePaths: readonly string[]): void => {
+      if (filePaths.length === 0) return
+      const previewsBySession = store.get(previewFilesMapAtom)
+      const sessionPaths = store.get(agentSessionPathMapAtom)
+      const resolvedPaths = store.get(previewResolvedPathAtom)
+      const affectedKeys = new Set<string>()
+
+      for (const [sessionId, previews] of previewsBySession) {
+        const sessionPath = sessionPaths.get(sessionId)
+        for (const preview of previews) {
+          if (!preview.previewOnly) continue
+          const key = getPreviewContentRefreshKey(sessionId, preview)
+          const resolvedPath = resolvedPaths.get(key)
+          const fileForMatch = resolvedPath ? { ...preview, filePath: resolvedPath } : preview
+          if (!doesWorkspaceChangeAffectPreview(fileForMatch, filePaths, sessionPath, isWindows)) continue
+          affectedKeys.add(key)
+        }
+      }
+      if (affectedKeys.size === 0) return
+
+      // 单次 watcher 事件最多更新一次 atom，避免多个已打开预览导致连续渲染。
+      store.set(previewContentRefreshVersionAtom, (previous) => {
+        const next = new Map(previous)
+        for (const key of affectedKeys) next.set(key, (previous.get(key) ?? 0) + 1)
+        return next
+      })
+    }
+
     const cleanupWatchedFileChanges = window.electronAPI.onWorkspaceFilesChanged((changedPaths) => {
       const filePaths = (changedPaths ?? []).filter(isAbsolutePath)
+      refreshAffectedPreviews(filePaths)
       if (filePaths.length === 0) return
 
       void (async () => {
@@ -900,6 +946,9 @@ export function useGlobalAgentListeners(): void {
           const runId = store.get(agentFileChangesCurrentRunAtom).get(sessionId)
             ?? String(streamingStates.get(sessionId)?.startedAt ?? Date.now())
           for (const changedPath of uniquelyMatchingPaths) {
+            // watcher 现在也会携带删除/目录路径；这些不应进入会话的文件改动记录。
+            const existingFile = await window.electronAPI.resolveAndReadFile(changedPath, { sessionId, unrestricted: true })
+            if (!existingFile) continue
             const previewFile = await buildWrittenFilePreviewInfo(sessionId, changedPath)
             if (previewFile.previewOnly) {
               store.set(agentNonGitFileChangesAtom, (prev) => {
@@ -1767,7 +1816,6 @@ export function useGlobalAgentListeners(): void {
     const HASH_MAX = 100
     let focusCheckSeq = 0
     const bumpDiffRefresh = (sessionId: string) => {
-      // 外部修改的精确路径无法从 focus 事件可靠取得，保守地失效全部缓存。
       void window.electronAPI.invalidateGitDiffCache().finally(() => {
         store.set(agentDiffRefreshVersionAtom, (prev) => {
           const m = new Map(prev)
@@ -1814,6 +1862,7 @@ export function useGlobalAgentListeners(): void {
         if (prevHash === undefined || prevHash !== hash) {
           // 首次建立 hash 基准时也刷新一次，避免用户离开窗口后首次外部修改被吞掉。
           bumpDiffRefresh(activeSessionId)
+          bumpPreviewContentRefresh(activeSessionId, previewFile)
         }
         fileContentHashMap.set(hashKey, hash)
 
@@ -1826,6 +1875,7 @@ export function useGlobalAgentListeners(): void {
         // 读取失败时删除旧 hash，并触发一次刷新让预览进入真实失败/空状态。
         fileContentHashMap.delete(hashKey)
         bumpDiffRefresh(activeSessionId)
+        bumpPreviewContentRefresh(activeSessionId, previewFile)
       }
     }
     window.addEventListener('focus', onWindowFocus)

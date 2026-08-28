@@ -6,7 +6,7 @@ import { PLANNING_CONFLICT_ERROR, AUTOMATION_OCCURRENCE_SAMPLES_PER_DAY, getAuto
 import type { Automation, CalendarEvent, PlanningGroup, PlanningTag, Todo } from '@proma/shared'
 import { cn } from '@/lib/utils'
 import { automationsAtom } from '@/atoms/automation-atoms'
-import { calendarEventsAtom, calendarPlanningGroupsAtom, planningCalendarCreateRequestAtom, planningTagsAtom, todosAtom } from '@/atoms/planning-atoms'
+import { calendarEventsAtom, calendarPlanningGroupsAtom, planningCalendarCreateRequestAtom, planningSelectedCalendarEventIdAtom, planningTagsAtom, todosAtom } from '@/atoms/planning-atoms'
 import { Button } from '@/components/ui/button'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Input } from '@/components/ui/input'
@@ -173,6 +173,7 @@ export function CalendarWorkspace(): React.ReactElement {
   const [mode, setMode] = React.useState<CalendarMode>('week')
   const [cursor, setCursor] = React.useState(() => Date.now())
   const [selectedId, setSelectedId] = React.useState<string | null>(null)
+  const [requestedSelectedId, setRequestedSelectedId] = useAtom(planningSelectedCalendarEventIdAtom)
   const [selectedTodoId, setSelectedTodoId] = React.useState<string | null>(null)
   const [createOpen, setCreateOpen] = React.useState(false)
   const [createAnchor, setCreateAnchor] = React.useState<CalendarPopoverAnchor | undefined>()
@@ -181,6 +182,15 @@ export function CalendarWorkspace(): React.ReactElement {
   const [draft, setDraft] = React.useState<EventDraft>(() => draftFromEvent())
   const [saving, setSaving] = React.useState(false)
   const today = useLocalDayStart()
+
+  React.useEffect(() => {
+    if (!requestedSelectedId) return
+    const event = events.find((candidate) => candidate.id === requestedSelectedId)
+    if (!event) return
+    setSelectedId(event.id)
+    setCursor(event.startAt)
+    setRequestedSelectedId(null)
+  }, [events, requestedSelectedId, setRequestedSelectedId])
 
   const selected = events.find((event) => event.id === selectedId)
   const selectedTodo = todos.find((todo) => todo.id === selectedTodoId)

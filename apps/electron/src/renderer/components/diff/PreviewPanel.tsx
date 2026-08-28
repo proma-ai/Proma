@@ -13,7 +13,7 @@ interface PreviewPanelProps {
   onClose: () => void
 }
 
-export function PreviewPanel({ sessionId, file, onClose }: PreviewPanelProps): React.ReactElement {
+function PreviewPanelContent({ sessionId, file, onClose }: PreviewPanelProps): React.ReactElement {
   const sessionPath = useAtomValue(agentSessionPathMapAtom).get(sessionId) ?? ''
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-content-area titlebar-no-drag">
@@ -38,3 +38,10 @@ export function PreviewPanel({ sessionId, file, onClose }: PreviewPanelProps): R
     </div>
   )
 }
+
+/** Pure file previews only re-render when their own file descriptor changes. */
+export const PreviewPanel = React.memo(PreviewPanelContent, (previous, next) => {
+  if (previous.sessionId !== next.sessionId || previous.file !== next.file) return false
+  // previewOnly never calls onEmptyDiff, so its parent callback must not defeat render isolation.
+  return previous.file.previewOnly || previous.onClose === next.onClose
+})

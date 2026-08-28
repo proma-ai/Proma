@@ -4,7 +4,7 @@
  * 封装当前工作区 Skills / MCP 的加载与增删改逻辑（IPC 调用），
  * 供「Agent 技能」全屏视图复用。当前 Skills 页面挂载期间固定初始快照，
  * 避免文件监听导致的重排和整页跳动；开关仅更新对应卡片的 enabled 字段。
- * 离开后下次进入或切换工作区时再重新读取完整能力列表。
+ * 只读浏览不会验证或写回 MCP 配置，离开后下次进入或切换工作区时再重新读取完整能力列表。
  */
 
 import * as React from 'react'
@@ -47,7 +47,6 @@ export interface AgentSkillsData {
   workspaceName: string
   hasWorkspace: boolean
   loading: boolean
-  mcpConnectionsRefreshing: boolean
   skills: SkillMeta[]
   defaultSkillSlugs: Set<string>
   skillsDir: string
@@ -83,7 +82,6 @@ export function useAgentSkillsData(workspaceId?: string): AgentSkillsData {
   const workspaceSlug = currentWorkspace?.slug ?? ''
 
   const [loading, setLoading] = React.useState(true)
-  const [mcpConnectionsRefreshing, setMcpConnectionsRefreshing] = React.useState(false)
   const [skills, setSkills] = React.useState<SkillMeta[]>([])
   const [defaultSkillSlugs, setDefaultSkillSlugs] = React.useState<Set<string>>(new Set())
   const [skillsDir, setSkillsDir] = React.useState('')
@@ -124,7 +122,6 @@ export function useAgentSkillsData(workspaceId?: string): AgentSkillsData {
       setBuiltinMcpServers([])
       setCliIntegrationStatuses([])
       setCliIntegrationProbeState('ready')
-      setMcpConnectionsRefreshing(false)
       setLoading(false)
       return
     }
@@ -157,8 +154,6 @@ export function useAgentSkillsData(workspaceId?: string): AgentSkillsData {
       const hasFreshCliCache = cachedCliStatuses && Date.now() - cachedCliStatuses.cachedAt < CLI_STATUS_CACHE_TTL_MS
       setCliIntegrationProbeState(hasFreshCliCache ? 'ready' : 'loading')
       setCliIntegrationStatuses(cachedCliStatuses?.statuses ?? [])
-      const hasEnabledMcp = Object.values(config.servers).some((entry) => entry.enabled)
-      setMcpConnectionsRefreshing(hasEnabledMcp)
       setLoading(false)
 
       const cliProbeRequestId = ++cliProbeRequestRef.current
@@ -175,19 +170,8 @@ export function useAgentSkillsData(workspaceId?: string): AgentSkillsData {
           setCliIntegrationProbeState('failed')
         })
 
-      if (hasEnabledMcp) {
-        void window.electronAPI.refreshMcpConnections(workspaceSlug)
-          .then((refreshed) => {
-            if (!isCurrentRequest()) return
-            setMcpConfig(refreshed)
-          })
-          .catch((error) => {
-            console.warn('[Agent 技能] 后台刷新 MCP 连接失败:', error)
-          })
-          .finally(() => {
-            if (isCurrentRequest()) setMcpConnectionsRefreshing(false)
-          })
-      }
+      // MCP 连接状态由新详情页的按需刷新处理，避免加载阶段触发额外握手。
+
     } catch (error) {
       if (!isCurrentRequest()) return
       console.error('[Agent 技能] 加载工作区配置失败:', error)
@@ -384,7 +368,6 @@ export function useAgentSkillsData(workspaceId?: string): AgentSkillsData {
     defaultSkillSlugs,
     skillsDir,
     mcpConfig,
-    mcpConnectionsRefreshing,
     capabilities,
     builtinMcpServers,
     cliIntegrationStatuses,

@@ -14,7 +14,6 @@ import { AgentView } from '@/components/agent'
 import { PreviewTabContent } from '@/components/diff/PreviewTabContent'
 import { MarkdownRichEditor } from '@/components/diff/MarkdownRichEditor'
 import { MarkdownToc } from '@/components/diff/MarkdownToc'
-import { ScratchPadView } from '@/components/scratch-pad/ScratchPadView'
 import { TabErrorBoundary } from './TabErrorBoundary'
 
 export interface TabContentProps {
@@ -38,10 +37,6 @@ export function TabContent({ tabId }: TabContentProps): React.ReactElement {
         标签页不存在
       </div>
     )
-  }
-
-  if (tab.type === 'scratch') {
-    return <ScratchPadView />
   }
 
   if (tab.type === 'tutorial') {

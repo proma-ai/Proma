@@ -1,20 +1,19 @@
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { toast } from 'sonner'
-import { AlertTriangle, Brain, ChevronDown, ChevronRight, Code2, Eye, FileText, FolderOpen, Loader2, RefreshCw, Save, Sparkles } from 'lucide-react'
+import { AlertTriangle, Brain, ChevronDown, ChevronRight, FileText, FolderOpen, RefreshCw, Sparkles } from 'lucide-react'
 import type { SkillFileNode, WorkspaceMemorySummary } from '@proma/shared'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { SettingsCard } from '@/components/settings/primitives'
-import { DefaultAppOpenButton } from '@/components/diff/DefaultAppOpenButton'
 import { AgentActionHint } from '@/components/agent/AgentActionHint'
 import { WorkspaceMemoryChangeShelf } from './WorkspaceMemoryChangeShelf'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { MessageResponse } from '@/components/ai-elements/message'
 import { agentPendingPromptAtom } from '@/atoms/agent-atoms'
 import { memoryFileNavigationAtom, workspaceMemoryChangesAtom } from '@/atoms/memory-change-atoms'
 import { useCreateSession } from '@/hooks/useCreateSession'
 import { cn } from '@/lib/utils'
+import { LiveMarkdownEditor } from '@/components/markdown/LiveMarkdownEditor'
 import {
   buildWorkspaceKnowledgeBootstrapPrompt,
   buildWorkspaceSessionEvidencePrompt,
@@ -51,11 +50,6 @@ function autoMemoryPath(summary: WorkspaceMemorySummary, relativePath: string): 
   return `${trimmedDir}${sep}${normalizedRelative}`
 }
 
-/** 取绝对路径的父目录，兼容 / 与 \ 两种分隔符 */
-function dirnameOf(absolutePath: string): string {
-  const idx = Math.max(absolutePath.lastIndexOf('/'), absolutePath.lastIndexOf('\\'))
-  return idx < 0 ? absolutePath : absolutePath.slice(0, idx)
-}
 
 function filterNodes(nodes: SkillFileNode[], query: string, contentMatchPaths = new Set<string>()): SkillFileNode[] {
   const q = query.trim().toLowerCase()
@@ -93,10 +87,8 @@ export function WorkspaceMemoryTab({ workspaceSlug, sessionId, search, embedded 
   const [saveConflict, setSaveConflict] = React.useState(false)
   const [loading, setLoading] = React.useState(true)
   const [loadingFile, setLoadingFile] = React.useState(false)
-  const [saving, setSaving] = React.useState(false)
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set())
   const [isDirty, setIsDirty] = React.useState(false)
-  const [viewMode, setViewMode] = React.useState<'preview' | 'edit'>('preview')
   const [bootstrapping, setBootstrapping] = React.useState(false)
   const [scanningHistory, setScanningHistory] = React.useState(false)
   const [historyRange, setHistoryRange] = React.useState<MemoryHistoryRange>('1m')
@@ -154,11 +146,9 @@ export function WorkspaceMemoryTab({ workspaceSlug, sessionId, search, embedded 
 
   /**
    * 把待保存的脏内容立即刷盘（静默，失败才提示）。
-   * showSaving=true 时（防抖自动保存路径）在保存按钮上展示 loading 动画并保证最短可见时长；
-   * 切换文件/刷新/卸载前的 flush 传 false，保持即时不拖慢手感。
+   * 切换文件、刷新、卸载和 Cmd/Ctrl+S 都复用本入口，确保写入顺序一致。
    */
-  const flushPendingSave = React.useCallback(async (opts?: { showSaving?: boolean }): Promise<void> => {
-    const showSaving = opts?.showSaving ?? false
+  const flushPendingSave = React.useCallback(async (): Promise<void> => {
     if (autoSaveTimerRef.current) {
       clearTimeout(autoSaveTimerRef.current)
       autoSaveTimerRef.current = null
@@ -169,9 +159,6 @@ export function WorkspaceMemoryTab({ workspaceSlug, sessionId, search, embedded 
     const { selected: curSelected, editText: curText, editBaseText: curBaseText, isDirty: curDirty, saveConflict: curSaveConflict } = saveStateRef.current
     if (!curSelected || !curDirty || curSaveConflict) return
     setIsDirty(false)
-    if (showSaving) setSaving(true)
-    // 写入通常很快，saving 一闪而过看不到动画；自动保存时保证"保存中"至少显示一小段时间
-    const startedAt = performance.now()
     try {
       const p = persistTarget(curSelected, curText, curBaseText)
       persistInFlightRef.current = p
@@ -184,14 +171,6 @@ export function WorkspaceMemoryTab({ workspaceSlug, sessionId, search, embedded 
       setIsDirty(true)
     } finally {
       persistInFlightRef.current = null
-      if (showSaving) {
-        const elapsed = performance.now() - startedAt
-        const MIN_SAVING_MS = 450
-        if (elapsed < MIN_SAVING_MS) {
-          await new Promise((r) => setTimeout(r, MIN_SAVING_MS - elapsed))
-        }
-        setSaving(false)
-      }
     }
   }, [persistTarget])
 
@@ -261,7 +240,6 @@ export function WorkspaceMemoryTab({ workspaceSlug, sessionId, search, embedded 
     }
     void (async () => {
       await openAutoFile(memoryNavigationRequest.relativePath)
-      setViewMode(memoryNavigationRequest.mode === 'edit' ? 'edit' : 'preview')
       setMemoryNavigationRequest(null)
     })()
   }, [memoryChanges, memoryNavigationRequest, openAutoFile, sessionId, setMemoryNavigationRequest, workspaceSlug])
@@ -334,12 +312,12 @@ export function WorkspaceMemoryTab({ workspaceSlug, sessionId, search, embedded 
     return () => { cancelled = true }
   }, [workspaceSlug])
 
-  // 防抖自动保存：编辑内容变脏后 800ms 内无新输入则自动保存（按钮显示 loading 动画）
+  // 防抖自动保存：编辑内容变脏后 800ms 内无新输入则自动保存。
   React.useEffect(() => {
     if (!selected || !isDirty || loadingFile) return
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
     autoSaveTimerRef.current = setTimeout(() => {
-      void flushPendingSave({ showSaving: true })
+      void flushPendingSave()
     }, 800)
     return () => {
       if (autoSaveTimerRef.current) {
@@ -356,27 +334,6 @@ export function WorkspaceMemoryTab({ workspaceSlug, sessionId, search, embedded 
     }
   }, [flushPendingSave])
 
-  const handleSave = async (): Promise<void> => {
-    if (!selected || saveConflict) return
-    if (autoSaveTimerRef.current) {
-      clearTimeout(autoSaveTimerRef.current)
-      autoSaveTimerRef.current = null
-    }
-    setSaving(true)
-    try {
-      setIsDirty(false)
-      await persistTarget(selected, editText, editBaseText)
-      toast.success('记忆文件已保存')
-    } catch (err) {
-      console.error('[工作区记忆] 保存失败:', err)
-      const message = err instanceof Error ? err.message : '保存失败'
-      toast.error(message)
-      if (message.startsWith('文件已被外部更新')) setSaveConflict(true)
-      setIsDirty(true)
-    } finally {
-      setSaving(false)
-    }
-  }
 
   const startGuidedSession = async (message: string, kind: 'bootstrap' | 'history'): Promise<void> => {
     const setLoadingState = kind === 'bootstrap' ? setBootstrapping : setScanningHistory
@@ -466,10 +423,7 @@ export function WorkspaceMemoryTab({ workspaceSlug, sessionId, search, embedded 
         changes={memoryChanges}
         onOpenFile={(change) => {
           setActiveChangeId(null)
-          void (async () => {
-            await openAutoFile(change.relativePath)
-            setViewMode('preview')
-          })()
+          void openAutoFile(change.relativePath)
         }}
         onBackToMemory={() => setActiveChangeId(null)}
         className="h-full min-h-0 overflow-auto bg-content-area p-3"
@@ -566,6 +520,7 @@ export function WorkspaceMemoryTab({ workspaceSlug, sessionId, search, embedded 
                 label="AGENTS.md"
                 meta="Proma 工作区项目指令"
                 onClick={() => void openAgents(summary)}
+                onReveal={() => window.electronAPI.showItemInFolder(summary.agentsMd.path)}
               />
               <div className="mt-3 px-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">
                 长期记忆
@@ -591,6 +546,7 @@ export function WorkspaceMemoryTab({ workspaceSlug, sessionId, search, embedded 
                         })
                       }}
                       onOpen={(path) => void openAutoFile(path, summary)}
+                      onReveal={(path) => window.electronAPI.showItemInFolder(autoMemoryPath(summary, path))}
                     />
                   ))
                 )}
@@ -610,62 +566,7 @@ export function WorkspaceMemoryTab({ workspaceSlug, sessionId, search, embedded 
                   {selected?.absolutePath ?? '从左侧选择一个记忆文件'}
                 </div>
               </div>
-              <div className="flex shrink-0 items-center gap-2">
-                {selected && (
-                  <div className="flex items-center gap-1 rounded-lg bg-muted p-0.5">
-                    <button
-                      type="button"
-                      onClick={() => setViewMode('preview')}
-                      className={cn(
-                        'flex h-7 items-center gap-1 rounded-md px-2 text-xs font-medium transition-colors',
-                        viewMode === 'preview' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
-                      )}
-                    >
-                      <Eye size={13} />
-                      预览
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setViewMode('edit')}
-                      className={cn(
-                        'flex h-7 items-center gap-1 rounded-md px-2 text-xs font-medium transition-colors',
-                        viewMode === 'edit' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
-                      )}
-                    >
-                      <Code2 size={13} />
-                      编辑
-                    </button>
-                  </div>
-                )}
-                {selected && (
-                  <DefaultAppOpenButton
-                    filePath={selected.absolutePath}
-                    variant="labeled"
-                    className="h-8 max-w-[170px] border border-border/60 bg-background px-2 shadow-sm"
-                  />
-                )}
-                {selected && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => window.electronAPI.showItemInFolder(selected.absolutePath)}
-                  >
-                    <FolderOpen size={14} className="mr-1.5" />
-                    打开文件夹
-                  </Button>
-                )}
-                {selected && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button size="sm" onClick={handleSave} disabled={!selected || saving || loadingFile || saveConflict}>
-                        {saving ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : <Save size={14} className="mr-1.5" />}
-                        {saving ? '保存中...' : '保存'}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">编辑后会自动保存，也可点此立即保存</TooltipContent>
-                  </Tooltip>
-                )}
-              </div>
+
             </div>
             {saveConflict && (
               <div className="mx-4 mt-3 flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
@@ -675,33 +576,18 @@ export function WorkspaceMemoryTab({ workspaceSlug, sessionId, search, embedded 
             )}
             {loadingFile ? (
               <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">读取文件中...</div>
-            ) : selected && viewMode === 'edit' ? (
-              <textarea
-                value={editText}
-                onChange={(event) => {
-                  setIsDirty(true)
-                  setEditText(event.target.value)
-                }}
-                spellCheck={false}
-                className="min-h-0 flex-1 resize-none bg-transparent p-4 font-mono text-[13px] leading-6 text-foreground outline-none placeholder:text-muted-foreground"
-                placeholder={selected.kind === 'agents'
-                  ? '# 项目指令\n\n写下未来 Agent 必须知道的项目规范、命令和决策。'
-                  : '# MEMORY\n\n写下稳定、可复用的自动记忆索引。'}
-              />
             ) : selected ? (
-              <div className="min-h-0 flex-1 overflow-y-auto p-5">
-                {editText.trim() ? (
-                  <MessageResponse
-                    className="text-[14px] prose-headings:scroll-mt-4"
-                    basePath={dirnameOf(selected.absolutePath)}
-                  >
-                    {editText}
-                  </MessageResponse>
-                ) : (
-                  <div className="flex h-full min-h-[240px] items-center justify-center rounded-lg border border-dashed border-border/70 text-sm text-muted-foreground">
-                    当前文件为空，切换到编辑后可以写入 Markdown 内容。
-                  </div>
-                )}
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                <LiveMarkdownEditor
+                  value={editText}
+                  onChange={(value) => {
+                    setIsDirty(true)
+                    setEditText(value)
+                  }}
+                  onSave={() => { void flushPendingSave() }}
+                  readOnly={saveConflict}
+                  className="live-markdown-external-scroll"
+                />
               </div>
             ) : (
               <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">从左侧选择一个记忆文件</div>
@@ -719,26 +605,43 @@ function FileButton({
   label,
   meta,
   onClick,
+  onReveal,
 }: {
   active: boolean
   icon: React.ReactNode
   label: string
   meta?: string
   onClick: () => void
+  onReveal: () => void
 }): React.ReactElement {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors',
-        active ? 'bg-accent text-accent-foreground' : 'text-foreground/80 hover:bg-accent/60',
-      )}
-    >
-      <span className="shrink-0 text-muted-foreground">{icon}</span>
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      {meta && <span className="truncate text-[11px] text-muted-foreground">{meta}</span>}
-    </button>
+    <div className="flex items-center gap-0.5">
+      <button
+        type="button"
+        onClick={onClick}
+        className={cn(
+          'flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors',
+          active ? 'bg-accent text-accent-foreground' : 'text-foreground/80 hover:bg-accent/60',
+        )}
+      >
+        <span className="shrink-0 text-muted-foreground">{icon}</span>
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        {meta && <span className="truncate text-[11px] text-muted-foreground">{meta}</span>}
+      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={onReveal}
+            className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            aria-label={`打开 ${label} 所在位置`}
+          >
+            <FolderOpen size={13} />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="right">打开文件所在位置</TooltipContent>
+      </Tooltip>
+    </div>
   )
 }
 
@@ -750,6 +653,7 @@ function MemoryTreeNode({
   contentMatches,
   onToggle,
   onOpen,
+  onReveal,
 }: {
   node: SkillFileNode
   level: number
@@ -758,6 +662,7 @@ function MemoryTreeNode({
   contentMatches: Map<string, string>
   onToggle: (path: string) => void
   onOpen: (path: string) => void
+  onReveal: (path: string) => void
 }): React.ReactElement {
   const isDirectory = node.type === 'directory'
   const isExpanded = expanded.has(node.relativePath)
@@ -767,28 +672,45 @@ function MemoryTreeNode({
 
   return (
     <div>
-      <button
-        type="button"
-        onClick={() => isDirectory ? onToggle(node.relativePath) : onOpen(node.relativePath)}
-        className={cn(
-          'flex w-full items-center gap-1.5 rounded-md py-1.5 pr-2 text-left text-[13px] transition-colors',
-          isActive ? 'bg-accent text-accent-foreground' : 'text-foreground/80 hover:bg-accent/60',
+      <div className="flex items-center gap-0.5">
+        <button
+          type="button"
+          onClick={() => isDirectory ? onToggle(node.relativePath) : onOpen(node.relativePath)}
+          className={cn(
+            'flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1.5 pr-2 text-left text-[13px] transition-colors',
+            isActive ? 'bg-accent text-accent-foreground' : 'text-foreground/80 hover:bg-accent/60',
+          )}
+          style={{ paddingLeft }}
+        >
+          {isDirectory ? (
+            isExpanded ? <ChevronDown size={13} className="shrink-0 text-muted-foreground" /> : <ChevronRight size={13} className="shrink-0 text-muted-foreground" />
+          ) : (
+            <FileText size={13} className="shrink-0 text-muted-foreground" />
+          )}
+          <span className="min-w-0 flex-1 overflow-hidden">
+            <span className="block truncate">{node.name}</span>
+            {contentExcerpt && <span className="block truncate text-[10px] text-muted-foreground" title={contentExcerpt}>{contentExcerpt}</span>}
+          </span>
+          {!isDirectory && node.size != null && (
+            <span className="shrink-0 text-[10px] text-muted-foreground/75">{formatBytes(node.size)}</span>
+          )}
+        </button>
+        {!isDirectory && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => onReveal(node.relativePath)}
+                className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                aria-label={`打开 ${node.name} 所在位置`}
+              >
+                <FolderOpen size={13} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">打开文件所在位置</TooltipContent>
+          </Tooltip>
         )}
-        style={{ paddingLeft }}
-      >
-        {isDirectory ? (
-          isExpanded ? <ChevronDown size={13} className="shrink-0 text-muted-foreground" /> : <ChevronRight size={13} className="shrink-0 text-muted-foreground" />
-        ) : (
-          <FileText size={13} className="shrink-0 text-muted-foreground" />
-        )}
-        <span className="min-w-0 flex-1 overflow-hidden">
-          <span className="block truncate">{node.name}</span>
-          {contentExcerpt && <span className="block truncate text-[10px] text-muted-foreground" title={contentExcerpt}>{contentExcerpt}</span>}
-        </span>
-        {!isDirectory && node.size != null && (
-          <span className="shrink-0 text-[10px] text-muted-foreground/75">{formatBytes(node.size)}</span>
-        )}
-      </button>
+      </div>
       {isDirectory && isExpanded && node.children && (
         <div className="space-y-0.5">
           {node.children.map((child) => (
@@ -801,6 +723,7 @@ function MemoryTreeNode({
               contentMatches={contentMatches}
               onToggle={onToggle}
               onOpen={onOpen}
+              onReveal={onReveal}
             />
           ))}
         </div>

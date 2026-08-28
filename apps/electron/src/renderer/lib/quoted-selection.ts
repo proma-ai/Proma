@@ -225,8 +225,7 @@ export function buildQuotedSelectionBlock(quotedSelection: QuotedSelection): str
   return `<quoted_file path="${safePath}">\n${safeText}\n</quoted_file>\n\n`
 }
 
-function normalizeContextSourceType(value: string | undefined): QuotedSelectionSourceType {
-  if (value === 'scratch-pad') return 'scratch-pad'
+function normalizeContextSourceType(_value: string | undefined): QuotedSelectionSourceType {
   return 'agent-history'
 }
 

@@ -2,9 +2,11 @@ import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { Sparkles } from 'lucide-react'
 import { collectSkillActivations } from '@proma/shared'
-import type { SDKMessage, SDKUserMessage, SkillActivation } from '@proma/shared'
+import type { SDKMessage, SDKUserMessage, SkillActivation, VaultFocusAttribution } from '@proma/shared'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { currentAgentSessionIdAtom, openWorkspaceComponentAtom, skillDetailNavigationAtomFamily } from '@/atoms/agent-atoms'
+import { focusedVaultFolderAtom, selectedVaultFileAtom } from '@/atoms/vault-atoms'
+import { ObsidianIcon } from '@/components/obsidian/obsidian-brand'
 import { cn } from '@/lib/utils'
 
 export interface TurnSkillUsageSummaryProps {
@@ -12,6 +14,64 @@ export interface TurnSkillUsageSummaryProps {
   turnMessages: SDKMessage[]
   /** Avoid a second divider when another completion summary follows this section. */
   showDivider?: boolean
+}
+
+function readVaultFocusAttribution(inputMessage?: SDKUserMessage): VaultFocusAttribution | null {
+  const value = (inputMessage as unknown as { _vaultFocus?: unknown } | undefined)?._vaultFocus
+  if (!value || typeof value !== 'object') return null
+  const focus = (value as { focus?: unknown }).focus
+  if (!focus || typeof focus !== 'object') return null
+  const record = value as Partial<VaultFocusAttribution>
+  const focusRecord = focus as Partial<VaultFocusAttribution['focus']>
+  if (
+    typeof record.displayName !== 'string' || typeof record.rootPath !== 'string'
+    || (focusRecord.kind !== 'file' && focusRecord.kind !== 'folder')
+    || typeof focusRecord.relativePath !== 'string' || !Number.isSafeInteger(focusRecord.sequence)
+  ) return null
+  return {
+    displayName: record.displayName,
+    rootPath: record.rootPath,
+    focus: { kind: focusRecord.kind, relativePath: focusRecord.relativePath, sequence: focusRecord.sequence as number },
+  }
+}
+
+function VaultFocusChip({ attribution }: { attribution: VaultFocusAttribution }): React.ReactElement {
+  const sessionId = useAtomValue(currentAgentSessionIdAtom)
+  const openWorkspaceComponent = useSetAtom(openWorkspaceComponentAtom)
+  const setSelectedFile = useSetAtom(selectedVaultFileAtom)
+  const setFocusedFolder = useSetAtom(focusedVaultFolderAtom)
+  const { focus } = attribution
+  const label = `${focus.relativePath.split('/').filter(Boolean).pop() || attribution.displayName}${focus.kind === 'folder' ? '/' : ''}`
+  const handleOpenVault = React.useCallback(() => {
+    if (!sessionId) return
+    if (focus.kind === 'file') {
+      setFocusedFolder(null)
+      setSelectedFile(focus.relativePath)
+    } else {
+      setFocusedFolder(focus.relativePath)
+    }
+    openWorkspaceComponent('vault')
+  }, [focus.kind, focus.relativePath, openWorkspaceComponent, sessionId, setFocusedFolder, setSelectedFile])
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex max-w-[240px] items-center gap-[0.25em] rounded-md bg-[hsl(270_60%_60%/0.15)] px-[0.35em] py-[0.15em] text-[0.875em] font-medium leading-none text-[hsl(270_60%_50%)] transition-colors hover:bg-[hsl(270_60%_60%/0.24)]"
+          onClick={handleOpenVault}
+          aria-label={`在 Obsidian 中打开本轮上下文 ${label}`}
+        >
+          <ObsidianIcon className="size-3 shrink-0" />
+          <span className="truncate">{label}</span>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top">
+        <p>本轮获得的 Obsidian {focus.kind === 'file' ? '文件' : '文件夹'}线索；不代表 Agent 已读取或编辑</p>
+        <p className="max-w-80 break-all text-xs text-muted-foreground">{attribution.rootPath}/{focus.relativePath}</p>
+      </TooltipContent>
+    </Tooltip>
+  )
 }
 
 function SkillUsageChip({ activation }: { activation: SkillActivation }): React.ReactElement {
@@ -105,13 +165,15 @@ export function TurnSkillUsageSummary({
     () => getTurnSkillActivations(turnMessages, inputMessage),
     [inputMessage, turnMessages],
   )
+  const vaultFocus = React.useMemo(() => readVaultFocusAttribution(inputMessage), [inputMessage])
 
-  if (activations.length === 0) return null
+  if (activations.length === 0 && !vaultFocus) return null
 
   return (
     <div className={cn('pl-[46px] mt-3', !showDivider && 'mt-2')}>
       <div className={cn(showDivider && 'border-t-2 border-dashed border-border/60 pt-3')}>
         <div className="flex flex-wrap gap-1.5">
+          {vaultFocus && <VaultFocusChip attribution={vaultFocus} />}
           {activations.map((activation) => (
             <SkillUsageChip key={activation.slug} activation={activation} />
           ))}
