@@ -34,7 +34,6 @@ function UpdateCard(): React.ReactElement | null {
   const available = useAtomValue(updaterAvailableAtom)
   const status = useAtomValue(updateStatusAtom)
   const [checking, setChecking] = React.useState(false)
-  const [idleInstallScheduled, setIdleInstallScheduled] = React.useState(false)
   const [showReleaseNotes, setShowReleaseNotes] = React.useState(false)
   const [release, setRelease] = React.useState<import('@proma/shared').GitHubRelease | null>(null)
 
@@ -58,19 +57,15 @@ function UpdateCard(): React.ReactElement | null {
 
   const handleInstallWhenIdle = (): void => {
     void window.electronAPI.updater?.installWhenIdle()
-      .then((scheduled) => setIdleInstallScheduled(scheduled))
-      .catch(() => setIdleInstallScheduled(false))
+      .catch((error) => console.error('[更新] 安排空闲更新失败:', error))
   }
 
   const handleCancelIdleInstall = (): void => {
     void window.electronAPI.updater?.cancelIdleInstall()
-      .then(() => setIdleInstallScheduled(false))
+      .catch((error) => console.error('[更新] 取消空闲更新失败:', error))
   }
 
   // 当检测到新版本时，获取完整的 release 信息
-  React.useEffect(() => {
-    if (status.status !== 'downloaded') setIdleInstallScheduled(false)
-  }, [status.status])
 
   React.useEffect(() => {
     if (status.status === 'available' && status.version && !release) {
@@ -100,7 +95,7 @@ function UpdateCard(): React.ReactElement | null {
 
           {/* 操作按钮 */}
           {status.status === 'downloaded' ? (
-            idleInstallScheduled ? (
+            status.installScheduled ? (
               <button
                 onClick={handleCancelIdleInstall}
                 className="inline-flex items-center gap-1.5 rounded-md bg-secondary px-3 py-1.5 text-xs font-medium text-secondary-foreground hover:bg-secondary/80 transition-colors"

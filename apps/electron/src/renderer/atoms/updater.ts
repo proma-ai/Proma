@@ -22,6 +22,8 @@ export interface UpdateStatus {
   releaseNotes?: string
   progress?: DownloadProgress
   error?: string
+  /** 用户已安排在所有 Agent 空闲后重启安装，暂停重复提醒。 */
+  installScheduled?: boolean
 }
 
 /** 更新状态 atom */

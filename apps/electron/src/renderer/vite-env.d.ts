@@ -24,6 +24,7 @@ interface UpdateStatus {
   releaseNotes?: string
   progress?: { percent: number; transferred: number; total: number; bytesPerSecond: number }
   error?: string
+  installScheduled?: boolean
 }
 
 /** 更新 API */

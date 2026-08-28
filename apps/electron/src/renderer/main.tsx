@@ -84,6 +84,7 @@ import { htmlToMarkdown, markdownToHtml } from './lib/markdown-rich-text'
 import { PromaLogo } from './lib/model-logo'
 import { initShortcutRegistry, updateShortcutOverrides } from './lib/shortcut-registry'
 import { initializePerformanceMonitor } from './lib/performance-monitor'
+import { createUpdateReminderScheduler, type UpdateReminderScheduler } from './lib/update-reminder-scheduler'
 import './styles/globals.css'
 import 'katex/dist/katex.min.css'
 
@@ -336,22 +337,22 @@ function AgentSettingsInitializer(): null {
 function UpdaterInitializer(): null {
   const setUpdateStatus = useSetAtom(updateStatusAtom)
   const updateStatus = useAtomValue(updateStatusAtom)
-  const notifiedDownloadVersionRef = useRef<string | null>(null)
+  const updateReminderSchedulerRef = useRef<UpdateReminderScheduler | null>(null)
+  const readyToastIdRef = useRef<string | number | null>(null)
+  const scheduledToastIdRef = useRef<string | number | null>(null)
 
   useEffect(() => {
     const cleanup = initializeUpdater(setUpdateStatus)
     return cleanup
   }, [setUpdateStatus])
 
-  useEffect(() => {
-    if (updateStatus.status !== 'downloaded') return
+  const showDownloadedUpdateReminder = React.useCallback((version: string): void => {
+    if (readyToastIdRef.current !== null) {
+      toast.dismiss(readyToastIdRef.current)
+    }
 
-    const version = updateStatus.version || '新版本'
-    if (notifiedDownloadVersionRef.current === version) return
-    notifiedDownloadVersionRef.current = version
     const versionLabel = version.startsWith('v') ? version : `v${version}`
-
-    toast.custom((toastId) => (
+    readyToastIdRef.current = toast.custom((toastId) => (
       <div className="w-[344px] max-w-[calc(100vw-32px)] rounded-xl bg-background/95 p-3 text-foreground shadow-[0_12px_32px_rgba(0,0,0,0.14)] ring-1 ring-black/5 backdrop-blur-xl dark:ring-white/10">
         <div className="flex items-center gap-2.5">
           <img src={PromaLogo} alt="Proma" className="size-8 rounded-lg" />
@@ -385,6 +386,7 @@ function UpdaterInitializer(): null {
               className="h-7 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 active:scale-[0.96]"
               onClick={() => {
                 toast.dismiss(toastId)
+                readyToastIdRef.current = null
                 void window.electronAPI.updater?.installWhenIdle()
                   .then((scheduled) => {
                     if (!scheduled) {
@@ -392,7 +394,7 @@ function UpdaterInitializer(): null {
                       return
                     }
 
-                    toast.custom((scheduledToastId) => (
+                    scheduledToastIdRef.current = toast.custom((scheduledToastId) => (
                       <div className="w-[312px] max-w-[calc(100vw-32px)] rounded-xl bg-background/95 p-3 text-foreground shadow-[0_12px_32px_rgba(0,0,0,0.14)] ring-1 ring-black/5 backdrop-blur-xl dark:ring-white/10">
                         <div className="flex items-center gap-2.5">
                           <img src={PromaLogo} alt="Proma" className="size-7 rounded-md" />
@@ -408,6 +410,7 @@ function UpdaterInitializer(): null {
                             onClick={() => {
                               void window.electronAPI.updater?.cancelIdleInstall()
                               toast.dismiss(scheduledToastId)
+                              scheduledToastIdRef.current = null
                             }}
                           >
                             取消安排
@@ -435,7 +438,39 @@ function UpdaterInitializer(): null {
       dismissible: false,
       unstyled: true,
     })
-  }, [updateStatus])
+  }, [])
+
+  useEffect(() => {
+    if (!updateReminderSchedulerRef.current) {
+      updateReminderSchedulerRef.current = createUpdateReminderScheduler({
+        remind: showDownloadedUpdateReminder,
+      })
+    }
+
+    const scheduler = updateReminderSchedulerRef.current
+    const isInstallScheduled = updateStatus.status === 'downloaded' && updateStatus.installScheduled === true
+    if (!isInstallScheduled && scheduledToastIdRef.current !== null) {
+      toast.dismiss(scheduledToastIdRef.current)
+      scheduledToastIdRef.current = null
+    }
+
+    if (updateStatus.status !== 'downloaded' || isInstallScheduled) {
+      scheduler.stop()
+      if (readyToastIdRef.current !== null) {
+        toast.dismiss(readyToastIdRef.current)
+        readyToastIdRef.current = null
+      }
+      return
+    }
+
+    scheduler.start(updateStatus.version || '新版本')
+  }, [showDownloadedUpdateReminder, updateStatus.installScheduled, updateStatus.status, updateStatus.version])
+
+  useEffect(() => () => {
+    updateReminderSchedulerRef.current?.stop()
+    if (readyToastIdRef.current !== null) toast.dismiss(readyToastIdRef.current)
+    if (scheduledToastIdRef.current !== null) toast.dismiss(scheduledToastIdRef.current)
+  }, [])
 
   return null
 }

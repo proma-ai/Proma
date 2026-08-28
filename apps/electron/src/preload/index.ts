@@ -993,6 +993,7 @@ export interface ElectronAPI {
       releaseNotes?: string
       progress?: { percent: number; transferred: number; total: number; bytesPerSecond: number }
       error?: string
+      installScheduled?: boolean
     }>
     onStatusChanged: (callback: (status: {
       status: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'not-available' | 'error'
@@ -1000,6 +1001,7 @@ export interface ElectronAPI {
       releaseNotes?: string
       progress?: { percent: number; transferred: number; total: number; bytesPerSecond: number }
       error?: string
+      installScheduled?: boolean
     }) => void) => () => void
     /** 在所有运行中的 Agent 结束后重启并安装更新 */
     installWhenIdle: () => Promise<boolean>
