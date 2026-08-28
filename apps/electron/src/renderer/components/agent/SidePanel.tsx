@@ -1619,6 +1619,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
           workspaceSlug={workspaceSlug || undefined}
           worktreeRepoPaths={worktreeRepoPathsMemo}
           onOpenWorktreeTerminal={handleOpenWorktreeTerminal}
+          onOpenDirectoryTerminal={handleOpenDirectoryTerminal}
           nonGitFileChanges={nonGitFileChanges}
           currentFileChangeRunId={fileChangesCurrentRunId}
           onPlainFileClick={handleFilePreview}
