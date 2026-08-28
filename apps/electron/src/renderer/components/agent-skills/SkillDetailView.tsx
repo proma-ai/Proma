@@ -5,8 +5,6 @@
  */
 
 import * as React from 'react'
-import Markdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { toast } from 'sonner'
 import { Sparkles, Pencil, Save, X, FolderOpen, RefreshCw, Trash2, ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -15,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { SettingsCard } from '@/components/settings/primitives'
 import { SkillFilesPanel } from '@/components/settings/SkillFilesPanel'
+import { LiveMarkdownEditor } from '@/components/markdown/LiveMarkdownEditor'
 import { cn } from '@/lib/utils'
 import type { SkillMeta } from '@proma/shared'
 import { extractSkillBody, rebuildSkillMd } from './skillMdUtils'
@@ -48,7 +47,6 @@ export function SkillDetailView({
   const [loadingContent, setLoadingContent] = React.useState(true)
 
   const [isEditingMeta, setIsEditingMeta] = React.useState(false)
-  const [isEditingBody, setIsEditingBody] = React.useState(false)
   const [editName, setEditName] = React.useState('')
   const [editDescription, setEditDescription] = React.useState('')
   const [editBody, setEditBody] = React.useState('')
@@ -60,7 +58,10 @@ export function SkillDetailView({
   React.useEffect(() => {
     setLoadingContent(true)
     window.electronAPI.readSkillContent(workspaceSlug, skill.slug)
-      .then((text) => setContent(text))
+      .then((text) => {
+        setContent(text)
+        setEditBody(extractSkillBody(text))
+      })
       .catch((err) => {
         console.error('[SkillDetail] 加载内容失败:', err)
         setContent(null)
@@ -101,7 +102,6 @@ export function SkillDetailView({
       const newContent = rebuildSkillMd(content, { body: editBody })
       await window.electronAPI.writeSkillContent(workspaceSlug, skill.slug, newContent)
       setContent(newContent)
-      setIsEditingBody(false)
       onChanged()
       toast.success('说明已保存')
     } catch (err) {
@@ -253,44 +253,22 @@ export function SkillDetailView({
               <div className="flex flex-col">
                 <div className="flex min-h-[28px] shrink-0 items-center justify-between px-1 pb-2">
                   <div className="font-mono text-xs text-muted-foreground">SKILL.md</div>
-                  {!isEditingBody ? (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          onClick={() => { setEditBody(body); setIsEditingBody(true) }}
-                          className="flex items-center gap-1 rounded p-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                        >
-                          <Pencil size={14} />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top">编辑</TooltipContent>
-                    </Tooltip>
-                  ) : (
-                    <div className="flex items-center gap-1">
-                      <Button size="sm" variant="ghost" onClick={() => setIsEditingBody(false)} disabled={saving}>
-                        <X size={14} /> 取消
-                      </Button>
-                      <Button size="sm" onClick={() => void saveBody()} disabled={saving}>
-                        <Save size={14} /> {saving ? '保存中...' : '保存'}
-                      </Button>
-                    </div>
-                  )}
+                  <Button
+                    size="sm"
+                    onClick={() => void saveBody()}
+                    disabled={saving || !content || editBody === body}
+                  >
+                    <Save size={14} /> {saving ? '保存中...' : '保存'}
+                  </Button>
                 </div>
                 <SettingsCard divided={false}>
                   <div className="p-4">
-                    {isEditingBody ? (
-                      <textarea
-                        value={editBody}
-                        onChange={(e) => setEditBody(e.target.value)}
-                        className="min-h-[420px] w-full resize-y rounded-md border border-border bg-transparent p-3 font-mono text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                        placeholder="输入 Skill 说明内容（支持 Markdown）..."
-                      />
-                    ) : (
-                      <div className="prose prose-sm dark:prose-invert max-w-none">
-                        <Markdown remarkPlugins={[remarkGfm]}>{body || '暂无说明内容'}</Markdown>
-                      </div>
-                    )}
+                    <LiveMarkdownEditor
+                      value={editBody}
+                      onChange={setEditBody}
+                      onSave={() => { void saveBody() }}
+                      className="live-markdown-external-scroll skill-detail-live-markdown"
+                    />
                   </div>
                 </SettingsCard>
               </div>

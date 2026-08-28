@@ -35,7 +35,7 @@ import { useFocusAgentSessionInput } from '@/hooks/useFocusAgentSessionInput'
 import { useShortcut } from '@/hooks/useShortcut'
 import { initShortcutRegistry } from '@/lib/shortcut-registry'
 import { DiffView } from './DiffView'
-import { MarkdownRichEditor } from './MarkdownRichEditor'
+import { LiveMarkdownEditor } from '@/components/markdown/LiveMarkdownEditor'
 import { getPreviewCandidateBasePaths, isAbsoluteFilePath } from './preview-open-path'
 import { DefaultAppOpenButton } from './DefaultAppOpenButton'
 import { UnsupportedFilePreview } from './UnsupportedFilePreview'
@@ -305,12 +305,11 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   const [newContent, setNewContent] = React.useState('')
   const [unsupportedPreviewReason, setUnsupportedPreviewReason] = React.useState('')
   const [previewMetadata, setPreviewMetadata] = React.useState<FilePreviewMetadata | undefined>()
+  // Markdown 预览本身就是 LiveMarkdown 编辑器，不再通过按钮切换编辑态。
   const [markdownEditing, setMarkdownEditing] = React.useState(
-    () => Boolean(initialMarkdownEditorState?.editing),
+    () => Boolean((isMarkdown && !readOnly) || initialMarkdownEditorState?.editing),
   )
-  const [markdownSourceMode, setMarkdownSourceMode] = React.useState(
-    () => Boolean(initialMarkdownEditorState?.editing && initialMarkdownEditorState.sourceMode && isMarkdown),
-  )
+  const [markdownSourceMode, setMarkdownSourceMode] = React.useState(false)
   const [markdownDraft, setMarkdownDraft] = React.useState(
     () => initialMarkdownEditorState?.draft ?? '',
   )
@@ -627,22 +626,6 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     themeType: theme as 'light' | 'dark' | 'system',
     unsafeCSS: PIERRE_FILE_CSS,
   }), [theme, codeWrap])
-  const markdownFileAccess = React.useMemo(() => {
-    const candidateBasePaths: string[] = []
-    const slash = filePath.lastIndexOf('/')
-    if (slash > 0) candidateBasePaths.push(filePath.slice(0, slash))
-    if (dirPath) candidateBasePaths.push(dirPath)
-    for (const basePath of basePaths ?? []) {
-      if (basePath && !candidateBasePaths.includes(basePath)) candidateBasePaths.push(basePath)
-    }
-    return {
-      sessionId,
-      ...(workspaceSkillSlug ? { workspaceSkillSlug } : {}),
-      ...(legacySkillFilePath ? { legacySkillFilePath } : {}),
-      candidateBasePaths,
-    }
-  }, [basePaths, dirPath, filePath, sessionId, workspaceSkillSlug, legacySkillFilePath])
-
   // props 变化时立即清空内容状态，避免在 useEffect 执行前渲染旧数据
   React.useEffect(() => {
     const restoredEditorState = !readOnly && isEditableText
@@ -656,7 +639,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
       scrollPositionCache.set(scrollCacheKey(sessionId, filePath, markdownEditorScrollScope), restoredEditorState.previewScroll)
     }
     lastSavedDraftRef.current = nextEditorState.lastSavedDraft
-    markdownEditingRef.current = Boolean(nextEditorState.editing && isEditableText && !readOnly)
+    markdownEditingRef.current = Boolean((isMarkdown || nextEditorState.editing) && isEditableText && !readOnly)
     pendingPreviewScrollRestoreRef.current = null
 
     setOldContent('')
@@ -673,8 +656,8 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     setImageZoom(0.25)
     setImageNaturalSize({ w: 0, h: 0 })
     setLoading(!isLegacyOffice)
-    setMarkdownEditing(Boolean(nextEditorState.editing && isEditableText && !readOnly))
-    setMarkdownSourceMode(Boolean(nextEditorState.editing && nextEditorState.sourceMode && isMarkdown && !readOnly))
+    setMarkdownEditing(Boolean((isMarkdown || nextEditorState.editing) && isEditableText && !readOnly))
+    setMarkdownSourceMode(false)
     setMarkdownDraft(nextEditorState.draft)
     setMarkdownSaving(false)
     setAutosaveStatus('idle')
@@ -766,22 +749,6 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     persistMarkdownEditorViewState(nextState)
     setMarkdownDraft(content)
   }, [isEditableText, markdownEditorCacheKey, persistMarkdownEditorViewState, readOnly, sessionId])
-
-  const handleRichScrollPositionChange = React.useCallback((position: MarkdownScrollPosition) => {
-    if (!canPersistMarkdownEditorState(isEditableText, Boolean(readOnly))) return
-    updateMarkdownEditorViewState((state) => ({
-      ...state,
-      richScroll: { ...position },
-    }))
-  }, [isEditableText, readOnly, updateMarkdownEditorViewState])
-
-  const handleRichSelectionChange = React.useCallback((selection: { from: number; to: number }) => {
-    if (!canPersistMarkdownEditorState(isEditableText, Boolean(readOnly))) return
-    updateMarkdownEditorViewState((state) => ({
-      ...state,
-      richSelection: { ...selection },
-    }))
-  }, [isEditableText, readOnly, updateMarkdownEditorViewState])
 
   const handleSourceScroll = React.useCallback((event: React.UIEvent<HTMLTextAreaElement>) => {
     const { scrollTop, scrollLeft } = event.currentTarget
@@ -1151,11 +1118,13 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
           updateMarkdownEditorViewState((state) => ({
             ...state,
             previewScroll: position,
+            // LiveMarkdown 的滚动由外层预览容器承接；编辑态离开后仍要恢复用户所在位置。
+            richScroll: activeMarkdownEditing && isMarkdown && !markdownSourceMode ? position : state.richScroll,
           }))
         }
       }
     })
-  }, [isEditableText, readOnly, scrollKey, updateMarkdownEditorViewState])
+  }, [activeMarkdownEditing, isEditableText, isMarkdown, markdownSourceMode, readOnly, scrollKey, updateMarkdownEditorViewState])
 
   // Cleanup rAF on unmount to prevent stale writes
   React.useEffect(() => {
@@ -1178,7 +1147,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
 
 
   const startMarkdownEdit = React.useCallback(() => {
-    if (!isEditableText || readOnly) return
+    if (!isPlainTextEditable || readOnly) return
     const currentEditorState = getMarkdownEditorViewState(sessionId, markdownEditorCacheKey) ?? markdownEditorStateRef.current
     const hasPendingDraft = currentEditorState.draft !== currentEditorState.lastSavedDraft
     const draft = hasPendingDraft ? currentEditorState.draft : newContent
@@ -1205,7 +1174,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     setMarkdownSourceMode(false)
     setMarkdownDraft(draft)
     setMarkdownEditing(true)
-  }, [isEditableText, markdownEditorCacheKey, newContent, persistMarkdownEditorViewState, readOnly, sessionId])
+  }, [isPlainTextEditable, markdownEditorCacheKey, newContent, persistMarkdownEditorViewState, readOnly, sessionId])
 
   // ref 形式的 persist：避免 callback / effect 因 refreshVersion 频繁变化而重建
   const persistRef = React.useRef<(draft: string, fp: string, fa: typeof fileAccess, cacheKey: string) => Promise<boolean>>(async () => false)
@@ -1333,30 +1302,6 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     }
   }, [componentMountedRef, fileAccess, filePath, isEditableText, markdownDraft, markdownEditorCacheKey, markdownSaving, ownerGeneration, persistMarkdownDraft, readOnly])
 
-  const toggleMarkdownSourceMode = React.useCallback(() => {
-    if (!isEditableText || readOnly) return
-    const sourceTextarea = sourceTextareaRef.current
-    const sourceScroll = sourceTextarea
-      ? { top: sourceTextarea.scrollTop, left: sourceTextarea.scrollLeft }
-      : markdownEditorStateRef.current.sourceScroll
-    const sourceSelection = sourceTextarea
-      ? { start: sourceTextarea.selectionStart, end: sourceTextarea.selectionEnd }
-      : markdownEditorStateRef.current.sourceSelection
-    const nextSourceMode = !markdownSourceMode
-    const nextEditorState: MarkdownEditorViewState = {
-      ...markdownEditorStateRef.current,
-      sourceMode: nextSourceMode,
-      richScroll: nextSourceMode
-        ? markdownEditorStateRef.current.richScroll
-        : { ...sourceScroll },
-      sourceScroll: nextSourceMode
-        ? { ...markdownEditorStateRef.current.richScroll }
-        : sourceScroll,
-      sourceSelection,
-    }
-    persistMarkdownEditorViewState(nextEditorState)
-    setMarkdownSourceMode(nextSourceMode)
-  }, [isEditableText, markdownSourceMode, persistMarkdownEditorViewState, readOnly])
 
   const handleManualRefresh = React.useCallback(() => {
     if (previewOnly) {
@@ -1613,20 +1558,9 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
           </button>
         )}
 
-        {previewOnly && isEditableText && !readOnly && (
+        {previewOnly && isPlainTextEditable && !readOnly && (
           markdownEditing ? (
             <div className="ml-auto flex items-center gap-1">
-              {isMarkdown && (
-                <button
-                  type="button"
-                  onClick={toggleMarkdownSourceMode}
-                  disabled={markdownSaving}
-                  className="p-1 rounded hover:bg-foreground/[0.06] text-foreground/40 hover:text-foreground/60 disabled:opacity-50 shrink-0"
-                  title={markdownSourceMode ? '切换到富文本编辑' : '切换到源码编辑'}
-                >
-                  {markdownSourceMode ? <Eye className="size-3.5" /> : <Code2 className="size-3.5" />}
-                </button>
-              )}
               <button
                 type="button"
                 onClick={exitMarkdownEdit}
@@ -1662,27 +1596,40 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
               type="button"
               onClick={startMarkdownEdit}
               className="ml-auto p-1 rounded hover:bg-foreground/[0.06] text-foreground/40 hover:text-foreground/60 shrink-0"
-              title={isMarkdown ? '编辑 Markdown' : '编辑文本'}
+              title="编辑文本"
             >
               <Pencil className="size-3.5" />
             </button>
           )
         )}
 
-        <button type="button" onClick={handleCopy}
-          className={cn("p-1 rounded hover:bg-foreground/[0.06] text-foreground/40 hover:text-foreground/60 shrink-0", previewOnly && !isEditableText && "ml-auto")}
-          title="复制文件内容">
-          {copied ? <Check className="size-3.5 text-green-500" /> : <Copy className="size-3.5" />}
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={handleCopy}
+              className={cn('p-1 rounded hover:bg-foreground/[0.06] text-foreground/40 hover:text-foreground/60 shrink-0', previewOnly && !isEditableText && 'ml-auto')}
+              aria-label={copied ? '已复制文件内容' : '复制文件内容'}
+            >
+              {copied ? <Check className="size-3.5 text-green-500" /> : <Copy className="size-3.5" />}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{copied ? '已复制文件内容' : '复制文件内容'}</TooltipContent>
+        </Tooltip>
 
-        <button
-          type="button"
-          onClick={handleManualRefresh}
-          className="p-1 rounded hover:bg-foreground/[0.06] text-foreground/40 hover:text-foreground/60 shrink-0"
-          title="刷新文件内容（检测外部编辑器的修改）"
-        >
-          <RotateCw className="size-3.5" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={handleManualRefresh}
+              className="p-1 rounded hover:bg-foreground/[0.06] text-foreground/40 hover:text-foreground/60 shrink-0"
+              aria-label="刷新文件内容（检测外部编辑器的修改）"
+            >
+              <RotateCw className="size-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">刷新文件内容（检测外部编辑器的修改）</TooltipContent>
+        </Tooltip>
 
         {canTogglePreviewWrap && (
           <Tooltip>
@@ -1705,18 +1652,23 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
           </Tooltip>
         )}
 
-        {isMarkdown && !activeMarkdownEditing && (
-          <button
-            type="button"
-            onClick={() => setTocOpen((v) => !v)}
-            className={cn(
-              'p-1 rounded hover:bg-foreground/[0.06] shrink-0',
-              tocOpen ? 'text-foreground/70' : 'text-foreground/40 hover:text-foreground/60',
-            )}
-            title={tocOpen ? '隐藏目录' : '显示目录'}
-          >
-            <List className="size-3.5" />
-          </button>
+        {isMarkdown && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => setTocOpen((v) => !v)}
+                className={cn(
+                  'p-1 rounded hover:bg-foreground/[0.06] shrink-0',
+                  tocOpen ? 'text-foreground/70' : 'text-foreground/40 hover:text-foreground/60',
+                )}
+                aria-label={tocOpen ? '隐藏目录' : '显示目录'}
+              >
+                <List className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{tocOpen ? '隐藏目录' : '显示目录'}</TooltipContent>
+          </Tooltip>
         )}
 
         {toolbarActions}
@@ -1733,10 +1685,10 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
         <MarkdownToc
           containerRef={scrollContainerRef}
           contentKey={tocContentKey}
-          enabled={Boolean(isMarkdown && !activeMarkdownEditing && tocOpen)}
+          enabled={Boolean(isMarkdown && tocOpen)}
           onOpenChange={setTocOpen}
         />
-        {isMarkdown && !activeMarkdownEditing && !tocOpen && (
+        {isMarkdown && !tocOpen && (
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -1879,44 +1831,14 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
                 </div>
               )
             ) : isMarkdown ? (
-              activeMarkdownEditing && markdownSourceMode ? (
-                <textarea
-                  ref={sourceTextareaRef}
-                  value={markdownDraft}
-                  onChange={(e) => updateMarkdownDraft(e.target.value)}
-                  onScroll={handleSourceScroll}
-                  onSelect={handleSourceSelection}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Escape') {
-                      e.preventDefault()
-                      exitMarkdownEdit()
-                    }
-                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                      e.preventDefault()
-                      void saveMarkdownEdit()
-                    }
-                  }}
-                  autoFocus
-                  spellCheck={false}
-                  className="w-full min-h-full resize-none border-0 bg-transparent px-4 py-3 font-mono text-[13px] leading-relaxed text-foreground outline-none focus:outline-none"
-                />
-              ) : (
-                <MarkdownRichEditor
-                  value={activeMarkdownEditing ? markdownDraft : newContent}
-                  editing={activeMarkdownEditing}
-                  onChange={updateMarkdownDraft}
-                  onSave={() => void saveMarkdownEdit()}
-                  onCancel={exitMarkdownEdit}
-                  renderMermaidInEditor
-                  disabled={markdownSaving || Boolean(readOnly)}
-                  fileAccess={markdownFileAccess}
-                  shikiTheme={theme === 'dark' ? 'github-dark' : 'github-light'}
-                  initialScrollPosition={activeMarkdownEditing ? markdownEditorStateRef.current.richScroll : undefined}
-                  onScrollPositionChange={handleRichScrollPositionChange}
-                  initialSelection={activeMarkdownEditing ? markdownEditorStateRef.current.richSelection : undefined}
-                  onSelectionChange={handleRichSelectionChange}
-                />
-              )
+              <LiveMarkdownEditor
+                key={readOnly ? 'readonly' : 'editable'}
+                value={readOnly ? newContent : markdownDraft}
+                onChange={updateMarkdownDraft}
+                onSave={() => void saveMarkdownEdit()}
+                readOnly={Boolean(readOnly)}
+                className="live-markdown-external-scroll"
+              />
             ) : isPlainTextEditable && activeMarkdownEditing ? (
               <textarea
                 ref={sourceTextareaRef}

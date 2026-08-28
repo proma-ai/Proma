@@ -17,6 +17,9 @@ interface LiveMarkdownEditorProps {
   value: string
   onChange: (value: string) => void
   onSave?: () => void
+  onCancel?: () => void
+  /** 只读时沿用同一套 Live Preview 渲染，但不允许修改源文档。 */
+  readOnly?: boolean
   extensions?: readonly Extension[]
   className?: string
 }
@@ -35,6 +38,68 @@ const markdownSyntaxMarkerNames = new Set([
 ])
 const hiddenMarkdownSyntax = Decoration.replace({ class: 'live-markdown-syntax-hidden' })
 const pendingListHeading = Decoration.mark({ class: 'live-markdown-pending-list-heading' })
+
+interface MarkdownHeading {
+  from: number
+  to: number
+  level: number
+  text: string
+}
+
+/**
+ * ink-mde / CodeMirror 以 span 呈现标题，而现有 TOC 通过 DOM 语义节点采集。
+ * 为每个 Markdown 标题行加入稳定 data 属性，让同一套 TOC 能继续发现、定位和高亮它们。
+ */
+function findMarkdownHeadings(state: EditorState): MarkdownHeading[] {
+  const headings: MarkdownHeading[] = []
+  let fence: string | null = null
+  for (let number = 1; number <= state.doc.lines; number += 1) {
+    const line = state.doc.line(number)
+    const fenceMatch = line.text.match(/^ {0,3}(`{3,}|~{3,})/)
+    if (fenceMatch) {
+      const marker = fenceMatch[1]![0]!
+      if (!fence) fence = marker
+      else if (fence === marker) fence = null
+      continue
+    }
+    if (fence) continue
+
+    const atx = line.text.match(/^ {0,3}(#{1,6})(?:[ \t]+(.*?)\s*|[ \t]*)$/)
+    if (atx) {
+      const text = (atx[2] ?? '').replace(/[ \t]+#+[ \t]*$/, '').trim()
+      if (text) headings.push({ from: line.from, to: line.to, level: atx[1]!.length, text })
+      continue
+    }
+
+    if (number >= state.doc.lines || !line.text.trim()) continue
+    const underline = state.doc.line(number + 1)
+    const setext = underline.text.match(/^ {0,3}(=+|-+)\s*$/)
+    if (!setext) continue
+    headings.push({ from: line.from, to: line.to, level: setext[1]![0] === '=' ? 1 : 2, text: line.text.trim() })
+    number += 1
+  }
+  return headings
+}
+
+function markdownHeadingDecorations(state: EditorState): DecorationSet {
+  const builder = new RangeSetBuilder<Decoration>()
+  for (const heading of findMarkdownHeadings(state)) {
+    builder.add(heading.from, heading.to, Decoration.mark({
+      attributes: {
+        'data-markdown-heading': 'true',
+        'data-toc-level': String(heading.level),
+        'data-toc-text': heading.text,
+      },
+    }))
+  }
+  return builder.finish()
+}
+
+const markdownHeadingMarkers = StateField.define<DecorationSet>({
+  create: markdownHeadingDecorations,
+  update: (value, transaction) => transaction.docChanged ? markdownHeadingDecorations(transaction.state) : value,
+  provide: (field) => EditorView.decorations.from(field),
+})
 
 type MarkdownSyntaxVisibility = {
   focused: boolean
@@ -130,6 +195,8 @@ export const LiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, Liv
   value,
   onChange,
   onSave,
+  onCancel,
+  readOnly = false,
   extensions = [],
   className,
 }, ref): React.ReactElement {
@@ -139,9 +206,11 @@ export const LiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, Liv
   const valueRef = React.useRef(value)
   const onChangeRef = React.useRef(onChange)
   const onSaveRef = React.useRef(onSave)
+  const onCancelRef = React.useRef(onCancel)
   valueRef.current = value
   onChangeRef.current = onChange
   onSaveRef.current = onSave
+  onCancelRef.current = onCancel
 
   React.useImperativeHandle(ref, () => ({
     focus: () => instanceRef.current?.focus(),
@@ -167,7 +236,7 @@ export const LiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, Liv
       hooks: { afterUpdate: (nextValue) => { if (ready) onChangeRef.current(nextValue) } },
       interface: {
         appearance: 'auto', attribution: false, autocomplete: false, images: false,
-        lists: true, readonly: false, spellcheck: false, toolbar: false,
+        lists: true, readonly: readOnly, spellcheck: false, toolbar: false,
       },
       plugins: [
         Prec.highest(keymap.of([{
@@ -176,7 +245,14 @@ export const LiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, Liv
             onSaveRef.current?.()
             return true
           },
+        }, {
+          key: 'Escape',
+          run: () => {
+            onCancelRef.current?.()
+            return Boolean(onCancelRef.current)
+          },
         }])),
+        markdownHeadingMarkers,
         ViewPlugin.define((view) => {
           viewRef.current = view
           return { destroy: () => { if (viewRef.current === view) viewRef.current = null } }

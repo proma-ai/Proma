@@ -2424,6 +2424,22 @@
   min-height: 100%;
   padding: 0.75rem var(--vault-editor-horizontal-inset, 1rem) !important;
 }
+/* 预览/详情页的滚动由外层统一承接：TOC、查找与选区引用必须和正文
+ * 使用同一个 scroll root，避免 CodeMirror 内层滚动导致目录跳转、ScrollSpy 失联。 */
+.live-markdown-external-scroll,
+.live-markdown-external-scroll .ink-mde,
+.live-markdown-external-scroll .ink-mde-editor,
+.live-markdown-external-scroll .cm-editor,
+.live-markdown-external-scroll .cm-scroller {
+  height: auto !important;
+  min-height: 100%;
+}
+.live-markdown-external-scroll .cm-scroller {
+  overflow: visible !important;
+}
+.skill-detail-live-markdown {
+  min-height: 26.25rem;
+}
 .vault-ink-mde .cm-selectionBackground,
 .vault-ink-mde .cm-searchMatch,
 .vault-ink-mde .cm-searchMatch-selected {
