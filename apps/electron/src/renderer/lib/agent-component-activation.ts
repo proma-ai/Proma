@@ -42,17 +42,16 @@ function getFilePath(input: Record<string, unknown>): string | null {
 
 function getWorkspaceManagedFileComponent(path: string): WorkspaceComponentTab | null {
   const normalized = path.replace(/\\/g, '/').toLowerCase()
-  // 只响应 Proma workspace 下的配置，避免用户项目中同名 skills/ 或 mcp.json 误触发。
+  // 工作区的 Skills/MCP 配置变更仅刷新能力数据，不自动打开、添加或聚焦右侧工作区 Tab。
+  // 仅 memory 写入仍需被识别，后续由 watcher 提供真实受限 Diff 后再打开。
   if (!normalized.includes('/agent-workspaces/')) return null
-  if (normalized.includes('/skills/')) return 'skills'
   if (normalized.includes('/memory/')) return 'memory'
-  if (normalized.endsWith('/mcp.json')) return 'mcp'
   return null
 }
 
 /**
  * 将 Agent 的变更工具调用映射为应展示的项目级组件。
- * 仅匹配增删改操作；读取、列举与执行定时任务不触发界面抢焦点。
+ * 仅匹配需要自动展示的增删改操作；Skills/MCP 配置变更不添加、打开或聚焦右侧 Tab。
  */
 export function getChangedWorkspaceComponentForTool(
   toolName: unknown,
@@ -77,7 +76,8 @@ export function getChangedWorkspaceComponentForTool(
     const filePath = getFilePath(input)
     return filePath ? getWorkspaceManagedFileComponent(filePath) : null
   }
-  // Skills/MCP 的创建和删除有时由 Bash 完成；仅识别 Proma workspace 路径和明确写入命令。
+  // Skills/MCP 的创建和删除有时由 Bash 完成；它们不会自动展示或抢焦点。
+  // 这里只保留对 workspace memory 写入的识别。
   if (toolName === 'Bash' && typeof input.command === 'string' && BASH_MUTATION_PATTERN.test(input.command)) {
     return getWorkspaceManagedFileComponent(input.command)
   }
