@@ -3346,18 +3346,24 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
             </Tooltip>
             <DropdownMenuContent side="right" align="end" className="min-w-40">
               <DropdownMenuItem
+                aria-current={isWorkspaceComponentActive("todos") ? "page" : undefined}
+                className={cn(isWorkspaceComponentActive("todos") && "bg-accent/70 text-accent-foreground")}
                 onSelect={() => handleOpenPlanningComponent("todos")}
               >
                 <ListTodo />
                 Todo
               </DropdownMenuItem>
               <DropdownMenuItem
+                aria-current={isWorkspaceComponentActive("calendar") ? "page" : undefined}
+                className={cn(isWorkspaceComponentActive("calendar") && "bg-accent/70 text-accent-foreground")}
                 onSelect={() => handleOpenPlanningComponent("calendar")}
               >
                 <CalendarDays />
                 日程
               </DropdownMenuItem>
               <DropdownMenuItem
+                aria-current={isWorkspaceComponentActive("automations") ? "page" : undefined}
+                className={cn(isWorkspaceComponentActive("automations") && "bg-accent/70 text-accent-foreground")}
                 onSelect={() => handleOpenPlanningComponent("automations")}
               >
                 <Clock />
@@ -3372,6 +3378,8 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
+                    aria-current={isWorkspaceComponentActive("skills") ? "page" : undefined}
+                    className={cn(isWorkspaceComponentActive("skills") && "bg-accent/70 text-accent-foreground")}
                     onSelect={() => handleOpenCapabilityComponent("skills")}
                   >
                     <Blocks />
@@ -3382,12 +3390,16 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                     )}
                   </DropdownMenuItem>
                   <DropdownMenuItem
+                    aria-current={isWorkspaceComponentActive("mcp") ? "page" : undefined}
+                    className={cn(isWorkspaceComponentActive("mcp") && "bg-accent/70 text-accent-foreground")}
                     onSelect={() => handleOpenCapabilityComponent("mcp")}
                   >
                     <ServerCog />
                     MCP
                   </DropdownMenuItem>
                   <DropdownMenuItem
+                    aria-current={isWorkspaceComponentActive("memory") ? "page" : undefined}
+                    className={cn(isWorkspaceComponentActive("memory") && "bg-accent/70 text-accent-foreground")}
                     onSelect={() => handleOpenCapabilityComponent("memory")}
                   >
                     <Brain />
@@ -3403,7 +3415,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
               status={updateStatus}
               onClick={handleUpdateButtonClick}
               tooltipSide="right"
-              className="group size-10 p-1"
+              className="group flex size-10 items-center justify-center p-1"
               readyDotClassName="absolute right-1 top-1 size-2 rounded-full bg-primary"
             />
           )}
