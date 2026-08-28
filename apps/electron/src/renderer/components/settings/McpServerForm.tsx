@@ -31,8 +31,10 @@ interface McpServerFormProps {
   /** 当前工作区 slug */
   workspaceSlug: string
   onSaved: () => void
-  onChanged?: () => void
-  onCancel: () => void
+  onChanged?: () => void | Promise<void>
+  onCancel: () => void | Promise<void>
+  /** 外部详情页请求关闭的递增标记；表单会先 flush 自动保存再触发 onCancel。 */
+  closeRequestId?: number
   /** 由 MCP 内部详情页托管标题与返回操作时隐藏表单标题栏。 */
   showHeader?: boolean
 }
@@ -122,7 +124,7 @@ function buildEntryFromValues(values: McpFormValues, includeTestResult = false):
   return base
 }
 
-export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCancel, showHeader = true }: McpServerFormProps): React.ReactElement {
+export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCancel, closeRequestId, showHeader = true }: McpServerFormProps): React.ReactElement {
   const isEdit = server !== null
   const isBuiltin = server?.entry.isBuiltin === true
 
@@ -233,7 +235,7 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
       if (generation === saveGenerationRef.current && mountedRef.current) {
         // 编辑抽屉外的 MCP 卡片使用独立快照；每次持久化后通知其局部重读，
         // 让测试结果无需离开再进入页面即可同步显示。
-        onChanged?.()
+        await onChanged?.()
         setSaveStatus('saved')
         setTimeout(() => {
           if (generation === saveGenerationRef.current && mountedRef.current) {
@@ -287,8 +289,10 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
     testResult,
   ])
 
-  // 组件卸载时 flush 待保存的变更，并标记 unmounted
+  // Strict Mode 会执行一次 setup → cleanup → setup；每次 setup 都恢复 mounted 状态。
+  // 正常“返回”会先走 handleCancel 的 await flush，再卸载，不依赖这里的异步兜底同步 UI。
   React.useEffect(() => {
+    mountedRef.current = true
     return () => {
       mountedRef.current = false
       if (autoSaveTimerRef.current) {
@@ -385,7 +389,7 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
   }
 
   /** 返回/关闭：编辑模式下先 flush 待保存变更 */
-  const handleCancel = async (): Promise<void> => {
+  const handleCancel = React.useCallback(async (): Promise<void> => {
     if (isEdit && autoSaveTimerRef.current) {
       clearTimeout(autoSaveTimerRef.current)
       autoSaveTimerRef.current = null
@@ -401,8 +405,15 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
         }
       }
     }
-    onCancel()
-  }
+    await onCancel()
+  }, [isEdit, onCancel])
+
+  const handledCloseRequestRef = React.useRef(closeRequestId ?? 0)
+  React.useEffect(() => {
+    if (closeRequestId === undefined || closeRequestId === handledCloseRequestRef.current) return
+    handledCloseRequestRef.current = closeRequestId
+    void handleCancel()
+  }, [closeRequestId, handleCancel])
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">

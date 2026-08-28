@@ -483,8 +483,8 @@ export function AgentSkillsView({
           entry={selectedMcp}
           workspaceSlug={data.workspaceSlug}
           onBack={() => setSelectedMcpName(null)}
-          onChanged={() => {
-            void data.refreshMcpConfig()
+          onChanged={async () => {
+            await data.refreshMcpConfig()
             bumpCapabilities((v) => v + 1)
           }}
         />

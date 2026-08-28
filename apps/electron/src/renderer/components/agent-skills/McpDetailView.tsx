@@ -17,7 +17,7 @@ export interface McpDetailViewProps {
   entry: McpServerEntry
   workspaceSlug: string
   onBack: () => void
-  onChanged: () => void
+  onChanged: () => void | Promise<void>
 }
 
 const TRANSPORT_LABELS: Record<string, string> = { stdio: 'stdio', http: 'HTTP', sse: 'SSE' }
@@ -30,12 +30,17 @@ export function McpDetailView({
   onChanged,
 }: McpDetailViewProps): React.ReactElement {
   const test = entry.lastTestResult
+  const [closeRequestId, setCloseRequestId] = React.useState(0)
+  const handleBack = React.useCallback(async (): Promise<void> => {
+    await onChanged()
+    onBack()
+  }, [onBack, onChanged])
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="shrink-0 border-b border-border/60 px-5 pb-4 pt-5">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" className="h-10 gap-1.5 px-2" type="button" onClick={onBack}>
+          <Button variant="ghost" size="sm" className="h-10 gap-1.5 px-2" type="button" onClick={() => setCloseRequestId((value) => value + 1)}>
             <ArrowLeft size={16} />
             返回 MCP
           </Button>
@@ -79,9 +84,10 @@ export function McpDetailView({
             server={{ name, entry }}
             workspaceSlug={workspaceSlug}
             showHeader={false}
-            onSaved={onBack}
+            closeRequestId={closeRequestId}
+            onSaved={handleBack}
             onChanged={onChanged}
-            onCancel={onBack}
+            onCancel={handleBack}
           />
         </div>
       </div>
