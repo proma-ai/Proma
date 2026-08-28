@@ -101,7 +101,7 @@ const ARK_CODING_PLAN_MODELS: ChannelModel[] = [
 /**
  * 一次性预设更新 ID。独立于配置 schema 版本，保证高版本配置也能收到新增候选模型。
  */
-const PRESET_MODEL_CANDIDATE_UPDATE_ID = 'model-candidates-v2'
+const PRESET_MODEL_CANDIDATE_UPDATE_ID = 'model-candidates-v3'
 
 /**
  * 本次预设更新向存量渠道追加的候选模型，默认禁用。
@@ -122,12 +122,15 @@ const PRESET_MODEL_CANDIDATES: Partial<Record<ProviderType, readonly ChannelMode
   ],
   zhipu: [
     { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
+    { id: 'glm-5.3-flash', name: 'GLM-5.3-Flash', enabled: false },
   ],
   'zhipu-coding': [
     { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
+    { id: 'glm-5.3-flash', name: 'GLM-5.3-Flash', enabled: false },
   ],
   'zhipu-coding-team': [
     { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
+    { id: 'glm-5.3-flash', name: 'GLM-5.3-Flash', enabled: false },
   ],
 }
 
