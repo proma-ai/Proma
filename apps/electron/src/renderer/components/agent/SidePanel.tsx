@@ -92,6 +92,7 @@ import { BrowserPanel } from '@/components/browser/BrowserPanel'
 import {
   getPreviewFileId,
   previewContentRefreshVersionAtom,
+  previewResolvedPathAtom,
   previewFileMapAtom,
   previewFilesMapAtom,
   previewPanelOpenMapAtom,
@@ -456,6 +457,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   const previewFilesMap = useAtomValue(previewFilesMapAtom)
   const setPreviewFilesMap = useSetAtom(previewFilesMapAtom)
   const setPreviewContentRefreshVersion = useSetAtom(previewContentRefreshVersionAtom)
+  const setPreviewResolvedPaths = useSetAtom(previewResolvedPathAtom)
   const previewOpenMap = useAtomValue(previewPanelOpenMapAtom)
   const setPreviewOpenMap = useSetAtom(previewPanelOpenMapAtom)
   const previewFiles = previewFilesMap.get(sessionId) ?? []
@@ -908,13 +910,25 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       next.delete(key)
       return next
     })
+    setPreviewFileMap((previous) => {
+      const next = new Map(previous)
+      next.set(sessionId, fallback)
+      return next
+    })
+    setPreviewResolvedPaths((previous) => {
+      const key = `${sessionId}\u0000${previewId}`
+      if (!previous.has(key)) return previous
+      const next = new Map(previous)
+      next.delete(key)
+      return next
+    })
     setPreviewOpenMap((previous) => {
       const next = new Map(previous)
       next.set(sessionId, fallback !== null)
       return next
     })
     if (getPreviewIdFromSidePanelTab(activeTab) === previewId) returnToPreviousTabAfterClose(getPreviewSidePanelTab(previewId))
-  }, [activeTab, previewFiles, returnToPreviousTabAfterClose, sessionId, setPreviewContentRefreshVersion, setPreviewFilesMap, setPreviewOpenMap])
+  }, [activeTab, previewFiles, returnToPreviousTabAfterClose, sessionId, setPreviewContentRefreshVersion, setPreviewFileMap, setPreviewFilesMap, setPreviewOpenMap, setPreviewResolvedPaths])
 
   const handleCloseChatTab = React.useCallback(() => {
     setSideChatMap((prev) => {

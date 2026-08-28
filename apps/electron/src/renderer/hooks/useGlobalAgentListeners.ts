@@ -71,6 +71,7 @@ import { channelsAtom } from '@/atoms/chat-atoms'
 import {
   getPreviewContentRefreshKey,
   previewContentRefreshVersionAtom,
+  previewResolvedPathAtom,
   previewFileMapAtom,
   previewFilesMapAtom,
   type PreviewFile,
@@ -105,7 +106,7 @@ const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Upda
 const GIT_MUTATING_SUBCOMMANDS = /\bgit\s+(commit|checkout|reset|restore|stash|clean|add|rm|mv|pull|merge|rebase|cherry-pick|revert|switch|am|apply)\b/
 
 function isAbsolutePath(path: string): boolean {
-  return path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)
+  return path.startsWith('/') || path.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(path)
 }
 
 function getParentDir(path: string): string {
@@ -880,13 +881,18 @@ export function useGlobalAgentListeners(): void {
       if (filePaths.length === 0) return
       const previewsBySession = store.get(previewFilesMapAtom)
       const sessionPaths = store.get(agentSessionPathMapAtom)
+      const resolvedPaths = store.get(previewResolvedPathAtom)
       const affectedKeys = new Set<string>()
 
       for (const [sessionId, previews] of previewsBySession) {
         const sessionPath = sessionPaths.get(sessionId)
         for (const preview of previews) {
-          if (!preview.previewOnly || !doesWorkspaceChangeAffectPreview(preview, filePaths, sessionPath, isWindows)) continue
-          affectedKeys.add(getPreviewContentRefreshKey(sessionId, preview))
+          if (!preview.previewOnly) continue
+          const key = getPreviewContentRefreshKey(sessionId, preview)
+          const resolvedPath = resolvedPaths.get(key)
+          const fileForMatch = resolvedPath ? { ...preview, filePath: resolvedPath } : preview
+          if (!doesWorkspaceChangeAffectPreview(fileForMatch, filePaths, sessionPath, isWindows)) continue
+          affectedKeys.add(key)
         }
       }
       if (affectedKeys.length === 0) return
@@ -940,6 +946,9 @@ export function useGlobalAgentListeners(): void {
           const runId = store.get(agentFileChangesCurrentRunAtom).get(sessionId)
             ?? String(streamingStates.get(sessionId)?.startedAt ?? Date.now())
           for (const changedPath of uniquelyMatchingPaths) {
+            // watcher 现在也会携带删除/目录路径；这些不应进入会话的文件改动记录。
+            const existingFile = await window.electronAPI.resolveAndReadFile(changedPath, { sessionId, unrestricted: true })
+            if (!existingFile) continue
             const previewFile = await buildWrittenFilePreviewInfo(sessionId, changedPath)
             if (previewFile.previewOnly) {
               store.set(agentNonGitFileChangesAtom, (prev) => {

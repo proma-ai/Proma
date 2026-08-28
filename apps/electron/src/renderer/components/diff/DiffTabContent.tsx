@@ -27,6 +27,7 @@ import {
   getPreviewContentRefreshKey,
   previewCodeWrapAtom,
   previewContentRefreshVersionAtom,
+  previewResolvedPathAtom,
   quotedSelectionMapAtom,
 } from '@/atoms/preview-atoms'
 import { markdownTocOpenAtom } from '@/atoms/markdown-toc'
@@ -370,6 +371,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   const [copied, setCopied] = React.useState(false)
   const setRefreshVersionMap = useSetAtom(agentDiffRefreshVersionAtom)
   const setPreviewContentRefreshVersionMap = useSetAtom(previewContentRefreshVersionAtom)
+  const setPreviewResolvedPaths = useSetAtom(previewResolvedPathAtom)
   const previewContentRefreshKey = React.useMemo(
     () => getPreviewContentRefreshKey(sessionId, { filePath, previewOnly, gitRoot, baseRef }),
     [baseRef, filePath, gitRoot, previewOnly, sessionId],
@@ -916,6 +918,14 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
             }
             const result = await window.electronAPI.resolveAndReadFile(filePath, fileAccess)
             if (cancelled) return
+            if (result?.resolvedPath) {
+              setPreviewResolvedPaths((previous) => {
+                if (previous.get(previewContentRefreshKey) === result.resolvedPath) return previous
+                const next = new Map(previous)
+                next.set(previewContentRefreshKey, result.resolvedPath)
+                return next
+              })
+            }
             if (result?.isBinary || result?.isTooLarge) {
               const reason = result.isTooLarge
                 ? '此文本文件超过 5 MB，无法安全进行内联预览，请使用默认应用打开。'
@@ -968,7 +978,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     load()
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filePath, dirPath, gitRoot, previewOnly, previewContentVersion, fileAccess, isPdf, isOfficePreview, isLegacyOffice, isImage, isHtml, sessionId, ext, getContentCacheKey])
+  }, [filePath, dirPath, gitRoot, previewOnly, previewContentRefreshKey, previewContentVersion, fileAccess, isPdf, isOfficePreview, isLegacyOffice, isImage, isHtml, sessionId, ext, getContentCacheKey, setPreviewResolvedPaths])
 
   // refreshVersion 触发的静默刷新：仅 diff 模式、内容有变化时才更新 state
   const prevRefreshRef = React.useRef(-1)
