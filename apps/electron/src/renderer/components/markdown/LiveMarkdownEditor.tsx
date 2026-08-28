@@ -52,32 +52,20 @@ interface MarkdownHeading {
  */
 function findMarkdownHeadings(state: EditorState): MarkdownHeading[] {
   const headings: MarkdownHeading[] = []
-  let fence: string | null = null
-  for (let number = 1; number <= state.doc.lines; number += 1) {
-    const line = state.doc.line(number)
-    const fenceMatch = line.text.match(/^ {0,3}(`{3,}|~{3,})/)
-    if (fenceMatch) {
-      const marker = fenceMatch[1]![0]!
-      if (!fence) fence = marker
-      else if (fence === marker) fence = null
-      continue
-    }
-    if (fence) continue
-
-    const atx = line.text.match(/^ {0,3}(#{1,6})(?:[ \t]+(.*?)\s*|[ \t]*)$/)
-    if (atx) {
-      const text = (atx[2] ?? '').replace(/[ \t]+#+[ \t]*$/, '').trim()
-      if (text) headings.push({ from: line.from, to: line.to, level: atx[1]!.length, text })
-      continue
-    }
-
-    if (number >= state.doc.lines || !line.text.trim()) continue
-    const underline = state.doc.line(number + 1)
-    const setext = underline.text.match(/^ {0,3}(=+|-+)\s*$/)
-    if (!setext) continue
-    headings.push({ from: line.from, to: line.to, level: setext[1]![0] === '=' ? 1 : 2, text: line.text.trim() })
-    number += 1
-  }
+  // 复用 CodeMirror 已维护的 Markdown 语法树：不会把 fenced code 中的 # 当标题，
+  // 也避免每次输入手写扫描整份文档和处理 fence 长度规则。
+  syntaxTree(state).iterate({
+    enter: ({ type, from }) => {
+      const match = /^(ATX|Setext)Heading([1-6])$/.exec(type.name)
+      if (!match) return
+      const line = state.doc.lineAt(from)
+      const text = match[1] === 'ATX'
+        ? line.text.replace(/^ {0,3}#{1,6}(?:[ \t]+|$)/, '').replace(/[ \t]+#+[ \t]*$/, '').trim()
+        : line.text.trim()
+      if (!text) return
+      headings.push({ from: line.from, to: line.to, level: Number(match[2]), text })
+    },
+  })
   return headings
 }
 
@@ -295,9 +283,10 @@ export const LiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, Liv
       if (instanceRef.current === localInstance) instanceRef.current = null
       mount.remove()
     }
-  // The editor owns its state after initialization; external reloads use the effect below.
+  // The editor owns its document state after initialization; external reloads use the effect below.
+  // `readOnly` is an ink-mde construction option, so changing it must recreate the instance.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [readOnly])
 
   React.useEffect(() => {
     const instance = instanceRef.current
