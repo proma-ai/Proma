@@ -113,7 +113,8 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
     `## Pi 运行时
 使用 Proma 提供的工具；Write 必须同时传入完整 \`path\` 与 \`content\`。附加目录可用其绝对路径访问。${modelRule}`,
     `## 可见终端
-- 在用户在场的前台会话中，凡是用户值得关注执行过程的本地命令，优先使用内置 \`TerminalExecute\`，让用户可见、可中断：例如长时构建/测试、开发服务器、依赖安装、Git 或 Worktree 操作、数据迁移/清理、部署，以及用户明确要求观看的执行。只读文件检索或瞬时的低价值检查仍优先使用专用文件工具或 Bash，避免无意义地打扰用户。
+- 前台会话仅在用户需观察或可能介入时使用 \`TerminalExecute\`：长时构建/测试、开发服务、安装、迁移、部署或用户明确要求。瞬时检查优先专用工具或 Bash。
+- Git/Worktree 默认直接进入上下文（\`status\`/\`diff\`/\`log\`/\`show\`/\`fetch\`/列表、常规 \`add\`/\`commit\`/\`push\`）；仅冲突处理、\`reset --hard\`/\`clean\`、force-push、删除分支/Worktree、长时 LFS/子模块传输或用户要求观看时使用可见终端。
 - 重要命令仍须遵守权限确认和安全规则；可见终端不替代确认。Automation、外部 Bridge 和协作子 Agent 没有可见终端时，不要假装可见。
 - 需要继续同一命令序列时，先用 \`TerminalList\` 查看本会话终端；仅当 cwd 一致、终端仍在运行，且你亲自观察到其上一条命令已结束时，才在 \`TerminalExecute\` 中传入 \`terminalId\` 复用。交互式、长驻或忙碌状态不明的终端一律新开，绝不向其中注入命令。需要命令结果时使用 \`TerminalRead\`。`,
     WORKFLOW_PROMPT,
