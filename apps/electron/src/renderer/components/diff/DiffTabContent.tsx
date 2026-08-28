@@ -871,6 +871,16 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     }
 
     async function load() {
+      const recordResolvedPreviewPath = (resolvedPath: string | undefined): void => {
+        if (!previewOnly || !resolvedPath) return
+        setPreviewResolvedPaths((previous) => {
+          if (previous.get(previewContentRefreshKey) === resolvedPath) return previous
+          const next = new Map(previous)
+          next.set(previewContentRefreshKey, resolvedPath)
+          return next
+        })
+      }
+
       try {
         let content = cached?.newContent ?? ''
         let old = cached?.oldContent ?? ''
@@ -879,6 +889,11 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
         if (!cached) {
           // 即使从「改动」列表点开，XLSX/PPTX 也应保留原有的 Office 内联预览。
           if (isOfficePreview) {
+            if (previewOnly) {
+              const resolvedPreview = await window.electronAPI.resolveAndReadFile(filePath, fileAccess)
+              if (cancelled) return
+              recordResolvedPreviewPath(resolvedPreview?.resolvedPath)
+            }
             const result = await window.electronAPI.officeToHtml(filePath, fileAccess)
             if (cancelled) return
             const html = DOMPurify.sanitize(result?.html ?? '')
@@ -891,6 +906,12 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
             return
           }
           if (previewOnly) {
+            // 所有纯预览类型先记录主进程实际解析到的路径。相对路径的多个候选根
+            // 中只有这个路径能使 watcher 刷新当前正在展示的文件。
+            const resolvedPreview = await window.electronAPI.resolveAndReadFile(filePath, fileAccess)
+            if (cancelled) return
+            recordResolvedPreviewPath(resolvedPreview?.resolvedPath)
+
             if (isPdf) {
               const result = await window.electronAPI.preparePdfPreview(filePath, fileAccess)
               if (cancelled) return
@@ -916,16 +937,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
             if (isLegacyOffice) {
               return
             }
-            const result = await window.electronAPI.resolveAndReadFile(filePath, fileAccess)
-            if (cancelled) return
-            if (result?.resolvedPath) {
-              setPreviewResolvedPaths((previous) => {
-                if (previous.get(previewContentRefreshKey) === result.resolvedPath) return previous
-                const next = new Map(previous)
-                next.set(previewContentRefreshKey, result.resolvedPath)
-                return next
-              })
-            }
+            const result = resolvedPreview
             if (result?.isBinary || result?.isTooLarge) {
               const reason = result.isTooLarge
                 ? '此文本文件超过 5 MB，无法安全进行内联预览，请使用默认应用打开。'
