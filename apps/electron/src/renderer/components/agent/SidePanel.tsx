@@ -89,7 +89,13 @@ import {
   browserStateMapAtom,
 } from '@/atoms/browser-atoms'
 import { BrowserPanel } from '@/components/browser/BrowserPanel'
-import { getPreviewFileId, previewFileMapAtom, previewFilesMapAtom, previewPanelOpenMapAtom } from '@/atoms/preview-atoms'
+import {
+  getPreviewFileId,
+  previewContentRefreshVersionAtom,
+  previewFileMapAtom,
+  previewFilesMapAtom,
+  previewPanelOpenMapAtom,
+} from '@/atoms/preview-atoms'
 import { PreviewPanel } from '@/components/diff/PreviewPanel'
 import { useOpenPreview } from '@/components/diff/preview-opener'
 import type { FileEntry, AgentPendingFile, AgentSessionMeta, SDKMessage, WorktreeInfo } from '@proma/shared'
@@ -449,6 +455,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   const setPreviewFileMap = useSetAtom(previewFileMapAtom)
   const previewFilesMap = useAtomValue(previewFilesMapAtom)
   const setPreviewFilesMap = useSetAtom(previewFilesMapAtom)
+  const setPreviewContentRefreshVersion = useSetAtom(previewContentRefreshVersionAtom)
   const previewOpenMap = useAtomValue(previewPanelOpenMapAtom)
   const setPreviewOpenMap = useSetAtom(previewPanelOpenMapAtom)
   const previewFiles = previewFilesMap.get(sessionId) ?? []
@@ -894,13 +901,20 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       return next
     })
     const fallback = remaining.at(-1) ?? null
+    setPreviewContentRefreshVersion((previous) => {
+      const key = `${sessionId}\u0000${previewId}`
+      if (!previous.has(key)) return previous
+      const next = new Map(previous)
+      next.delete(key)
+      return next
+    })
     setPreviewOpenMap((previous) => {
       const next = new Map(previous)
       next.set(sessionId, fallback !== null)
       return next
     })
     if (getPreviewIdFromSidePanelTab(activeTab) === previewId) returnToPreviousTabAfterClose(getPreviewSidePanelTab(previewId))
-  }, [activeTab, previewFiles, returnToPreviousTabAfterClose, sessionId, setPreviewFilesMap, setPreviewOpenMap])
+  }, [activeTab, previewFiles, returnToPreviousTabAfterClose, sessionId, setPreviewContentRefreshVersion, setPreviewFilesMap, setPreviewOpenMap])
 
   const handleCloseChatTab = React.useCallback(() => {
     setSideChatMap((prev) => {

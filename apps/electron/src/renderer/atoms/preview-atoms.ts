@@ -38,6 +38,17 @@ export function getPreviewFileId(file: PreviewFile): string {
   return [file.filePath, file.previewOnly ? 'preview' : 'diff', file.gitRoot ?? '', file.baseRef ?? ''].join('\u0000')
 }
 
+/** 同一会话中单个预览文件的内容刷新版本。 */
+export function getPreviewContentRefreshKey(sessionId: string, file: Pick<PreviewFile, 'filePath' | 'previewOnly' | 'gitRoot' | 'baseRef'>): string {
+  return `${sessionId}\u0000${getPreviewFileId(file)}`
+}
+
+/**
+ * 纯文件预览的内容刷新版本：按 session + 文件隔离。
+ * 不复用 Git diff 的会话级版本，避免无关文件改动重载当前预览。
+ */
+export const previewContentRefreshVersionAtom = atom<Map<string, number>>(new Map())
+
 /** 每会话预览面板开关 */
 export const previewPanelOpenMapAtom = atom<Map<string, boolean>>(new Map())
 

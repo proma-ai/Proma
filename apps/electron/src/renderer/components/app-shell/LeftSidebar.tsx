@@ -73,7 +73,12 @@ import {
   automationGroupOrderAtom,
 } from '@/atoms/agent-atoms'
 import type { SessionIndicatorStatus, WorkspaceComponentTab } from '@/atoms/agent-atoms'
-import { previewPanelOpenMapAtom, previewFileMapAtom, previewFilesMapAtom } from '@/atoms/preview-atoms'
+import {
+  previewPanelOpenMapAtom,
+  previewFileMapAtom,
+  previewFilesMapAtom,
+  previewContentRefreshVersionAtom,
+} from '@/atoms/preview-atoms'
 import { clearPreviewCacheForSession } from '@/components/diff/DiffTabContent'
 import {
   tabsAtom,
@@ -855,6 +860,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   const setPreviewPanelOpen = useSetAtom(previewPanelOpenMapAtom)
   const setPreviewFile = useSetAtom(previewFileMapAtom)
   const setPreviewFiles = useSetAtom(previewFilesMapAtom)
+  const setPreviewContentRefreshVersion = useSetAtom(previewContentRefreshVersionAtom)
   const setAgentSideChatMap = useSetAtom(agentSideChatMapAtom)
   const setDiffPanelTab = useSetAtom(agentDiffPanelTabAtom)
   const setDiffRefreshVersion = useSetAtom(agentDiffRefreshVersionAtom)
@@ -885,6 +891,14 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     setPreviewPanelOpen(deleteKey)
     setPreviewFile(deleteKey)
     setPreviewFiles(deleteKey)
+    setPreviewContentRefreshVersion((prev) => {
+      const prefix = `${id}\u0000`
+      const keys = [...prev.keys()].filter((key) => key.startsWith(prefix))
+      if (keys.length === 0) return prev
+      const next = new Map(prev)
+      for (const key of keys) next.delete(key)
+      return next
+    })
     setAgentSideChatMap((prev) => {
       let changed = false
       const map = new Map(prev)
@@ -959,7 +973,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     sessionExistsAtom.remove(id)
 
     clearPreviewCacheForSession(id)
-  }, [setConvModels, setConvContextLength, setConvThinking, setConvParallel, setConvPromptId, setPreviewPanelOpen, setPreviewFile, setDiffPanelTab, setDiffRefreshVersion, setDiffUnseen, setDiffUnseenFiles, setNonGitFileChanges, setFileChangesCurrentRun, setDiffData, setAgentSidePanelOpenMap, setSessionChannelMap, setSessionModelMap, setSessionPathMap, setSessionViewStateMap, setStreamingStates, setLiveMessagesMap, setSessionPendingFiles, store])
+  }, [setConvModels, setConvContextLength, setConvThinking, setConvParallel, setConvPromptId, setPreviewPanelOpen, setPreviewFile, setPreviewFiles, setPreviewContentRefreshVersion, setDiffPanelTab, setDiffRefreshVersion, setDiffUnseen, setDiffUnseenFiles, setNonGitFileChanges, setFileChangesCurrentRun, setDiffData, setAgentSidePanelOpenMap, setSessionChannelMap, setSessionModelMap, setSessionPathMap, setSessionViewStateMap, setStreamingStates, setLiveMessagesMap, setSessionPendingFiles, store])
 
   const currentWorkspaceSlug = React.useMemo(() => {
     if (!currentWorkspaceId) return null
