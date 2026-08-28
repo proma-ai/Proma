@@ -330,7 +330,7 @@ export function resolveReasoningProfile(input: ResolveReasoningProfileInput): Re
       ? DEEPSEEK_V4_PRO_PROFILE
       : /^(?:k3(?:-256k)?|kimi-k3)$/.test(modelId)
         ? K3_PROFILE
-        : modelId === 'glm-5.3'
+        : modelId === 'glm-5.3' || modelId === 'glm-5.3-flash'
           ? GLM_53_PROFILE
           : modelId === 'glm-5.2'
             ? GLM_52_PROFILE

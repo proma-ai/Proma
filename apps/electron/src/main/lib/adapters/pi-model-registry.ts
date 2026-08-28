@@ -54,11 +54,8 @@ const ZERO_MODEL_COST: PiModelCost = { input: 0, output: 0, cacheRead: 0, cacheW
 export const DEFAULT_CONTEXT_WINDOW = 200_000
 const DEFAULT_MAX_TOKENS = 64_000
 const VOLCENGINE_GLM_MAX_TOKENS = 128_000
-/**
- * 当 Pi catalog 尚未包含 GLM-5.3 时，补回其官方最大输出上限，避免落到默认 64K。
- * 智谱官方文档标注 GLM-5.3 最大输出 128K，与目录中 GLM-5.2 的 131072 同一口径。
- */
-const GLM_53_MAX_TOKENS = 131_072
+/** GLM-5.3 与 GLM-5.3-Flash 均支持 128K 最大输出。 */
+const GLM_53_FAMILY_MAX_TOKENS = 131_072
 const CODEX_BASE_URL = 'https://chatgpt.com/backend-api'
 const CODEX_MAX_TOKENS = 128_000
 /**
@@ -670,7 +667,8 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
   const glmModelId = input.model?.toLowerCase()
   const isVolcengineGlm5x = (input.provider === 'doubao' || input.provider === 'doubao-api' || input.provider === 'ark-coding-plan')
     && (glmModelId === 'glm-5.2' || glmModelId === 'glm-5.3')
-  const isCatalogMissingGlm53 = !catalogModel && glmModelId === 'glm-5.3'
+  const isCatalogMissingGlm53Family = !catalogModel
+    && (glmModelId === 'glm-5.3' || glmModelId === 'glm-5.3-flash')
   const catalogContextWindow = catalogModel?.contextWindow ?? DEFAULT_CONTEXT_WINDOW
   const inferredContextWindow = inferContextWindow(input.model) ?? DEFAULT_CONTEXT_WINDOW
   // 商业版官方渠道的需求仅限 Claude；GPT、Kimi 等官方模型即使共享 Anthropic
@@ -693,12 +691,12 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
     // Proma 后端下发的规格优先；其次 Codex 对齐策略，最后才是 catalog 与 shared inference 的较大值。
     contextWindow: configuredContextWindow ?? codexAlignedCapabilities?.contextWindow ?? Math.max(catalogContextWindow, inferredContextWindow),
     // 同样后端下发优先（configuredMaxTokens 只会来自 provider === 'proma' 的官方渠道，
-    // 与仅对 doubao / ark-coding-plan 生效的方舟上限天然互斥，这里显式保持一致的优先级顺序）。
-    // Pi 的智谱目录将 GLM-5.2 标为 131072，但火山方舟兼容端点上限为 128000；GLM-5.3 同理。
+    // 与仅对 doubao / ark-coding-plan 生效的方舟上限天然互斥）。Pi catalog 缺少时，
+    // GLM-5.3 与 GLM-5.3-Flash 均按官方 128K 输出上限注册。
     maxTokens: configuredMaxTokens
       ?? (isVolcengineGlm5x
         ? VOLCENGINE_GLM_MAX_TOKENS
-        : (catalogModel?.maxTokens ?? (isCatalogMissingGlm53 ? GLM_53_MAX_TOKENS : DEFAULT_MAX_TOKENS))),
+        : (catalogModel?.maxTokens ?? (isCatalogMissingGlm53Family ? GLM_53_FAMILY_MAX_TOKENS : DEFAULT_MAX_TOKENS))),
   }
 }
 
