@@ -895,7 +895,7 @@ export function useGlobalAgentListeners(): void {
           affectedKeys.add(key)
         }
       }
-      if (affectedKeys.length === 0) return
+      if (affectedKeys.size === 0) return
 
       // 单次 watcher 事件最多更新一次 atom，避免多个已打开预览导致连续渲染。
       store.set(previewContentRefreshVersionAtom, (previous) => {
