@@ -266,10 +266,14 @@ export function FileBrowser({ rootPath, roots, hideToolbar, embedded, hideEmpty,
     window.electronAPI.showInFolder(entry.path, access).catch(console.error)
   }, [access])
 
-  /** 在系统终端中打开文件夹 */
+  /** 优先在右侧工作区中以文件夹路径为 cwd 打开终端，独立使用时回退到系统终端。 */
   const handleOpenInTerminal = React.useCallback((entry: FileEntry) => {
+    if (onOpenDirectoryTerminal) {
+      onOpenDirectoryTerminal(entry.path, entry.name)
+      return
+    }
     window.electronAPI.openFolderInTerminal(entry.path, access).catch(console.error)
-  }, [access])
+  }, [access, onOpenDirectoryTerminal])
 
   /** 开始重命名 */
   const handleStartRename = React.useCallback((entry: FileEntry) => {
@@ -577,7 +581,8 @@ function FileTreeItem({
   const [children, setChildren] = React.useState<ScopedFileEntry[]>([])
   const [childrenLoaded, setChildrenLoaded] = React.useState(false)
   const rowRef = React.useRef<HTMLDivElement>(null)
-  const supportsTerminalFolderOpen = typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac')
+  const supportsTerminalFolderOpen = Boolean(onOpenDirectoryTerminal)
+    || (typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac'))
 
   // 从其他工作区 Tab 返回时，已展开的目录会重新挂载；补载其子项以恢复原来的树形视图。
   React.useEffect(() => {

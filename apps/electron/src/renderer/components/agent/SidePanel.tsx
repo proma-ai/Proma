@@ -1644,7 +1644,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
                     本地项目根目录不可用；当前会话文件仍可访问。
                   </div>
                 )}
-                <FileBrowser roots={visibleFileRoots} access={fileAccess} projectRootPath={isProjectRootUnavailable ? null : workspaceFilesPath} showSessionBadge={false} hideToolbar embedded hideEmpty={hasVisibleSessionAttachedItems || hasVisibleWorkspaceAttachedItems} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} />
+                <FileBrowser roots={visibleFileRoots} access={fileAccess} projectRootPath={isProjectRootUnavailable ? null : workspaceFilesPath} showSessionBadge={false} hideToolbar embedded hideEmpty={hasVisibleSessionAttachedItems || hasVisibleWorkspaceAttachedItems} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} onOpenDirectoryTerminal={handleOpenDirectoryTerminal} />
                 {showSessionFiles && workspaceSlug && (
                   <FileDropZone workspaceSlug={workspaceSlug} sessionId={sessionId} target="session" onFilesUploaded={handleFilesUploaded} onFilesAttached={handleSessionFilesAttached} onAttachFolder={handleAttachSessionFolder} onFoldersDropped={handleSessionFoldersDropped} />
                 )}
