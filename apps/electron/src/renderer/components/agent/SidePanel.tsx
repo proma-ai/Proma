@@ -1067,6 +1067,10 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     handleOpenTerminal(worktree.path, `终端 · ${worktree.branch}`)
   }, [handleOpenTerminal])
 
+  const handleOpenDirectoryTerminal = React.useCallback((directoryPath: string, directoryName: string) => {
+    handleOpenTerminal(directoryPath, `终端 · ${directoryName}`)
+  }, [handleOpenTerminal])
+
   const handleCloseBrowserTab = React.useCallback(async (browserTabId: string) => {
     try {
       const state = await window.electronAPI.closeAgentBrowserTab({ sessionId, tabId: browserTabId })
@@ -1231,16 +1235,16 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
             <AttachedFilesSection scope="session" showSessionBadge={false} attachedFiles={attachedFiles} onDetach={handleDetachFile} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
           )}
           {isSession && attachedDirs.length > 0 && (
-            <AttachedDirsSection scope="session" showSessionBadge={false} attachedDirs={attachedDirs} onDetach={handleDetachDirectory} refreshVersion={filesVersion} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
+            <AttachedDirsSection scope="session" showSessionBadge={false} attachedDirs={attachedDirs} onDetach={handleDetachDirectory} refreshVersion={filesVersion} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} onOpenDirectoryTerminal={handleOpenDirectoryTerminal} allowedPaths={basePathsRef.current} sessionId={sessionId} />
           )}
           {!isSession && wsAttachedFiles.length > 0 && (
             <AttachedFilesSection scope="project" attachedFiles={wsAttachedFiles} onDetach={handleDetachWorkspaceFile} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
           )}
           {!isSession && wsAttachedDirs.length > 0 && (
-            <AttachedDirsSection scope="project" attachedDirs={wsAttachedDirs} onDetach={handleDetachWorkspaceDirectory} refreshVersion={filesVersion} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
+            <AttachedDirsSection scope="project" attachedDirs={wsAttachedDirs} onDetach={handleDetachWorkspaceDirectory} refreshVersion={filesVersion} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} onOpenDirectoryTerminal={handleOpenDirectoryTerminal} allowedPaths={basePathsRef.current} sessionId={sessionId} />
           )}
           {!isSession && isProjectRootUnavailable && <div className="mx-2 my-2 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">本地项目根目录不可用；当前会话文件仍可访问。</div>}
-          <FileBrowser roots={roots} access={fileAccess} projectRootPath={isProjectRootUnavailable ? null : workspaceFilesPath} showSessionBadge={false} hideToolbar embedded hideEmpty={hasAttachedItems} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} />
+          <FileBrowser roots={roots} access={fileAccess} projectRootPath={isProjectRootUnavailable ? null : workspaceFilesPath} showSessionBadge={false} hideToolbar embedded hideEmpty={hasAttachedItems} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} onOpenDirectoryTerminal={handleOpenDirectoryTerminal} />
           {workspaceSlug && (isSession ? (
             <FileDropZone workspaceSlug={workspaceSlug} sessionId={sessionId} target="session" onFilesUploaded={handleFilesUploaded} onFilesAttached={handleSessionFilesAttached} onAttachFolder={handleAttachSessionFolder} onFoldersDropped={handleSessionFoldersDropped} />
           ) : !isProjectRootUnavailable ? (
@@ -1358,6 +1362,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
                 workspaceSlug={workspaceSlug || undefined}
                 worktreeRepoPaths={worktreeRepoPathsMemo}
                 onOpenWorktreeTerminal={handleOpenWorktreeTerminal}
+                onOpenDirectoryTerminal={handleOpenDirectoryTerminal}
                 nonGitFileChanges={nonGitFileChanges}
                 currentFileChangeRunId={fileChangesCurrentRunId}
                 onPlainFileClick={handleFilePreview}
@@ -1432,20 +1437,20 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
                         <AttachedFilesSection scope="project" attachedFiles={wsAttachedFiles} onDetach={handleDetachWorkspaceFile} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
                       )}
                       {showProjectFiles && wsAttachedDirs.length > 0 && (
-                        <AttachedDirsSection scope="project" attachedDirs={wsAttachedDirs} onDetach={handleDetachWorkspaceDirectory} refreshVersion={filesVersion} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
+                        <AttachedDirsSection scope="project" attachedDirs={wsAttachedDirs} onDetach={handleDetachWorkspaceDirectory} refreshVersion={filesVersion} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} onOpenDirectoryTerminal={handleOpenDirectoryTerminal} allowedPaths={basePathsRef.current} sessionId={sessionId} />
                       )}
                       {showSessionFiles && attachedFiles.length > 0 && (
                         <AttachedFilesSection scope="session" showSessionBadge={false} attachedFiles={attachedFiles} onDetach={handleDetachFile} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
                       )}
                       {showSessionFiles && attachedDirs.length > 0 && (
-                        <AttachedDirsSection scope="session" showSessionBadge={false} attachedDirs={attachedDirs} onDetach={handleDetachDirectory} refreshVersion={filesVersion} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
+                        <AttachedDirsSection scope="session" showSessionBadge={false} attachedDirs={attachedDirs} onDetach={handleDetachDirectory} refreshVersion={filesVersion} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} onOpenDirectoryTerminal={handleOpenDirectoryTerminal} allowedPaths={basePathsRef.current} sessionId={sessionId} />
                       )}
                       {showProjectFiles && isProjectRootUnavailable && (
                         <div className="mx-2 my-2 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
                           本地项目根目录不可用；当前会话文件仍可访问。
                         </div>
                       )}
-                      <FileBrowser roots={visibleFileRoots} access={fileAccess} projectRootPath={isProjectRootUnavailable ? null : workspaceFilesPath} showSessionBadge={false} hideToolbar embedded hideEmpty={hasVisibleSessionAttachedItems || hasVisibleWorkspaceAttachedItems} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} />
+                      <FileBrowser roots={visibleFileRoots} access={fileAccess} projectRootPath={isProjectRootUnavailable ? null : workspaceFilesPath} showSessionBadge={false} hideToolbar embedded hideEmpty={hasVisibleSessionAttachedItems || hasVisibleWorkspaceAttachedItems} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} onOpenDirectoryTerminal={handleOpenDirectoryTerminal} />
                       {showSessionFiles && workspaceSlug && (
                         <FileDropZone workspaceSlug={workspaceSlug} sessionId={sessionId} target="session" onFilesUploaded={handleFilesUploaded} onFilesAttached={handleSessionFilesAttached} onAttachFolder={handleAttachSessionFolder} onFoldersDropped={handleSessionFoldersDropped} />
                       )}
@@ -1592,13 +1597,15 @@ interface AttachedDirsSectionProps {
   refreshVersion: number
   onAddToChat?: (entry: FileEntry) => void
   onFilePreview?: (filePath: string) => void
+  /** 在右侧工作区中以指定目录为 cwd 打开终端。 */
+  onOpenDirectoryTerminal?: (directoryPath: string, directoryName: string) => void
   /** 所有允许访问的路径（传给 IPC 做路径校验） */
   allowedPaths?: string[]
   sessionId: string
 }
 
 /** 附加目录区域：统一管理所有子项的选中状态 */
-function AttachedDirsSection({ title, scope = 'project', showSessionBadge = true, attachedDirs, onDetach, refreshVersion, onAddToChat, onFilePreview, allowedPaths, sessionId }: AttachedDirsSectionProps): React.ReactElement {
+function AttachedDirsSection({ title, scope = 'project', showSessionBadge = true, attachedDirs, onDetach, refreshVersion, onAddToChat, onFilePreview, onOpenDirectoryTerminal, allowedPaths, sessionId }: AttachedDirsSectionProps): React.ReactElement {
   const [selectedPaths, setSelectedPaths] = React.useState<Set<string>>(new Set())
 
   // ===== 接入搜索点击触发的 reveal：附加目录文件搜到后，需要展开/选中目标 =====
@@ -1660,6 +1667,7 @@ function AttachedDirsSection({ title, scope = 'project', showSessionBadge = true
             refreshVersion={refreshVersion}
             onAddToChat={onAddToChat}
             onFilePreview={onFilePreview}
+            onOpenDirectoryTerminal={onOpenDirectoryTerminal}
             allowedPaths={allowedPaths}
             sessionId={sessionId}
             scope={scope}
@@ -1683,6 +1691,7 @@ interface AttachedDirTreeProps {
   refreshVersion: number
   onAddToChat?: (entry: FileEntry) => void
   onFilePreview?: (filePath: string) => void
+  onOpenDirectoryTerminal?: (directoryPath: string, directoryName: string) => void
   allowedPaths?: string[]
   sessionId: string
   scope: 'project' | 'session'
@@ -1693,7 +1702,7 @@ interface AttachedDirTreeProps {
   revealTs?: number
 }
 
-function AttachedDirTree({ dirPath, onDetach, selectedPaths, onSelect, refreshVersion, onAddToChat, onFilePreview, allowedPaths, sessionId, scope, showSessionBadge, revealTarget = null, revealTs = 0 }: AttachedDirTreeProps): React.ReactElement {
+function AttachedDirTree({ dirPath, onDetach, selectedPaths, onSelect, refreshVersion, onAddToChat, onFilePreview, onOpenDirectoryTerminal, allowedPaths, sessionId, scope, showSessionBadge, revealTarget = null, revealTs = 0 }: AttachedDirTreeProps): React.ReactElement {
   const [expanded, setExpanded] = React.useState(false)
   const [children, setChildren] = React.useState<FileEntry[]>([])
   const [loaded, setLoaded] = React.useState(false)
@@ -1797,6 +1806,25 @@ function AttachedDirTree({ dirPath, onDetach, selectedPaths, onSelect, refreshVe
         {showSessionBadge && scope === 'session' && (
           <span className="relative z-10 flex-shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">会话文件</span>
         )}
+        {onOpenDirectoryTerminal && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label={`在 ${dirName} 打开终端`}
+                title={`在 ${dirName} 打开终端`}
+                className="relative z-10 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-[background-color,color,opacity,transform] hover:bg-accent/70 hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100 active:scale-[0.96]"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onOpenDirectoryTerminal(dirPath, dirName)
+                }}
+              >
+                <SquareTerminal className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="left">在右侧标签中打开终端</TooltipContent>
+          </Tooltip>
+        )}
         <Button
           type="button"
           variant="ghost"
@@ -1823,7 +1851,7 @@ function AttachedDirTree({ dirPath, onDetach, selectedPaths, onSelect, refreshVe
             </div>
           )}
           {children.map((child) => (
-            <AttachedDirItem key={child.path} entry={child} depth={1} selectedPaths={selectedPaths} onSelect={onSelect} refreshVersion={refreshVersion} onAddToChat={onAddToChat} onFilePreview={onFilePreview} allowedPaths={allowedPaths} sessionId={sessionId} scope={scope} revealTarget={revealTarget} revealTs={revealTs} revealAncestors={revealAncestors} />
+            <AttachedDirItem key={child.path} entry={child} depth={1} selectedPaths={selectedPaths} onSelect={onSelect} refreshVersion={refreshVersion} onAddToChat={onAddToChat} onFilePreview={onFilePreview} onOpenDirectoryTerminal={onOpenDirectoryTerminal} allowedPaths={allowedPaths} sessionId={sessionId} scope={scope} revealTarget={revealTarget} revealTs={revealTs} revealAncestors={revealAncestors} />
           ))}
         </div>
       )}
@@ -1839,6 +1867,7 @@ interface AttachedDirItemProps {
   refreshVersion: number
   onAddToChat?: (entry: FileEntry) => void
   onFilePreview?: (filePath: string) => void
+  onOpenDirectoryTerminal?: (directoryPath: string, directoryName: string) => void
   allowedPaths?: string[]
   sessionId: string
   scope: 'project' | 'session'
@@ -1850,7 +1879,7 @@ interface AttachedDirItemProps {
   revealAncestors?: Set<string>
 }
 
-function AttachedDirItem({ entry, depth, selectedPaths, onSelect, refreshVersion, onAddToChat, onFilePreview, allowedPaths, sessionId, scope, revealTarget = null, revealTs = 0, revealAncestors }: AttachedDirItemProps): React.ReactElement {
+function AttachedDirItem({ entry, depth, selectedPaths, onSelect, refreshVersion, onAddToChat, onFilePreview, onOpenDirectoryTerminal, allowedPaths, sessionId, scope, revealTarget = null, revealTs = 0, revealAncestors }: AttachedDirItemProps): React.ReactElement {
   const [expanded, setExpanded] = React.useState(false)
   const [children, setChildren] = React.useState<FileEntry[]>([])
   const [loaded, setLoaded] = React.useState(false)
@@ -2068,6 +2097,26 @@ function AttachedDirItem({ entry, depth, selectedPaths, onSelect, refreshVersion
           <span className="relative z-10 truncate text-xs flex-1">{currentName}</span>
         )}
 
+        {entry.isDirectory && onOpenDirectoryTerminal && !isRenaming && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label={`在 ${currentName} 打开终端`}
+                title={`在 ${currentName} 打开终端`}
+                className="relative z-10 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-[background-color,color,opacity,transform] hover:bg-accent/70 hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100 active:scale-[0.96]"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onOpenDirectoryTerminal(currentPath, currentName)
+                }}
+              >
+                <SquareTerminal className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="left">在右侧标签中打开终端</TooltipContent>
+          </Tooltip>
+        )}
+
         {/* 右侧操作按钮占位 */}
         <div
           className="relative z-10 flex-shrink-0 mr-1"
@@ -2167,7 +2216,7 @@ function AttachedDirItem({ entry, depth, selectedPaths, onSelect, refreshVersion
             </div>
           )}
           {children.map((child) => (
-            <AttachedDirItem key={child.path} entry={child} depth={depth + 1} selectedPaths={selectedPaths} onSelect={onSelect} refreshVersion={refreshVersion} onAddToChat={onAddToChat} onFilePreview={onFilePreview} allowedPaths={allowedPaths} sessionId={sessionId} scope={scope} revealTarget={revealTarget} revealTs={revealTs} revealAncestors={revealAncestors} />
+            <AttachedDirItem key={child.path} entry={child} depth={depth + 1} selectedPaths={selectedPaths} onSelect={onSelect} refreshVersion={refreshVersion} onAddToChat={onAddToChat} onFilePreview={onFilePreview} onOpenDirectoryTerminal={onOpenDirectoryTerminal} allowedPaths={allowedPaths} sessionId={sessionId} scope={scope} revealTarget={revealTarget} revealTs={revealTs} revealAncestors={revealAncestors} />
           ))}
         </div>
       )}

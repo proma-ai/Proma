@@ -121,6 +121,8 @@ interface FileBrowserProps {
   onAddToChat?: (entry: FileEntry) => void
   /** 单击文件时在内联预览面板中显示（替代外部窗口预览） */
   onFilePreview?: (filePath: string) => void
+  /** 在右侧工作区中以指定目录为 cwd 打开终端。 */
+  onOpenDirectoryTerminal?: (directoryPath: string, directoryName: string) => void
 }
 
 function sortEntries(entries: ScopedFileEntry[]): ScopedFileEntry[] {
@@ -138,7 +140,7 @@ function getFileBrowserStateKey(sessionId: string | null, roots: readonly FileBr
   return `${sessionId ?? 'standalone'}\u0002${rootKey}`
 }
 
-export function FileBrowser({ rootPath, roots, hideToolbar, embedded, hideEmpty, access, projectRootPath, showSessionBadge = true, onAddToChat, onFilePreview }: FileBrowserProps): React.ReactElement {
+export function FileBrowser({ rootPath, roots, hideToolbar, embedded, hideEmpty, access, projectRootPath, showSessionBadge = true, onAddToChat, onFilePreview, onOpenDirectoryTerminal }: FileBrowserProps): React.ReactElement {
   const browserRoots = React.useMemo<FileBrowserRoot[]>(() => {
     if (roots && roots.length > 0) return roots.filter((root) => Boolean(root.path))
     return rootPath ? [{ path: rootPath, scope: 'project' }] : []
@@ -407,6 +409,7 @@ export function FileBrowser({ rootPath, roots, hideToolbar, embedded, hideEmpty,
           onSelect={handleSelect}
           onShowInFolder={handleShowInFolder}
           onOpenInTerminal={handleOpenInTerminal}
+          onOpenDirectoryTerminal={onOpenDirectoryTerminal}
           onStartRename={handleStartRename}
           onCancelRename={handleCancelRename}
           onRename={handleRename}
@@ -517,6 +520,7 @@ interface FileTreeItemProps {
   onSelect: (entry: FileEntry, event: React.MouseEvent) => void
   onShowInFolder: (entry: FileEntry) => void
   onOpenInTerminal: (entry: FileEntry) => void
+  onOpenDirectoryTerminal?: (directoryPath: string, directoryName: string) => void
   onStartRename: (entry: FileEntry) => void
   onCancelRename: () => void
   onRename: (filePath: string, newName: string) => Promise<string | null>
@@ -547,6 +551,7 @@ function FileTreeItem({
   onSelect,
   onShowInFolder,
   onOpenInTerminal,
+  onOpenDirectoryTerminal,
   onStartRename,
   onCancelRename,
   onRename,
@@ -887,6 +892,26 @@ function FileTreeItem({
           </>
         )}
 
+        {entry.isDirectory && onOpenDirectoryTerminal && !isRenaming && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label={`在 ${entry.name} 打开终端`}
+                title={`在 ${entry.name} 打开终端`}
+                className="relative z-10 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-[background-color,color,opacity,transform] hover:bg-accent/70 hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100 active:scale-[0.96]"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onOpenDirectoryTerminal(entry.path, entry.name)
+                }}
+              >
+                <Terminal className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="left">在右侧标签中打开终端</TooltipContent>
+          </Tooltip>
+        )}
+
         {/* 右侧操作按钮占位（始终占位，避免行宽跳动） */}
         <div
           className="relative z-10 flex-shrink-0 mr-1"
@@ -1045,6 +1070,7 @@ function FileTreeItem({
               onSelect={onSelect}
               onShowInFolder={onShowInFolder}
               onOpenInTerminal={onOpenInTerminal}
+              onOpenDirectoryTerminal={onOpenDirectoryTerminal}
               onStartRename={onStartRename}
               onCancelRename={onCancelRename}
               onRename={onRename}
