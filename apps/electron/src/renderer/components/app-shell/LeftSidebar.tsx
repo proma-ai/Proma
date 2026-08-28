@@ -250,11 +250,11 @@ function WorkspaceComponentSidebarEntry({ label, icon, active, onClick, badge }:
         'group flex w-full items-center justify-between rounded-md px-3 py-2 text-[13px] transition-colors duration-100 titlebar-no-drag',
         active
           ? 'bg-accent-foreground/[0.10] text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
-          : 'text-foreground/60 hover:bg-accent-foreground/[0.08] hover:text-foreground',
+          : 'text-foreground/75 hover:bg-accent-foreground/[0.08] hover:text-foreground',
       )}
     >
       <span className="flex min-w-0 items-center gap-3">
-        <span className={cn('flex size-[18px] shrink-0 items-center justify-center', active ? 'text-accent-foreground' : 'text-foreground/45')}>
+        <span className={cn('flex size-[18px] shrink-0 items-center justify-center', active ? 'text-accent-foreground' : 'text-foreground/60')}>
           {icon}
         </span>
         <span className="truncate">{label}</span>
@@ -3615,7 +3615,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
               'flex h-5 min-w-[22px] items-center justify-center rounded-full px-1.5 text-[11px] font-medium tabular-nums',
               isWorkspaceComponentActive('automations')
                 ? 'bg-accent-foreground/[0.26] text-primary-foreground'
-                : 'bg-foreground/[0.045] text-foreground/[0.42] group-hover:text-foreground/65',
+                : 'bg-foreground/[0.045] text-foreground/60 group-hover:text-foreground/75',
             )}>{formatAutomationCount(automationCount)}</span>
           ) : undefined}
         />
