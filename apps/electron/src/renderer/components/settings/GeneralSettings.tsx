@@ -40,11 +40,9 @@ import {
 import {
   longTextPasteAsAttachmentEnabledAtom,
   richTextRenderingEnabledAtom,
-  stickyUserMessageEnabledAtom,
   sessionHoverPreviewEnabledAtom,
   updateLongTextPasteAsAttachmentEnabled,
   updateRichTextRenderingEnabled,
-  updateStickyUserMessageEnabled,
   updateSessionHoverPreviewEnabled,
 } from '@/atoms/ui-preferences'
 import { cn } from '@/lib/utils'
@@ -67,7 +65,6 @@ export function GeneralSettings(): React.ReactElement {
   const [notificationsEnabled, setNotificationsEnabled] = useAtom(notificationsEnabledAtom)
   const [notificationSoundEnabled, setNotificationSoundEnabled] = useAtom(notificationSoundEnabledAtom)
   const [notificationSounds, setNotificationSounds] = useAtom(notificationSoundsAtom)
-  const [stickyUserMessageEnabled, setStickyUserMessageEnabled] = useAtom(stickyUserMessageEnabledAtom)
   const [longTextPasteAsAttachmentEnabled, setLongTextPasteAsAttachmentEnabled] = useAtom(longTextPasteAsAttachmentEnabledAtom)
   const [richTextRenderingEnabled, setRichTextRenderingEnabled] = useAtom(richTextRenderingEnabledAtom)
   const [sessionHoverPreviewEnabled, setSessionHoverPreviewEnabled] = useAtom(sessionHoverPreviewEnabledAtom)
@@ -356,15 +353,6 @@ export function GeneralSettings(): React.ReactElement {
               </SelectContent>
             </Select>
           </SettingsRow>
-          <SettingsToggle
-            label="消息悬浮置顶条"
-            description="滚动浏览对话时，在顶部显示最近的用户消息摘要"
-            checked={stickyUserMessageEnabled}
-            onCheckedChange={(checked) => {
-              setStickyUserMessageEnabled(checked)
-              updateStickyUserMessageEnabled(checked)
-            }}
-          />
           <SettingsToggle
             label="长文本粘贴转附件"
             description="开启后，输入框粘贴超过 2000 字的文本会自动生成可预览编辑的附件"

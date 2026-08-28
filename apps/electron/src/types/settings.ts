@@ -320,8 +320,6 @@ export interface AppSettings {
   sendWithCmdEnter?: boolean
   /** 用户自定义快捷键覆盖 */
   shortcutOverrides?: ShortcutOverrides
-  /** 是否显示用户消息悬浮置顶条（默认 true） */
-  stickyUserMessageEnabled?: boolean
   /** 左侧会话列表悬浮预览迷你地图（默认 false，需手动开启） */
   sessionHoverPreviewEnabled?: boolean
   /** 粘贴超过阈值的长文本时是否自动转为附件（默认 false） */
