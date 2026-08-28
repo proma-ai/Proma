@@ -1,11 +1,11 @@
 /**
  * McpCard — Agent 技能视图中的 MCP 服务器卡片（商店风）
  *
- * 整卡可点击打开编辑抽屉；右上角开关独立响应（阻止冒泡）。
+ * 整卡可点击在当前 MCP 工作区中打开内部详情页；右上角开关独立响应（阻止冒泡）。
  */
 
 import * as React from 'react'
-import { Plug, CheckCircle2, XCircle, Trash2, ArrowUpRight, CircleDashed } from 'lucide-react'
+import { Plug, CheckCircle2, XCircle, Trash2, CircleDashed } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
@@ -54,7 +54,7 @@ export function McpCard({
         }
       }}
       className={cn(
-        'group relative flex min-h-[172px] flex-col gap-3 rounded-lg bg-card p-4 text-left shadow-md cursor-pointer',
+        'group relative flex flex-col gap-2.5 rounded-lg bg-card px-4 pb-3 pt-4 text-left shadow-md cursor-pointer',
         'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
         !entry.enabled && 'bg-muted/35',
       )}
@@ -85,7 +85,7 @@ export function McpCard({
         )}
       </div>
 
-      <div className="mt-auto flex items-center gap-2 pt-3">
+      <div className="flex items-center gap-2 border-t border-border/50 pt-2.5">
         {statusLabel && (
           <span
             className={cn(
@@ -117,34 +117,20 @@ export function McpCard({
             内置托管
           </span>
         )}
-        <div className="ml-auto flex items-center gap-1">
-          {!isBuiltin && !readOnly && onRequestDelete && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); onRequestDelete() }}
-                  className="flex size-8 items-center justify-center rounded-full text-muted-foreground/50 opacity-0 transition-[color,opacity,background-color] hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top">删除</TooltipContent>
-            </Tooltip>
-          )}
+        {!isBuiltin && !readOnly && onRequestDelete && (
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
-                onClick={(e) => { e.stopPropagation(); onOpen() }}
-                className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted text-foreground/65 transition-[transform,background-color,color] hover:bg-accent hover:text-foreground active:scale-[0.96] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                onClick={(e) => { e.stopPropagation(); onRequestDelete() }}
+                className="ml-auto flex size-8 items-center justify-center rounded-md text-muted-foreground/50 opacity-0 transition-[color,opacity,background-color] hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
               >
-                <ArrowUpRight size={17} />
+                <Trash2 size={14} />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="top">{readOnly ? '查看详情' : '查看配置'}</TooltipContent>
+            <TooltipContent side="top">删除</TooltipContent>
           </Tooltip>
-        </div>
+        )}
       </div>
     </div>
   )

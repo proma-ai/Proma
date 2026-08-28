@@ -11,7 +11,7 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Star, Settings, Plus, CirclePlus, Trash2, Pencil, PanelLeft, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, FolderInput, FolderPlus, GripVertical, Clock, CalendarDays, ChevronRight, ChevronDown, ChevronUp, Blocks, Brain, ListTodo, ServerCog, GitBranch, Download, Loader2, RotateCw } from 'lucide-react'
+import { Pin, PinOff, Star, Settings, Plus, CirclePlus, Trash2, Pencil, PanelLeft, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, FolderInput, FolderPlus, GripVertical, Clock, CalendarDays, ChevronRight, ChevronDown, ChevronUp, Blocks, Brain, ListTodo, GitBranch, Download, Loader2, RotateCw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
@@ -1097,6 +1097,18 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     }
     setActiveView('conversations')
     openWorkspaceComponent(component)
+  }, [currentAgentSessionId, mode, openWorkspaceComponent, setActiveView, setAgentSkillsTab])
+
+  /** MCP/Skills 为同一低频管理入口；在右侧工作区中一次展开两个独立 Tab，保留 Skills 为当前焦点。 */
+  const handleOpenMcpSkillsComponents = React.useCallback((): void => {
+    if (mode !== 'agent' || !currentAgentSessionId) {
+      setAgentSkillsTab('skills')
+      setActiveView('agent-skills')
+      return
+    }
+    setActiveView('conversations')
+    openWorkspaceComponent('mcp')
+    openWorkspaceComponent('skills')
   }, [currentAgentSessionId, mode, openWorkspaceComponent, setActiveView, setAgentSkillsTab])
 
   // 切换模式时重置归档视图
@@ -3376,27 +3388,19 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
               </DropdownMenuItem>
               {mode === "agent" && (
                 <>
-                  <DropdownMenuSeparator />
                   <DropdownMenuItem
-                    aria-current={isWorkspaceComponentActive("skills") ? "page" : undefined}
-                    className={cn(isWorkspaceComponentActive("skills") && "bg-accent/70 text-accent-foreground")}
-                    onSelect={() => handleOpenCapabilityComponent("skills")}
+                    aria-current={isWorkspaceComponentActive("skills") || isWorkspaceComponentActive("mcp") ? "page" : undefined}
+                    className={cn((isWorkspaceComponentActive("skills") || isWorkspaceComponentActive("mcp")) && "bg-accent/70 text-accent-foreground")}
+                    onSelect={handleOpenMcpSkillsComponents}
                   >
                     <Blocks />
-                    Skills
+                    MCP/Skills
                     {(capabilities?.skills.filter((skill) => skill.hasUpdate)
                       .length ?? 0) > 0 && (
                       <span className="ml-auto size-2 rounded-full bg-blue-500" />
                     )}
                   </DropdownMenuItem>
-                  <DropdownMenuItem
-                    aria-current={isWorkspaceComponentActive("mcp") ? "page" : undefined}
-                    className={cn(isWorkspaceComponentActive("mcp") && "bg-accent/70 text-accent-foreground")}
-                    onSelect={() => handleOpenCapabilityComponent("mcp")}
-                  >
-                    <ServerCog />
-                    MCP
-                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem
                     aria-current={isWorkspaceComponentActive("memory") ? "page" : undefined}
                     className={cn(isWorkspaceComponentActive("memory") && "bg-accent/70 text-accent-foreground")}
@@ -3547,20 +3551,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       </div>
 
       {mode === 'agent' && (
-        <div className="space-y-0.5 px-3 pb-0.5">
-          <WorkspaceComponentSidebarEntry
-            label="Skills"
-            icon={<Blocks size={16} />}
-            active={isWorkspaceComponentActive('skills')}
-            onClick={() => handleOpenCapabilityComponent('skills')}
-            badge={(capabilities?.skills.filter((skill) => skill.hasUpdate).length ?? 0) > 0 ? <span className="size-2.5 rounded-full bg-blue-500" /> : undefined}
-          />
-          <WorkspaceComponentSidebarEntry
-            label="MCP"
-            icon={<ServerCog size={16} />}
-            active={isWorkspaceComponentActive('mcp')}
-            onClick={() => handleOpenCapabilityComponent('mcp')}
-          />
+        <div className="px-3 pb-0.5">
           <WorkspaceComponentSidebarEntry
             label="项目记忆"
             icon={<Brain size={16} />}
@@ -3569,7 +3560,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
           />
         </div>
       )}
-      <div className="px-3 pb-0.5">
+      <div className="space-y-0.5 px-3 pb-0.5">
         <WorkspaceComponentSidebarEntry
           label="定时任务"
           icon={<Clock size={16} />}
@@ -3584,6 +3575,15 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
             )}>{formatAutomationCount(automationCount)}</span>
           ) : undefined}
         />
+        {mode === 'agent' && (
+          <WorkspaceComponentSidebarEntry
+            label="MCP/Skills"
+            icon={<Blocks size={16} />}
+            active={isWorkspaceComponentActive('skills') || isWorkspaceComponentActive('mcp')}
+            onClick={handleOpenMcpSkillsComponents}
+            badge={(capabilities?.skills.filter((skill) => skill.hasUpdate).length ?? 0) > 0 ? <span className="size-2.5 rounded-full bg-blue-500" /> : undefined}
+          />
+        )}
       </div>
 
       {/* Chat 模式 active 视图：置顶 + 对话历史，结构与 Agent active 视图保持一致 */}

@@ -33,7 +33,7 @@ import { useAgentSkillsData } from './useAgentSkillsData'
 import { SkillCard } from './SkillCard'
 import { McpCard } from './McpCard'
 import { SkillDetailView } from './SkillDetailView'
-import { McpDetailSheet } from './McpDetailSheet'
+import { McpDetailView } from './McpDetailView'
 import { ImportSkillDialog } from './ImportSkillDialog'
 import { WorkspaceMemoryTab } from './WorkspaceMemoryTab'
 import { groupSkills } from './skillGrouping'
@@ -169,8 +169,7 @@ export function AgentSkillsView({
   const tab = embedded && componentTab ? componentTab : storedTab
   const [search, setSearch] = React.useState('')
   const [selectedSkillSlug, setSelectedSkillSlug] = React.useState<string | null>(null)
-  const [mcpSheetOpen, setMcpSheetOpen] = React.useState(false)
-  const [editingMcp, setEditingMcp] = React.useState<{ name: string; entry: McpServerEntry } | null>(null)
+  const [selectedMcpName, setSelectedMcpName] = React.useState<string | null>(null)
   const [showImport, setShowImport] = React.useState(false)
   const [wsPopoverOpen, setWsPopoverOpen] = React.useState(false)
   const [pendingDeleteSkill, setPendingDeleteSkill] = React.useState<SkillMeta | null>(null)
@@ -239,6 +238,7 @@ export function AgentSkillsView({
 
   const selectedSkill = data.skills.find((s) => s.slug === selectedSkillSlug) ?? null
   const selectedIsBuiltin = selectedSkill ? data.defaultSkillSlugs.has(selectedSkill.slug) : false
+  const selectedMcp = selectedMcpName ? data.mcpConfig.servers[selectedMcpName] ?? null : null
 
   React.useEffect(() => {
     if (!skillDetailNavigation || data.loading) return
@@ -314,8 +314,7 @@ export function AgentSkillsView({
 
     const existing = data.mcpConfig.servers[integration.serverName]
     if (existing) {
-      setEditingMcp({ name: integration.serverName, entry: existing })
-      setMcpSheetOpen(true)
+      setSelectedMcpName(integration.serverName)
       return
     }
     setInstallingCatalogMcpId(integration.id)
@@ -471,6 +470,24 @@ export function AgentSkillsView({
           onChanged={() => bumpCapabilities((v) => v + 1)}
         />
         {skillDeleteDialog}
+      </div>
+    )
+  }
+
+  if (selectedMcpName && selectedMcp) {
+    return (
+      <div className="flex h-full min-h-0 flex-col overflow-hidden">
+        <McpDetailView
+          key={selectedMcpName}
+          name={selectedMcpName}
+          entry={selectedMcp}
+          workspaceSlug={data.workspaceSlug}
+          onBack={() => setSelectedMcpName(null)}
+          onChanged={() => {
+            void data.refreshMcpConfig()
+            bumpCapabilities((v) => v + 1)
+          }}
+        />
       </div>
     )
   }
@@ -681,7 +698,7 @@ export function AgentSkillsView({
               connectedCliIds={new Set(data.cliIntegrationStatuses.filter((status) => status.connected && status.enabled).map((status) => status.id))}
               cliIntegrationProbeState={data.cliIntegrationProbeState}
               installingCatalogMcpId={installingCatalogMcpId}
-              onOpen={(name, entry) => { setEditingMcp({ name, entry }); setMcpSheetOpen(true) }}
+              onOpen={(name) => setSelectedMcpName(name)}
               onToggle={data.toggleMcp}
               onRequestDelete={setPendingDeleteMcpName}
               onInstallCatalogMcp={(integration) => { void installCatalogMcp(integration) }}
@@ -713,24 +730,6 @@ export function AgentSkillsView({
           await data.deleteMcp(pendingDeleteMcpName)
           setIsDeletingMcp(false)
           setPendingDeleteMcpName(null)
-        }}
-      />
-
-      <McpDetailSheet
-        open={mcpSheetOpen}
-        server={editingMcp}
-        workspaceSlug={data.workspaceSlug}
-        onOpenChange={(open) => {
-          setMcpSheetOpen(open)
-          if (!open) {
-            void data.refreshMcpConfig()
-            bumpCapabilities((v) => v + 1)
-          }
-        }}
-        onSaved={() => setMcpSheetOpen(false)}
-        onChanged={() => {
-          void data.refreshMcpConfig()
-          bumpCapabilities((v) => v + 1)
         }}
       />
 
