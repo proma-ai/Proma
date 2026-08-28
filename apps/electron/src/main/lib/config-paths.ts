@@ -216,6 +216,15 @@ export function getChatToolsConfigPath(): string {
 }
 
 /**
+ * 获取第三方 MCP OAuth 凭据的加密索引路径。
+ *
+ * 文件只保存 Electron safeStorage 加密后的 payload，不会写入任何工作区 mcp.json。
+ */
+export function getMcpOAuthCredentialsPath(): string {
+  return join(getConfigDir(), 'mcp-oauth-credentials.json')
+}
+
+/**
  * 获取 Agent 会话索引文件路径
  *
  * @returns ~/.proma/agent-sessions.json

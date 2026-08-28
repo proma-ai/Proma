@@ -359,7 +359,7 @@ export function SettingsPanel({
             >
               <ArrowLeft size={16} />
               <span>返回</span>
-              <span className="ml-auto hidden group-hover:inline-flex">
+              <span aria-hidden="true" className="ml-auto inline-flex opacity-0 transition-opacity group-hover:opacity-100">
                 <ShortcutKeycaps accelerator="Esc" />
               </span>
             </button>

@@ -89,6 +89,12 @@ export interface BrowserSessionClosed {
 
 export type BrowserStateChange = BrowserViewState | BrowserSessionClosed
 
+/** 原生 WebContentsView 获得用户焦点；renderer 用它同步双 Pane 焦点与工具栏目标。 */
+export interface BrowserTabFocusChange {
+  sessionId: string
+  tabId: string
+}
+
 export interface BrowserNavigateInput {
   sessionId: string
   tabId?: string

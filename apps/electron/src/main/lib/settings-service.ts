@@ -7,7 +7,7 @@
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { getSettingsPath } from './config-paths'
-import { DEFAULT_INTERFACE_VARIANT, DEFAULT_THEME_MODE } from '../../types'
+import { DEFAULT_THEME_MODE } from '../../types'
 import type { AgentIslandSettings, AppSettings } from '../../types'
 
 function sanitizeAgentIslandSettings(input: unknown): AgentIslandSettings | undefined {
@@ -27,7 +27,6 @@ export function getSettings(): AppSettings {
   if (!existsSync(filePath)) {
     return {
       themeMode: DEFAULT_THEME_MODE,
-      interfaceVariant: DEFAULT_INTERFACE_VARIANT,
       onboardingCompleted: false,
       environmentCheckSkipped: false,
       notificationsEnabled: true,
@@ -48,19 +47,20 @@ export function getSettings(): AppSettings {
       agentRuntime?: unknown
       agentChannelIds?: unknown
       builtinMcpDisabledIds?: unknown
+      interfaceVariant?: unknown
     }
-    // Pi-only：读取时丢弃旧 runtime selector/Claude 白名单，避免下次写回复活。
+    // Pi-only：读取时丢弃旧 runtime selector、界面风格与 Claude 白名单，避免下次写回复活。
     const {
       experimentalAgentRuntimeSwitchEnabled: _legacyRuntimeSwitch,
       agentRuntime: _legacyAgentRuntime,
       agentChannelIds: _legacyAgentChannelIds,
       builtinMcpDisabledIds: _legacyBuiltinMcpDisabledIds,
+      interfaceVariant: _legacyInterfaceVariant,
       ...settings
     } = data
     return {
       ...settings,
       themeMode: data.themeMode || DEFAULT_THEME_MODE,
-      interfaceVariant: data.interfaceVariant || DEFAULT_INTERFACE_VARIANT,
       onboardingCompleted: data.onboardingCompleted ?? false,
       environmentCheckSkipped: data.environmentCheckSkipped ?? false,
       notificationsEnabled: data.notificationsEnabled ?? true,
@@ -79,7 +79,6 @@ export function getSettings(): AppSettings {
     console.error('[设置] 读取失败:', error)
     return {
       themeMode: DEFAULT_THEME_MODE,
-      interfaceVariant: DEFAULT_INTERFACE_VARIANT,
       onboardingCompleted: false,
       environmentCheckSkipped: false,
       notificationsEnabled: true,

@@ -158,6 +158,8 @@ export async function openAgentTerminal(input: {
 export async function executeAgentTerminal(input: {
   sessionId: string
   command: string
+  /** 指定时复用当前 Agent 会话中仍在运行的可见 PTY；省略时创建新终端。 */
+  terminalId?: string
   cwd?: string
   title?: string
   agentCwd?: string
@@ -165,6 +167,15 @@ export async function executeAgentTerminal(input: {
 }): Promise<AgentTerminalRecord> {
   const command = input.command.trim()
   if (!command || command.length > 64 * 1024) throw new Error('终端命令为空或过长')
+
+  const requestedTerminalId = input.terminalId?.trim()
+  if (requestedTerminalId) {
+    const record = getOwnedAgentTerminal(input.sessionId, requestedTerminalId)
+    if (record.status !== 'running') throw new Error('终端已退出，不能复用')
+    await writeTerminal({ terminalId: record.terminalId, data: `${command}\r` })
+    return record
+  }
+
   const title = input.title?.trim() || `Agent · ${command.replace(/\s+/g, ' ').slice(0, 48)}`
   const record = await openAgentTerminal({ ...input, title })
   await writeTerminal({ terminalId: record.terminalId, data: `${command}\r` })

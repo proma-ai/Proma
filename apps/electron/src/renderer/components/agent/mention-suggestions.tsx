@@ -12,7 +12,7 @@ import { CalendarDays, ListTodo, MessageSquareText, Sparkles, Server } from 'luc
 import { MentionList } from './MentionList'
 import type { MentionListRef } from './MentionList'
 import { createDebouncedSuggestionLoader, createLatestSuggestionRequestGuard, createMentionPopup, positionPopup, isSuggestionTriggerPresent, shouldSuppressEscTrigger, shouldClearEscSuppressionOnExit, type EscSuppressedTrigger } from './mention-popup-utils'
-import type { AgentSessionReferenceSearchResult } from '@proma/shared'
+import type { AgentSessionReferenceSearchResult, WorkspaceCapabilities } from '@proma/shared'
 import { shouldAllowMentionTrigger, shouldShowMentionSuggestion } from '@/components/ai-elements/mention-utils'
 import {
   buildPlanningReferenceItems,
@@ -259,6 +259,31 @@ export interface McpMentionItem {
   type: string
 }
 
+/**
+ * 仅暴露 # 候选过滤所需的无敏感连接状态。其值必须由主进程从工作区 mcp.json
+ * 中已持久化、且仅在真实 handshake + listTools 成功后写入的 lastTestResult 派生。
+ */
+export type McpMentionServer = WorkspaceCapabilities['mcpServers'][number] & {
+  lastTestResult?: {
+    success: boolean
+  }
+}
+
+/**
+ * # MCP 候选只来自当前工作区的持久化 MCP 能力摘要。
+ * 不混入会话临时工具、CLI 集成或 mcpporter 注册项，避免展示无法由当前工作区配置启用的服务。
+ */
+export function getMcpMentionItems(
+  mcpServers: readonly McpMentionServer[],
+  query: string,
+): McpMentionItem[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  return mcpServers
+    .filter((server) => server.enabled && server.lastTestResult?.success === true)
+    .filter((server) => !normalizedQuery || server.name.toLocaleLowerCase().includes(normalizedQuery))
+    .map((server) => ({ id: server.name, name: server.name, type: server.type }))
+}
+
 export function createMcpMentionSuggestion(
   workspaceSlugRef: React.RefObject<string | null>,
   mentionActiveRef: React.MutableRefObject<boolean>,
@@ -271,10 +296,7 @@ export function createMcpMentionSuggestion(
       emptyText: '无匹配 MCP 服务',
       fetchItems: async (slug, q) => {
         const caps = await window.electronAPI.getWorkspaceCapabilities(slug)
-        return caps.mcpServers
-          .filter((s) => s.enabled)
-          .filter((s) => !q || s.name.toLowerCase().includes(q))
-          .map((s) => ({ id: s.name, name: s.name, type: s.type }))
+        return getMcpMentionItems(caps.mcpServers, q)
       },
       keyExtractor: (item) => item.id,
       renderItem: (item) => (

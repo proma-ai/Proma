@@ -14,7 +14,6 @@ import { cn } from '@/lib/utils'
 import type { TabType, TabMinimapItem } from '@/atoms/tab-atoms'
 import type { SessionIndicatorStatus } from '@/atoms/agent-atoms'
 import { tabMinimapCacheAtom } from '@/atoms/tab-atoms'
-import { interfaceVariantAtom } from '@/atoms/theme'
 import { Spinner } from '@/components/ui/spinner'
 import { TabPreviewPanel } from './TabPreviewPanel'
 
@@ -73,8 +72,6 @@ export function TabBarItem({
   const buttonRef = React.useRef<HTMLButtonElement>(null)
   const [isNarrow, setIsNarrow] = React.useState(false)
   const minimapCache = useAtomValue(tabMinimapCacheAtom)
-  const interfaceVariant = useAtomValue(interfaceVariantAtom)
-  const isClassic = interfaceVariant === 'classic'
 
   React.useEffect(() => {
     const el = buttonRef.current
@@ -120,16 +117,12 @@ export function TabBarItem({
           type="button"
           className={cn(
             'group relative flex items-center justify-center gap-1.5 min-w-[82px] px-3 h-[34px]',
-            isClassic ? 'rounded-t-lg' : 'rounded-none',
+            'rounded-none',
             'text-xs transition-colors select-none cursor-pointer',
             'border-t border-l border-r border-transparent',
             isActive
-              ? isClassic
-                ? 'bg-content-area text-foreground border-border/50'
-                : 'app-tab-active text-foreground border-border/80'
-              : isClassic
-                ? 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-                : 'app-tab-inactive text-muted-foreground hover:text-foreground',
+              ? 'app-tab-active text-foreground border-border/80'
+              : 'app-tab-inactive text-muted-foreground hover:text-foreground',
           )}
           onClick={onActivate}
           onMouseDown={handleMouseDown}
@@ -153,16 +146,12 @@ export function TabBarItem({
         type="button"
         className={cn(
           'group relative flex items-center gap-1.5 px-3 h-[34px] w-full',
-          isClassic ? 'rounded-t-lg' : 'rounded-none',
+          'rounded-none',
           'text-xs transition-colors select-none cursor-pointer',
           'border-t border-l border-r border-transparent',
           isActive
-            ? isClassic
-              ? 'bg-content-area text-foreground border-border/50'
-              : 'app-tab-active text-foreground border-border/80'
-            : isClassic
-              ? 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-              : 'app-tab-inactive text-muted-foreground hover:text-foreground',
+            ? 'app-tab-active text-foreground border-border/80'
+            : 'app-tab-inactive text-muted-foreground hover:text-foreground',
           isTearingOff && 'ring-2 ring-primary/70 ring-offset-0 bg-primary/10',
         )}
         onClick={onActivate}

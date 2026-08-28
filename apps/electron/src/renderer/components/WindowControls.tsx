@@ -1,14 +1,10 @@
 import * as React from 'react'
-import { useAtomValue } from 'jotai'
 import { detectIsWindows } from '@/lib/platform'
-import { interfaceVariantAtom } from '@/atoms/theme'
 import { cn } from '@/lib/utils'
 import { getWindowTitlebarDragInsetClass } from '@/lib/window-titlebar-layout'
 
 export function WindowControls(): React.ReactElement | null {
   const isWindows = React.useMemo(() => detectIsWindows(), [])
-  const interfaceVariant = useAtomValue(interfaceVariantAtom)
-  const isClassic = interfaceVariant === 'classic'
   const [isMaximized, setIsMaximized] = React.useState(false)
 
   React.useEffect(() => {
@@ -25,10 +21,7 @@ export function WindowControls(): React.ReactElement | null {
   if (!isWindows) return null
 
   return (
-    <div className={cn(
-      'window-titlebar fixed inset-x-0 top-0 z-[100] flex h-8 select-none',
-      isClassic && 'window-titlebar-classic',
-    )}>
+    <div className="window-titlebar fixed inset-x-0 top-0 z-[100] flex h-8 select-none">
       <div aria-hidden="true" className={cn('titlebar-drag-region absolute inset-y-0 left-0', getWindowTitlebarDragInsetClass(isWindows))} />
       <div className="window-controls relative ml-auto flex">
         <button

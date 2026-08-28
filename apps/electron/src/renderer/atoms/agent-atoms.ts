@@ -13,6 +13,7 @@ import { PROMA_DEFAULT_PERMISSION_MODE } from '@proma/shared'
 import { calculateDockBadgeCount, countPendingRequests } from '@/lib/dock-badge-count'
 import type { AgentQueuedMessage } from '@/lib/agent-message-queue'
 import type { SessionFileChange } from '@/lib/session-file-changes'
+import type { RightWorkspaceSplitState } from '@/lib/right-workspace-split'
 
 /** 活动状态 */
 export type ActivityStatus = 'pending' | 'running' | 'completed' | 'error' | 'backgrounded'
@@ -250,12 +251,12 @@ export function isActivityGroup(item: ActivityGroup | ToolActivity): item is Act
 }
 
 
-/** 待自动发送的 Agent 提示（从设置页"对话完成配置"触发） */
+/** 待预填到新 Agent 会话输入框的提示词；仅由用户手动发送。 */
 export interface AgentPendingPrompt {
   sessionId: string
   message: string
   additionalDirectories?: string[]
-  /** 自动发送时注入的 Todo 引用，确保 Agent 读取最新记录而非仅依赖提示文本。 */
+  /** 保留调用方关联的 Todo 引用元数据，发送时由用户确认。 */
   mentionedTodoIds?: string[]
 }
 
@@ -605,6 +606,47 @@ export const agentFileSourceFilterMapAtom = atomWithStorage<Record<string, Agent
 )
 
 /**
+ * 文件树展开状态。Files Tab 切换时 FileBrowser 会卸载，因此按会话与文件根保存
+ * 每个目录的显式展开/折叠状态；仅用于当前应用运行期的 UI 恢复，不写入用户的长期偏好。
+ */
+export const fileBrowserExpandedPathsAtom = atom<Map<string, Map<string, boolean>>>(new Map())
+
+/** 更新单个目录的展开状态，同时保留其他文件树与目录的状态。 */
+export function updateFileBrowserExpandedPath(
+  state: Map<string, Map<string, boolean>>,
+  stateKey: string,
+  path: string,
+  expanded: boolean,
+): Map<string, Map<string, boolean>> {
+  const current = state.get(stateKey)
+  if (current?.get(path) === expanded) return state
+
+  const nextPaths = new Map(current)
+  nextPaths.set(path, expanded)
+  const next = new Map(state)
+  next.set(stateKey, nextPaths)
+  return next
+}
+
+/** Files Tab 各滚动视图的 scrollTop，按会话和文件视图隔离。 */
+export const fileBrowserScrollTopMapAtom = atom<Map<string, number>>(new Map())
+
+/** 清理已删除会话遗留的文件树 UI 状态；保留 standalone FileBrowser 状态。 */
+export function pruneFileBrowserStateMap<T>(state: Map<string, T>, retainedSessionIds: ReadonlySet<string>): Map<string, T> {
+  let changed = false
+  const next = new Map(state)
+  for (const key of state.keys()) {
+    const separatorIndex = key.indexOf('\u0002')
+    const sessionId = separatorIndex >= 0 ? key.slice(0, separatorIndex) : key
+    if (sessionId !== 'standalone' && !retainedSessionIds.has(sessionId)) {
+      next.delete(key)
+      changed = true
+    }
+  }
+  return changed ? next : state
+}
+
+/**
  * 工作区级组件：内容归属项目而非单个会话，但在当前会话的右侧工作区中呈现。
  * 同一项目下的打开状态跨会话保留；关闭一个组件不会影响其他项目。
  */
@@ -757,6 +799,17 @@ export const agentSessionComponentTabsAtomFamily = atomFamily((sessionId: string
 /** 侧面板当前工作区：基础视图或某个浏览器网页（per-session Map）。 */
 export const agentDiffPanelTabAtom = atom<Map<string, AgentSidePanelTab | 'browser' | 'preview'>>(new Map())
 
+/** 当前 renderer 运行期内的右侧双 Pane 状态；动态 Tab 失效时由 SidePanel 主动清理。 */
+export const agentSidePanelSplitMapAtom = atom<Map<string, RightWorkspaceSplitState>>(new Map())
+
+/** 双 Pane 分隔比例按 Session 持久化，但不持久化可能在重启后失效的动态 Tab ID。 */
+export const agentSidePanelSplitRatioMapAtom = atomWithStorage<Record<string, number>>(
+  'proma-agent-workspace-split-ratio-by-session',
+  {},
+  undefined,
+  { getOnInit: true },
+)
+
 /** Agent 历史中的 Skill 引用请求在 Skills Tab 内打开对应详情。 */
 export interface SkillDetailNavigationRequest {
   skillSlug: string
@@ -877,6 +930,16 @@ export interface FileBrowserAutoReveal {
   select?: boolean
 }
 export const fileBrowserAutoRevealAtom = atom<FileBrowserAutoReveal | null>(null)
+
+/** 文件搜索定位只应影响发起后的短暂视图，避免切回 Files 时重放旧定位。 */
+export const FILE_BROWSER_AUTO_REVEAL_TTL_MS = 1_500
+
+export function isFileBrowserAutoRevealActive(
+  reveal: FileBrowserAutoReveal | null,
+  now = Date.now(),
+): reveal is FileBrowserAutoReveal {
+  return reveal !== null && now - reveal.ts >= 0 && now - reveal.ts < FILE_BROWSER_AUTO_REVEAL_TTL_MS
+}
 
 /**
  * 最近被 Agent 修改的文件路径（per-session，path → 修改时间戳 ms）。

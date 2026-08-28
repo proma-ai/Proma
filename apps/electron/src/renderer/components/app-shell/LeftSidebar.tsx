@@ -91,7 +91,6 @@ import { hasUpdateAtom, updateStatusAtom, type UpdateStatus } from '@/atoms/upda
 import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
 import { hasEnvironmentIssuesAtom } from '@/atoms/environment'
 import { conversationPromptIdAtom } from '@/atoms/system-prompt-atoms'
-import { interfaceVariantAtom } from '@/atoms/theme'
 import { useCreateSession } from '@/hooks/useCreateSession'
 import { useOpenSession } from '@/hooks/useOpenSession'
 import { useSyncActiveTabSideEffects } from '@/hooks/useSyncActiveTabSideEffects'
@@ -753,8 +752,6 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   const hasUpdate = useAtomValue(hasUpdateAtom)
   const updateStatus = useAtomValue(updateStatusAtom)
   const hasEnvironmentIssues = useAtomValue(hasEnvironmentIssuesAtom)
-  const interfaceVariant = useAtomValue(interfaceVariantAtom)
-  const isClassic = interfaceVariant === 'classic'
   const sessionHoverPreviewEnabled = useAtomValue(sessionHoverPreviewEnabledAtom)
 
   // Agent 模式状态
@@ -3167,9 +3164,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
         className={cn(
           'relative h-full flex flex-col items-center px-2',
           !noTransition && 'transition-[width] duration-300',
-          isClassic
-            ? 'bg-background rounded-2xl shadow-xl dark:shadow-md'
-            : 'bg-[hsl(var(--sidebar-surface))]'
+          'bg-[hsl(var(--sidebar-surface))]'
         )}
         style={{ width: 60, flexShrink: 0 }}
       >
@@ -3395,9 +3390,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       className={cn(
         'relative h-full flex flex-col',
         !noTransition && 'transition-[width] duration-300',
-        isClassic
-          ? 'bg-background rounded-2xl shadow-xl dark:shadow-md'
-          : 'bg-[hsl(var(--sidebar-surface))]'
+        'bg-[hsl(var(--sidebar-surface))]'
       )}
       style={{ width: width ?? 300, minWidth: 200, flexShrink: 0 }}
     >
@@ -3905,8 +3898,6 @@ const ConversationItem = React.memo(function ConversationItem({
   const justStartedEditing = React.useRef(false)
   // 菜单打开时关闭迷你地图预览，避免预览面板盖住菜单项导致点不动
   const preview = useSessionMiniMapHover(600, !sessionHoverPreviewEnabled || menuOpen)
-  const interfaceVariant = useAtomValue(interfaceVariantAtom)
-  const isClassic = interfaceVariant === 'classic'
 
   /** 进入编辑模式 */
   const startEdit = (): void => {
@@ -3997,7 +3988,7 @@ const ConversationItem = React.memo(function ConversationItem({
             active && 'bg-foreground/[0.08]',
           )}
         >
-          {(streaming || (isClassic && active)) && (
+          {streaming && (
             <span
               className={cn(
                 'absolute inset-y-0 left-0 w-[3px] rounded-l-md pointer-events-none',
@@ -4151,8 +4142,6 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
   const justStartedEditing = React.useRef(false)
   // 菜单打开时关闭迷你地图预览，避免预览面板盖住菜单项导致点不动
   const preview = useSessionMiniMapHover(600, disableMiniMap || menuOpen)
-  const interfaceVariant = useAtomValue(interfaceVariantAtom)
-  const isClassic = interfaceVariant === 'classic'
 
   const startEdit = (): void => {
     setEditTitle(session.title)
@@ -4266,7 +4255,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
             active && leftAccent !== 'orange' && 'bg-foreground/[0.08]',
           )}
         >
-          {(leftAccent || (isClassic && active)) && (
+          {leftAccent && (
             <span
               className={cn(
                 'absolute inset-y-0 left-0 w-[3px] rounded-l-md pointer-events-none',

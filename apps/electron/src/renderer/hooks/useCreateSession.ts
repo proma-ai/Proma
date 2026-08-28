@@ -23,6 +23,8 @@ import { useOpenSession } from './useOpenSession'
 interface CreateSessionOptions {
   /** 标记为草稿会话（不在侧边栏显示，发送首条消息后自动取消） */
   draft?: boolean
+  /** 是否创建后立即打开会话标签页，默认 true */
+  open?: boolean
   /** 覆盖默认渠道 ID（仅 Agent 会话） */
   channelId?: string
   /** 覆盖默认模型 ID（仅 Agent 会话） */
@@ -30,9 +32,9 @@ interface CreateSessionOptions {
 }
 
 interface CreateSessionActions {
-  /** 创建新 Chat 对话并打开标签页 */
+  /** 创建新 Chat 对话，可选择不打开标签页 */
   createChat: (options?: CreateSessionOptions) => Promise<string | undefined>
-  /** 创建新 Agent 会话并打开标签页 */
+  /** 创建新 Agent 会话，可选择不打开标签页 */
   createAgent: (options?: CreateSessionOptions) => Promise<string | undefined>
 }
 
@@ -61,8 +63,8 @@ export function useCreateSession(): CreateSessionActions {
         selectedModel?.channelId,
       )
       setConversations((prev) => [meta, ...prev])
-      openSession('chat', meta.id, meta.title)
-      setActiveView('conversations')
+      if (options?.open !== false) openSession('chat', meta.id, meta.title)
+      if (options?.open !== false) setActiveView('conversations')
       if (promptConfig.defaultPromptId) {
         setSelectedPromptId(promptConfig.defaultPromptId)
       }
@@ -85,8 +87,8 @@ export function useCreateSession(): CreateSessionActions {
         options?.modelId ?? agentModelId ?? undefined,
       )
       setAgentSessions((prev) => [meta, ...prev])
-      openSession('agent', meta.id, meta.title)
-      setActiveView('conversations')
+      if (options?.open !== false) openSession('agent', meta.id, meta.title)
+      if (options?.open !== false) setActiveView('conversations')
       if (options?.draft) {
         setDraftSessionIds((prev: Set<string>) => { const next = new Set(prev); next.add(meta.id); return next })
       }

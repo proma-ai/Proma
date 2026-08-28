@@ -18,13 +18,10 @@ import {
 import {
   themeModeAtom,
   themeStyleAtom,
-  interfaceVariantAtom,
   systemIsDarkAtom,
   updateThemeMode,
   updateThemeStyle,
-  updateInterfaceVariant,
   applyThemeToDOM,
-  applyInterfaceVariantToDOM,
 } from '@/atoms/theme'
 import {
   markdownFontSizeAtom,
@@ -32,7 +29,7 @@ import {
 } from '@/atoms/markdown-font-size'
 import { cn } from '@/lib/utils'
 import { detectIsWindows } from '@/lib/platform'
-import type { InterfaceVariant, ThemeMode, ThemeStyle, MarkdownFontSize } from '../../../types'
+import type { ThemeMode, ThemeStyle, MarkdownFontSize } from '../../../types'
 
 // ===== Logo 资源导入（用于图标选择器） =====
 import promaBlackLogo from '@/assets/bots/proma-logos/proma-black.png'
@@ -64,12 +61,6 @@ const THEME_OPTIONS = [
   { value: 'dark', label: '深色' },
   { value: 'system', label: '跟随系统' },
   { value: 'special', label: '特殊风格' },
-]
-
-/** 界面风格选项 */
-const INTERFACE_VARIANT_OPTIONS: { value: InterfaceVariant; label: string }[] = [
-  { value: 'classic', label: '经典' },
-  { value: 'modern', label: '现代' },
 ]
 
 /** Markdown 字号选项 */
@@ -181,7 +172,6 @@ const ZOOM_HINT = isMac
 export function AppearanceSettings(): React.ReactElement {
   const [themeMode, setThemeMode] = useAtom(themeModeAtom)
   const [themeStyle, setThemeStyle] = useAtom(themeStyleAtom)
-  const [interfaceVariant, setInterfaceVariant] = useAtom(interfaceVariantAtom)
   const systemIsDark = useAtomValue(systemIsDarkAtom)
   const [markdownFontSize, setMarkdownFontSize] = useAtom(markdownFontSizeAtom)
 
@@ -208,14 +198,6 @@ export function AppearanceSettings(): React.ReactElement {
     applyThemeToDOM('special', style, systemIsDark)
   }, [setThemeMode, setThemeStyle, systemIsDark])
 
-  /** 切换界面风格 */
-  const handleInterfaceVariantChange = React.useCallback((value: string) => {
-    const variant = value as InterfaceVariant
-    setInterfaceVariant(variant)
-    updateInterfaceVariant(variant)
-    applyInterfaceVariantToDOM(variant)
-  }, [setInterfaceVariant])
-
   /** 切换 Markdown 字号 */
   const handleMarkdownFontSizeChange = React.useCallback((value: string) => {
     const size = value as MarkdownFontSize
@@ -237,14 +219,6 @@ export function AppearanceSettings(): React.ReactElement {
             value={themeMode}
             onValueChange={handleThemeChange}
             options={THEME_OPTIONS}
-          />
-
-          <SettingsSegmentedControl
-            label="界面风格"
-            description="经典风保留旧版视觉；现代风使用更小圆角、更清晰分割线达成更统一干净的质感"
-            value={interfaceVariant}
-            onValueChange={handleInterfaceVariantChange}
-            options={INTERFACE_VARIANT_OPTIONS}
           />
 
           {/* 特殊风格 - 标签在上，卡片在下 */}

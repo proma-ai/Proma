@@ -8,11 +8,14 @@
 import { basename, join, dirname, extname, resolve, posix as pathPosix } from 'node:path'
 import { readFileSync, readdirSync, statSync, mkdirSync, existsSync, writeFileSync, unlinkSync } from 'node:fs'
 import { tmpdir, homedir } from 'node:os'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { createRequire } from 'node:module'
 import { createHash } from 'node:crypto'
 import AdmZip from 'adm-zip'
 import { DOMParser } from '@xmldom/xmldom'
 import type { FilePreviewReadResult, OfficePreviewResult } from '@proma/shared'
+import { getBundledOfficeCliPath } from './officecli-manager'
 
 const require = createRequire(__filename)
 const PDFJS_PACKAGE = 'pdfjs-dist'
@@ -25,6 +28,11 @@ const MAX_XLSX_SHEETS = 8
 const MAX_XLSX_ROWS = 200
 const MAX_XLSX_COLUMNS = 40
 const MAX_PPTX_SLIDES = 80
+const OFFICECLI_RENDER_TIMEOUT_MS = 15_000
+const OFFICECLI_TEXT_RENDER_TIMEOUT_MS = 5_000
+const OFFICECLI_MAX_HTML_SIZE = 20 * 1024 * 1024
+const PREVIEW_TEMP_FILE_TTL_MS = 60 * 60 * 1000
+const execFileAsync = promisify(execFile)
 
 // ─── 临时文件 ───
 
@@ -44,6 +52,21 @@ function writeTempHtml(html: string): string {
     writeFileSync(tmpFile, html, 'utf-8')
   }
   return tmpFile
+}
+
+function createOfficeCliOutputPath(sourcePath: string): string {
+  const fileHash = createHash('sha256')
+    .update(`${sourcePath}\0${Date.now()}\0${Math.random()}`)
+    .digest('hex')
+    .slice(0, 24)
+  return join(getPreviewTmpDir(), `officecli-${fileHash}.html`)
+}
+
+function removeTempFileLater(path: string): void {
+  const cleanup = setTimeout(() => {
+    try { unlinkSync(path) } catch { /* 已由启动清理或其他路径删除 */ }
+  }, PREVIEW_TEMP_FILE_TTL_MS)
+  cleanup.unref()
 }
 
 /** 清理所有临时预览文件 */
@@ -701,21 +724,6 @@ export async function preparePdfPreview(filePath: string, basePaths?: string[]):
 }
 
 /** 将 DOCX 文件转换为 HTML（供内联预览使用） */
-export async function convertDocxToHtml(filePath: string, basePaths?: string[]): Promise<{ resolvedPath: string; html: string } | null> {
-  const safePath = resolveTargetPath(filePath, basePaths)
-  if (!existsSync(safePath)) return null
-  try {
-    const st = statSync(safePath)
-    if (st.size > MAX_FILE_SIZE) return null
-    const mammoth = await import('mammoth')
-    const result = await mammoth.convertToHtml({ path: safePath })
-    return { resolvedPath: safePath, html: result.value }
-  } catch (err) {
-    console.error('[file-preview] convertDocxToHtml failed:', err)
-    return null
-  }
-}
-
 function renderOfficeTextFallback(filePath: string, text: string, kind: OfficePreviewResult['kind']): string {
   const title = escapeHtml(basename(filePath))
   const paragraphs = text
@@ -728,6 +736,96 @@ function renderOfficeTextFallback(filePath: string, text: string, kind: OfficePr
   return `<div class="office-preview office-preview-${kind}"><div class="office-preview-title">${title}</div>${body}</div>`
 }
 
+function getOfficeCliCandidates(): string[] {
+  return [getBundledOfficeCliPath()]
+}
+
+function isExecutableFile(path: string): boolean {
+  try {
+    const stats = statSync(path)
+    if (!stats.isFile()) return false
+    if (process.platform === 'win32') return true
+    return (stats.mode & 0o111) !== 0
+  } catch {
+    return false
+  }
+}
+
+function restrictOfficeCliHtml(html: string): string {
+  const contentSecurityPolicy = "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'; frame-src 'none'; media-src data: blob:"
+  const policyTag = `<meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}">`
+  if (/<head(?:\s[^>]*)?>/i.test(html)) {
+    return html.replace(/<head(?:\s[^>]*)?>/i, (head) => `${head}${policyTag}`)
+  }
+  return html.replace(/<html(?:\s[^>]*)?>/i, (htmlTag) => `${htmlTag}<head>${policyTag}</head>`)
+}
+
+async function registerOfficeCliOutputFile(path: string): Promise<string> {
+  const { registerPromaFilePath } = await import('./local-file-protocol')
+  return registerPromaFilePath(path)
+}
+
+export async function renderOfficeWithOfficeCli(
+  resolvedPath: string,
+  registerFilePath: (path: string) => string | Promise<string> = registerOfficeCliOutputFile,
+  officeCliCandidates = getOfficeCliCandidates(),
+  expectedExtensions: ReadonlySet<string> = new Set(['.docx', '.xlsx', '.pptx']),
+): Promise<{ htmlUrl: string; text: string } | null> {
+  if (!expectedExtensions.has(extname(resolvedPath).toLowerCase())) return null
+
+  const outputPath = createOfficeCliOutputPath(resolvedPath)
+  let lastError: unknown
+  for (const candidate of officeCliCandidates) {
+    if (!isExecutableFile(candidate)) continue
+    try {
+      await execFileAsync(candidate, ['view', resolvedPath, 'html', '-o', outputPath], {
+        timeout: OFFICECLI_RENDER_TIMEOUT_MS,
+        windowsHide: true,
+        env: { ...process.env, OFFICECLI_SKIP_UPDATE: '1', OFFICECLI_NO_AUTO_INSTALL: '1', OFFICECLI_NO_AUTO_RESIDENT: '1' },
+        maxBuffer: 1024 * 1024,
+      })
+      const outputStat = statSync(outputPath)
+      if (outputStat.size <= 0 || outputStat.size > OFFICECLI_MAX_HTML_SIZE) {
+        throw new Error(`OfficeCLI HTML 输出大小异常: ${outputStat.size}`)
+      }
+      const html = restrictOfficeCliHtml(readFileSync(outputPath, 'utf-8'))
+      if (!html.includes('<html') || !html.includes('</html>')) throw new Error('OfficeCLI HTML 输出不完整')
+      writeFileSync(outputPath, html, 'utf-8')
+      const htmlUrl = await registerFilePath(outputPath)
+      let text = ''
+      try {
+        const result = await execFileAsync(candidate, ['view', resolvedPath, 'text', '--max-lines', '10000'], {
+          timeout: OFFICECLI_TEXT_RENDER_TIMEOUT_MS,
+          windowsHide: true,
+          env: { ...process.env, OFFICECLI_SKIP_UPDATE: '1', OFFICECLI_NO_AUTO_INSTALL: '1', OFFICECLI_NO_AUTO_RESIDENT: '1' },
+          maxBuffer: 2 * 1024 * 1024,
+        })
+        text = result.stdout.trim()
+      } catch (textError) {
+        console.warn('[file-preview] OfficeCLI 文本提取失败，预览仍可用:', textError instanceof Error ? textError.message : textError)
+      }
+      removeTempFileLater(outputPath)
+      return { htmlUrl, text }
+    } catch (error) {
+      lastError = error
+      try { unlinkSync(outputPath) } catch { /* 输出可能尚未生成 */ }
+    }
+  }
+
+  if (lastError) {
+    console.warn('[file-preview] OfficeCLI 文档渲染不可用，回退内置解析器:', lastError instanceof Error ? lastError.message : lastError)
+  }
+  return null
+}
+
+export async function renderXlsxWithOfficeCli(
+  resolvedPath: string,
+  registerFilePath: (path: string) => string | Promise<string> = registerOfficeCliOutputFile,
+  officeCliCandidates = getOfficeCliCandidates(),
+): Promise<{ htmlUrl: string; text: string } | null> {
+  return renderOfficeWithOfficeCli(resolvedPath, registerFilePath, officeCliCandidates, new Set(['.xlsx']))
+}
+
 /** 将 XLSX/PPTX 转成可内联展示的 HTML 预览 */
 export async function convertOfficeToHtml(filePath: string, basePaths?: string[]): Promise<OfficePreviewResult | null> {
   const safePath = resolveTargetPath(filePath, basePaths)
@@ -738,8 +836,29 @@ export async function convertOfficeToHtml(filePath: string, basePaths?: string[]
     if (st.size > MAX_FILE_SIZE) return null
 
     const ext = extname(safePath).toLowerCase()
-    if (ext === '.xlsx') return convertXlsxToHtml(filePath, safePath)
-    if (ext === '.pptx') return convertPptxToHtml(filePath, safePath)
+    if (ext === '.xlsx' || ext === '.docx' || ext === '.pptx') {
+      const officeCliResult = await renderOfficeWithOfficeCli(safePath)
+      if (officeCliResult) {
+        const kind: OfficePreviewResult['kind'] = ext === '.xlsx'
+          ? 'spreadsheet'
+          : ext === '.docx'
+            ? 'document'
+            : 'presentation'
+        return {
+          resolvedPath: safePath,
+          kind,
+          html: '',
+          htmlUrl: officeCliResult.htmlUrl,
+          text: officeCliResult.text,
+          renderer: 'officecli',
+        }
+      }
+      if (ext === '.xlsx') return convertXlsxToHtml(filePath, safePath)
+      if (ext === '.pptx') return convertPptxToHtml(filePath, safePath)
+      const mammoth = await import('mammoth')
+      const result = await mammoth.convertToHtml({ path: safePath })
+      return { resolvedPath: safePath, kind: 'document', html: result.value, text: result.value.replace(/<[^>]+>/g, ' ') }
+    }
     return null
   } catch (err) {
     console.error('[file-preview] convertOfficeToHtml structured preview failed:', err)
@@ -747,7 +866,11 @@ export async function convertOfficeToHtml(filePath: string, basePaths?: string[]
       const officeParser = await import('officeparser')
       const text = await officeParser.parseOfficeAsync(safePath)
       const ext = extname(safePath).toLowerCase()
-      const kind: OfficePreviewResult['kind'] = ext === '.pptx' ? 'presentation' : 'spreadsheet'
+      const kind: OfficePreviewResult['kind'] = ext === '.pptx'
+        ? 'presentation'
+        : ext === '.docx'
+          ? 'document'
+          : 'spreadsheet'
       return {
         resolvedPath: safePath,
         kind,

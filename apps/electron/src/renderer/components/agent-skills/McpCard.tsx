@@ -5,7 +5,7 @@
  */
 
 import * as React from 'react'
-import { Plug, ShieldCheck, CheckCircle2, XCircle, Trash2 } from 'lucide-react'
+import { Plug, CheckCircle2, XCircle, Trash2, ArrowUpRight, CircleDashed } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
@@ -54,23 +54,26 @@ export function McpCard({
         }
       }}
       className={cn(
-        'group relative flex h-full flex-col gap-3 rounded-xl border border-border/60 bg-content-area p-4 text-left transition-all cursor-pointer',
-        'hover:border-border hover:shadow-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-        !entry.enabled && 'opacity-55',
+        'group relative flex min-h-[172px] flex-col gap-3 rounded-lg bg-card p-4 text-left shadow-md cursor-pointer',
+        'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+        !entry.enabled && 'bg-muted/35',
       )}
     >
       <div className="flex items-start gap-3">
-        <div className="rounded-xl bg-blue-500/12 p-2 text-blue-500 shadow-sm shrink-0">
+        <div className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
           <Plug size={18} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="truncate text-sm font-medium text-foreground">{name}</span>
-            <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
-              {TRANSPORT_LABELS[entry.type] ?? entry.type ?? '未知'}
+            <span className="truncate text-[15px] font-semibold text-foreground [text-wrap:balance]">{name}</span>
+            <span className={cn(
+              'shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium',
+              isBuiltin ? 'bg-primary/12 text-primary' : 'bg-muted text-muted-foreground',
+            )}>
+              {isBuiltin ? '内置' : (TRANSPORT_LABELS[entry.type] ?? entry.type ?? '未知')}
             </span>
           </div>
-          <div className="mt-0.5 truncate text-xs text-muted-foreground">{description || target || '未配置地址'}</div>
+          <div className="mt-1 line-clamp-2 min-h-[32px] text-[12px] leading-4 text-muted-foreground">{description || target || '未配置地址'}</div>
         </div>
         {onToggle && (
           <Switch
@@ -82,23 +85,17 @@ export function McpCard({
         )}
       </div>
 
-      <div className="mt-auto flex items-center gap-2">
-        {isBuiltin && (
-          <span className="flex items-center gap-1 rounded-md bg-blue-500/10 px-1.5 py-0.5 text-[11px] font-medium text-blue-600 dark:text-blue-400">
-            <ShieldCheck size={12} /> 内置
-          </span>
-        )}
+      <div className="mt-auto flex items-center gap-2 pt-3">
         {statusLabel && (
           <span
             className={cn(
               'flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium',
-              statusTone === 'success' && 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
-              statusTone === 'warning' && 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
+              statusTone === 'success' && 'bg-primary/12 text-primary',
+              statusTone === 'warning' && 'bg-muted text-muted-foreground',
               statusTone === 'muted' && 'bg-muted text-muted-foreground',
             )}
           >
-            {statusTone === 'success' && <CheckCircle2 size={12} />}
-            {statusTone !== 'success' && <XCircle size={12} />}
+            {statusTone === 'success' ? <CheckCircle2 size={12} /> : <CircleDashed size={12} />}
             {statusLabel}
           </span>
         )}
@@ -107,7 +104,7 @@ export function McpCard({
             className={cn(
               'flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium',
               test.success
-                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                ? 'bg-primary/12 text-primary'
                 : 'bg-destructive/10 text-destructive',
             )}
           >
@@ -116,24 +113,38 @@ export function McpCard({
           </span>
         )}
         {readOnly && (
-          <span className="ml-auto rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+          <span className="rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
             内置托管
           </span>
         )}
-        {!isBuiltin && !readOnly && onRequestDelete && (
+        <div className="ml-auto flex items-center gap-1">
+          {!isBuiltin && !readOnly && onRequestDelete && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onRequestDelete() }}
+                  className="flex size-8 items-center justify-center rounded-full text-muted-foreground/50 opacity-0 transition-[color,opacity,background-color] hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">删除</TooltipContent>
+            </Tooltip>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
-                onClick={(e) => { e.stopPropagation(); onRequestDelete() }}
-                className="ml-auto rounded p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+                onClick={(e) => { e.stopPropagation(); onOpen() }}
+                className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted text-foreground/65 transition-[transform,background-color,color] hover:bg-accent hover:text-foreground active:scale-[0.96] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
-                <Trash2 size={14} />
+                <ArrowUpRight size={17} />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="top">删除</TooltipContent>
+            <TooltipContent side="top">{readOnly ? '查看详情' : '查看配置'}</TooltipContent>
           </Tooltip>
-        )}
+        </div>
       </div>
     </div>
   )

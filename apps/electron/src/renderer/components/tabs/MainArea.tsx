@@ -6,7 +6,7 @@
  */
 
 import * as React from 'react'
-import type { BrowserStateChange } from '@proma/shared'
+import type { BrowserStateChange, BrowserTabFocusChange } from '@proma/shared'
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
 import {
   tabsAtom,
@@ -27,8 +27,6 @@ import { PlanningView } from '@/components/planning/PlanningView'
 import { AgentSkillsView } from '@/components/agent-skills/AgentSkillsView'
 import { automationFormAtom } from '@/atoms/automation-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
-import { interfaceVariantAtom } from '@/atoms/theme'
-import { cn } from '@/lib/utils'
 import { registerShortcut } from '@/lib/shortcut-registry'
 import {
   agentDiffPanelTabAtom,
@@ -52,8 +50,6 @@ export function MainArea(): React.ReactElement {
   const activeTab = useAtomValue(activeTabAtom)
   const automationFormOpen = useAtomValue(automationFormAtom).open
   const activeView = useAtomValue(activeViewAtom)
-  const interfaceVariant = useAtomValue(interfaceVariantAtom)
-  const isClassic = interfaceVariant === 'classic'
   const store = useStore()
 
   // TabBar 立即反馈，较重的中心内容可让出当前交互帧；Agent 历史则保持当前会话避免旧内容占屏。
@@ -118,6 +114,25 @@ export function MainArea(): React.ReactElement {
     return subscribe(publishBrowserState)
   }, [publishBrowserState])
 
+  const focusNativeBrowserTab = React.useCallback((change: BrowserTabFocusChange) => {
+    // WebContentsView 不在 React DOM 中；点击后台 Browser Pane 的网页正文只能由主进程
+    // 把原生 focus 映射回右侧 Pane/Tab 焦点。后台 Agent Session 不得借此抢前台。
+    if (activeTab?.type !== 'agent' || activeTab.sessionId !== change.sessionId) return
+    store.set(agentSidePanelOpenAtomFamily(change.sessionId), true)
+    setAgentSidePanelTabMap((previous) => {
+      if (previous.get(change.sessionId) === getBrowserSidePanelTab(change.tabId)) return previous
+      const next = new Map(previous)
+      next.set(change.sessionId, getBrowserSidePanelTab(change.tabId))
+      return next
+    })
+  }, [activeTab, setAgentSidePanelTabMap, store])
+
+  React.useEffect(() => {
+    const subscribe = (window.electronAPI as Partial<typeof window.electronAPI>).onAgentBrowserTabFocused
+    if (typeof subscribe !== 'function') return
+    return subscribe(focusNativeBrowserTab)
+  }, [focusNativeBrowserTab])
+
   React.useEffect(() => {
     if (!browserSessionId) return
     const getState = (window.electronAPI as Partial<typeof window.electronAPI>).getAgentBrowserState
@@ -180,7 +195,7 @@ export function MainArea(): React.ReactElement {
     : { flex: '1 1 auto' }
 
   return (
-    <Panel variant="grow" className={cn('bg-content-area', isClassic && 'rounded-2xl shadow-xl dark:shadow-sm')}>
+    <Panel variant="grow" className="bg-content-area">
       <div className="flex flex-1 min-h-0 overflow-hidden" data-scratch-split-container>
         <div className="flex flex-col min-w-0 h-full" style={leftFlexStyle}>
           {activeView === 'planning' ? (

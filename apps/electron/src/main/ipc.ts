@@ -9,6 +9,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { existsSync, realpathSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { createHash } from 'node:crypto'
 import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, AGENT_ISLAND_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, PLANNING_CONFLICT_ERROR, MAX_ATTACHMENT_SIZE, isPromaPermissionMode, normalizePathForCompare, TERMINAL_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS, WINDOWS_AGENT_ISLAND_IPC_CHANNELS, TRAY_IPC_CHANNELS } from '../types'
 import type {
@@ -302,6 +303,8 @@ import {
   ensureDefaultWorkspace,
   getWorkspaceMcpConfig,
   saveWorkspaceMcpConfig,
+  getDisabledCliIntegrationIds,
+  setCliIntegrationEnabled,
   getAllWorkspaceSkills,
   getOtherWorkspaceSkills,
   getDefaultSkillSlugs,
@@ -342,10 +345,54 @@ import {
 import { movePathSafely } from './lib/file-move-service'
 import { subscribeWorkspaceMemoryChanges } from './lib/workspace-memory-change-watcher'
 import { confirmWorkspaceMemoryWindowClose, markWorkspaceMemoryWindowReady } from './lib/workspace-memory-window'
+import { deleteMcpCredential, startMcpOAuth, saveMcpApiKey } from './lib/mcp-oauth-service'
 
 /** Renderer-scoped subscriptions; disposed on explicit tab cleanup or renderer destruction. */
 const workspaceMemoryWatchSubscriptions = new Map<number, Map<string, () => void>>()
 const workspaceMemoryWatchDestroyedListeners = new Set<number>()
+
+/**
+ * 每次保存或刷新都会推进工作区代数，使较早的异步 MCP 刷新不能回写较新的配置。
+ * 该代数仅用于进程内竞态保护，不写入用户的 mcp.json。
+ */
+const workspaceMcpRefreshGenerations = new Map<string, number>()
+const workspaceMcpPendingValidations = new Map<string, Map<string, import('@proma/shared').McpServerEntry>>()
+
+function advanceWorkspaceMcpRefreshGeneration(workspaceSlug: string): number {
+  const generation = (workspaceMcpRefreshGenerations.get(workspaceSlug) ?? 0) + 1
+  workspaceMcpRefreshGenerations.set(workspaceSlug, generation)
+  return generation
+}
+
+function getWorkspaceMcpPendingValidation(workspaceSlug: string, name: string): import('@proma/shared').McpServerEntry | undefined {
+  return workspaceMcpPendingValidations.get(workspaceSlug)?.get(name)
+}
+
+function setWorkspaceMcpPendingValidation(workspaceSlug: string, name: string, entry: import('@proma/shared').McpServerEntry): void {
+  const pending = workspaceMcpPendingValidations.get(workspaceSlug) ?? new Map<string, import('@proma/shared').McpServerEntry>()
+  pending.set(name, entry)
+  workspaceMcpPendingValidations.set(workspaceSlug, pending)
+}
+
+function clearWorkspaceMcpPendingValidation(workspaceSlug: string, name: string): void {
+  const pending = workspaceMcpPendingValidations.get(workspaceSlug)
+  if (!pending) return
+  pending.delete(name)
+  if (pending.size === 0) workspaceMcpPendingValidations.delete(workspaceSlug)
+}
+
+function clearMissingWorkspaceMcpPendingValidations(workspaceSlug: string, serverNames: ReadonlySet<string>): void {
+  const pending = workspaceMcpPendingValidations.get(workspaceSlug)
+  if (!pending) return
+  for (const name of pending.keys()) {
+    if (!serverNames.has(name)) pending.delete(name)
+  }
+  if (pending.size === 0) workspaceMcpPendingValidations.delete(workspaceSlug)
+}
+
+function isWorkspaceMcpRefreshCurrent(workspaceSlug: string, generation: number): boolean {
+  return workspaceMcpRefreshGenerations.get(workspaceSlug) === generation
+}
 
 function stopWorkspaceMemoryWatch(webContentsId: number, workspaceSlug: string): void {
   const subscriptions = workspaceMemoryWatchSubscriptions.get(webContentsId)
@@ -708,6 +755,196 @@ async function runCmd(
       child.stdin.end(stdin)
     }
   })
+}
+
+type CliCommandResult = { status: number | null; stdout: string }
+type CliCommandRunner = (bin: string, args: string[], opts: { timeoutMs?: number }) => Promise<CliCommandResult>
+
+/**
+ * npm-installed CLIs are commonly exposed as .cmd shims on Windows. Keep the
+ * cmd.exe path isolated to fixed catalog commands instead of enabling a shell
+ * for the general-purpose runCmd helper.
+ */
+export function getCliProbeInvocation(
+  bin: string,
+  args: string[],
+  platform = process.platform,
+  comSpec = process.env.ComSpec,
+): { bin: string; args: string[] } {
+  if (platform !== 'win32') return { bin, args }
+  return {
+    bin: comSpec || 'cmd.exe',
+    args: ['/d', '/s', '/c', [bin, ...args].join(' ')],
+  }
+}
+
+async function runCliCommand(bin: string, args: string[], opts: { timeoutMs?: number }): Promise<CliCommandResult> {
+  const invocation = getCliProbeInvocation(bin, args)
+  return runCmd(invocation.bin, invocation.args, opts)
+}
+
+interface McpRefreshValidation {
+  name: string
+  fingerprint: string
+  lastTestResult: NonNullable<import('@proma/shared').McpServerEntry['lastTestResult']>
+}
+
+/**
+ * 生成 MCP 可运行配置的稳定摘要。摘要只用于内存中比较，绝不记录或返回，避免暴露 headers/env 中的敏感值。
+ */
+export function getMcpEntryFingerprint(entry: import('@proma/shared').McpServerEntry): string {
+  const sortedEntries = (record: Record<string, string> | undefined): Array<[string, string]> =>
+    Object.entries(record ?? {}).sort(([left], [right]) => left.localeCompare(right))
+
+  const canonical = {
+    type: entry.type,
+    command: entry.command ?? null,
+    args: entry.args ? [...entry.args] : null,
+    url: entry.url ?? null,
+    headers: sortedEntries(entry.headers),
+    env: sortedEntries(entry.env),
+    timeout: entry.timeout ?? null,
+    enabled: entry.enabled,
+    isBuiltin: entry.isBuiltin ?? false,
+  }
+  return createHash('sha256').update(JSON.stringify(canonical)).digest('hex')
+}
+
+/** 在固定上限内并发执行任务，保留输入顺序，避免同时启动过多 MCP 进程或网络连接。 */
+export async function mapWithConcurrency<T, R>(
+  values: readonly T[],
+  maxConcurrency: number,
+  mapper: (value: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  if (!Number.isInteger(maxConcurrency) || maxConcurrency < 1) {
+    throw new Error('maxConcurrency 必须是正整数')
+  }
+
+  const results = new Array<R>(values.length)
+  let nextIndex = 0
+  const worker = async (): Promise<void> => {
+    while (nextIndex < values.length) {
+      const index = nextIndex++
+      results[index] = await mapper(values[index]!, index)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(maxConcurrency, values.length) }, worker))
+  return results
+}
+
+/**
+ * 只合并仍与验证开始时完全一致的条目。调用方还必须检查 refresh generation，
+ * 因而同名服务器被编辑、禁用、删除或被后一次刷新取代时，旧结果不会落盘。
+ */
+export function mergeMcpRefreshResults(
+  currentConfig: import('@proma/shared').WorkspaceMcpConfig,
+  validations: readonly McpRefreshValidation[],
+): import('@proma/shared').WorkspaceMcpConfig {
+  const servers = { ...currentConfig.servers }
+  for (const validation of validations) {
+    const currentEntry = servers[validation.name]
+    if (currentEntry?.enabled && getMcpEntryFingerprint(currentEntry) === validation.fingerprint) {
+      servers[validation.name] = {
+        ...currentEntry,
+        enabled: validation.lastTestResult.success,
+        lastTestResult: validation.lastTestResult,
+      }
+    }
+  }
+  return { servers }
+}
+
+/**
+ * Validates an enabled candidate while the persisted entry remains disabled. If
+ * the configuration changed while validation was in flight, return that latest
+ * snapshot instead of overwriting it. A failed validation is persisted as a
+ * disabled entry, so invalid MCPs are never loaded by the runtime.
+ */
+async function validateAndConditionallyPersistMcp(
+  workspaceSlug: string,
+  name: string,
+  candidateEntry: import('@proma/shared').McpServerEntry,
+  expectedPersistedFingerprint: string,
+  expectedRefreshGeneration: number,
+): Promise<import('@proma/shared').McpConnectionMutationResult> {
+  const { validateMcpServer } = await import('./lib/mcp-validator')
+  const result = await validateMcpServer(name, candidateEntry, workspaceSlug)
+  const verification = {
+    success: result.valid,
+    message: result.valid ? (result.message ?? 'MCP 连接成功') : (result.reason ?? 'MCP 连接失败'),
+  }
+  const current = getWorkspaceMcpConfig(workspaceSlug)
+  const currentEntry = current.servers[name]
+  if (
+    !isWorkspaceMcpRefreshCurrent(workspaceSlug, expectedRefreshGeneration) ||
+    !currentEntry ||
+    getMcpEntryFingerprint(currentEntry) !== expectedPersistedFingerprint
+  ) {
+    return { config: current, verification }
+  }
+
+  const nextEntry = {
+    ...candidateEntry,
+    enabled: verification.success,
+    lastTestResult: { ...verification, timestamp: Date.now() },
+  }
+  const config = { servers: { ...current.servers, [name]: nextEntry } }
+  clearWorkspaceMcpPendingValidation(workspaceSlug, name)
+  saveWorkspaceMcpConfig(workspaceSlug, config)
+  return { config, verification }
+}
+
+async function runCliProbe(
+  runner: CliCommandRunner,
+  bin: string,
+  args: string[],
+): Promise<CliCommandResult> {
+  try {
+    return await runner(bin, args, { timeoutMs: 2_000 })
+  } catch {
+    return { status: null, stdout: '' }
+  }
+}
+
+/**
+ * `dws auth status --format json` 是官方的非交互认证探测。只接受其完整、成功且 token 有效的结果；
+ * 不读取、返回或持久化 CLI 输出中的任何身份字段。
+ */
+function isDingTalkCliAuthenticated(result: CliCommandResult): boolean {
+  if (result.status !== 0) return false
+
+  try {
+    const status = JSON.parse(result.stdout) as {
+      success?: unknown
+      authenticated?: unknown
+      token_valid?: unknown
+    }
+    return status.success === true && status.authenticated === true && status.token_valid === true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 仅将可由 CLI 本身的认证探测确认的集成标记为已连接；命令不存在、超时、未认证和未知探测均保守为 false。
+ */
+export async function getCliIntegrationStatuses(
+  runner: CliCommandRunner = runCliCommand,
+  disabledIds: ReadonlySet<string> = new Set(),
+): Promise<import('@proma/shared').CliIntegrationStatus[]> {
+  const [wecom, dingtalk, github, feishu] = await Promise.all([
+    runCliProbe(runner, 'wecom-cli', ['auth', 'show', '--status']),
+    runCliProbe(runner, 'dws', ['auth', 'status', '--format', 'json']),
+    runCliProbe(runner, 'gh', ['auth', 'status', '--active']),
+    runCliProbe(runner, 'lark-cli', ['auth', 'status', '--verify']),
+  ])
+
+  return [
+    { id: 'wecom-cli', connected: wecom.status === 0 && wecom.stdout.trim().toLowerCase() === 'authorized', enabled: !disabledIds.has('wecom-cli') },
+    { id: 'dingtalk-cli', connected: isDingTalkCliAuthenticated(dingtalk), enabled: !disabledIds.has('dingtalk-cli') },
+    { id: 'github-cli', connected: github.status === 0, enabled: !disabledIds.has('github-cli') },
+    { id: 'feishu-cli', connected: feishu.status === 0, enabled: !disabledIds.has('feishu-cli') },
+  ]
 }
 
 function parseWindowsRegistryValue(stdout: string): string {
@@ -1816,11 +2053,10 @@ export function registerIpcHandlers(): void {
       }
 
       // 主题相关设置变化时，广播给所有窗口（跨窗口同步，如 Quick Task 面板）
-      if (updates.themeMode !== undefined || updates.themeStyle !== undefined || updates.interfaceVariant !== undefined) {
+      if (updates.themeMode !== undefined || updates.themeStyle !== undefined) {
         const payload = {
           themeMode: result.themeMode,
           themeStyle: result.themeStyle,
-          interfaceVariant: result.interfaceVariant,
         }
         BrowserWindow.getAllWindows().forEach((win) => {
           // 跳过发起者窗口，避免重复应用
@@ -2620,23 +2856,222 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // 保存工作区 MCP 配置
+  // Save full MCP configurations defensively: renderer-provided test results are
+  // display data, not authorization to load an MCP. Newly enabled or changed
+  // entries are persisted disabled and receive the same real validation as a
+  // card toggle before they can become enabled.
   ipcMain.handle(
     AGENT_IPC_CHANNELS.SAVE_MCP_CONFIG,
-    async (_, workspaceSlug: string, config: WorkspaceMcpConfig): Promise<void> => {
-      return saveWorkspaceMcpConfig(workspaceSlug, config)
+    async (_, workspaceSlug: string, config: WorkspaceMcpConfig, options?: import('@proma/shared').SaveWorkspaceMcpConfigOptions): Promise<void> => {
+      for (const name of options?.explicitlyDisabledServerNames ?? []) {
+        clearWorkspaceMcpPendingValidation(workspaceSlug, name)
+      }
+      const pendingValidations: Array<{ name: string; candidate: import('@proma/shared').McpServerEntry }> = []
+      const servers: WorkspaceMcpConfig['servers'] = {}
+
+      const configServerNames = new Set(Object.keys(config.servers))
+      clearMissingWorkspaceMcpPendingValidations(workspaceSlug, configServerNames)
+      for (const [name, entry] of Object.entries(config.servers)) {
+        const entryWithoutTestResult = { ...entry }
+        delete entryWithoutTestResult.lastTestResult
+        const candidate = { ...entryWithoutTestResult, enabled: true }
+        if (entry.enabled) {
+          // `lastTestResult` is renderer-visible display data, not proof that an
+          // MCP can be loaded. Re-validate every enabled entry, including
+          // configs created by earlier app versions or manually edited on disk.
+          servers[name] = { ...entryWithoutTestResult, enabled: false }
+          pendingValidations.push({ name, candidate })
+          setWorkspaceMcpPendingValidation(workspaceSlug, name, candidate)
+        } else {
+          const pendingCandidate = getWorkspaceMcpPendingValidation(workspaceSlug, name)
+          const pendingEntry = pendingCandidate ? { ...pendingCandidate, enabled: false } : undefined
+          if (pendingEntry && getMcpEntryFingerprint(pendingEntry) === getMcpEntryFingerprint(entry)) {
+            servers[name] = pendingEntry
+            pendingValidations.push({ name, candidate: pendingCandidate! })
+          } else {
+            clearWorkspaceMcpPendingValidation(workspaceSlug, name)
+            // Do not persist renderer-provided verification data for disabled entries.
+            servers[name] = entryWithoutTestResult
+          }
+        }
+      }
+
+      const pendingConfig = { servers }
+      const refreshGeneration = advanceWorkspaceMcpRefreshGeneration(workspaceSlug)
+      saveWorkspaceMcpConfig(workspaceSlug, pendingConfig)
+      for (const validation of pendingValidations) {
+        await validateAndConditionallyPersistMcp(
+          workspaceSlug,
+          validation.name,
+          validation.candidate,
+          getMcpEntryFingerprint(pendingConfig.servers[validation.name]!),
+          refreshGeneration,
+        )
+      }
     }
+  )
+
+  // Atomically toggle one MCP. Any later save advances the workspace refresh
+  // generation, while fingerprint matching protects this entry's validation writeback.
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.SET_MCP_ENABLED_AND_VALIDATE,
+    async (_, workspaceSlug: string, name: string, enabled: boolean): Promise<import('@proma/shared').McpConnectionMutationResult> => {
+      const current = getWorkspaceMcpConfig(workspaceSlug)
+      const entry = current.servers[name]
+      if (!entry) throw new Error('找不到 MCP 配置')
+
+      const entryWithoutTestResult = { ...entry }
+      delete entryWithoutTestResult.lastTestResult
+      if (!enabled) {
+        const config = { servers: { ...current.servers, [name]: { ...entry, enabled: false } } }
+        advanceWorkspaceMcpRefreshGeneration(workspaceSlug)
+        clearWorkspaceMcpPendingValidation(workspaceSlug, name)
+        saveWorkspaceMcpConfig(workspaceSlug, config)
+        return { config, verification: { success: true, message: 'MCP 已关闭' } }
+      }
+
+      // Keep the entry disabled until the real handshake succeeds. This prevents
+      // the runtime from repeatedly starting a known-invalid server.
+      const pendingEntry = { ...entryWithoutTestResult, enabled: false }
+      const pendingConfig = { servers: { ...current.servers, [name]: pendingEntry } }
+      // Keep this candidate in memory so an unrelated full-config save during
+      // the handshake preserves and resumes the validation instead of treating
+      // the temporary disabled entry as a user-requested disable.
+      const refreshGeneration = advanceWorkspaceMcpRefreshGeneration(workspaceSlug)
+      setWorkspaceMcpPendingValidation(workspaceSlug, name, { ...entryWithoutTestResult, enabled: true })
+      saveWorkspaceMcpConfig(workspaceSlug, pendingConfig)
+      return validateAndConditionallyPersistMcp(
+        workspaceSlug,
+        name,
+        { ...entryWithoutTestResult, enabled: true },
+        getMcpEntryFingerprint(pendingEntry),
+        refreshGeneration,
+      )
+    },
+  )
+
+  // Atomically install a catalog MCP. Existing configs win instead of being
+  // replaced by a stale renderer snapshot.
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.INSTALL_MCP_AND_VALIDATE,
+    async (_, workspaceSlug: string, name: string, entry: import('@proma/shared').McpServerEntry): Promise<import('@proma/shared').McpInstallMutationResult> => {
+      const current = getWorkspaceMcpConfig(workspaceSlug)
+      if (current.servers[name]) {
+        return {
+          installed: false,
+          config: current,
+          verification: { success: Boolean(current.servers[name]?.lastTestResult?.success), message: 'MCP 已存在' },
+        }
+      }
+
+      const entryWithoutTestResult = { ...entry }
+      delete entryWithoutTestResult.lastTestResult
+      if (!entry.enabled) {
+        const config = { servers: { ...current.servers, [name]: entryWithoutTestResult } }
+        advanceWorkspaceMcpRefreshGeneration(workspaceSlug)
+        saveWorkspaceMcpConfig(workspaceSlug, config)
+        return { installed: true, config, verification: { success: true, message: 'MCP 已添加，等待配置' } }
+      }
+
+      // Newly installed catalog MCPs are also kept disabled until validation.
+      const pendingEntry = { ...entryWithoutTestResult, enabled: false }
+      const pendingConfig = { servers: { ...current.servers, [name]: pendingEntry } }
+      // Keep this candidate in memory so an unrelated full-config save during
+      // the handshake preserves and resumes the validation instead of treating
+      // the temporary disabled entry as a user-requested disable.
+      const refreshGeneration = advanceWorkspaceMcpRefreshGeneration(workspaceSlug)
+      setWorkspaceMcpPendingValidation(workspaceSlug, name, { ...entryWithoutTestResult, enabled: true })
+      saveWorkspaceMcpConfig(workspaceSlug, pendingConfig)
+      const result = await validateAndConditionallyPersistMcp(
+        workspaceSlug,
+        name,
+        { ...entryWithoutTestResult, enabled: true },
+        getMcpEntryFingerprint(pendingEntry),
+        refreshGeneration,
+      )
+      return { installed: true, ...result }
+    },
+  )
+
+  // 刷新并持久化工作区 MCP 真实连接状态
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.REFRESH_MCP_CONNECTIONS,
+    async (_, workspaceSlug: string): Promise<WorkspaceMcpConfig> => {
+      const refreshGeneration = advanceWorkspaceMcpRefreshGeneration(workspaceSlug)
+      const config = getWorkspaceMcpConfig(workspaceSlug)
+      const entries = Object.entries(config.servers).filter(([, entry]) => entry.enabled)
+      const { validateMcpServer } = await import('./lib/mcp-validator')
+      const validations = await mapWithConcurrency(entries, 4, async ([name, entry]) => {
+        const result = await validateMcpServer(name, entry, workspaceSlug)
+        return {
+          name,
+          fingerprint: getMcpEntryFingerprint(entry),
+          lastTestResult: {
+            success: result.valid,
+            message: result.valid ? (result.message ?? 'MCP 连接成功') : (result.reason ?? 'MCP 连接失败'),
+            timestamp: Date.now(),
+          },
+        }
+      })
+
+      // 保存或更晚发起的刷新会使本次 generation 过期；直接返回最新完整配置，不写任何旧验证结果。
+      if (!isWorkspaceMcpRefreshCurrent(workspaceSlug, refreshGeneration)) {
+        return getWorkspaceMcpConfig(workspaceSlug)
+      }
+
+      const refreshed = mergeMcpRefreshResults(getWorkspaceMcpConfig(workspaceSlug), validations)
+      saveWorkspaceMcpConfig(workspaceSlug, refreshed)
+      return refreshed
+    },
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.START_MCP_OAUTH,
+    async (_, input: import('@proma/shared').StartMcpOAuthInput): Promise<import('@proma/shared').McpOAuthStartResult> => {
+      return startMcpOAuth(input)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.SAVE_MCP_API_KEY,
+    async (_, input: import('@proma/shared').SaveMcpApiKeyInput): Promise<void> => {
+      return saveMcpApiKey(input)
+    }
+  )
+
+  // The renderer removes the transport config first, then calls this handler
+  // to remove only the matching encrypted Keychain payload.
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.DELETE_MCP_CREDENTIAL,
+    async (_, workspaceSlug: string, serverName: string): Promise<void> => {
+      return deleteMcpCredential(workspaceSlug, serverName)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_CLI_INTEGRATION_STATUSES,
+    async (_, workspaceSlug: string): Promise<import('@proma/shared').CliIntegrationStatus[]> => {
+      return getCliIntegrationStatuses(undefined, getDisabledCliIntegrationIds(workspaceSlug))
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.SET_CLI_INTEGRATION_ENABLED,
+    async (_, workspaceSlug: string, id: string, enabled: boolean): Promise<import('@proma/shared').CliIntegrationStatus[]> => {
+      setCliIntegrationEnabled(workspaceSlug, id, enabled)
+      return getCliIntegrationStatuses(undefined, getDisabledCliIntegrationIds(workspaceSlug))
+    },
   )
 
   // 测试 MCP 服务器连接
   ipcMain.handle(
     AGENT_IPC_CHANNELS.TEST_MCP_SERVER,
-    async (_, name: string, entry: import('@proma/shared').McpServerEntry): Promise<{ success: boolean; message: string }> => {
+    async (_, workspaceSlug: string, name: string, entry: import('@proma/shared').McpServerEntry): Promise<{ success: boolean; message: string }> => {
       const { validateMcpServer } = await import('./lib/mcp-validator')
-      const result = await validateMcpServer(name, entry)
+      const result = await validateMcpServer(name, entry, workspaceSlug)
       return {
         success: result.valid,
-        message: result.valid ? '连接成功' : (result.reason || '连接失败'),
+        message: result.valid ? (result.message ?? '连接成功') : (result.reason || '连接失败'),
       }
     }
   )
@@ -3710,22 +4145,7 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // DOCX 转 HTML（内联预览使用 mammoth）
-  ipcMain.handle(
-    'file:docx-to-html',
-    async (_, filePath: string, access?: FileAccessOptions | string[]): Promise<{ resolvedPath: string; html: string } | null> => {
-      const { convertDocxToHtml, resolveFilePath } = await import('./lib/file-preview-service')
-      const options = normalizeFileAccessOptions(access)
-      const resolved = resolveFilePath(filePath, getPreviewCandidateBasePaths(options))
-      if (!resolved) {
-        return null
-      }
-      const result = await convertDocxToHtml(resolved)
-      return result
-    }
-  )
-
-  // XLSX/PPTX 转 HTML（内联预览使用 OOXML 解析）
+  // Office 文件转高保真 HTML（内联预览；失败时由服务层降级到内置解析器）
   ipcMain.handle(
     'file:office-to-html',
     async (_, filePath: string, access?: FileAccessOptions | string[]): Promise<import('@proma/shared').OfficePreviewResult | null> => {

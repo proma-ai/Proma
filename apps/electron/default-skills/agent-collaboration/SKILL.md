@@ -14,9 +14,10 @@ Proma 已提供内置 `collaboration` MCP 工具。你必须通过这些工具�
 可用工具：
 
 - `collaboration.list_available_agent_models`：查看父会话当前渠道下可用于协作子 Agent 的模型。
-- `collaboration.delegate_agent`：创建单个真实子会话。
-- `collaboration.delegate_agents`：批量创建真实子会话，适合已经明确分片的大型并行任务。
-- `collaboration.wait_for_delegations`：等待子会话，支持 `mode=all` 等全部，或 `mode=any` 先收敛一部分完成结果。
+- `collaboration.delegate_agent`：创建单个真实子会话；**返回只代表启动成功，不代表子任务完成**。记下返回的 `delegationId`，后续凡是需要该子任务结果才能回复、决策或交付，都必须调用 `collaboration.wait_for_delegations` 收敛；只有完全独立的主线可以先继续。
+- `collaboration.delegate_agents`：批量创建真实子会话，适合已经明确分片的大型并行任务；**批量创建成功也不等于批次完成**。保存返回的全部 `delegationIds`，需要完整批次结果时必须用 `wait_for_delegations(mode=all)`。
+- `collaboration.wait_for_delegations`：父会话的结果收敛屏障。只要当前回复、下一步判断或交付依赖已委派任务，父会话必须在回复前调用；不能仅凭 delegate 工具返回就结束本轮或声称任务完成。`mode=any` 只用于明确接受部分结果的场景，完整交付使用 `mode=all`。
+
 - `collaboration.list_delegations`：查看当前父会话创建的子会话状态。
 - `collaboration.get_delegation_results`：按委派 ID 读取一个或多个子会话结果摘要。
 - `collaboration.stop_delegation` / `collaboration.stop_delegations`：停止一个或一批子会话。
@@ -108,6 +109,11 @@ Proma 已提供内置 `collaboration` MCP 工具。你必须通过这些工具�
 - 多样性探索是"调研驱动"，不是"实现竞争"——子 Agent 只做分析
 - 收到所有方向结果后，父 Agent 先对比分析，再向用户呈现选项供决策
 
+- **委派后的强制收敛规则**：`delegate_agent` / `delegate_agents` 是异步启动工具，不会把结果自动注入父会话，也不表示子任务已经完成。每次委派后先保留返回的 ID；如果父会话没有可独立推进的工作，下一步应立即调用 `wait_for_delegations`。如果还有独立主线，可以先继续，但在生成依赖子会话结果的最终回复、方案、判断或交付前，必须等待并读取结果。
+- **默认等待全部**：需要把多个子会话整合成一个完整答案时，显式传入全部 `delegationIds` 并使用 `mode=all`。不要用 `mode=any` 代替全部等待；它只适合用户明确接受“先返回最早完成的 N 个结果”的场景。
+- **超时不等于完成**：`wait_for_delegations` 返回 `status=timeout` 或 `runningCount>0` 时，父会话必须如实说明仍有未完成委派；可以继续等待、查询/处理阻塞事件，或在用户允许时停止，不得把未完成子任务当作已汇总结果，也不得无依据补全其结论。
+- **批量部分失败**：`delegate_agents` 返回 `failures` 时，等待成功创建的委派前，父会话应检查失败项；最终交付中说明缺失方向，必要时先修复委派或调整范围。
+
 ## 推荐工作流
 
 1. 判断是否真的需要真实子会话；不需要时按 Workflow / Skill 工作流或普通工具推进。
@@ -116,13 +122,10 @@ Proma 已提供内置 `collaboration` MCP 工具。你必须通过这些工具�
    - 方向不唯一 → 考虑多样性探索（并行派多个调研子 Agent）
    - 纯并行独立任务 → 按方向直接拆分派发
 3. 为每个独立方向调用 `collaboration.delegate_agent`；方向已清晰时用 `collaboration.delegate_agents` 批量创建。
-4. 根据任务关系决定父会话下一步：
-   - 如果父会话后续工作强依赖子会话结果，调用 `collaboration.wait_for_delegations` 等待必要结果。
-   - 如果父会话还有独立主线可推进，先继续处理自己的工作，不要因为已经派发子会话就空等。
-   - 如果需要快速校准方向，用 `mode=any` / `minCompleted` 先收敛一部分结果，再决定父会话继续做什么。
-5. 调用 `collaboration.wait_for_delegations` 收敛结果；几十个并行任务可以先用 `mode=any` 等一部分完成，再决定是否继续等待或停止剩余任务。非阻塞推进时，可以先 `list_delegations`，再用 `get_delegation_results` 按 ID 拉取结果。
-6. 整合子会话发现，明确哪些结论来自哪个子会话。
-7. 如某个子会话或一批子会话卡住、重复或方向错误，用 `collaboration.stop_delegation` / `collaboration.stop_delegations` 停止。
+4. 有完全独立的父会话工作才先推进；不要因为“已启动”就结束本轮。
+5. 在任何依赖子任务的回复、判断或交付前，调用 `collaboration.wait_for_delegations`；完整汇总使用 `mode=all`，只需要早期部分结果时才使用 `mode=any`。
+6. 检查 `status`、`completedCount`、`runningCount`、每个委派的终态和 `resultSummary`；超时、失败、取消、中断或存在 `pendingBlockedEvents` 时，先如实处理状态。
+7. 整合子会话发现，明确哪些结论来自哪个子会话；如某个子会话卡住、重复或方向错误，用 `collaboration.stop_delegation` / `collaboration.stop_delegations` 停止。
 
 ## 委派 task 写法
 
@@ -146,8 +149,9 @@ Proma 已提供内置 `collaboration` MCP 工具。你必须通过这些工具�
 
 ## 回复方式
 
-- 创建子会话后，不要只告诉用户“已创建”，还要说明每个子会话负责什么。
+- 创建子会话后，不能只告诉用户“已创建”或仅复述委派计划：只要当轮目标依赖其结果，必须先调用 `wait_for_delegations` 并整合结果后再回复。
 - 等待结果后，整合关键发现，不要把多个子会话结果原样堆给用户。
+- 若等待超时或仍有子会话运行，明确说明未完成状态与下一步，而不是宣称已完成或虚构汇总。
 - 如果不建议创建子会话，直接说明原因，并使用普通工具完成。
 
 ## 简单 BDD 手动测试
@@ -237,3 +241,21 @@ Then 父 Agent 评估该建议的必要性和影响。
 And 父 Agent 决定是否采纳建议，并由自己执行修改（子 Agent 不直接修改文件）。
 
 And 父 Agent 向用户说明采纳了什么以及原因。
+
+### Scenario 9：派发后没有独立工作时必须等待
+
+Given 用户说：“开两个子会话分别分析前端与主进程，等它们完成后给我结论。”
+
+When 父 Agent 已调用 `collaboration.delegate_agents`，且当前没有可独立推进的工作。
+
+Then 父 Agent 必须保存返回的全部 `delegationIds`，并在回复前调用 `collaboration.wait_for_delegations`、`mode=all`。
+
+And 父 Agent 不得只报告“子会话已创建”就结束本轮，也不得把已启动视为已完成。
+
+### Scenario 10：等待超时不能伪造汇总
+
+Given 父 Agent 等待一个依赖交付的子会话，`wait_for_delegations` 返回 `status=timeout` 且 `runningCount=1`。
+
+Then 父 Agent 不得声称已取得该子会话结论或完成最终汇总。
+
+And 父 Agent 应继续等待、处理阻塞事件，或如实向用户说明尚未收敛的状态与可选下一步。

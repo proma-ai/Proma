@@ -1,7 +1,7 @@
 import { app, BrowserWindow, WebContentsView, session as electronSession, type DownloadItem, type Session, type WebContents } from 'electron'
 import path from 'node:path'
 import { realpath, stat } from 'node:fs/promises'
-import type { BrowserExecutionSource, BrowserOperationStatus, BrowserSessionClosed, BrowserTraceAction, BrowserTraceItem, BrowserViewLayout, BrowserViewState, BrowserTabState } from '@proma/shared'
+import type { BrowserExecutionSource, BrowserOperationStatus, BrowserSessionClosed, BrowserTabFocusChange, BrowserTraceAction, BrowserTraceItem, BrowserViewLayout, BrowserViewState, BrowserTabState } from '@proma/shared'
 import { AGENT_IPC_CHANNELS } from '@proma/shared'
 import { assertSafeBrowserDestination, assertSafeBrowserDestinationWithFallback, assertSafeBrowserDownloadUrl, assertSafeBrowserUrl, isSupportedBrowserPopupUrl, isTransientBrowserPopupUrl, USER_NEW_TAB_URL } from './browser-policy'
 import { createAuthorizedPreviewUrl, isAuthorizedPreviewProtocol } from './browser-preview-service'
@@ -10,6 +10,7 @@ import { BrowserCdpTimeoutError, BrowserOperationAbortedError, BROWSER_OBSERVE_T
 import { parseBrowserPressAction } from './browser-key-policy'
 import { browserObservationNameLimit, prioritizeBrowserObservationCandidates, resolveBrowserObserveMaxElements } from './browser-observation-policy'
 import { buildPersistentBrowserPartition, resolveBrowserProfileKey } from './browser-profile-policy'
+import { canBrowserSessionTakeForeground, isNewBrowserTabLayoutRevision } from './browser-presentation-policy'
 import { hasAcknowledgedBrowserRiskDisclaimer } from './browser-risk-disclaimer'
 import { buildPromaBrowserUserAgent } from './browser-identity'
 import {
@@ -114,7 +115,8 @@ type BrowserSessionRecord = {
   ledger: BrowserTraceItem[]
   /** 用户在面板中主动打开/操作过浏览器；用于下一条消息的实时上下文。 */
   userOpenedAt: number | null
-  lastLayoutRevision: number
+  /** 每个 BrowserSlot 独立拒绝晚到布局；双 Pane 下不能用 Session 级 revision 互相覆盖。 */
+  lastLayoutRevisionByTab: Map<string, number>
 }
 
 type BrowserSessionConfiguration = {
@@ -123,10 +125,7 @@ type BrowserSessionConfiguration = {
   executionSource: BrowserExecutionSource
 }
 
-/**
- * 主窗口只有一个原生浏览器展示槽。布局 revision 由 renderer 全局递增，
- * 因此可跨 Agent session 拒绝晚到的 show IPC。
- */
+/** 一个前台 BrowserSlot 对应一个原生 WebContentsView；同一 Agent Session 最多可同时呈现多个。 */
 type BrowserPresentation = {
   sessionId: string
   tabId: string
@@ -223,10 +222,12 @@ export class BrowserController {
   private readonly downloadGuardedSessions = new WeakSet<Session>()
   /** 自定义 partition 不继承 default session 的协议处理器，必须单独注册本地预览协议。 */
   private readonly previewProtocolSessions = new WeakSet<Session>()
-  /** 跨 Session 的唯一原生 WebContentsView 前台所有权。 */
-  private presentation: BrowserPresentation | null = null
-  /** 即使当前没有 Slot，也保留最新 show 代际以拒绝晚到的旧 show IPC。 */
-  private latestPresentationRevision = 0
+  /** 同一前台 Agent Session 可同时拥有多个原生 WebContentsView（双 Pane）。 */
+  private readonly presentations = new Map<string, BrowserPresentation>()
+  /** 原生视图仍只能属于一个前台 Agent Session，防止后台 Session 穿透到当前界面。 */
+  private foregroundPresentationSessionId: string | null = null
+  /** 最近一次切换前台 Session 的 show 代际，用于拒绝晚到的旧 Session show。 */
+  private latestForegroundPresentationRevision = 0
 
   configureSession(sessionId: string, input: ConfigureBrowserSessionInput): void {
     const previous = this.configurations.get(sessionId)
@@ -270,6 +271,12 @@ export class BrowserController {
     if (!this.owner || this.owner.isDestroyed()) return
     const change: BrowserSessionClosed = { sessionId, closed: true }
     this.owner.webContents.send(AGENT_IPC_CHANNELS.BROWSER_STATE_CHANGED, change)
+  }
+
+  private emitFocusedTab(browserSession: BrowserSessionRecord, tab: BrowserTabRecord): void {
+    if (!this.owner || this.owner.isDestroyed() || !this.isManagedTabCurrent(browserSession, tab)) return
+    const change: BrowserTabFocusChange = { sessionId: browserSession.sessionId, tabId: tab.tabId }
+    this.owner.webContents.send(AGENT_IPC_CHANNELS.BROWSER_TAB_FOCUSED, change)
   }
 
   private buildState(browserSession: BrowserSessionRecord): BrowserViewState {
@@ -573,7 +580,7 @@ export class BrowserController {
       executionSource: configuration?.executionSource ?? 'user',
       ledger: [],
       userOpenedAt: null,
-      lastLayoutRevision: 0,
+      lastLayoutRevisionByTab: new Map(),
     }
     this.installSessionGuards(browserSession)
     this.installPreviewProtocol(browserSession)
@@ -635,6 +642,8 @@ export class BrowserController {
           })
           this.activateDisplayTab(browserSession, popup)
           this.trace(browserSession, popup, 'popup', isTransientBrowserPopupUrl(url) ? '已打开临时新窗口' : '已打开新窗口', 'dispatched')
+          // popup 尚未有 BrowserSlot，显式要求 renderer 将它放入当前焦点 Pane。
+          this.emitFocusedTab(browserSession, popup)
           return popup.view.webContents
         },
       }
@@ -655,6 +664,13 @@ export class BrowserController {
         this.trace(browserSession, tab, 'navigate', '已阻止不安全的页面跳转', 'failed')
       }
     })
+    view.webContents.on('focus', () => {
+      if (!this.isManagedTabCurrent(browserSession, tab) || !this.hasPresentation(browserSession.sessionId, tab.tabId)) return
+      tab.lastActivityAt = Date.now()
+      browserSession.activeTabId = tab.tabId
+      this.emit(browserSession)
+      this.emitFocusedTab(browserSession, tab)
+    })
     view.webContents.on('did-start-loading', () => { this.invalidateTabDocument(tab); this.updateNavigationState(browserSession, tab) })
     view.webContents.on('did-stop-loading', () => this.updateNavigationState(browserSession, tab))
     view.webContents.on('page-title-updated', () => this.updateNavigationState(browserSession, tab))
@@ -664,11 +680,16 @@ export class BrowserController {
       if (!browserSession.tabs.has(tab.tabId)) return
       this.disposePopupChildren(browserSession, tab.tabId)
       browserSession.tabs.delete(tab.tabId)
+      browserSession.lastLayoutRevisionByTab.delete(tab.tabId)
+      this.removePresentation(browserSession.sessionId, tab.tabId)
       this.clearAgentTargetHighlight(tab)
       this.detachTabView(tab)
       this.repairTabSelection(browserSession, tab.tabId)
       if (browserSession.tabs.size === 0) {
         this.sessions.delete(browserSession.sessionId)
+        this.clearPresentationsForSession(browserSession.sessionId)
+        if (this.foregroundPresentationSessionId === browserSession.sessionId) this.foregroundPresentationSessionId = null
+        this.emitClosed(browserSession.sessionId)
         return
       }
       this.emit(browserSession)
@@ -777,17 +798,43 @@ export class BrowserController {
     return structuredClone(this.buildState(browserSession))
   }
 
+  private presentationKey(sessionId: string, tabId: string): string {
+    return `${sessionId}\u0000${tabId}`
+  }
+
+  private hasPresentation(sessionId: string, tabId: string): boolean {
+    return this.presentations.has(this.presentationKey(sessionId, tabId))
+  }
+
+  private hasPresentationForSession(sessionId: string): boolean {
+    for (const presentation of this.presentations.values()) {
+      if (presentation.sessionId === sessionId) return true
+    }
+    return false
+  }
+
+  private removePresentation(sessionId: string, tabId: string): void {
+    this.presentations.delete(this.presentationKey(sessionId, tabId))
+  }
+
+  private clearPresentationsForSession(sessionId: string): void {
+    for (const [key, presentation] of this.presentations) {
+      if (presentation.sessionId === sessionId) this.presentations.delete(key)
+    }
+  }
+
   /**
-   * 所有受管标签都挂在同一个 BrowserWindow.contentView，必须在 controller
-   * 层保证跨 Session 只有一个原生 View 可见，不能依赖 renderer 卸载顺序。
+   * 所有受管标签都挂在同一个 BrowserWindow.contentView。同一个前台 Agent Session
+   * 可以有多个不重叠的 Pane，但其他 Session 的原生 View 必须全部 detach。
    */
-  private hideAllViewsExcept(targetSessionId: string, targetTabId: string): Set<BrowserSessionRecord> {
+  private hideViewsOutsideSession(targetSessionId: string): Set<BrowserSessionRecord> {
     const changedSessions = new Set<BrowserSessionRecord>()
     for (const browserSession of this.sessions.values()) {
+      if (browserSession.sessionId === targetSessionId) continue
       for (const tab of browserSession.tabs.values()) {
-        if (browserSession.sessionId === targetSessionId && tab.tabId === targetTabId) continue
         if (this.hideTabView(tab)) changedSessions.add(browserSession)
       }
+      this.clearPresentationsForSession(browserSession.sessionId)
     }
     return changedSessions
   }
@@ -841,7 +888,7 @@ export class BrowserController {
   }
 
   private isBackgroundSession(browserSession: BrowserSessionRecord): boolean {
-    if (this.presentation?.sessionId === browserSession.sessionId) return false
+    if (this.hasPresentationForSession(browserSession.sessionId)) return false
     if (browserSession.preserveSessionOnHide) return false
     if (browserSession.activeAgentOperationCount > 0) return false
     return [...browserSession.tabs.values()].every((tab) => !tab.state.visible)
@@ -864,14 +911,17 @@ export class BrowserController {
     }
   }
 
-  /** 用户最小化当前浏览器：保留 WebContents，并在必要时回收最久未使用的后台 session。 */
+  /** 用户最小化当前浏览器：保留 WebContents，并隐藏该 Session 的所有可见 Pane。 */
   minimize(sessionId: string): void {
     const browserSession = this.getSession(sessionId)
-    const tab = this.getDisplayTab(browserSession)
-    tab.lastActivityAt = Date.now()
+    const activeTab = this.getDisplayTab(browserSession)
+    activeTab.lastActivityAt = Date.now()
     const changedSessions = new Set<BrowserSessionRecord>()
-    if (this.hideTabView(tab)) changedSessions.add(browserSession)
-    if (this.presentation?.sessionId === browserSession.sessionId) this.presentation = null
+    for (const tab of browserSession.tabs.values()) {
+      if (this.hideTabView(tab)) changedSessions.add(browserSession)
+    }
+    this.clearPresentationsForSession(browserSession.sessionId)
+    if (this.foregroundPresentationSessionId === browserSession.sessionId) this.foregroundPresentationSessionId = null
     browserSession.preserveSessionOnHide = false
     this.emitChangedSessions(changedSessions)
     this.pruneBackgroundSessions()
@@ -880,30 +930,41 @@ export class BrowserController {
   setLayout(layout: BrowserViewLayout): void {
     const browserSession = this.sessions.get(layout.sessionId)
     if (!browserSession) return
-    // React effect cleanup 和新 slot 的 IPC 可以交错到达。只采纳当前 Session 的最新布局。
-    if (!Number.isSafeInteger(layout.revision) || layout.revision <= browserSession.lastLayoutRevision) return
-    browserSession.lastLayoutRevision = layout.revision
-    browserSession.preserveSessionOnHide = layout.preserveSessionOnHide === true
-    const tab = browserSession.tabs.get(layout.tabId ?? browserSession.activeTabId)
+    const tabId = layout.tabId ?? browserSession.activeTabId
+    const tab = browserSession.tabs.get(tabId)
     // BrowserSlot 卸载与 tab 关闭可交错，晚到布局不应让 renderer 报错。
     if (!tab) return
+    // 双 Pane 中两个 Slot 会交错发布。每个 tab 只和自己的最新 revision 比较，
+    // 不能让右 Pane 的 resize 吞掉左 Pane 尚未到达的 show。
+    const previousRevision = browserSession.lastLayoutRevisionByTab.get(tab.tabId) ?? 0
+    if (!isNewBrowserTabLayoutRevision(layout.revision, previousRevision)) return
+    browserSession.lastLayoutRevisionByTab.set(tab.tabId, layout.revision)
+    browserSession.preserveSessionOnHide = layout.preserveSessionOnHide === true
 
     const bounds = layout.bounds
     const visible = layout.visible && bounds.width > 4 && bounds.height > 4 && !!this.owner && !this.owner.isDestroyed() && this.owner.isVisible()
     if (!visible) {
-      this.latestPresentationRevision = Math.max(this.latestPresentationRevision, layout.revision)
       const changedSessions = new Set<BrowserSessionRecord>()
       if (this.hideTabView(tab)) changedSessions.add(browserSession)
-      if (this.presentation?.sessionId === browserSession.sessionId && this.presentation.tabId === tab.tabId) {
-        this.presentation = null
-      }
+      this.removePresentation(browserSession.sessionId, tab.tabId)
       this.emitChangedSessions(changedSessions)
       return
     }
 
-    // revision 在 renderer 全局单调递增。A 的旧 show 即使在 B 已显示后晚到，
-    // 也不能重新把 A 的原生 view 放到前台。
-    if (layout.revision <= this.latestPresentationRevision) return
+    // revision 在 renderer 全局单调递增。只有切换 Agent Session 时才用全局 show
+    // 代际仲裁；同一 Session 的多个 Pane 必须独立接受各自的新布局。
+    if (!canBrowserSessionTakeForeground({
+      incomingSessionId: browserSession.sessionId,
+      foregroundSessionId: this.foregroundPresentationSessionId,
+      revision: layout.revision,
+      latestForegroundRevision: this.latestForegroundPresentationRevision,
+    })) return
+
+    const changedSessions = this.foregroundPresentationSessionId === browserSession.sessionId
+      ? new Set<BrowserSessionRecord>()
+      : this.hideViewsOutsideSession(browserSession.sessionId)
+    this.foregroundPresentationSessionId = browserSession.sessionId
+    this.latestForegroundPresentationRevision = Math.max(this.latestForegroundPresentationRevision, layout.revision)
 
     const zoomFactor = this.owner?.webContents.getZoomFactor() ?? 1
     const adjustedBounds = {
@@ -912,7 +973,6 @@ export class BrowserController {
       width: Math.round(bounds.width * zoomFactor),
       height: Math.round(bounds.height * zoomFactor),
     }
-    const changedSessions = this.hideAllViewsExcept(browserSession.sessionId, tab.tabId)
     if (!tab.lastBounds || Object.entries(adjustedBounds).some(([key, value]) => tab.lastBounds?.[key as keyof typeof adjustedBounds] !== value)) {
       tab.lastBounds = { ...adjustedBounds }
     }
@@ -921,40 +981,35 @@ export class BrowserController {
       tab.state.visible = shown
       changedSessions.add(browserSession)
     }
-    this.presentation = shown ? { sessionId: browserSession.sessionId, tabId: tab.tabId, revision: layout.revision } : null
-    this.latestPresentationRevision = layout.revision
+    if (shown) {
+      this.presentations.set(this.presentationKey(browserSession.sessionId, tab.tabId), {
+        sessionId: browserSession.sessionId,
+        tabId: tab.tabId,
+        revision: layout.revision,
+      })
+    } else {
+      this.removePresentation(browserSession.sessionId, tab.tabId)
+    }
     this.emitChangedSessions(changedSessions)
     if (shown) this.pruneBackgroundSessions()
   }
 
   /**
-   * 会话内切 tab 可立即复用展示区域；后台 Session 只更新自身状态，绝不抢占
-   * 当前浏览器展示槽，等待其 BrowserSlot 成为前台后再由 setLayout 显示。
+   * Tab 激活只改变地址栏/历史操作的逻辑目标。原生 View 的增删和 bounds 由各自
+   * BrowserSlot 的 setLayout 驱动，因此聚焦一个 Browser Pane 不能隐藏另一个 Pane。
    */
   private activateDisplayTab(browserSession: BrowserSessionRecord, tab: BrowserTabRecord): void {
-    const previous = browserSession.tabs.get(browserSession.activeTabId)
     tab.lastActivityAt = Date.now()
     browserSession.activeTabId = tab.tabId
-    if (this.presentation?.sessionId !== browserSession.sessionId) {
-      // 后台 Session 的 tab 切换只更新逻辑状态，所有原生 View 都保持 detach。
-      for (const candidate of browserSession.tabs.values()) this.hideTabView(candidate)
-      this.emit(browserSession)
-      return
+    const isPresented = this.foregroundPresentationSessionId === browserSession.sessionId
+      && this.hasPresentation(browserSession.sessionId, tab.tabId)
+    const visible = isPresented && this.attachTabView(tab)
+    if (!visible) {
+      this.detachTabView(tab)
+      this.removePresentation(browserSession.sessionId, tab.tabId)
     }
-
-    if (!tab.lastBounds && previous?.lastBounds) {
-      tab.lastBounds = { ...previous.lastBounds }
-    }
-    const changedSessions = this.hideAllViewsExcept(browserSession.sessionId, tab.tabId)
-    const shouldShow = !!tab.lastBounds && !!this.owner && !this.owner.isDestroyed() && this.owner.isVisible()
-    const visible = shouldShow && this.attachTabView(tab)
-    if (!visible) this.detachTabView(tab)
-    if (tab.state.visible !== visible) {
-      tab.state.visible = visible
-      changedSessions.add(browserSession)
-    }
-    this.presentation = visible ? { ...this.presentation, tabId: tab.tabId } : null
-    this.emitChangedSessions(changedSessions)
+    if (tab.state.visible !== visible) tab.state.visible = visible
+    this.emit(browserSession)
   }
 
   private disposePopupChildren(browserSession: BrowserSessionRecord, openerTabId: string): void {
@@ -977,6 +1032,8 @@ export class BrowserController {
     // Child windows use Electron's opener lifetime and must not outlive a tab closed from Proma UI either.
     this.disposePopupChildren(browserSession, tab.tabId)
     browserSession.tabs.delete(tab.tabId)
+    browserSession.lastLayoutRevisionByTab.delete(tab.tabId)
+    this.removePresentation(browserSession.sessionId, tab.tabId)
     this.clearAgentTargetHighlight(tab)
     try { if (tab.view.webContents.debugger.isAttached()) tab.view.webContents.debugger.detach() } catch { /* 已销毁 */ }
     this.detachTabView(tab)
@@ -1060,7 +1117,8 @@ export class BrowserController {
     this.disposeTab(browserSession, tab)
     if (browserSession.tabs.size === 0) {
       this.sessions.delete(sessionId)
-      if (this.presentation?.sessionId === sessionId) this.presentation = null
+      this.clearPresentationsForSession(sessionId)
+      if (this.foregroundPresentationSessionId === sessionId) this.foregroundPresentationSessionId = null
       this.emitClosed(sessionId)
       return null
     }
@@ -1683,7 +1741,8 @@ export class BrowserController {
       return
     }
     this.sessions.delete(sessionId)
-    if (this.presentation?.sessionId === sessionId) this.presentation = null
+    this.clearPresentationsForSession(sessionId)
+    if (this.foregroundPresentationSessionId === sessionId) this.foregroundPresentationSessionId = null
     for (const tab of browserSession.tabs.values()) {
       this.clearAgentTargetHighlight(tab)
       try { if (tab.view.webContents.debugger.isAttached()) tab.view.webContents.debugger.detach() } catch { /* 已销毁 */ }
@@ -1697,8 +1756,9 @@ export class BrowserController {
   dispose(): void {
     for (const sessionId of [...this.sessions.keys()]) void this.close(sessionId)
     this.configurations.clear()
-    this.presentation = null
-    this.latestPresentationRevision = 0
+    this.presentations.clear()
+    this.foregroundPresentationSessionId = null
+    this.latestForegroundPresentationRevision = 0
     this.owner = null
   }
 }

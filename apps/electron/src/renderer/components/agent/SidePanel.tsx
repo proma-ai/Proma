@@ -21,7 +21,7 @@ import { cn } from '@/lib/utils'
 import { markdownToHtml } from '@/lib/markdown-rich-text'
 import { FileBrowser, FileDropZone, FileTypeIcon, FileSearchBar, computeRevealAncestors, isPathUnderRoot, computeTreeRowLayout, AncestorGuides, STICKY_ROW_BASE_CLASS, canBeSticky } from '@/components/file-browser'
 import { DiffPanelTabBar } from '@/components/diff/DiffPanelTabBar'
-import type { WorkspacePanelTab } from '@/components/diff/DiffPanelTabBar'
+import type { RightWorkspaceTabDragState, WorkspacePanelTab } from '@/components/diff/DiffPanelTabBar'
 import { DiffChangesList } from '@/components/diff/DiffChangesList'
 import { ChatView } from '@/components/chat/ChatView'
 import { AgentView } from '@/components/agent/AgentView'
@@ -47,6 +47,9 @@ import {
   sanitizeWorkspaceComponentTabs,
   getDelegationTabLabel,
   fileBrowserAutoRevealAtom,
+  fileBrowserScrollTopMapAtom,
+  isFileBrowserAutoRevealActive,
+  pruneFileBrowserStateMap,
   agentSelectedWorktreeAtom,
   agentSideTemporaryAgentMapAtom,
   agentSideDelegationMapAtom,
@@ -56,6 +59,8 @@ import {
   agentSessionDraftSyncVersionsAtom,
   agentSessionDraftHtmlAtom,
   agentTerminalTabsAtom,
+  agentSidePanelSplitMapAtom,
+  agentSidePanelSplitRatioMapAtom,
 } from '@/atoms/agent-atoms'
 import {
   getBrowserSidePanelTab,
@@ -77,7 +82,6 @@ import { AutomationFormView } from '@/components/automation/AutomationFormView'
 import { automationFormAtom } from '@/atoms/automation-atoms'
 import { memoryFileNavigationAtom, workspaceMemoryChangesAtom } from '@/atoms/memory-change-atoms'
 import { agentSideChatMapAtom } from '@/atoms/chat-atoms'
-import { interfaceVariantAtom } from '@/atoms/theme'
 import {
   browserPanelMinimizedMapAtom,
   browserPanelOpenMapAtom,
@@ -100,6 +104,162 @@ import { rememberStopGenerationTarget } from '@/lib/stop-generation-target'
 import { TerminalTabContent } from '@/components/tabs/TerminalTabContent'
 import { useEnterpriseSkillsAvailability } from '@/hooks/useEnterpriseSkillsAvailability'
 import { shouldShowBothFileSources } from './file-panel-layout'
+import {
+  clampRightWorkspaceSplitRatio,
+  clampRightWorkspaceSplitRatioForWidth,
+  collapseRightWorkspaceSplit,
+  createRightWorkspaceSplit,
+  focusRightWorkspaceSplitPane,
+  getFocusedRightWorkspaceTab,
+  placeRightWorkspaceSplitTab,
+  sanitizeRightWorkspaceSplit,
+  selectRightWorkspaceSplitTab,
+} from '@/lib/right-workspace-split'
+import type { RightWorkspacePane, RightWorkspaceSplitState } from '@/lib/right-workspace-split'
+
+function MeasuredWorkspacePane({ children }: { children: (width: number) => React.ReactNode }): React.ReactElement {
+  const ref = React.useRef<HTMLDivElement>(null)
+  const [width, setWidth] = React.useState<number | null>(null)
+
+  React.useLayoutEffect(() => {
+    const element = ref.current
+    if (!element) return
+    const publishWidth = () => {
+      const nextWidth = Math.round(element.getBoundingClientRect().width)
+      setWidth((previous) => previous === nextWidth ? previous : nextWidth)
+    }
+    publishWidth()
+    const observer = new ResizeObserver(publishWidth)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+
+  return (
+    <div ref={ref} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      {width !== null ? children(width) : null}
+    </div>
+  )
+}
+
+interface PersistentFileScrollAreaProps {
+  stateKey: string
+  className: string
+  children: React.ReactNode
+  autoRevealTs?: number
+}
+
+/** 保存 Files Tab 的滚动位置，并在文件树异步恢复内容后再次定位。 */
+function PersistentFileScrollArea({ stateKey, className, children, autoRevealTs = 0 }: PersistentFileScrollAreaProps): React.ReactElement {
+  const scrollTopMap = useAtomValue(fileBrowserScrollTopMapAtom)
+  const setScrollTopMap = useSetAtom(fileBrowserScrollTopMapAtom)
+  const scrollTop = scrollTopMap.get(stateKey) ?? 0
+  const containerRef = React.useRef<HTMLDivElement>(null)
+  // 用 stateKey 分隔最新值：切换文件来源时，旧 effect 的 cleanup 仍须写回旧视图的位置。
+  const latestScrollTopByStateKeyRef = React.useRef(new Map<string, number>())
+  const pendingFlushRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  React.useLayoutEffect(() => {
+    latestScrollTopByStateKeyRef.current.set(stateKey, scrollTop)
+  }, [scrollTop, stateKey])
+
+  React.useLayoutEffect(() => {
+    // 新搜索的 scrollIntoView 优先于历史位置；过期 reveal 会在传入前被过滤。
+    if (autoRevealTs) return
+
+    const container = containerRef.current
+    if (!container) return
+
+    let firstFrame = 0
+    let secondFrame = 0
+    let mutationObserver: MutationObserver | null = null
+    const restore = (): boolean => {
+      const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight)
+      const latestScrollTop = latestScrollTopByStateKeyRef.current.get(stateKey) ?? 0
+      container.scrollTop = Math.min(latestScrollTop, maxScrollTop)
+      return maxScrollTop >= latestScrollTop
+    }
+    const scheduleRestore = () => {
+      if (restore()) {
+        mutationObserver?.disconnect()
+        return
+      }
+      firstFrame = requestAnimationFrame(() => {
+        if (restore()) {
+          mutationObserver?.disconnect()
+          return
+        }
+        secondFrame = requestAnimationFrame(() => {
+          if (restore()) mutationObserver?.disconnect()
+        })
+      })
+    }
+
+    const resizeObserver = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(scheduleRestore)
+      : null
+    resizeObserver?.observe(container)
+    // 仅在尚未达到保存位置时保留观察；深层目录慢速恢复后继续定位，达到目标即释放。
+    mutationObserver = typeof MutationObserver !== 'undefined'
+      ? new MutationObserver(scheduleRestore)
+      : null
+    mutationObserver?.observe(container, { childList: true, subtree: true })
+    scheduleRestore()
+
+    return () => {
+      cancelAnimationFrame(firstFrame)
+      cancelAnimationFrame(secondFrame)
+      resizeObserver?.disconnect()
+      mutationObserver?.disconnect()
+    }
+  }, [autoRevealTs, stateKey])
+
+  React.useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const flush = () => {
+      pendingFlushRef.current = null
+      const nextScrollTop = latestScrollTopByStateKeyRef.current.get(stateKey) ?? 0
+      setScrollTopMap((previous) => {
+        if (previous.get(stateKey) === nextScrollTop) return previous
+        const next = new Map(previous)
+        next.set(stateKey, nextScrollTop)
+        return next
+      })
+    }
+    const handleScroll = () => {
+      latestScrollTopByStateKeyRef.current.set(stateKey, container.scrollTop)
+      if (pendingFlushRef.current === null) {
+        pendingFlushRef.current = setTimeout(flush, 120)
+      }
+    }
+
+    container.addEventListener('scroll', handleScroll, { passive: true })
+    return () => {
+      container.removeEventListener('scroll', handleScroll)
+      if (pendingFlushRef.current !== null) {
+        clearTimeout(pendingFlushRef.current)
+        pendingFlushRef.current = null
+      }
+      // Tab 切换卸载前同步落盘到内存 atom，避免最后 120ms 丢失。
+      flush()
+    }
+  }, [setScrollTopMap, stateKey])
+
+  return <div ref={containerRef} className={className}>{children}</div>
+}
+
+function getFileBrowserScrollStateKey(
+  sessionId: string,
+  view: string,
+  roots: readonly { path: string; scope: string }[],
+): string {
+  const rootKey = roots
+    .map((root) => `${root.scope}\u0000${root.path}`)
+    .sort()
+    .join('\u0001')
+  return `${sessionId}\u0002files\u0002${view}\u0002${rootKey}`
+}
 
 function getPathBasename(filePath: string): string {
   return filePath.split(/[\\/]/).filter(Boolean).pop() || filePath
@@ -284,7 +444,6 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     return nextTab
   }, [activeTab, getPreviousTabBeforeClose, onTabChange])
 
-  const showBothFileSources = shouldShowBothFileSources(width)
   // 侧面板状态按 sessionId 持久化，切换会话不会互相覆盖。
   const [isOpen, setIsOpen] = useAtom(currentSessionSidePanelOpenAtom)
   // Tab 系统
@@ -340,6 +499,10 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   })
 
   const filesVersion = useAtomValue(workspaceFilesVersionAtom)
+  const autoReveal = useAtomValue(fileBrowserAutoRevealAtom)
+  const activeAutoRevealTs = autoReveal?.sessionId === sessionId && isFileBrowserAutoRevealActive(autoReveal)
+    ? autoReveal.ts
+    : 0
   const setFilesVersion = useSetAtom(workspaceFilesVersionAtom)
   const diffRefreshVersionMap = useAtomValue(agentDiffRefreshVersionAtom)
   const diffRefreshVersion = diffRefreshVersionMap.get(sessionId) ?? 0
@@ -627,9 +790,6 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       return { ...prev, [sessionId]: source }
     })
   }, [sessionId, setFileSourceFilterMap])
-  const showSessionFiles = showBothFileSources || fileSourceFilter === 'session'
-  const showProjectFiles = showBothFileSources || fileSourceFilter === 'project'
-
   const sessionFileRoots = React.useMemo(
     () => sessionPath ? [{ path: sessionPath, scope: 'session' as const }] : [],
     [sessionPath],
@@ -640,11 +800,6 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       : [],
     [isProjectRootUnavailable, workspaceFilesPath],
   )
-  const visibleFileRoots = React.useMemo(() => [
-    ...(showProjectFiles ? projectFileRoots : []),
-    ...(showSessionFiles ? sessionFileRoots : []),
-  ], [projectFileRoots, sessionFileRoots, showProjectFiles, showSessionFiles])
-
   // Files 将会话与项目文件放在同一视图；FileBrowser 自己处理对应根目录的自动定位。
   // RightSidePanel 完全由用户控制，不因 Agent 文件变更自动打开。
 
@@ -652,10 +807,6 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   basePathsRef.current = [sessionPath, workspaceFilesPath, ...fileAccessPathsMemo].filter(Boolean) as string[]
   const hasSessionAttachedItems = attachedDirs.length > 0 || attachedFiles.length > 0
   const hasWorkspaceAttachedItems = wsAttachedDirs.length > 0 || wsAttachedFiles.length > 0
-  const hasVisibleSessionAttachedItems = showSessionFiles && hasSessionAttachedItems
-  const hasVisibleWorkspaceAttachedItems = showProjectFiles && hasWorkspaceAttachedItems
-  const interfaceVariant = useAtomValue(interfaceVariantAtom)
-  const isClassic = interfaceVariant === 'classic'
   const sideChatMap = useAtomValue(agentSideChatMapAtom)
   const setSideChatMap = useSetAtom(agentSideChatMapAtom)
   const sideChatConversationId = sideChatMap.get(sessionId) ?? null
@@ -712,6 +863,23 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       : isWorkspaceComponentTab(activeTab) && (!workspaceSlug || !workspaceComponentTabs.includes(activeTab) || (activeTab === 'enterprise' && !enterpriseSkills.enabled))
         ? 'files'
         : activeTab
+  const [splitMap, setSplitMap] = useAtom(agentSidePanelSplitMapAtom)
+  const [splitRatioMap, setSplitRatioMap] = useAtom(agentSidePanelSplitRatioMapAtom)
+  const split = splitMap.get(sessionId) ?? null
+  const splitMapRef = React.useRef(splitMap)
+  splitMapRef.current = splitMap
+  const savedSplitRatio = clampRightWorkspaceSplitRatio(splitRatioMap[sessionId] ?? 0.5)
+
+  const updateSplit = React.useCallback((next: RightWorkspaceSplitState | null) => {
+    setSplitMap((previous) => {
+      const current = previous.get(sessionId) ?? null
+      if (current === next) return previous
+      const updated = new Map(previous)
+      if (next) updated.set(sessionId, next)
+      else updated.delete(sessionId)
+      return updated
+    })
+  }, [sessionId, setSplitMap])
 
   // memory 写入不能沿用通用组件激活：只有 watcher 捕获真实文件变更后才能生成受限 Diff。
   // SidePanel 按 session 挂载，因此只会为正在运行的来源 session 路由这次 Diff；其他会话不受影响。
@@ -835,10 +1003,17 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   const setPendingNavigationMap = useSetAtom(browserPendingNavigationMapAtom)
   const browserState = browserStateMap.get(sessionId) ?? null
   const openingBrowserSessionRef = React.useRef<string | null>(null)
-  // 右侧 Tab 可被快速连续点击。必须串行落盘到原生 controller，否则迟到的旧选择
-  // 会把 WebContentsView 切回已卸载的 Slot，造成页面不可见。
-  const desiredBrowserTabIdRef = React.useRef<string | null>(null)
-  const browserSelectionInFlightRef = React.useRef(false)
+  // 右侧 Tab 可被快速连续点击。队列必须同时按 Session/epoch 隔离；SidePanel
+  // 组件会跨 Session 复用，旧 Session 的异步 IPC 绝不能消费新 Session 的 tabId。
+  const browserSelectionQueueRef = React.useRef({ sessionId, epoch: 0, desiredTabId: null as string | null, running: false })
+  if (browserSelectionQueueRef.current.sessionId !== sessionId) {
+    browserSelectionQueueRef.current = {
+      sessionId,
+      epoch: browserSelectionQueueRef.current.epoch + 1,
+      desiredTabId: null,
+      running: false,
+    }
+  }
 
   const publishBrowserState = React.useCallback((state: NonNullable<typeof browserState>) => {
     setBrowserStateMap((previous) => {
@@ -876,22 +1051,31 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   }, [publishBrowserState, sessionId])
 
   const flushBrowserTabSelection = React.useCallback(() => {
-    if (browserSelectionInFlightRef.current) return
-    browserSelectionInFlightRef.current = true
+    const queue = browserSelectionQueueRef.current
+    if (queue.sessionId !== sessionId || queue.running) return
+    queue.running = true
+    const runEpoch = queue.epoch
     void (async () => {
       try {
-        while (desiredBrowserTabIdRef.current) {
-          const targetTabId = desiredBrowserTabIdRef.current
-          desiredBrowserTabIdRef.current = null
+        while (true) {
+          const current = browserSelectionQueueRef.current
+          if (current.sessionId !== sessionId || current.epoch !== runEpoch) return
+          const targetTabId = current.desiredTabId
+          if (!targetTabId) return
+          current.desiredTabId = null
           const state = await window.electronAPI.selectAgentBrowserTab({ sessionId, tabId: targetTabId })
+          const latest = browserSelectionQueueRef.current
+          if (latest.sessionId !== sessionId || latest.epoch !== runEpoch) return
           publishBrowserState(state)
         }
       } catch (error) {
         console.error('[SidePanel] 切换受管浏览器标签失败:', error)
       } finally {
-        browserSelectionInFlightRef.current = false
+        const current = browserSelectionQueueRef.current
+        if (current.sessionId !== sessionId || current.epoch !== runEpoch) return
+        current.running = false
         // 请求完成的瞬间可能又点击了其他标签，继续落到最终目标。
-        if (desiredBrowserTabIdRef.current) flushBrowserTabSelection()
+        if (current.desiredTabId) flushBrowserTabSelection()
       }
     })()
   }, [publishBrowserState, sessionId])
@@ -924,11 +1108,20 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       }
     }
     const browserTabId = getBrowserTabIdFromSidePanelTab(tab)
+    if (split) updateSplit(selectRightWorkspaceSplitTab(split, tab))
     onTabChange(tab)
     if (!browserTabId) return
-    desiredBrowserTabIdRef.current = browserTabId
+    const queue = browserSelectionQueueRef.current
+    if (queue.sessionId !== sessionId) return
+    queue.desiredTabId = browserTabId
     flushBrowserTabSelection()
-  }, [flushBrowserTabSelection, onTabChange, previewFiles, sessionId, setPreviewFileMap, sideChatConversationId, sideDelegationSessionIds, sideTemporaryAgents])
+  }, [flushBrowserTabSelection, onTabChange, previewFiles, sessionId, setPreviewFileMap, sideChatConversationId, sideDelegationSessionIds, sideTemporaryAgents, split, updateSplit])
+
+  // Agent/浏览器等外部事件仍只更新兼容 activeTab；分屏时把新目标落到当前焦点 Pane。
+  React.useEffect(() => {
+    if (!split || getFocusedRightWorkspaceTab(split) === effectiveActiveTab) return
+    updateSplit(selectRightWorkspaceSplitTab(split, effectiveActiveTab))
+  }, [effectiveActiveTab, split, updateSplit])
 
   const handleOpenBrowserTab = React.useCallback(async () => {
     try {
@@ -937,11 +1130,11 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
         : await ensureBrowserOpen()
       if (!state) return
       publishBrowserState(state)
-      onTabChange(getBrowserSidePanelTab(state.activeTabId))
+      handleWorkspaceTabChange(getBrowserSidePanelTab(state.activeTabId))
     } catch (error) {
       console.error('[SidePanel] 新建受管浏览器标签失败:', error)
     }
-  }, [browserState, ensureBrowserOpen, onTabChange, publishBrowserState, sessionId])
+  }, [browserState, ensureBrowserOpen, handleWorkspaceTabChange, publishBrowserState, sessionId])
 
   const handleOpenTerminal = React.useCallback((cwd?: string, title = '终端') => {
     const terminalId = crypto.randomUUID()
@@ -950,14 +1143,18 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       next.set(sessionId, [...(next.get(sessionId) ?? []), { terminalId, title, cwd }])
       return next
     })
-    onTabChange(getTerminalSidePanelTab(terminalId))
-  }, [onTabChange, sessionId, setTerminalTabsMap])
+    handleWorkspaceTabChange(getTerminalSidePanelTab(terminalId))
+  }, [handleWorkspaceTabChange, sessionId, setTerminalTabsMap])
 
   const handleOpenWorktreeTerminal = React.useCallback((worktree: WorktreeInfo) => {
     handleOpenTerminal(worktree.path, `终端 · ${worktree.branch}`)
   }, [handleOpenTerminal])
 
-  const handleCloseBrowserTab = React.useCallback(async (browserTabId: string) => {
+  const handleOpenDirectoryTerminal = React.useCallback((directoryPath: string, directoryName: string) => {
+    handleOpenTerminal(directoryPath, `终端 · ${directoryName}`)
+  }, [handleOpenTerminal])
+
+  const handleCloseBrowserTab = React.useCallback(async (browserTabId: string): Promise<boolean> => {
     try {
       const state = await window.electronAPI.closeAgentBrowserTab({ sessionId, tabId: browserTabId })
       if (state) {
@@ -967,7 +1164,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
         } else {
           getPreviousTabBeforeClose(getBrowserSidePanelTab(browserTabId))
         }
-        return
+        return true
       }
       setBrowserOpenMap((previous) => {
         const next = new Map(previous)
@@ -990,8 +1187,10 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
         return next
       })
       returnToPreviousTabAfterClose(getBrowserSidePanelTab(browserTabId))
+      return true
     } catch (error) {
       console.error('[SidePanel] 关闭受管浏览器标签失败:', error)
+      return false
     }
   }, [activeTab, getPreviousTabBeforeClose, handleWorkspaceTabChange, publishBrowserState, returnToPreviousTabAfterClose, sessionId, setBrowserMinimizedMap, setBrowserOpenMap, setBrowserStateMap, setPendingNavigationMap])
 
@@ -1055,14 +1254,33 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       id: getBrowserSidePanelTab(tab.tabId),
       label: tab.title || '新建标签页',
       icon: <Globe className="size-3.5" />,
-      // Agent 当前工作标签不能直接销毁，否则未指定 tabId 的后续浏览器工具会失去目标。
-      closable: tab.tabId !== browserState.agentTabId,
+      // 用户可关闭任何浏览器标签；关闭 Agent 工作标签后，后续未指定 tabId 的工具会提示新建或选择工作标签。
+      closable: true,
       activity: showBrowserActivity && activeBrowserTabId !== tab.tabId && browserState.activeTabId === tab.tabId,
     })) ?? []),
   ], [activeBrowserTabId, browserState, enterpriseSkills.enabled, previewFiles, sessions, sessionId, showBrowserActivity, sideChatConversationId, sideDelegationSessionIds, sideTemporaryAgents, terminalTabs, workspaceComponentTabs])
   workspaceTabsRef.current = workspaceTabs
 
+  React.useEffect(() => {
+    if (!split) return
+    const availableTabs = new Set<AgentSidePanelTab>(workspaceTabs.map((tab) => tab.id))
+    const resolution = sanitizeRightWorkspaceSplit(split, availableTabs)
+    if (resolution.split === split && resolution.activeTab === effectiveActiveTab) return
+    updateSplit(resolution.split)
+    if (resolution.activeTab !== effectiveActiveTab) onTabChange(resolution.activeTab)
+  }, [effectiveActiveTab, onTabChange, split, updateSplit, workspaceTabs])
+
+  const exitSplitInsteadOfClosingBoundTab = React.useCallback((tab: AgentSidePanelTab): boolean => {
+    const currentSplit = splitMapRef.current.get(sessionId) ?? null
+    if (!currentSplit || (tab !== currentSplit.leftTab && tab !== currentSplit.rightTab)) return false
+    // 关闭命令作用于绑定组时不销毁成员；等同“退出并排，保留当前焦点”。
+    handleWorkspaceTabChange(collapseRightWorkspaceSplit(currentSplit))
+    updateSplit(null)
+    return true
+  }, [handleWorkspaceTabChange, sessionId, updateSplit])
+
   const handleCloseWorkspaceTab = React.useCallback((tab: AgentSidePanelTab) => {
+    if (exitSplitInsteadOfClosingBoundTab(tab)) return
     const terminalId = getTerminalIdFromSidePanelTab(tab)
     if (terminalId) {
       void window.electronAPI.killTerminal(terminalId).catch(console.error)
@@ -1091,8 +1309,8 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     const delegationSessionId = getDelegationSessionIdFromSidePanelTab(tab)
     if (delegationSessionId) { handleCloseDelegationTab(delegationSessionId); return }
     const browserTabId = getBrowserTabIdFromSidePanelTab(tab)
-    if (browserTabId && browserTabId !== browserState?.agentTabId) void handleCloseBrowserTab(browserTabId)
-  }, [browserState?.agentTabId, handleCloseBrowserTab, handleCloseChatTab, handleCloseDelegationTab, handleCloseExplorationTab, handleClosePreviewTab, returnToPreviousTabAfterClose, sessionId, setTerminalTabsMap, setWorkspaceComponentTabs])
+    if (browserTabId) void handleCloseBrowserTab(browserTabId)
+  }, [exitSplitInsteadOfClosingBoundTab, handleCloseBrowserTab, handleCloseChatTab, handleCloseDelegationTab, handleCloseExplorationTab, handleClosePreviewTab, returnToPreviousTabAfterClose, sessionId, setTerminalTabsMap, setWorkspaceComponentTabs])
 
   React.useEffect(() => {
     const handleCloseActiveWorkspaceTab = (event: Event) => {
@@ -1102,6 +1320,119 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     window.addEventListener(CLOSE_ACTIVE_RIGHT_WORKSPACE_TAB_EVENT, handleCloseActiveWorkspaceTab)
     return () => window.removeEventListener(CLOSE_ACTIVE_RIGHT_WORKSPACE_TAB_EVENT, handleCloseActiveWorkspaceTab)
   }, [activeTab, handleCloseWorkspaceTab, sessionId])
+
+  const splitContentRef = React.useRef<HTMLDivElement>(null)
+  const splitDividerCancelRef = React.useRef<(() => void) | null>(null)
+  const [tabDrag, setTabDrag] = React.useState<RightWorkspaceTabDragState | null>(null)
+  const [dragTargetPane, setDragTargetPane] = React.useState<RightWorkspacePane | null>(null)
+
+  React.useEffect(() => () => splitDividerCancelRef.current?.(), [sessionId])
+
+  const resolveDragTargetPane = React.useCallback((state: RightWorkspaceTabDragState): RightWorkspacePane | null => {
+    const rect = splitContentRef.current?.getBoundingClientRect()
+    if (!rect || state.clientY < rect.top || state.clientY > rect.bottom || state.clientX < rect.left || state.clientX > rect.right) return null
+    return state.clientX < rect.left + rect.width / 2 ? 'left' : 'right'
+  }, [])
+
+  const handleTabDragChange = React.useCallback((state: RightWorkspaceTabDragState | null) => {
+    setTabDrag(state)
+    setDragTargetPane(state ? resolveDragTargetPane(state) : null)
+  }, [resolveDragTargetPane])
+
+  const handleSplitTab = React.useCallback((tab: AgentSidePanelTab, pane: RightWorkspacePane) => {
+    const next = split
+      ? placeRightWorkspaceSplitTab(split, tab, pane)
+      : createRightWorkspaceSplit(effectiveActiveTab, tab, pane, savedSplitRatio)
+    if (!next) return
+    // 先复用既有 Tab 激活副作用，再以明确的左右布局覆盖 split map。
+    handleWorkspaceTabChange(tab)
+    updateSplit(next)
+  }, [effectiveActiveTab, handleWorkspaceTabChange, savedSplitRatio, split, updateSplit])
+
+  const handleTabDrop = React.useCallback((state: RightWorkspaceTabDragState) => {
+    const pane = resolveDragTargetPane(state)
+    if (pane) handleSplitTab(state.tabId, pane)
+    setTabDrag(null)
+    setDragTargetPane(null)
+  }, [handleSplitTab, resolveDragTargetPane])
+
+  const handleCollapseSplit = React.useCallback(() => {
+    if (!split) return
+    const retainedTab = collapseRightWorkspaceSplit(split)
+    handleWorkspaceTabChange(retainedTab)
+    updateSplit(null)
+  }, [handleWorkspaceTabChange, split, updateSplit])
+
+  const handleFocusPane = React.useCallback((pane: RightWorkspacePane) => {
+    if (!split || split.focusedPane === pane) return
+    const next = focusRightWorkspaceSplitPane(split, pane)
+    handleWorkspaceTabChange(getFocusedRightWorkspaceTab(next))
+    updateSplit(next)
+  }, [handleWorkspaceTabChange, split, updateSplit])
+
+  const persistSplitRatio = React.useCallback((ratio: number) => {
+    setSplitRatioMap((previous) => ({ ...previous, [sessionId]: clampRightWorkspaceSplitRatio(ratio) }))
+  }, [sessionId, setSplitRatioMap])
+
+  const handleSplitDividerMouseDown = React.useCallback((event: React.MouseEvent) => {
+    if (!split) return
+    event.preventDefault()
+    splitDividerCancelRef.current?.()
+    const container = splitContentRef.current
+    if (!container) return
+    const startX = event.clientX
+    const width = container.clientWidth || 1
+    const startRatio = clampRightWorkspaceSplitRatioForWidth(split.ratio, width)
+    let latestX = startX
+    let latestRatio = startRatio
+    let frame = 0
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'col-resize'
+
+    const apply = () => {
+      latestRatio = clampRightWorkspaceSplitRatioForWidth(startRatio + (latestX - startX) / width, width)
+      setSplitMap((previous) => {
+        const current = previous.get(sessionId)
+        if (!current || current.ratio === latestRatio) return previous
+        const next = new Map(previous)
+        next.set(sessionId, { ...current, ratio: latestRatio })
+        return next
+      })
+    }
+    const cleanup = () => {
+      if (frame) cancelAnimationFrame(frame)
+      frame = 0
+      document.body.style.userSelect = ''
+      document.body.style.cursor = ''
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      window.removeEventListener('blur', cancel)
+      if (splitDividerCancelRef.current === cancel) splitDividerCancelRef.current = null
+    }
+    const cancel = () => cleanup()
+    const onMove = (moveEvent: MouseEvent) => {
+      latestX = moveEvent.clientX
+      if (frame) return
+      frame = requestAnimationFrame(() => { frame = 0; apply() })
+    }
+    const onUp = () => {
+      if (frame) cancelAnimationFrame(frame)
+      frame = 0
+      apply()
+      persistSplitRatio(latestRatio)
+      cleanup()
+    }
+    splitDividerCancelRef.current = cancel
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    window.addEventListener('blur', cancel)
+  }, [persistSplitRatio, sessionId, setSplitMap, split])
+
+  const resetSplitRatio = React.useCallback(() => {
+    if (!split) return
+    updateSplit({ ...split, ratio: 0.5 })
+    persistSplitRatio(0.5)
+  }, [persistSplitRatio, split, updateSplit])
 
   const renderFileSourceContent = (scope: 'session' | 'project'): React.ReactElement => {
     const isSession = scope === 'session'
@@ -1113,27 +1444,251 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
         <h3 className="flex h-8 shrink-0 items-center px-3 text-[11px] font-medium text-muted-foreground">
           {isSession ? '会话文件' : '项目文件'}
         </h3>
-        <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin pt-1">
+        <PersistentFileScrollArea
+          stateKey={getFileBrowserScrollStateKey(sessionId, scope, roots)}
+          autoRevealTs={activeAutoRevealTs}
+          className="min-h-0 flex-1 overflow-y-auto scrollbar-thin pt-1"
+        >
           {isSession && attachedFiles.length > 0 && (
             <AttachedFilesSection scope="session" showSessionBadge={false} attachedFiles={attachedFiles} onDetach={handleDetachFile} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
           )}
           {isSession && attachedDirs.length > 0 && (
-            <AttachedDirsSection scope="session" showSessionBadge={false} attachedDirs={attachedDirs} onDetach={handleDetachDirectory} refreshVersion={filesVersion} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
+            <AttachedDirsSection scope="session" showSessionBadge={false} attachedDirs={attachedDirs} onDetach={handleDetachDirectory} refreshVersion={filesVersion} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} onOpenDirectoryTerminal={handleOpenDirectoryTerminal} allowedPaths={basePathsRef.current} sessionId={sessionId} />
           )}
           {!isSession && wsAttachedFiles.length > 0 && (
             <AttachedFilesSection scope="project" attachedFiles={wsAttachedFiles} onDetach={handleDetachWorkspaceFile} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
           )}
           {!isSession && wsAttachedDirs.length > 0 && (
-            <AttachedDirsSection scope="project" attachedDirs={wsAttachedDirs} onDetach={handleDetachWorkspaceDirectory} refreshVersion={filesVersion} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
+            <AttachedDirsSection scope="project" attachedDirs={wsAttachedDirs} onDetach={handleDetachWorkspaceDirectory} refreshVersion={filesVersion} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} onOpenDirectoryTerminal={handleOpenDirectoryTerminal} allowedPaths={basePathsRef.current} sessionId={sessionId} />
           )}
           {!isSession && isProjectRootUnavailable && <div className="mx-2 my-2 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">本地项目根目录不可用；当前会话文件仍可访问。</div>}
-          <FileBrowser roots={roots} access={fileAccess} projectRootPath={isProjectRootUnavailable ? null : workspaceFilesPath} showSessionBadge={false} hideToolbar embedded hideEmpty={hasAttachedItems} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} />
+          <FileBrowser roots={roots} access={fileAccess} projectRootPath={isProjectRootUnavailable ? null : workspaceFilesPath} showSessionBadge={false} hideToolbar embedded hideEmpty={hasAttachedItems} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} onOpenDirectoryTerminal={handleOpenDirectoryTerminal} />
           {workspaceSlug && (isSession ? (
             <FileDropZone workspaceSlug={workspaceSlug} sessionId={sessionId} target="session" onFilesUploaded={handleFilesUploaded} onFilesAttached={handleSessionFilesAttached} onAttachFolder={handleAttachSessionFolder} onFoldersDropped={handleSessionFoldersDropped} />
           ) : !isProjectRootUnavailable ? (
             <FileDropZone workspaceSlug={workspaceSlug} target="workspace" onFilesUploaded={handleFilesUploaded} onFilesAttached={handleWorkspaceFilesAttached} onAttachFolder={handleAttachWorkspaceFolder} onFoldersDropped={handleWorkspaceFoldersDropped} />
           ) : null)}
+        </PersistentFileScrollArea>
+      </section>
+    )
+  }
+
+  const renderWorkspaceTabContent = (paneTab: AgentSidePanelTab, paneWidth: number): React.ReactNode => {
+    const panePreviewId = getPreviewIdFromSidePanelTab(paneTab)
+    const panePreviewFile = (panePreviewId ? previewFiles.find((file) => getPreviewFileId(file) === panePreviewId) : null)
+      ?? previewFileMap.get(sessionId) ?? null
+    const paneBrowserTabId = getBrowserTabIdFromSidePanelTab(paneTab)
+    const paneExplorationSessionId = getExplorationSessionIdFromSidePanelTab(paneTab)
+    const paneExplorationBranch = paneExplorationSessionId
+      ? sideTemporaryAgents.find((branch) => branch.sessionId === paneExplorationSessionId) ?? null
+      : null
+    const paneDelegationSessionId = getDelegationSessionIdFromSidePanelTab(paneTab)
+    const paneDelegationSession = paneDelegationSessionId
+      ? sessions.find((item) => item.id === paneDelegationSessionId && item.parentSessionId === sessionId && !!item.sourceDelegationId) ?? null
+      : null
+    const paneTerminalId = getTerminalIdFromSidePanelTab(paneTab)
+    const paneTerminal = paneTerminalId ? terminalTabs.find((terminal) => terminal.terminalId === paneTerminalId) ?? null : null
+    // Files 的双来源布局必须由它所在 Pane 的真实宽度决定，而不是整个右侧工作区宽度。
+    const showBothFileSources = shouldShowBothFileSources(paneWidth)
+    const showSessionFiles = showBothFileSources || fileSourceFilter === 'session'
+    const showProjectFiles = showBothFileSources || fileSourceFilter === 'project'
+    const visibleFileRoots = [
+      ...(showProjectFiles ? projectFileRoots : []),
+      ...(showSessionFiles ? sessionFileRoots : []),
+    ]
+    const hasVisibleSessionAttachedItems = showSessionFiles && hasSessionAttachedItems
+    const hasVisibleWorkspaceAttachedItems = showProjectFiles && hasWorkspaceAttachedItems
+
+    if (paneTerminal) {
+      return (
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <TerminalTabContent terminalId={paneTerminal.terminalId} sessionId={sessionId} cwd={paneTerminal.cwd ?? sessionPath ?? undefined} terminateOnUnmount={false} />
         </div>
+      )
+    }
+
+    return (
+    panePreviewId && panePreviewFile ? (
+      <div className="min-h-0 flex-1 overflow-hidden"><PreviewPanel sessionId={sessionId} file={panePreviewFile} onClose={() => handleClosePreviewTab(panePreviewId)} /></div>
+    ) : paneBrowserTabId ? (
+      browserState && browserState.tabs.some((tab) => tab.tabId === paneBrowserTabId) ? (
+        tabDrag ? (
+          <div className="flex flex-1 items-center justify-center bg-muted/15 text-xs text-muted-foreground">释放后恢复浏览器视图</div>
+        ) : (
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <BrowserPanel
+              sessionId={sessionId}
+              tabId={paneBrowserTabId}
+              state={browserState}
+              isAddTabMenuOpen={isAddTabMenuOpen}
+            />
+          </div>
+        )
+      ) : (
+        <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">浏览器标签已关闭</div>
+      )
+    ) : paneTab === 'chat' ? (
+      sideChatConversationId ? (
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <ChatView conversationId={sideChatConversationId} />
+        </div>
+      ) : (
+        <div className="flex-1 flex items-center justify-center text-muted-foreground text-xs">暂无问答会话</div>
+      )
+    ) : paneExplorationBranch ? (
+      <SideAgentSessionContent contentKey={`exploration:${paneExplorationBranch.sessionId}`}>
+        <AgentView sessionId={paneExplorationBranch.sessionId} embedded />
+      </SideAgentSessionContent>
+    ) : paneDelegationSession ? (
+      <SideAgentSessionContent contentKey={`delegation:${paneDelegationSession.id}`}>
+        <AgentView sessionId={paneDelegationSession.id} embedded />
+      </SideAgentSessionContent>
+    ) : paneTab === 'todos' ? (
+      <PlanningView embedded componentTab="todos" />
+    ) : paneTab === 'calendar' ? (
+      <PlanningView embedded componentTab="calendar" />
+    ) : paneTab === 'automations' ? (
+      automationFormOpen ? <AutomationFormView embedded /> : <PlanningView embedded componentTab="automations" />
+    ) : paneTab === 'skills' ? (
+      <AgentSkillsView embedded componentTab="skills" workspaceId={currentWorkspaceId ?? undefined} sessionId={sessionId} onOpenEnterprise={openEnterpriseSkillsTab} />
+    ) : paneTab === 'enterprise' && enterpriseSkills.enabled ? (
+      <AgentSkillsView embedded componentTab="enterprise" workspaceId={currentWorkspaceId ?? undefined} sessionId={sessionId} />
+    ) : paneTab === 'mcp' ? (
+      <AgentSkillsView embedded componentTab="mcp" workspaceId={currentWorkspaceId ?? undefined} sessionId={sessionId} />
+    ) : paneTab === 'memory' ? (
+      workspaceSlug ? (
+        <div className="min-h-0 flex-1 overflow-hidden p-2">
+          <WorkspaceMemoryTab workspaceSlug={workspaceSlug} sessionId={sessionId} embedded />
+        </div>
+      ) : (
+        <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">等待项目初始化...</div>
+      )
+    ) : paneTab === 'changes' ? (
+      sessionPath ? (
+        <DiffChangesList
+          key={sessionId}
+          dirPath={workspaces.find((workspace) => workspace.id === currentWorkspaceId)?.projectRootPath ?? sessionPath}
+          sessionId={sessionId}
+          sessionPath={sessionPath}
+          workspaceFilesPath={workspaceFilesPath || undefined}
+          extraPaths={fileAccessPathsMemo}
+          refreshVersion={diffRefreshVersion}
+          selectedFilePath={selectedFilePath}
+          onFileClick={handleDiffFileClick}
+          workspaceSlug={workspaceSlug || undefined}
+          worktreeRepoPaths={worktreeRepoPathsMemo}
+          onOpenWorktreeTerminal={handleOpenWorktreeTerminal}
+          nonGitFileChanges={nonGitFileChanges}
+          currentFileChangeRunId={fileChangesCurrentRunId}
+          onPlainFileClick={handleFilePreview}
+        />
+      ) : (
+        <div className="flex-1 flex items-center justify-center text-muted-foreground text-xs">等待会话初始化...</div>
+      )
+    ) : paneTab === 'files' ? (
+      <div className="flex-1 min-h-0 flex flex-col pt-2 mx-2 mb-2">
+        {sessionPath ? (
+          <>
+            <FileSearchBar
+              workspaceFilesPath={isProjectRootUnavailable ? null : workspaceFilesPath}
+              sessionPath={sessionPath}
+              sessionAttachedDirs={attachedDirs}
+              workspaceAttachedDirs={wsAttachedDirs}
+              sourceFilter={showBothFileSources ? 'all' : fileSourceFilter}
+              showSessionBadge={showBothFileSources}
+              placeholder="搜索文件..."
+              sessionId={sessionId}
+              onFilePreview={handleFilePreview}
+            >
+              {!showBothFileSources && (
+                <div className="file-source-tabbar main-tabbar mt-1.5 flex h-7 border-b border-border/80" role="tablist" aria-label="文件来源">
+                  <button
+                    type="button"
+                    role="tab"
+                    className={cn(
+                      'relative flex-1 h-7 px-2 text-[11px] transition-colors select-none',
+                      fileSourceFilter === 'session'
+                        ? 'app-tab-active text-foreground'
+                        : 'app-tab-inactive text-muted-foreground hover:text-foreground',
+                    )}
+                    aria-selected={fileSourceFilter === 'session'}
+                    onClick={() => setFileSourceFilter('session')}
+                  >
+                    会话文件
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    className={cn(
+                      'relative flex-1 h-7 px-2 text-[11px] transition-colors select-none',
+                      fileSourceFilter === 'project'
+                        ? 'app-tab-active text-foreground'
+                        : 'app-tab-inactive text-muted-foreground hover:text-foreground',
+                    )}
+                    aria-selected={fileSourceFilter === 'project'}
+                    onClick={() => setFileSourceFilter('project')}
+                  >
+                    项目文件
+                  </button>
+                </div>
+              )}
+            </FileSearchBar>
+            {showBothFileSources ? (
+              <div className="grid min-h-0 flex-1 grid-cols-2 divide-x divide-border/70 overflow-hidden pt-2">
+                {renderFileSourceContent('session')}
+                {renderFileSourceContent('project')}
+              </div>
+            ) : (
+              <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin pt-1">
+                {/* 拖拽引用提示：引用块样式，左侧竖线 + 缩进，与下方文件列表内容左对齐 */}
+                <div className="mb-1.5 ml-4 border-l-2 border-primary/40 pl-2 text-[11px] leading-4 text-foreground/75">
+                  支持拖拽文件或文件夹到输入框，实现引用
+                </div>
+                {showProjectFiles && wsAttachedFiles.length > 0 && (
+                  <AttachedFilesSection scope="project" attachedFiles={wsAttachedFiles} onDetach={handleDetachWorkspaceFile} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
+                )}
+                {showProjectFiles && wsAttachedDirs.length > 0 && (
+                  <AttachedDirsSection scope="project" attachedDirs={wsAttachedDirs} onDetach={handleDetachWorkspaceDirectory} refreshVersion={filesVersion} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
+                )}
+                {showSessionFiles && attachedFiles.length > 0 && (
+                  <AttachedFilesSection scope="session" showSessionBadge={false} attachedFiles={attachedFiles} onDetach={handleDetachFile} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
+                )}
+                {showSessionFiles && attachedDirs.length > 0 && (
+                  <AttachedDirsSection scope="session" showSessionBadge={false} attachedDirs={attachedDirs} onDetach={handleDetachDirectory} refreshVersion={filesVersion} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
+                )}
+                {showProjectFiles && isProjectRootUnavailable && (
+                  <div className="mx-2 my-2 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                    本地项目根目录不可用；当前会话文件仍可访问。
+                  </div>
+                )}
+                <FileBrowser roots={visibleFileRoots} access={fileAccess} projectRootPath={isProjectRootUnavailable ? null : workspaceFilesPath} showSessionBadge={false} hideToolbar embedded hideEmpty={hasVisibleSessionAttachedItems || hasVisibleWorkspaceAttachedItems} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} />
+                {showSessionFiles && workspaceSlug && (
+                  <FileDropZone workspaceSlug={workspaceSlug} sessionId={sessionId} target="session" onFilesUploaded={handleFilesUploaded} onFilesAttached={handleSessionFilesAttached} onAttachFolder={handleAttachSessionFolder} onFoldersDropped={handleSessionFoldersDropped} />
+                )}
+                {showProjectFiles && !isProjectRootUnavailable && workspaceSlug && (
+                  <FileDropZone workspaceSlug={workspaceSlug} target="workspace" onFilesUploaded={handleFilesUploaded} onFilesAttached={handleWorkspaceFilesAttached} onAttachFolder={handleAttachWorkspaceFolder} onFoldersDropped={handleWorkspaceFoldersDropped} />
+                )}
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-muted-foreground text-xs">等待会话初始化...</div>
+        )}
+      </div>
+    ) : null
+    )
+  }
+
+  const effectiveSplitRatio = split ? clampRightWorkspaceSplitRatioForWidth(split.ratio, width) : 0.5
+
+  const renderWorkspacePane = (pane: RightWorkspacePane, tab: AgentSidePanelTab): React.ReactElement => {
+    return (
+      <section
+        className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-content-area"
+        aria-label={`${pane === 'left' ? '左侧' : '右侧'} Pane：${tab}`}
+        onPointerDownCapture={() => handleFocusPane(pane)}
+      >
+        <MeasuredWorkspacePane>{(paneWidth) => renderWorkspaceTabContent(tab, paneWidth)}</MeasuredWorkspacePane>
       </section>
     )
   }
@@ -1142,7 +1697,6 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     <div
       className={cn(
         'relative z-0 h-full flex-shrink-0 overflow-hidden titlebar-drag-region bg-content-area',
-        isClassic && 'rounded-2xl shadow-xl dark:shadow-md',
         shouldAnimate && 'transition-[width] duration-300 ease-in-out',
         isOpen ? '' : '!w-0',
       )}
@@ -1157,6 +1711,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
         )}
         >
           <DiffPanelTabBar
+            key={sessionId}
             tabs={workspaceTabs}
             activeTab={effectiveActiveTab}
             onTabChange={handleWorkspaceTabChange}
@@ -1168,185 +1723,60 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
             onOpenWorkspaceComponent={(component) => {
               if (component === 'enterprise' && !enterpriseSkills.enabled) return
               setWorkspaceComponentTabs((previous) => previous.includes(component) ? previous : [...previous, component])
-              onTabChange(component)
+              handleWorkspaceTabChange(component)
             }}
+            visibleTabs={split ? { left: split.leftTab, right: split.rightTab } : undefined}
+            focusedPane={split?.focusedPane}
+            onTabDragChange={handleTabDragChange}
+            onTabDrop={handleTabDrop}
+            onSplitTab={handleSplitTab}
+            onCollapseSplit={split ? handleCollapseSplit : undefined}
             activeTabAction={activeExplorationBranch ? (
               <ExplorationBringBackAction parentSessionId={sessionId} branch={activeExplorationBranch} sessions={sessions} />
             ) : undefined}
             onClose={() => setIsOpen(false)}
           />
 
-          <SidePanelTerminalTabs
-            terminals={terminalTabs}
-            activeTerminalId={getTerminalIdFromSidePanelTab(effectiveActiveTab)}
-            sessionId={sessionId}
-            cwd={sessionPath ?? undefined}
-          />
+          <div ref={splitContentRef} className="relative flex min-h-0 flex-1 overflow-hidden">
+            {split ? (
+              <>
+                <div className="flex min-h-0 min-w-0" style={{ flex: `0 0 calc(${effectiveSplitRatio * 100}% - 4px)` }}>
+                  {renderWorkspacePane('left', split.leftTab)}
+                </div>
+                <div
+                  className="group relative w-2 shrink-0 cursor-col-resize bg-border/35 transition-colors hover:bg-primary/25 active:bg-primary/45"
+                  onMouseDown={handleSplitDividerMouseDown}
+                  onDoubleClick={resetSplitRatio}
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label="调整并排宽度；双击恢复均分"
+                >
+                  <span className="pointer-events-none absolute left-1/2 top-1/2 h-9 w-px -translate-x-1/2 -translate-y-1/2 bg-foreground/15 group-hover:bg-primary/50" />
+                </div>
+                <div className="flex min-h-0 min-w-0 flex-1">{renderWorkspacePane('right', split.rightTab)}</div>
+              </>
+            ) : (
+              <MeasuredWorkspacePane>{(paneWidth) => renderWorkspaceTabContent(effectiveActiveTab, paneWidth)}</MeasuredWorkspacePane>
+            )}
 
-          {requestedPreviewId && currentPreviewFile ? (
-            <div className="min-h-0 flex-1 overflow-hidden"><PreviewPanel sessionId={sessionId} file={currentPreviewFile} onClose={() => handleClosePreviewTab(requestedPreviewId)} /></div>
-          ) : activeBrowserTabId ? (
-            browserState && browserState.tabs.some((tab) => tab.tabId === activeBrowserTabId) ? (
-              <div className="min-h-0 flex-1 overflow-hidden">
-                <BrowserPanel
-                  sessionId={sessionId}
-                  tabId={activeBrowserTabId}
-                  state={browserState}
-                  isAddTabMenuOpen={isAddTabMenuOpen}
-                />
-              </div>
-            ) : (
-              <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">浏览器标签已关闭</div>
-            )
-          ) : effectiveActiveTab === 'chat' ? (
-            sideChatConversationId ? (
-              <div className="min-h-0 flex-1 overflow-hidden">
-                <ChatView conversationId={sideChatConversationId} />
-              </div>
-            ) : (
-              <div className="flex-1 flex items-center justify-center text-muted-foreground text-xs">暂无问答会话</div>
-            )
-          ) : activeExplorationBranch ? (
-            <SideAgentSessionContent contentKey={`exploration:${activeExplorationBranch.sessionId}`}>
-              <AgentView sessionId={activeExplorationBranch.sessionId} embedded />
-            </SideAgentSessionContent>
-          ) : activeDelegationSession ? (
-            <SideAgentSessionContent contentKey={`delegation:${activeDelegationSession.id}`}>
-              <AgentView sessionId={activeDelegationSession.id} embedded />
-            </SideAgentSessionContent>
-          ) : effectiveActiveTab === 'todos' ? (
-            <PlanningView embedded componentTab="todos" />
-          ) : effectiveActiveTab === 'calendar' ? (
-            <PlanningView embedded componentTab="calendar" />
-          ) : effectiveActiveTab === 'automations' ? (
-            automationFormOpen ? <AutomationFormView embedded /> : <PlanningView embedded componentTab="automations" />
-          ) : effectiveActiveTab === 'skills' ? (
-            <AgentSkillsView embedded componentTab="skills" workspaceId={currentWorkspaceId ?? undefined} sessionId={sessionId} onOpenEnterprise={openEnterpriseSkillsTab} />
-          ) : effectiveActiveTab === 'enterprise' && enterpriseSkills.enabled ? (
-            <AgentSkillsView embedded componentTab="enterprise" workspaceId={currentWorkspaceId ?? undefined} sessionId={sessionId} />
-          ) : effectiveActiveTab === 'mcp' ? (
-            <AgentSkillsView embedded componentTab="mcp" workspaceId={currentWorkspaceId ?? undefined} sessionId={sessionId} />
-          ) : effectiveActiveTab === 'memory' ? (
-            workspaceSlug ? (
-              <div className="min-h-0 flex-1 overflow-hidden p-2">
-                <WorkspaceMemoryTab workspaceSlug={workspaceSlug} sessionId={sessionId} embedded />
-              </div>
-            ) : (
-              <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">等待项目初始化...</div>
-            )
-          ) : effectiveActiveTab === 'changes' ? (
-            sessionPath ? (
-              <DiffChangesList
-                key={sessionId}
-                dirPath={workspaces.find((workspace) => workspace.id === currentWorkspaceId)?.projectRootPath ?? sessionPath}
-                sessionId={sessionId}
-                sessionPath={sessionPath}
-                workspaceFilesPath={workspaceFilesPath || undefined}
-                extraPaths={fileAccessPathsMemo}
-                refreshVersion={diffRefreshVersion}
-                selectedFilePath={selectedFilePath}
-                onFileClick={handleDiffFileClick}
-                workspaceSlug={workspaceSlug || undefined}
-                worktreeRepoPaths={worktreeRepoPathsMemo}
-                onOpenWorktreeTerminal={handleOpenWorktreeTerminal}
-                nonGitFileChanges={nonGitFileChanges}
-                currentFileChangeRunId={fileChangesCurrentRunId}
-                onPlainFileClick={handleFilePreview}
-              />
-            ) : (
-              <div className="flex-1 flex items-center justify-center text-muted-foreground text-xs">等待会话初始化...</div>
-            )
-          ) : effectiveActiveTab === 'files' ? (
-            <div className="flex-1 min-h-0 flex flex-col pt-2 mx-2 mb-2">
-              {sessionPath ? (
-                <>
-                  <FileSearchBar
-                    workspaceFilesPath={isProjectRootUnavailable ? null : workspaceFilesPath}
-                    sessionPath={sessionPath}
-                    sessionAttachedDirs={attachedDirs}
-                    workspaceAttachedDirs={wsAttachedDirs}
-                    sourceFilter={showBothFileSources ? 'all' : fileSourceFilter}
-                    showSessionBadge={showBothFileSources}
-                    placeholder="搜索文件..."
-                    sessionId={sessionId}
-                    onFilePreview={handleFilePreview}
-                  >
-                    {!showBothFileSources && (
-                      <div className="file-source-tabbar main-tabbar mt-1.5 flex h-7 border-b border-border/80" role="tablist" aria-label="文件来源">
-                        <button
-                          type="button"
-                          role="tab"
-                          className={cn(
-                            'relative flex-1 h-7 px-2 text-[11px] transition-colors select-none',
-                            fileSourceFilter === 'session'
-                              ? 'app-tab-active text-foreground'
-                              : 'app-tab-inactive text-muted-foreground hover:text-foreground',
-                          )}
-                          aria-selected={fileSourceFilter === 'session'}
-                          onClick={() => setFileSourceFilter('session')}
-                        >
-                          会话文件
-                        </button>
-                        <button
-                          type="button"
-                          role="tab"
-                          className={cn(
-                            'relative flex-1 h-7 px-2 text-[11px] transition-colors select-none',
-                            fileSourceFilter === 'project'
-                              ? 'app-tab-active text-foreground'
-                              : 'app-tab-inactive text-muted-foreground hover:text-foreground',
-                          )}
-                          aria-selected={fileSourceFilter === 'project'}
-                          onClick={() => setFileSourceFilter('project')}
-                        >
-                          项目文件
-                        </button>
-                      </div>
+            {tabDrag && (
+              <div className="absolute inset-0 z-[90] grid grid-cols-2 gap-2 bg-background/90 p-3">
+                {(['left', 'right'] as const).map((pane) => (
+                  <div
+                    key={pane}
+                    className={cn(
+                      'flex items-center justify-center rounded-xl text-xs font-medium transition-[background-color,color,box-shadow,transform]',
+                      dragTargetPane === pane
+                        ? 'scale-[1.01] bg-primary/12 text-foreground shadow-[inset_0_0_0_2px_hsl(var(--primary)/0.55)]'
+                        : 'bg-card/65 text-muted-foreground shadow-sm',
                     )}
-                  </FileSearchBar>
-                  {showBothFileSources ? (
-                    <div className="grid min-h-0 flex-1 grid-cols-2 divide-x divide-border/70 overflow-hidden pt-2">
-                      {renderFileSourceContent('session')}
-                      {renderFileSourceContent('project')}
-                    </div>
-                  ) : (
-                    <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin pt-1">
-                      {/* 拖拽引用提示：引用块样式，左侧竖线 + 缩进，与下方文件列表内容左对齐 */}
-                      <div className="mb-1.5 ml-4 border-l-2 border-primary/40 pl-2 text-[11px] leading-4 text-foreground/75">
-                        支持拖拽文件或文件夹到输入框，实现引用
-                      </div>
-                      {showProjectFiles && wsAttachedFiles.length > 0 && (
-                        <AttachedFilesSection scope="project" attachedFiles={wsAttachedFiles} onDetach={handleDetachWorkspaceFile} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
-                      )}
-                      {showProjectFiles && wsAttachedDirs.length > 0 && (
-                        <AttachedDirsSection scope="project" attachedDirs={wsAttachedDirs} onDetach={handleDetachWorkspaceDirectory} refreshVersion={filesVersion} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
-                      )}
-                      {showSessionFiles && attachedFiles.length > 0 && (
-                        <AttachedFilesSection scope="session" showSessionBadge={false} attachedFiles={attachedFiles} onDetach={handleDetachFile} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
-                      )}
-                      {showSessionFiles && attachedDirs.length > 0 && (
-                        <AttachedDirsSection scope="session" showSessionBadge={false} attachedDirs={attachedDirs} onDetach={handleDetachDirectory} refreshVersion={filesVersion} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} allowedPaths={basePathsRef.current} sessionId={sessionId} />
-                      )}
-                      {showProjectFiles && isProjectRootUnavailable && (
-                        <div className="mx-2 my-2 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                          本地项目根目录不可用；当前会话文件仍可访问。
-                        </div>
-                      )}
-                      <FileBrowser roots={visibleFileRoots} access={fileAccess} projectRootPath={isProjectRootUnavailable ? null : workspaceFilesPath} showSessionBadge={false} hideToolbar embedded hideEmpty={hasVisibleSessionAttachedItems || hasVisibleWorkspaceAttachedItems} onAddToChat={handleAddToChat} onFilePreview={handleFilePreview} />
-                      {showSessionFiles && workspaceSlug && (
-                        <FileDropZone workspaceSlug={workspaceSlug} sessionId={sessionId} target="session" onFilesUploaded={handleFilesUploaded} onFilesAttached={handleSessionFilesAttached} onAttachFolder={handleAttachSessionFolder} onFoldersDropped={handleSessionFoldersDropped} />
-                      )}
-                      {showProjectFiles && !isProjectRootUnavailable && workspaceSlug && (
-                        <FileDropZone workspaceSlug={workspaceSlug} target="workspace" onFilesUploaded={handleFilesUploaded} onFilesAttached={handleWorkspaceFilesAttached} onAttachFolder={handleAttachWorkspaceFolder} onFoldersDropped={handleWorkspaceFoldersDropped} />
-                      )}
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div className="flex-1 flex items-center justify-center text-muted-foreground text-xs">等待会话初始化...</div>
-              )}
-            </div>
-          ) : null}
+                  >
+                    在{pane === 'left' ? '左侧' : '右侧'}并排
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
     </div>
   )
@@ -1479,31 +1909,34 @@ interface AttachedDirsSectionProps {
   refreshVersion: number
   onAddToChat?: (entry: FileEntry) => void
   onFilePreview?: (filePath: string) => void
+  /** 在右侧工作区中以指定目录为 cwd 打开终端。 */
+  onOpenDirectoryTerminal?: (directoryPath: string, directoryName: string) => void
   /** 所有允许访问的路径（传给 IPC 做路径校验） */
   allowedPaths?: string[]
   sessionId: string
 }
 
 /** 附加目录区域：统一管理所有子项的选中状态 */
-function AttachedDirsSection({ title, scope = 'project', showSessionBadge = true, attachedDirs, onDetach, refreshVersion, onAddToChat, onFilePreview, allowedPaths, sessionId }: AttachedDirsSectionProps): React.ReactElement {
+function AttachedDirsSection({ title, scope = 'project', showSessionBadge = true, attachedDirs, onDetach, refreshVersion, onAddToChat, onFilePreview, onOpenDirectoryTerminal, allowedPaths, sessionId }: AttachedDirsSectionProps): React.ReactElement {
   const [selectedPaths, setSelectedPaths] = React.useState<Set<string>>(new Set())
 
   // ===== 接入搜索点击触发的 reveal：附加目录文件搜到后，需要展开/选中目标 =====
   const autoReveal = useAtomValue(fileBrowserAutoRevealAtom)
+  const activeAutoReveal = isFileBrowserAutoRevealActive(autoReveal) ? autoReveal : null
   // 找到 reveal target 命中的那个附加目录根。如果用户附加了嵌套目录（如同时附加 /a 和 /a/b），
   // 取"最深匹配"——只让真正包含该文件的最近一棵树展开，避免外层 /a 树被无谓打开。
   const revealRoot = React.useMemo(() => {
-    if (!autoReveal) return null
+    if (!activeAutoReveal) return null
     let best: string | null = null
     for (const dir of attachedDirs) {
-      if (!isPathUnderRoot(dir, autoReveal.path)) continue
+      if (!isPathUnderRoot(dir, activeAutoReveal.path)) continue
       if (!best || dir.length > best.length) best = dir
     }
     return best
-  }, [autoReveal, attachedDirs])
-  const revealTarget = revealRoot ? autoReveal!.path : null
-  const revealTs = revealRoot ? autoReveal!.ts : 0
-  const revealSelect = revealRoot ? !!autoReveal!.select : false
+  }, [activeAutoReveal, attachedDirs])
+  const revealTarget = revealRoot ? activeAutoReveal!.path : null
+  const revealTs = revealRoot ? activeAutoReveal!.ts : 0
+  const revealSelect = revealRoot ? !!activeAutoReveal!.select : false
 
   // 命中本区域 + select=true：把目标加入选中态（与 FileBrowser 行为对齐）
   const consumedSelectTsRef = React.useRef(0)
@@ -1546,6 +1979,7 @@ function AttachedDirsSection({ title, scope = 'project', showSessionBadge = true
             refreshVersion={refreshVersion}
             onAddToChat={onAddToChat}
             onFilePreview={onFilePreview}
+            onOpenDirectoryTerminal={onOpenDirectoryTerminal}
             allowedPaths={allowedPaths}
             sessionId={sessionId}
             scope={scope}
@@ -1569,6 +2003,7 @@ interface AttachedDirTreeProps {
   refreshVersion: number
   onAddToChat?: (entry: FileEntry) => void
   onFilePreview?: (filePath: string) => void
+  onOpenDirectoryTerminal?: (directoryPath: string, directoryName: string) => void
   allowedPaths?: string[]
   sessionId: string
   scope: 'project' | 'session'
@@ -1579,7 +2014,7 @@ interface AttachedDirTreeProps {
   revealTs?: number
 }
 
-function AttachedDirTree({ dirPath, onDetach, selectedPaths, onSelect, refreshVersion, onAddToChat, onFilePreview, allowedPaths, sessionId, scope, showSessionBadge, revealTarget = null, revealTs = 0 }: AttachedDirTreeProps): React.ReactElement {
+function AttachedDirTree({ dirPath, onDetach, selectedPaths, onSelect, refreshVersion, onAddToChat, onFilePreview, onOpenDirectoryTerminal, allowedPaths, sessionId, scope, showSessionBadge, revealTarget = null, revealTs = 0 }: AttachedDirTreeProps): React.ReactElement {
   const [expanded, setExpanded] = React.useState(false)
   const [children, setChildren] = React.useState<FileEntry[]>([])
   const [loaded, setLoaded] = React.useState(false)
@@ -1683,6 +2118,25 @@ function AttachedDirTree({ dirPath, onDetach, selectedPaths, onSelect, refreshVe
         {showSessionBadge && scope === 'session' && (
           <span className="relative z-10 flex-shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">会话文件</span>
         )}
+        {onOpenDirectoryTerminal && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label={`在 ${dirName} 打开终端`}
+                title={`在 ${dirName} 打开终端`}
+                className="relative z-10 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-[background-color,color,opacity,transform] hover:bg-accent/70 hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100 active:scale-[0.96]"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onOpenDirectoryTerminal(dirPath, dirName)
+                }}
+              >
+                <SquareTerminal className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="left">在右侧标签中打开终端</TooltipContent>
+          </Tooltip>
+        )}
         <Button
           type="button"
           variant="ghost"
@@ -1709,7 +2163,7 @@ function AttachedDirTree({ dirPath, onDetach, selectedPaths, onSelect, refreshVe
             </div>
           )}
           {children.map((child) => (
-            <AttachedDirItem key={child.path} entry={child} depth={1} selectedPaths={selectedPaths} onSelect={onSelect} refreshVersion={refreshVersion} onAddToChat={onAddToChat} onFilePreview={onFilePreview} allowedPaths={allowedPaths} sessionId={sessionId} scope={scope} revealTarget={revealTarget} revealTs={revealTs} revealAncestors={revealAncestors} />
+            <AttachedDirItem key={child.path} entry={child} depth={1} selectedPaths={selectedPaths} onSelect={onSelect} refreshVersion={refreshVersion} onAddToChat={onAddToChat} onFilePreview={onFilePreview} onOpenDirectoryTerminal={onOpenDirectoryTerminal} allowedPaths={allowedPaths} sessionId={sessionId} scope={scope} revealTarget={revealTarget} revealTs={revealTs} revealAncestors={revealAncestors} />
           ))}
         </div>
       )}
@@ -1725,6 +2179,7 @@ interface AttachedDirItemProps {
   refreshVersion: number
   onAddToChat?: (entry: FileEntry) => void
   onFilePreview?: (filePath: string) => void
+  onOpenDirectoryTerminal?: (directoryPath: string, directoryName: string) => void
   allowedPaths?: string[]
   sessionId: string
   scope: 'project' | 'session'
@@ -1736,7 +2191,7 @@ interface AttachedDirItemProps {
   revealAncestors?: Set<string>
 }
 
-function AttachedDirItem({ entry, depth, selectedPaths, onSelect, refreshVersion, onAddToChat, onFilePreview, allowedPaths, sessionId, scope, revealTarget = null, revealTs = 0, revealAncestors }: AttachedDirItemProps): React.ReactElement {
+function AttachedDirItem({ entry, depth, selectedPaths, onSelect, refreshVersion, onAddToChat, onFilePreview, onOpenDirectoryTerminal, allowedPaths, sessionId, scope, revealTarget = null, revealTs = 0, revealAncestors }: AttachedDirItemProps): React.ReactElement {
   const [expanded, setExpanded] = React.useState(false)
   const [children, setChildren] = React.useState<FileEntry[]>([])
   const [loaded, setLoaded] = React.useState(false)
@@ -1954,6 +2409,26 @@ function AttachedDirItem({ entry, depth, selectedPaths, onSelect, refreshVersion
           <span className="relative z-10 truncate text-xs flex-1">{currentName}</span>
         )}
 
+        {entry.isDirectory && onOpenDirectoryTerminal && !isRenaming && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label={`在 ${currentName} 打开终端`}
+                title={`在 ${currentName} 打开终端`}
+                className="relative z-10 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-[background-color,color,opacity,transform] hover:bg-accent/70 hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100 active:scale-[0.96]"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onOpenDirectoryTerminal(currentPath, currentName)
+                }}
+              >
+                <SquareTerminal className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="left">在右侧标签中打开终端</TooltipContent>
+          </Tooltip>
+        )}
+
         {/* 右侧操作按钮占位 */}
         <div
           className="relative z-10 flex-shrink-0 mr-1"
@@ -2053,7 +2528,7 @@ function AttachedDirItem({ entry, depth, selectedPaths, onSelect, refreshVersion
             </div>
           )}
           {children.map((child) => (
-            <AttachedDirItem key={child.path} entry={child} depth={depth + 1} selectedPaths={selectedPaths} onSelect={onSelect} refreshVersion={refreshVersion} onAddToChat={onAddToChat} onFilePreview={onFilePreview} allowedPaths={allowedPaths} sessionId={sessionId} scope={scope} revealTarget={revealTarget} revealTs={revealTs} revealAncestors={revealAncestors} />
+            <AttachedDirItem key={child.path} entry={child} depth={depth + 1} selectedPaths={selectedPaths} onSelect={onSelect} refreshVersion={refreshVersion} onAddToChat={onAddToChat} onFilePreview={onFilePreview} onOpenDirectoryTerminal={onOpenDirectoryTerminal} allowedPaths={allowedPaths} sessionId={sessionId} scope={scope} revealTarget={revealTarget} revealTs={revealTs} revealAncestors={revealAncestors} />
           ))}
         </div>
       )}
@@ -2061,28 +2536,4 @@ function AttachedDirItem({ entry, depth, selectedPaths, onSelect, refreshVersion
   )
 }
 
-function SidePanelTerminalTabs({
-  terminals,
-  activeTerminalId,
-  sessionId,
-  cwd,
-}: {
-  terminals: Array<{ terminalId: string; title: string; cwd?: string }>
-  activeTerminalId: string | null
-  sessionId: string
-  cwd?: string
-}): React.ReactElement {
-  return (
-    <div className={cn('relative min-h-0 flex-1', activeTerminalId ? 'flex' : 'hidden')}>
-      {terminals.map((terminal) => (
-        <div
-          key={terminal.terminalId}
-          className={cn('absolute inset-0', terminal.terminalId === activeTerminalId ? 'block' : 'hidden')}
-          aria-hidden={terminal.terminalId !== activeTerminalId}
-        >
-          <TerminalTabContent terminalId={terminal.terminalId} sessionId={sessionId} cwd={terminal.cwd ?? cwd} terminateOnUnmount={false} />
-        </div>
-      ))}
-    </div>
-  )
-}
+// Terminal panes mount only the visible terminal so two distinct terminal tabs can render side by side.

@@ -768,7 +768,7 @@ export function buildPiCollaborationTools(
     sdk.defineTool({
       name: 'mcp__collaboration__delegate_agent',
       label: '委派子 Agent',
-      description: '创建一个真实可见的 Proma 协作子 Agent 会话来并行处理独立子任务。只用于长耗时、可并行、需要追踪的任务。',
+      description: '创建一个真实可见的 Proma 协作子 Agent 会话来并行处理独立子任务。只用于长耗时、可并行、需要追踪的任务。委派只表示子会话已启动，不表示任务完成或结果已回传：若本轮回复、下一步决策或交付依赖该子任务，主会话必须在回复前用返回的 delegationId 调用 wait_for_delegations 收敛结果；只有仍有完全独立的工作时才可先继续推进。',
       parameters: Type.Object({
         title: Type.Optional(Type.String({ description: '子会话标题' })),
         role: roleType,
@@ -791,14 +791,14 @@ export function buildPiCollaborationTools(
           delegation: getDelegationResult(ctx.sessionId, result.delegationId),
           effectivePermissionMode: result.effectivePermissionMode,
           effectiveModelId: result.effectiveModelId,
-          note: '子会话已启动。需要结果时调用 wait_for_delegations。',
+          note: '子会话已启动，尚未完成或回传结果。记录 delegationId；如果本轮回复、决策或交付依赖它，必须在回复前调用 wait_for_delegations 收敛。仅在父会话还有完全独立的工作时才继续推进。',
         })
       },
     }),
     sdk.defineTool({
       name: 'mcp__collaboration__delegate_agents',
       label: '批量委派子 Agent',
-      description: '批量创建多个真实可见的 Proma 协作子 Agent 会话。适合把同一大任务拆成多片并行处理。',
+      description: '批量创建多个真实可见的 Proma 协作子 Agent 会话。适合把同一大任务拆成多片并行处理。创建成功只表示各子会话已启动，不表示批次已完成：若本轮需要基于任一或全部子任务交付、判断或回复，主会话必须在回复前用返回的 delegationIds 调用 wait_for_delegations（需要完整结论时用 mode=all）；仅可在等待前推进完全独立的主线。',
       parameters: Type.Object({
         sharedContext: Type.Optional(Type.String({ description: '批量子任务共用背景' })),
         items: Type.Array(delegateItemType, { description: '要创建的子会话列表，最多 50 个' }),
@@ -853,7 +853,7 @@ export function buildPiCollaborationTools(
     sdk.defineTool({
       name: 'mcp__collaboration__wait_for_delegations',
       label: '等待子会话完成',
-      description: '等待一个或多个 Proma 协作子会话完成，并返回结构化结果摘要。',
+      description: '父会话用于收敛子会话结果的等待屏障：等待指定的 Proma 协作子会话完成，并返回结构化结果摘要。只要本轮回复、决策或交付依赖已委派任务，主会话必须在回复前调用本工具，不能只因 delegate_agent/delegate_agents 已返回就宣称完成；需要全部结果时传入所有 delegationIds 并使用 mode=all，需要部分早期结果时才使用 mode=any。若返回 timeout 或仍有 running 委派，必须如实说明未收敛状态，不能把未完成任务当作已有结果。',
       parameters: Type.Object({
         delegationIds: Type.Optional(Type.Array(Type.String(), { description: '要等待的委派 ID' })),
         mode: Type.Optional(Type.Union([Type.Literal('all'), Type.Literal('any')])),

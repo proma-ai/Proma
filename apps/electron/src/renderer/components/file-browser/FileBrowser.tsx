@@ -11,7 +11,8 @@
  */
 
 import * as React from 'react'
-import { useAtomValue } from 'jotai'
+import { useAtomValue, useSetAtom } from 'jotai'
+import { selectAtom } from 'jotai/utils'
 import { toast } from 'sonner'
 import {
   ChevronRight,
@@ -46,7 +47,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { workspaceFilesVersionAtom, fileBrowserAutoRevealAtom, recentlyModifiedPathsAtom, currentAgentSessionIdAtom } from '@/atoms/agent-atoms'
+import { workspaceFilesVersionAtom, fileBrowserAutoRevealAtom, recentlyModifiedPathsAtom, currentAgentSessionIdAtom, fileBrowserExpandedPathsAtom, isFileBrowserAutoRevealActive, updateFileBrowserExpandedPath } from '@/atoms/agent-atoms'
 import type { FileAccessOptions, FileEntry } from '@proma/shared'
 import { FileTypeIcon } from './FileTypeIcon'
 import { DefaultAppMenuItem } from './DefaultAppMenuItem'
@@ -120,6 +121,8 @@ interface FileBrowserProps {
   onAddToChat?: (entry: FileEntry) => void
   /** 单击文件时在内联预览面板中显示（替代外部窗口预览） */
   onFilePreview?: (filePath: string) => void
+  /** 在右侧工作区中以指定目录为 cwd 打开终端。 */
+  onOpenDirectoryTerminal?: (directoryPath: string, directoryName: string) => void
 }
 
 function sortEntries(entries: ScopedFileEntry[]): ScopedFileEntry[] {
@@ -129,7 +132,15 @@ function sortEntries(entries: ScopedFileEntry[]): ScopedFileEntry[] {
   })
 }
 
-export function FileBrowser({ rootPath, roots, hideToolbar, embedded, hideEmpty, access, projectRootPath, showSessionBadge = true, onAddToChat, onFilePreview }: FileBrowserProps): React.ReactElement {
+function getFileBrowserStateKey(sessionId: string | null, roots: readonly FileBrowserRoot[]): string {
+  const rootKey = roots
+    .map((root) => `${root.scope}\u0000${root.path}`)
+    .sort()
+    .join('\u0001')
+  return `${sessionId ?? 'standalone'}\u0002${rootKey}`
+}
+
+export function FileBrowser({ rootPath, roots, hideToolbar, embedded, hideEmpty, access, projectRootPath, showSessionBadge = true, onAddToChat, onFilePreview, onOpenDirectoryTerminal }: FileBrowserProps): React.ReactElement {
   const browserRoots = React.useMemo<FileBrowserRoot[]>(() => {
     if (roots && roots.length > 0) return roots.filter((root) => Boolean(root.path))
     return rootPath ? [{ path: rootPath, scope: 'project' }] : []
@@ -138,16 +149,22 @@ export function FileBrowser({ rootPath, roots, hideToolbar, embedded, hideEmpty,
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const filesVersion = useAtomValue(workspaceFilesVersionAtom)
+  const currentSessionId = useAtomValue(currentAgentSessionIdAtom)
+  const expandedStateKey = React.useMemo(
+    () => getFileBrowserStateKey(currentSessionId, browserRoots),
+    [currentSessionId, browserRoots],
+  )
 
   // ===== Agent 写入文件时的自动定位 =====
   const autoReveal = useAtomValue(fileBrowserAutoRevealAtom)
+  const activeAutoReveal = isFileBrowserAutoRevealActive(autoReveal) ? autoReveal : null
   const revealRoot = React.useMemo(() => {
-    if (!autoReveal) return null
+    if (!activeAutoReveal) return null
     return browserRoots
-      .filter((root) => isPathUnderRoot(root.path, autoReveal.path))
+      .filter((root) => isPathUnderRoot(root.path, activeAutoReveal.path))
       .sort((a, b) => b.path.length - a.path.length)[0] ?? null
-  }, [autoReveal, browserRoots])
-  const revealForThisRoot = revealRoot ? autoReveal : null
+  }, [activeAutoReveal, browserRoots])
+  const revealForThisRoot = revealRoot ? activeAutoReveal : null
   const revealAncestors = React.useMemo(
     () => revealForThisRoot && revealRoot ? computeRevealAncestors(revealRoot.path, revealForThisRoot.path) : new Set<string>(),
     [revealForThisRoot, revealRoot],
@@ -167,7 +184,6 @@ export function FileBrowser({ rootPath, roots, hideToolbar, embedded, hideEmpty,
 
   // ===== 最近修改的文件路径（60s 内显示左侧竖条） =====
   const recentlyModifiedMap = useAtomValue(recentlyModifiedPathsAtom)
-  const currentSessionId = useAtomValue(currentAgentSessionIdAtom)
   const recentlyModifiedSet = React.useMemo<Set<string>>(() => {
     if (!currentSessionId) return new Set()
     const inner = recentlyModifiedMap.get(currentSessionId)
@@ -389,9 +405,11 @@ export function FileBrowser({ rootPath, roots, hideToolbar, embedded, hideEmpty,
           revealTarget={revealTarget}
           revealTs={revealTs}
           recentlyModifiedSet={recentlyModifiedSet}
+          expandedStateKey={expandedStateKey}
           onSelect={handleSelect}
           onShowInFolder={handleShowInFolder}
           onOpenInTerminal={handleOpenInTerminal}
+          onOpenDirectoryTerminal={onOpenDirectoryTerminal}
           onStartRename={handleStartRename}
           onCancelRename={handleCancelRename}
           onRename={handleRename}
@@ -497,9 +515,12 @@ interface FileTreeItemProps {
   /** 自动定位时间戳，变化时重新触发 */
   revealTs: number
   recentlyModifiedSet: Set<string>
+  /** 当前文件树实例的隔离状态 key。 */
+  expandedStateKey: string
   onSelect: (entry: FileEntry, event: React.MouseEvent) => void
   onShowInFolder: (entry: FileEntry) => void
   onOpenInTerminal: (entry: FileEntry) => void
+  onOpenDirectoryTerminal?: (directoryPath: string, directoryName: string) => void
   onStartRename: (entry: FileEntry) => void
   onCancelRename: () => void
   onRename: (filePath: string, newName: string) => Promise<string | null>
@@ -526,9 +547,11 @@ function FileTreeItem({
   revealTarget,
   revealTs,
   recentlyModifiedSet,
+  expandedStateKey,
   onSelect,
   onShowInFolder,
   onOpenInTerminal,
+  onOpenDirectoryTerminal,
   onStartRename,
   onCancelRename,
   onRename,
@@ -541,11 +564,36 @@ function FileTreeItem({
   onAddToChat,
   onFilePreview,
 }: FileTreeItemProps): React.ReactElement {
-  const [expanded, setExpanded] = React.useState(false)
+  // 每行只订阅自己的布尔值；其他目录展开/折叠不重渲染整棵已展开树。
+  const expandedAtom = React.useMemo(
+    () => selectAtom(fileBrowserExpandedPathsAtom, (state) => state.get(expandedStateKey)?.get(entry.path) ?? false),
+    [entry.path, expandedStateKey],
+  )
+  const expanded = useAtomValue(expandedAtom)
+  const setExpandedPathsMap = useSetAtom(fileBrowserExpandedPathsAtom)
+  const setExpanded = React.useCallback((nextExpanded: boolean) => {
+    setExpandedPathsMap((previous) => updateFileBrowserExpandedPath(previous, expandedStateKey, entry.path, nextExpanded))
+  }, [entry.path, expandedStateKey, setExpandedPathsMap])
   const [children, setChildren] = React.useState<ScopedFileEntry[]>([])
   const [childrenLoaded, setChildrenLoaded] = React.useState(false)
   const rowRef = React.useRef<HTMLDivElement>(null)
   const supportsTerminalFolderOpen = typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac')
+
+  // 从其他工作区 Tab 返回时，已展开的目录会重新挂载；补载其子项以恢复原来的树形视图。
+  React.useEffect(() => {
+    if (!expanded || childrenLoaded || !entry.isDirectory) return
+
+    let cancelled = false
+    window.electronAPI.listDirectory(entry.path, access)
+      .then((items) => {
+        if (cancelled) return
+        setChildren(items.map((child) => ({ ...child, scope: entry.scope, rootPath: entry.rootPath })))
+        setChildrenLoaded(true)
+      })
+      .catch((err) => console.error('[FileTreeItem] 恢复已展开目录失败:', err))
+
+    return () => { cancelled = true }
+  }, [access, childrenLoaded, entry.isDirectory, entry.path, entry.rootPath, entry.scope, expanded])
 
   // 当 refreshVersion 变化时，已展开的文件夹自动重新加载子项
   React.useEffect(() => {
@@ -844,6 +892,26 @@ function FileTreeItem({
           </>
         )}
 
+        {entry.isDirectory && onOpenDirectoryTerminal && !isRenaming && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label={`在 ${entry.name} 打开终端`}
+                title={`在 ${entry.name} 打开终端`}
+                className="relative z-10 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-[background-color,color,opacity,transform] hover:bg-accent/70 hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100 active:scale-[0.96]"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onOpenDirectoryTerminal(entry.path, entry.name)
+                }}
+              >
+                <Terminal className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="left">在右侧标签中打开终端</TooltipContent>
+          </Tooltip>
+        )}
+
         {/* 右侧操作按钮占位（始终占位，避免行宽跳动） */}
         <div
           className="relative z-10 flex-shrink-0 mr-1"
@@ -998,9 +1066,11 @@ function FileTreeItem({
               revealTarget={revealTarget}
               revealTs={revealTs}
               recentlyModifiedSet={recentlyModifiedSet}
+              expandedStateKey={expandedStateKey}
               onSelect={onSelect}
               onShowInFolder={onShowInFolder}
               onOpenInTerminal={onOpenInTerminal}
+              onOpenDirectoryTerminal={onOpenDirectoryTerminal}
               onStartRename={onStartRename}
               onCancelRename={onCancelRename}
               onRename={onRename}

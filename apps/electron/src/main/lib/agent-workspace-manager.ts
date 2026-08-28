@@ -775,6 +775,15 @@ export function getWorkspaceCapabilities(workspaceSlug: string): WorkspaceCapabi
     name,
     enabled: entry.enabled,
     type: entry.type,
+    // Do not cross the IPC boundary with the server-provided diagnostic message:
+    // it may contain endpoint details. The success bit and timestamp are enough
+    // for catalog status and # MCP eligibility.
+    ...(entry.lastTestResult ? {
+      lastTestResult: {
+        success: entry.lastTestResult.success,
+        timestamp: entry.lastTestResult.timestamp,
+      },
+    } : {}),
   }))
 
   return { mcpServers, builtinMcpServers, skills, memory }
@@ -1860,6 +1869,8 @@ interface WorkspaceConfig {
   attachedDirectories?: string[]
   attachedFiles?: string[]
   worktreeRepos?: import('@proma/shared').WorkspaceWorktreeRepo[]
+  /** CLI integrations disabled only for Proma in this workspace; third-party CLI credentials stay untouched. */
+  disabledCliIntegrationIds?: string[]
   /** User consent for Agent-initiated maintenance of the two AGENTS.md files. */
   projectKnowledgeMaintenanceApproved?: boolean
   /** Internal scheduling metadata only; Markdown remains the long-term memory source. */
@@ -1892,6 +1903,9 @@ function readWorkspaceConfig(workspaceSlug: string): WorkspaceConfig {
       worktreeRepos: Array.isArray(data.worktreeRepos)
         ? data.worktreeRepos.filter((r) => r && typeof r.name === 'string' && typeof r.repoPath === 'string' && typeof r.worktreesPath === 'string')
         : undefined,
+      disabledCliIntegrationIds: Array.isArray(data.disabledCliIntegrationIds)
+        ? [...new Set(data.disabledCliIntegrationIds.filter((id): id is string => typeof id === 'string' && id.length > 0))]
+        : undefined,
       projectKnowledgeMaintenanceApproved: data.projectKnowledgeMaintenanceApproved === true ? true : undefined,
       // Read the prior public setting only to preserve its cooldown timestamp; its
       // interval is intentionally ignored after switching to the fixed internal cadence.
@@ -1912,6 +1926,29 @@ function readWorkspaceConfig(workspaceSlug: string): WorkspaceConfig {
 function writeWorkspaceConfig(workspaceSlug: string, config: WorkspaceConfig): void {
   const configPath = getWorkspaceConfigPath(workspaceSlug)
   writeJsonFileAtomic(configPath, config)
+}
+
+/** IDs of CLI integrations that are intentionally disabled only for Proma in this workspace. */
+export function getDisabledCliIntegrationIds(workspaceSlug: string): Set<string> {
+  return new Set(readWorkspaceConfig(workspaceSlug).disabledCliIntegrationIds ?? [])
+}
+
+/**
+ * Changes Proma's permission to use a CLI integration without invoking third-party logout,
+ * credential deletion, or token revocation.
+ */
+export function setCliIntegrationEnabled(workspaceSlug: string, id: string, enabled: boolean): void {
+  const normalizedId = id.trim()
+  if (!normalizedId) throw new Error('CLI 集成 ID 不能为空')
+
+  const config = readWorkspaceConfig(workspaceSlug)
+  const disabledIds = new Set(config.disabledCliIntegrationIds ?? [])
+  if (enabled) disabledIds.delete(normalizedId)
+  else disabledIds.add(normalizedId)
+  writeWorkspaceConfig(workspaceSlug, {
+    ...config,
+    disabledCliIntegrationIds: [...disabledIds].sort(),
+  })
 }
 
 /** Whether the user explicitly enabled Agent-initiated maintenance of both AGENTS.md files. */

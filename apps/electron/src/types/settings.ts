@@ -249,12 +249,6 @@ export const DEFAULT_THEME_MODE: ThemeMode = 'dark'
 /** 默认特殊风格 */
 export const DEFAULT_THEME_STYLE: ThemeStyle = 'default'
 
-/** 界面风格：经典保留旧版视觉，现代使用当前更克制的 UI */
-export type InterfaceVariant = 'classic' | 'modern'
-
-/** 默认界面风格 */
-export const DEFAULT_INTERFACE_VARIANT: InterfaceVariant = 'modern'
-
 /** Markdown 预览字号档位 */
 export type MarkdownFontSize = 'small' | 'medium' | 'large'
 
@@ -286,8 +280,6 @@ export interface AppSettings {
   themeMode: ThemeMode
   /** 特殊风格主题 */
   themeStyle?: ThemeStyle
-  /** 界面风格 */
-  interfaceVariant?: InterfaceVariant
   /** Agent 默认渠道 ID（由当前 Agent Core 解释） — 当前选中的渠道 */
   agentChannelId?: string
   /** Agent 默认模型 ID */

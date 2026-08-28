@@ -128,6 +128,11 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
   const [name, setName] = React.useState(server?.name ?? '')
   const [transportType, setTransportType] = React.useState<McpTransportType>(server?.entry.type ?? 'stdio')
   const [enabled, setEnabled] = React.useState(server?.entry.enabled ?? false) // 默认关闭
+  const explicitlyDisabledRef = React.useRef(false)
+  const handleEnabledChange = React.useCallback((nextEnabled: boolean): void => {
+    if (!nextEnabled) explicitlyDisabledRef.current = true
+    setEnabled(nextEnabled)
+  }, [])
 
   // stdio 字段
   const [command, setCommand] = React.useState(server?.entry.command ?? '')
@@ -213,7 +218,10 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
       const newConfig: WorkspaceMcpConfig = {
         servers: { ...config.servers, [serverName]: entry },
       }
-      await window.electronAPI.saveWorkspaceMcpConfig(workspaceSlug, newConfig)
+      const options = explicitlyDisabledRef.current && !entry.enabled
+        ? { explicitlyDisabledServerNames: [serverName] }
+        : undefined
+      await window.electronAPI.saveWorkspaceMcpConfig(workspaceSlug, newConfig, options)
       if (generation === saveGenerationRef.current && mountedRef.current) {
         // 编辑抽屉外的 MCP 卡片使用独立快照；每次持久化后通知其局部重读，
         // 让测试结果无需离开再进入页面即可同步显示。
@@ -305,7 +313,7 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
 
     try {
       const entry = buildEntry(false) // 测试时不包含旧的测试结果
-      const result = await window.electronAPI.testMcpServer(serverName, entry)
+      const result = await window.electronAPI.testMcpServer(workspaceSlug, serverName, entry)
       setTestResult({
         success: result.success,
         message: result.message,
@@ -572,12 +580,12 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
           <SettingsToggle
             label="启用此服务器"
             description={
-              testResult?.success
-                ? '开启后该 MCP 服务器将在 Agent 会话中加载'
-                : '开启后该 MCP 服务器将在 Agent 会话中加载；如配置有误，Agent 会按运行时错误提示处理'
+              enabled
+                ? '保存后会进行真实连接验证；仅验证成功才会在 Agent 会话中加载。'
+                : '关闭时该 MCP 不会在 Agent 会话中加载。'
             }
             checked={enabled}
-            onCheckedChange={setEnabled}
+            onCheckedChange={handleEnabledChange}
           />
         </SettingsCard>
       </SettingsSection>

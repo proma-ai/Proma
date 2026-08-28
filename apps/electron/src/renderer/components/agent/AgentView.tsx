@@ -511,11 +511,12 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
   const setModelSelectorOpen = useSetAtom(modelSelectorOpenAtom)
   const setDraftSessionIds = useSetAtom(draftSessionIdsAtom)
   const globalWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
-  // 从会话元数据派生 workspaceId：会话数据已加载时以自身为准，未加载时回退全局 atom
+  // 会话已归属工作区时始终以其自身为准；缺少 workspaceId 的旧会话则回退当前项目。
+  // 否则 AgentView 会把 workspaceSlug 传成 null，导致 # MCP（以及 / Skill、@ 文件）在
+  // 已选中的工作区中仍拿不到能力摘要。
   const currentWorkspaceId = React.useMemo(() => {
-    if (!sessionMeta) return globalWorkspaceId // 数据未加载，回退全局
-    return sessionMeta.workspaceId ?? null     // 数据已加载，以会话自身为准
-  }, [sessionMeta, globalWorkspaceId])
+    return sessionMeta?.workspaceId ?? globalWorkspaceId
+  }, [sessionMeta?.workspaceId, globalWorkspaceId])
   const [pendingPrompt, setPendingPrompt] = useAtom(agentPendingPromptAtom)
   const [pendingFiles, setPendingFiles] = useAtom(agentPendingFilesAtomFamily(sessionId))
   const [queuedMessages, setQueuedMessages] = useAtom(agentMessageQueueAtomFamily(sessionId))
@@ -1220,85 +1221,16 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
     })
   }, [sessionId, sessions, setAttachedFilesMap])
 
-  // 自动发送 pending prompt（从快速任务窗口或设置页触发）
-  // 等待 messagesLoaded 确保消息加载完成后再插入乐观消息，避免被加载结果覆盖。
-  // 使用 queueMicrotask 延迟发送：避免 setState → 重渲染 → cleanup 取消 timer 的竞态。
+  // 外部入口创建的新会话只预填提示词；用户确认后再自行发送。
+  // 等待 messagesLoaded，避免会话水合时覆盖刚写入的输入草稿。
   React.useEffect(() => {
-    if (!messagesLoaded) return
-    if (!pendingPrompt) return
-    if (pendingPrompt.sessionId !== sessionId) return
-    if (!agentChannelId || streaming) return
+    if (!messagesLoaded || !pendingPrompt || pendingPrompt.sessionId !== sessionId) return
 
-    // 快照当前上下文
-    const snapshot = {
-      message: pendingPrompt.message,
-      // Agent 侧使用解码后的 SDK 文本（@file 路径还原为真实路径），
-      // 展示/持久化保留编码原文（remarkMentions 解码显示）。
-      sdkMessage: parseQueuedMessageMentions(pendingPrompt.message).cleanedText,
-      channelId: agentChannelId,
-      modelId: agentModelId || undefined,
-      workspaceId: currentWorkspaceId || undefined,
-      additionalDirectories: Array.from(new Set([...attachedDirs, ...attachedFileDirectories, ...(pendingPrompt.additionalDirectories ?? [])])),
-      mentionedTodoIds: pendingPrompt.mentionedTodoIds,
-    }
+    setInputContent(pendingPrompt.message)
+    setInputHtmlContent('')
     setPendingPrompt(null)
+  }, [messagesLoaded, pendingPrompt, sessionId, setInputContent, setInputHtmlContent, setPendingPrompt])
 
-    queueMicrotask(() => {
-      // 初始化流式状态（startedAt 由渲染进程生成，传递给主进程原样回传，确保竞态保护使用同一个值）
-      const streamStartedAt = Date.now()
-      setStreamingStates((prev) => {
-        const map = new Map(prev)
-        const existing = prev.get(sessionId)
-        map.set(sessionId, {
-          running: true,
-          model: snapshot.modelId,
-          startedAt: streamStartedAt,
-          inputTokens: existing?.inputTokens,
-          contextWindow: resolveRunContextWindow(snapshot.modelId, existing?.contextWindow),
-        })
-        return map
-      })
-
-      // 乐观更新：SDKMessage 格式（Phase 4）
-      const tempUserSDKMsg: SDKMessage = {
-        type: 'user',
-        message: {
-          content: [{ type: 'text', text: snapshot.message }],
-        },
-        parent_tool_use_id: null,
-        _createdAt: Date.now(),
-      } as unknown as SDKMessage
-      appendOptimisticPersistedMessage(tempUserSDKMsg)
-
-      // 发送消息
-      const input: AgentSendInput = {
-        sessionId,
-        userMessage: snapshot.sdkMessage,
-        rawUserMessage: snapshot.message,
-        channelId: snapshot.channelId,
-        modelId: snapshot.modelId,
-        workspaceId: snapshot.workspaceId,
-        startedAt: streamStartedAt,
-        permissionModeOverride: permissionMode,
-        ...(snapshot.additionalDirectories && snapshot.additionalDirectories.length > 0 && {
-          additionalDirectories: snapshot.additionalDirectories,
-        }),
-        ...(snapshot.mentionedTodoIds && snapshot.mentionedTodoIds.length > 0 && {
-          mentionedTodoIds: snapshot.mentionedTodoIds,
-        }),
-      }
-      window.electronAPI.sendAgentMessage(input).catch((error) => {
-        console.error('[AgentView] 自动发送配置消息失败:', error)
-        setStreamingStates((prev) => {
-          const current = prev.get(sessionId)
-          if (!current) return prev
-          const map = new Map(prev)
-          map.set(sessionId, { ...current, running: false })
-          return map
-        })
-      })
-    })
-  }, [messagesLoaded, pendingPrompt, sessionId, agentChannelId, agentModelId, agentChannelProvider, currentWorkspaceId, streaming, setPendingPrompt, setStreamingStates, permissionMode, attachedDirs, attachedFileDirectories])
   // ===== 附件处理 =====
 
   /** 为文件生成唯一文件名（避免粘贴多张图片时文件名重复导致覆盖） */

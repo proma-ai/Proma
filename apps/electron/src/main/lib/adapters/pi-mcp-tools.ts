@@ -17,12 +17,14 @@ import type { AgentToolResult } from '@earendil-works/pi-agent-core'
 import type { TextContent, ImageContent } from '@earendil-works/pi-ai'
 import type { TSchema } from 'typebox'
 import { Type } from 'typebox'
+import { createManagedProxyFetch, type ManagedProxyFetch } from '../proxy-fetch'
 import { sanitizeToolResultImageContent } from '../image-content-validation'
 
 const DEFAULT_MCP_REQUEST_TIMEOUT_MS = 60_000
 const DEFAULT_MCP_STARTUP_TIMEOUT_MS = 30_000
 const OPTIONAL_MCP_BOOTSTRAP_TIMEOUT_MS = 500
 const HTTP_SESSION_REJECTION_PATTERN = /missing session id|no valid session id provided|mcp-session-id header is required/i
+const transportProxyFetches = new WeakMap<Transport, ManagedProxyFetch>()
 
 interface PiMcpServerConfig {
   type?: unknown
@@ -33,6 +35,7 @@ interface PiMcpServerConfig {
   headers?: unknown
   startup_timeout_sec?: unknown
   timeout?: unknown
+  proxyUrl?: unknown
   required?: unknown
 }
 
@@ -46,6 +49,7 @@ interface McpConnection {
   client: Client
   transport: Transport
   close: () => Promise<void>
+  proxyFetch?: ManagedProxyFetch
   tools?: McpToolInfo[]
   toolsPromise?: Promise<McpToolInfo[]>
 }
@@ -112,6 +116,12 @@ function getTimeoutMs(config: PiMcpServerConfig): number {
   return timeoutSec * 1000
 }
 
+function getProxyFetch(config: PiMcpServerConfig): ManagedProxyFetch | undefined {
+  return typeof config.proxyUrl === 'string' && config.proxyUrl.trim()
+    ? createManagedProxyFetch(config.proxyUrl)
+    : undefined
+}
+
 function createTransport(name: string, config: PiMcpServerConfig): Transport | undefined {
   const type = config.type
   if (type === 'stdio') {
@@ -136,9 +146,13 @@ function createTransport(name: string, config: PiMcpServerConfig): Transport | u
       return undefined
     }
     const headers = getHeaders(config)
-    return new StreamableHTTPClientTransport(new URL(config.url), {
+    const proxyFetch = getProxyFetch(config)
+    const transport = new StreamableHTTPClientTransport(new URL(config.url), {
       requestInit: headers ? { headers } : undefined,
+      fetch: proxyFetch?.fetch,
     })
+    if (proxyFetch) transportProxyFetches.set(transport, proxyFetch)
+    return transport
   }
 
   if (type === 'sse') {
@@ -147,20 +161,22 @@ function createTransport(name: string, config: PiMcpServerConfig): Transport | u
       return undefined
     }
     const headers = getHeaders(config)
-    return new SSEClientTransport(new URL(config.url), {
+    const proxyFetch = getProxyFetch(config)
+    const transport = new SSEClientTransport(new URL(config.url), {
       requestInit: headers ? { headers } : undefined,
-      eventSourceInit: headers
+      fetch: proxyFetch?.fetch,
+      eventSourceInit: headers || proxyFetch
         ? ({
-          fetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, {
-            ...init,
-            headers: {
-              ...(init?.headers as Record<string, string> | undefined),
-              ...headers,
-            },
-          }),
+          fetch: (input: RequestInfo | URL, init?: RequestInit) => {
+            const mergedHeaders = new Headers(init?.headers)
+            for (const [key, value] of Object.entries(headers ?? {})) mergedHeaders.set(key, value)
+            return (proxyFetch?.fetch ?? fetch)(input, { ...init, headers: mergedHeaders })
+          },
         } as any)
         : undefined,
     })
+    if (proxyFetch) transportProxyFetches.set(transport, proxyFetch)
+    return transport
   }
 
   console.warn(`[Pi MCP] MCP 服务器 ${name} 使用暂不支持的类型 ${String(type)}，已跳过`)
@@ -414,9 +430,16 @@ class PiMcpClientManager {
   ): Promise<McpConnection> {
     const transport = createTransport(serverName, config)
     if (!transport) throw new Error(`无法创建 MCP transport: ${serverName}`)
+    const proxyFetch = transportProxyFetches.get(transport)
 
     const client = new Client({ name: 'proma-pi-agent-mcp-bridge', version: '0.1.0' }, { capabilities: {} })
-    await client.connect(transport, { timeout: getTimeoutMs(config) })
+    try {
+      await client.connect(transport, { timeout: getTimeoutMs(config) })
+    } catch (error) {
+      try { await transport.close() } catch { /* connection setup already failed */ }
+      await proxyFetch?.close()
+      throw error
+    }
 
     let closing = false
 
@@ -439,7 +462,11 @@ class PiMcpClientManager {
       transport,
       close: async () => {
         closing = true
-        await transport.close()
+        try {
+          await transport.close()
+        } finally {
+          await proxyFetch?.close()
+        }
       },
     }
   }
@@ -471,12 +498,21 @@ function createPiMcpToolDefinition(binding: McpToolBinding): ToolDefinition {
  * 注意：本函数仅供 Pi runtime 使用；Claude runtime 仍直接把 mcpServers 交给
  * Claude Agent SDK，不经过这里。
  */
-export async function buildPiMcpTools(mcpServers: PiMcpServers): Promise<ToolDefinition[]> {
+export async function buildPiMcpTools(mcpServers: PiMcpServers, proxyUrl?: string): Promise<ToolDefinition[]> {
   const tools: ToolDefinition[] = []
+  const proxiedServers = proxyUrl
+    ? Object.fromEntries(Object.entries(mcpServers).map(([name, config]) => {
+      const type = (config as PiMcpServerConfig).type
+      return [name, {
+        ...config,
+        ...(type === 'http' || type === 'sse' ? { proxyUrl } : {}),
+      }]
+    })) as PiMcpServers
+    : mcpServers
   const seenToolNames = new Set<string>()
 
   // 并行连接所有 MCP 服务器，避免串行等待导致启动慢
-  const entries = Object.entries(mcpServers).filter(([, rawConfig]) => {
+  const entries = Object.entries(proxiedServers).filter(([, rawConfig]) => {
     const type = (rawConfig as PiMcpServerConfig).type
     return type === 'stdio' || type === 'http' || type === 'sse'
   })

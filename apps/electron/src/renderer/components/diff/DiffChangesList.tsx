@@ -5,7 +5,7 @@
  */
 
 import * as React from 'react'
-import { Box, ChevronRight, FolderSearch, Search, Undo2, X } from 'lucide-react'
+import { Box, ChevronRight, FolderSearch, Search, SquareTerminal, Undo2, X } from 'lucide-react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -63,6 +63,8 @@ interface DiffChangesListProps {
   worktreeRepoPaths?: string[]
   /** 在指定 Worktree 根目录创建右侧终端 */
   onOpenWorktreeTerminal?: (worktree: WorktreeInfo) => void
+  /** 在右侧工作区中以 Git 目录为 cwd 打开终端。 */
+  onOpenDirectoryTerminal?: (directoryPath: string, directoryName: string) => void
   /** 本会话在非 Git 目录中成功写入的文件 */
   nonGitFileChanges?: SessionFileChange[]
   /** 当前 Agent run ID，用于将文件变更划分为本轮和更早 */
@@ -83,6 +85,7 @@ export const DiffChangesList = React.memo(function DiffChangesList({
   workspaceSlug,
   worktreeRepoPaths,
   onOpenWorktreeTerminal,
+  onOpenDirectoryTerminal,
   nonGitFileChanges = [],
   currentFileChangeRunId,
   onPlainFileClick,
@@ -335,8 +338,8 @@ export const DiffChangesList = React.memo(function DiffChangesList({
           {fileGroups.map((group) => {
             return (
               <div key={group.gitRoot} className="py-1">
-                <div className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium text-muted-foreground">
-                  <span className="truncate">{group.dirName}</span>
+                <div className="group flex items-center gap-1.5 px-3 py-1.5 text-[14px] font-medium text-muted-foreground">
+                  <span className="min-w-0 flex-1 truncate">{group.dirName}</span>
                   {group.sources.map((source) => {
                     const config = DIFF_CHANGE_SOURCE_CONFIG[source]
                     return (
@@ -345,6 +348,22 @@ export const DiffChangesList = React.memo(function DiffChangesList({
                       </span>
                     )
                   })}
+                  {onOpenDirectoryTerminal && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label={`在 ${group.dirName} 打开终端`}
+                          title={`在 ${group.dirName} 打开终端`}
+                          className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-[background-color,color,opacity,transform] hover:bg-accent/70 hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100 active:scale-[0.96]"
+                          onClick={() => onOpenDirectoryTerminal(group.gitRoot, group.dirName)}
+                        >
+                          <SquareTerminal className="size-3.5" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="left">在右侧标签中打开终端</TooltipContent>
+                    </Tooltip>
+                  )}
                 </div>
                 {group.tree.map((node) => (
                   <GitFileTreeNode
@@ -363,6 +382,7 @@ export const DiffChangesList = React.memo(function DiffChangesList({
                       onFileClick(file.filePath, file.status === 'untracked', file.gitRoot)
                     }}
                     onRevert={(file) => handleRevert(file.filePath, file.gitRoot)}
+                    onOpenDirectoryTerminal={onOpenDirectoryTerminal}
                   />
                 ))}
               </div>
@@ -387,6 +407,7 @@ function GitFileTreeNode({
   onToggle,
   onFileClick,
   onRevert,
+  onOpenDirectoryTerminal,
 }: {
   node: DiffFileTreeNode<GitFileEntry>
   depth: number
@@ -399,6 +420,7 @@ function GitFileTreeNode({
   onToggle: (path: string) => void
   onFileClick: (file: GitFileEntry, absPath: string) => void
   onRevert: (file: GitFileEntry) => void
+  onOpenDirectoryTerminal?: (directoryPath: string, directoryName: string) => void
 }): React.ReactElement {
   if (node.kind === 'file') {
     const file = node.entry
@@ -418,16 +440,18 @@ function GitFileTreeNode({
 
   const stateKey = `${gitRoot}:${node.path}`
   const isCollapsed = !forceExpanded && collapsedDirs.has(stateKey)
+  const directoryPath = `${gitRoot}/${node.path}`.replace(/\/+/g, '/')
   const rowPaddingLeft = 8 + depth * 16
   const guideLeft = 23 + depth * 16
 
   return (
     <div className="relative">
+      <div className="group mx-2 flex h-8 items-center gap-1.5 rounded-md pr-2 text-[13px] font-medium text-foreground/75 transition-colors hover:bg-accent/50">
       <button
         type="button"
         aria-expanded={!isCollapsed}
         title={node.name}
-        className="mx-2 flex h-8 items-center gap-1.5 rounded-md pr-2 text-left text-[13px] font-medium text-foreground/75 transition-colors hover:bg-accent/50"
+        className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
         style={{ paddingLeft: rowPaddingLeft }}
         onClick={() => onToggle(stateKey)}
       >
@@ -436,6 +460,23 @@ function GitFileTreeNode({
         />
         <span className="min-w-0 flex-1 truncate">{node.name}</span>
       </button>
+      {onOpenDirectoryTerminal && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label={`在 ${node.name} 打开终端`}
+              title={`在 ${node.name} 打开终端`}
+              className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-[background-color,color,opacity,transform] hover:bg-accent/70 hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100 active:scale-[0.96]"
+              onClick={() => onOpenDirectoryTerminal(directoryPath, node.name)}
+            >
+              <SquareTerminal className="size-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="left">在右侧标签中打开终端</TooltipContent>
+        </Tooltip>
+      )}
+      </div>
       {!isCollapsed && (
         <div className="relative">
           <span
@@ -457,6 +498,7 @@ function GitFileTreeNode({
               onToggle={onToggle}
               onFileClick={onFileClick}
               onRevert={onRevert}
+              onOpenDirectoryTerminal={onOpenDirectoryTerminal}
             />
           ))}
         </div>
@@ -602,7 +644,7 @@ function FileRow({
       role="button"
       tabIndex={0}
       className={cn(
-        'group/file relative mx-2 flex h-8 items-center rounded-md pr-2 text-[14px] transition-colors',
+        'group/file relative mx-2 flex h-8 items-center rounded-md pr-2 text-[12px] transition-colors',
         isSelected
           ? 'session-item-selected bg-primary/10 shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
           : 'hover:bg-primary/5',
@@ -633,7 +675,7 @@ function FileRow({
       </Tooltip>
 
       {hasLineChanges && (
-        <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[13px] tabular-nums transition-opacity group-hover/file:opacity-0">
+        <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[11px] tabular-nums transition-opacity group-hover/file:opacity-0">
           {file.additions > 0 && (
             <span style={{ color: 'rgb(34 197 94)' }}>+{file.additions}</span>
           )}
@@ -684,7 +726,7 @@ function GitStatusMarker({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className={cn('w-4 shrink-0 text-right text-[12px] font-medium tabular-nums', className, color)}>{label}</span>
+        <span className={cn('w-4 shrink-0 text-right text-[11px] font-medium tabular-nums', className, color)}>{label}</span>
       </TooltipTrigger>
       <TooltipContent side="bottom">{description}</TooltipContent>
     </Tooltip>

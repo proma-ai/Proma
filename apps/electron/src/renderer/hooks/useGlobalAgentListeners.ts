@@ -571,8 +571,6 @@ export function useGlobalAgentListeners(): void {
       existedBefore?: boolean
       runId: string
     }>()
-    /** 每轮只自动打开一次文件改动面板，避免连续写入打断用户。 */
-    const autoActivatedChangeTurns = new Map<string, string>()
     /** 正在执行的 git 突变 Bash 命令：toolUseId → sessionId（完成后触发 diff 刷新） */
     const pendingGitMutateTools = new Map<string, string>()
 
@@ -862,42 +860,6 @@ export function useGlobalAgentListeners(): void {
     // startedAt 后仍需保留一个短生命周期的终态标记，避免迟到快照复活旧 run。
     const latestTerminalRunStartedAt = new Map<string, number>()
 
-    /**
-     * 当前前台会话在本轮首次产生文件改动时，自动展开右侧工作区并切到「改动」。
-     * Git 与非 Git 文件都应触发；前者由 Git diff 展示，后者由会话改动记录补充。
-     */
-    const activateChangesTabForCurrentRun = (sessionId: string, runId: string): void => {
-      const activeTabId = store.get(activeTabIdAtom)
-      const activeTab = store.get(tabsAtom).find((tab) => tab.id === activeTabId)
-      const isViewingSession = (activeTab?.type === 'agent' || activeTab?.type === 'preview')
-        && activeTab.sessionId === sessionId
-      if (
-        store.get(currentAgentSessionIdAtom) !== sessionId
-        || !isViewingSession
-        || autoActivatedChangeTurns.get(sessionId) === runId
-      ) return
-
-      autoActivatedChangeTurns.set(sessionId, runId)
-      // 本轮由已绑定 Worktree 的 Agent 触发时，同步改动面板的临时选择。
-      // 否则 atom 中曾缓存的 null 会覆盖会话元数据，导致自动打开 Tab 后仍展示会话改动。
-      const activeWorktreePath = store.get(agentSessionsAtom)
-        .find((session) => session.id === sessionId)?.activeWorktree?.path
-      if (activeWorktreePath) {
-        store.set(agentSelectedWorktreeAtom, (previous) => {
-          if (previous.get(sessionId) === activeWorktreePath) return previous
-          const next = new Map(previous)
-          next.set(sessionId, activeWorktreePath)
-          return next
-        })
-      }
-      store.set(agentSidePanelOpenAtomFamily(sessionId), true)
-      store.set(agentDiffPanelTabAtom, (prev) => {
-        const map = new Map(prev)
-        map.set(sessionId, 'changes')
-        return map
-      })
-    }
-
     const cleanupWatchedFileChanges = window.electronAPI.onWorkspaceFilesChanged((changedPaths) => {
       const filePaths = (changedPaths ?? []).filter(isAbsolutePath)
       if (filePaths.length === 0) return
@@ -952,7 +914,6 @@ export function useGlobalAgentListeners(): void {
                 return map
               })
             }
-            activateChangesTabForCurrentRun(sessionId, runId)
           }
         }
       })().catch(() => { /* 文件监听不应影响会话流 */ })
@@ -1267,7 +1228,7 @@ export function useGlobalAgentListeners(): void {
             }
           }
 
-          // 当前前台会话本轮首次写入时自动打开“文件改动”，并刷新 Git / 非 Git 改动数据。
+          // Agent 写入完成后刷新 Git / 非 Git 改动数据，并保留未读改动提示。
 
           // Agent 修改文件时，记入「最近修改」状态，用于 60s 内左侧竖条标记
           if (event.type === 'tool_start' && WRITE_TOOLS.has(event.toolName)) {
@@ -1359,8 +1320,6 @@ export function useGlobalAgentListeners(): void {
                       return m
                     })
                   }
-
-                  activateChangesTabForCurrentRun(sessionId, entry.runId)
 
                 }).catch(() => { /* 改动提示不应影响流式输出 */ })
               }

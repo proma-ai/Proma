@@ -232,13 +232,18 @@ export interface ResolvedFileUrl {
 }
 
 /** Office 文件内联预览类型 */
-export type OfficePreviewKind = 'spreadsheet' | 'presentation'
+export type OfficePreviewKind = 'document' | 'spreadsheet' | 'presentation'
 
 /** Office 文件内联预览结果 */
 export interface OfficePreviewResult {
   resolvedPath: string
   kind: OfficePreviewKind
+  /** 内置解析器生成、可直接嵌入的净化后 HTML。 */
   html: string
+  /** 高保真渲染器生成的受令牌保护独立 HTML 文档地址。 */
+  htmlUrl?: string
+  /** 实际产出该预览的渲染器；未指定时表示内置解析器。 */
+  renderer?: 'builtin' | 'officecli'
   text: string
 }
 
