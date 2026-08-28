@@ -80,7 +80,9 @@ import type {
   ApiKeyUpdateParams,
   SubscriptionTiersResponse,
   SubscriptionStatusResponse,
+  SubscriptionOrderHistoryResponse,
   SubscriptionOrderRecord,
+  SubscriptionHistoryQuery,
   CreateSubscriptionWechatResponse,
   SyncState,
   SyncResult,
@@ -1169,7 +1171,7 @@ export interface ElectronAPI {
     /** 查询订阅订单状态 */
     getOrderStatus: (orderNo: string) => Promise<BillingIpcResponse<SubscriptionOrderRecord>>
     /** 获取订阅历史 */
-    getHistory: () => Promise<BillingIpcResponse<SubscriptionOrderRecord[]>>
+    getHistory: (params?: SubscriptionHistoryQuery) => Promise<BillingIpcResponse<SubscriptionOrderHistoryResponse>>
   }
 
   // ===== Cloud 提示词下载相关 =====
@@ -2807,8 +2809,8 @@ const electronAPI: ElectronAPI = {
     getOrderStatus: (orderNo: string) => {
       return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_SUBSCRIPTION_ORDER_STATUS, orderNo)
     },
-    getHistory: () => {
-      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_SUBSCRIPTION_HISTORY)
+    getHistory: (params?: SubscriptionHistoryQuery) => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_SUBSCRIPTION_HISTORY, params)
     },
   },
 

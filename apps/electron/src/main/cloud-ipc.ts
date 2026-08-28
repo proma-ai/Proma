@@ -7,6 +7,7 @@
 
 import { ipcMain } from 'electron'
 import { CLOUD_IPC_CHANNELS } from '@proma/shared'
+import type { SubscriptionHistoryQuery } from '@proma/shared'
 import type {
   LoginRequest,
   RegisterRequest,
@@ -272,8 +273,8 @@ export async function registerCloudIpcHandlers(): Promise<void> {
 
   ipcMain.handle(
     CLOUD_IPC_CHANNELS.GET_SUBSCRIPTION_HISTORY,
-    async () => {
-      return getSubscriptionHistory()
+    async (_, params?: SubscriptionHistoryQuery) => {
+      return getSubscriptionHistory(params)
     },
   )
 

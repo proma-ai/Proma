@@ -19,6 +19,7 @@ import { WechatPayArea } from './WechatPayArea'
 import type { WechatPayStatus } from './WechatPayArea'
 // 开发者信封弹窗暂时停用；购买按钮直接发起微信支付。
 import { TeamPromoBanner } from './TeamPromoBanner'
+import { SubscriptionOrderHistory } from './SubscriptionOrderHistory'
 import { subscriptionTiersAtom, subscriptionStatusAtom } from '@/atoms/cloud-billing'
 import { OFFICIAL_COMPARISON, BILLING_NOTES } from '@/lib/official-channels'
 import type { SubscriptionTier } from '@proma/shared'
@@ -29,6 +30,8 @@ interface SubscriptionTabProps {
   hideWhyProma?: boolean
   /** onboarding 弹窗模式：隐藏「购买 Proma 商业版额度」标题块（弹窗标题已展示） */
   hideHeading?: boolean
+  /** onboarding 弹窗模式：不展示个人订单记录，避免打断首次购买引导 */
+  hideOrderHistory?: boolean
 }
 
 interface WechatPayState {
@@ -152,7 +155,12 @@ function formatCurrency(value: number | string | null | undefined): string {
   return `${num.toFixed(2)} 积分`
 }
 
-export function SubscriptionTab({ onSubscriptionComplete, hideWhyProma = false, hideHeading = false }: SubscriptionTabProps): React.ReactElement {
+export function SubscriptionTab({
+  onSubscriptionComplete,
+  hideWhyProma = false,
+  hideHeading = false,
+  hideOrderHistory = false,
+}: SubscriptionTabProps): React.ReactElement {
   const tiers = useAtomValue(subscriptionTiersAtom)
   const [subStatus, setSubStatus] = useAtom(subscriptionStatusAtom)
 
@@ -320,6 +328,8 @@ export function SubscriptionTab({ onSubscriptionComplete, hideWhyProma = false, 
           </div>
         )
       })()}
+
+      {!hideOrderHistory && <SubscriptionOrderHistory />}
 
       {/* 订阅计划卡片 */}
       <div className="space-y-4">

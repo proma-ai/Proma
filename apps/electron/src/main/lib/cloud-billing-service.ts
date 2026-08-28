@@ -18,7 +18,9 @@ import type {
   BillingIpcResponse,
   SubscriptionTiersResponse,
   SubscriptionStatusResponse,
+  SubscriptionOrderHistoryResponse,
   SubscriptionOrderRecord,
+  SubscriptionHistoryQuery,
   CreateSubscriptionWechatResponse,
 } from '@proma/shared'
 import { CLOUD_IPC_CHANNELS } from '@proma/shared'
@@ -142,9 +144,11 @@ export async function getSubscriptionOrderStatus(orderNo: string): Promise<Billi
 }
 
 /** 获取订阅历史 */
-export async function getSubscriptionHistory(): Promise<BillingIpcResponse<SubscriptionOrderRecord[]>> {
+export async function getSubscriptionHistory(
+  params?: SubscriptionHistoryQuery,
+): Promise<BillingIpcResponse<SubscriptionOrderHistoryResponse>> {
   try {
-    const data = await getSubscriptionApi().getHistory()
+    const data = await getSubscriptionApi().getHistory(params)
     return { success: true, data }
   } catch (error) {
     return { success: false, error: wrapError(error) }

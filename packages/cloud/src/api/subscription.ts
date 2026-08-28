@@ -6,7 +6,9 @@ import type { CloudApiClient } from './client'
 import type {
   SubscriptionTiersResponse,
   SubscriptionStatusResponse,
+  SubscriptionOrderHistoryResponse,
   SubscriptionOrderRecord,
+  SubscriptionHistoryQuery,
   CreateSubscriptionWechatResponse,
 } from '@proma/shared'
 
@@ -41,8 +43,12 @@ export function createSubscriptionApi(client: CloudApiClient) {
     },
 
     /** 获取订阅历史 */
-    getHistory: async (): Promise<SubscriptionOrderRecord[]> => {
-      const response = await client.get<SubscriptionOrderRecord[]>('/subscription/history')
+    getHistory: async (params: SubscriptionHistoryQuery = {}): Promise<SubscriptionOrderHistoryResponse> => {
+      const searchParams = new URLSearchParams()
+      if (params.page !== undefined) searchParams.set('page', String(params.page))
+      if (params.page_size !== undefined) searchParams.set('page_size', String(params.page_size))
+      const query = searchParams.size > 0 ? `?${searchParams.toString()}` : ''
+      const response = await client.get<SubscriptionOrderHistoryResponse>(`/subscription/history${query}`)
       return response.data
     },
   }

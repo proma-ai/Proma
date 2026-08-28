@@ -83,6 +83,7 @@ export function BillingSettings({ onboarding = false }: BillingSettingsProps): R
         onSubscriptionComplete={refreshAll}
         hideWhyProma
         hideHeading={onboarding}
+        hideOrderHistory={onboarding}
       />
 
       {/* 计费说明固定在最底部 */}

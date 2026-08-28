@@ -112,6 +112,20 @@ export interface SubscriptionOrderRecord {
   created_at: string
 }
 
+/** 订阅订单历史查询参数 */
+export interface SubscriptionHistoryQuery {
+  page?: number
+  page_size?: number
+}
+
+/** 订阅订单历史分页结果 */
+export interface SubscriptionOrderHistoryResponse {
+  items: SubscriptionOrderRecord[]
+  total: number
+  page: number
+  page_size: number
+}
+
 /** 当前订阅汇总 */
 export interface SubscriptionStatusResponse {
   has_active: boolean
