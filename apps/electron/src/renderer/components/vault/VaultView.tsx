@@ -389,6 +389,14 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
   const vaultSidebarWidthRef = React.useRef(vaultSidebarWidth)
   const vaultSidebarDragCleanupRef = React.useRef<(() => void) | null>(null)
   const selectedFileRef = React.useRef(selectedFile)
+  // Keep the ref in sync synchronously with user actions. Refreshes can start
+  // before React commits the atom update (notably after rename), so relying on
+  // the effect below can make a refresh reread the old path and report a false
+  // "opened note cannot be refreshed" error.
+  const selectFile = React.useCallback((relativePath: string | null): void => {
+    selectedFileRef.current = relativePath
+    setSelectedFile(relativePath)
+  }, [setSelectedFile])
   // Start from wall-clock time so a remounted workspace tab still supersedes an older IPC snapshot.
   const focusSequenceRef = React.useRef(Date.now())
   const readRequestRef = React.useRef(0)
@@ -454,19 +462,23 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
       const nextFiles = nextConfig ? await window.electronAPI.listVaultFiles() : []
       setFiles((current) => hasSameVaultTreeEntries(current, nextFiles) ? current : nextFiles)
       if (!nextConfig) {
-        setSelectedFile(null)
+        selectFile(null)
         setReadResult(null)
       } else if (selectedFileRef.current) {
         const relativePath = selectedFileRef.current
+        if (!nextFiles.some((file) => file.relativePath === relativePath)) {
+          selectFile(null)
+          setReadResult(null)
+          toast.message('已打开的笔记不存在')
+          return
+        }
         const requestId = ++readRequestRef.current
         try {
           const result = await window.electronAPI.readVaultFile(relativePath)
           if (requestId === readRequestRef.current) setReadResult(result)
-        } catch {
+        } catch (error) {
           if (requestId === readRequestRef.current) {
-            setSelectedFile(null)
-            setReadResult(null)
-            toast.message('已打开的笔记不存在或无法刷新')
+            toast.error(error instanceof Error ? error.message : '无法刷新已打开的笔记')
           }
         }
       }
@@ -475,7 +487,7 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
     } finally {
       if (showLoading) setLoading(false)
     }
-  }, [setReadResult, setSelectedFile])
+  }, [selectFile, setReadResult])
 
   React.useEffect(() => {
     const showLoading = initialRefreshRef.current
@@ -500,7 +512,7 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
 
   const openFile = React.useCallback(async (relativePath: string): Promise<void> => {
     const requestId = ++readRequestRef.current
-    setSelectedFile(relativePath)
+    selectFile(relativePath)
     setFileLoading(true)
     try {
       const result = await window.electronAPI.readVaultFile(relativePath)
@@ -513,12 +525,14 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
     } finally {
       if (requestId === readRequestRef.current) setFileLoading(false)
     }
-  }, [setReadResult, setSelectedFile])
+  }, [selectFile, setReadResult])
 
   const selectVaultManually = async (): Promise<void> => {
     const selected = await window.electronAPI.selectVault({ inboxPath: 'Proma Inbox', allowAgentWrites: false })
     if (!selected) return
     setConfig(selected)
+    selectFile(null)
+    setReadResult(null)
     setVaultSwitcherOpen(false)
     setRefreshToken((value) => value + 1)
     toast.success(`已连接 ${selected.displayName}`)
@@ -528,6 +542,8 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
     try {
       const selected = await window.electronAPI.selectDefaultVault()
       setConfig(selected)
+      selectFile(null)
+      setReadResult(null)
       setVaultSwitcherOpen(false)
       setRefreshToken((value) => value + 1)
       toast.success(`已创建 ${selected.displayName}`)
@@ -542,6 +558,8 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
         ? await window.electronAPI.selectDefaultVault()
         : await window.electronAPI.authorizeDiscoveredVault(candidate.path, { inboxPath: 'Proma Inbox', allowAgentWrites: false })
       setConfig(selected)
+      selectFile(null)
+      setReadResult(null)
       setVaultSwitcherOpen(false)
       setRefreshToken((value) => value + 1)
       toast.success(`已连接 ${selected.displayName}`)
@@ -634,7 +652,7 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
         name,
         expectedSha256: readResult.sha256,
       })
-      setSelectedFile(renamed.relativePath)
+      selectFile(renamed.relativePath)
       setReadResult(renamed)
       setRefreshToken((value) => value + 1)
       toast.success('已重命名笔记')
@@ -658,8 +676,7 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
 
       if (deletingCurrentFile) {
         ++readRequestRef.current
-        selectedFileRef.current = null
-        setSelectedFile(null)
+        selectFile(null)
         setReadResult(null)
         setFileLoading(false)
         if (sessionId) await window.electronAPI.setVaultUserContext(sessionId, null, true)
