@@ -3141,58 +3141,85 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
 
   // ===== 折叠状态：精简图标视图 =====
   if (sidebarCollapsed) {
+    const hasActiveCollapsedTool = [
+      "todos",
+      "calendar",
+      "automations",
+      "skills",
+      "mcp",
+      "memory",
+    ].some((component) =>
+      isWorkspaceComponentActive(component as WorkspaceComponentTab),
+    );
+
     return (
       <div
         ref={sidebarRootRef}
-        data-session-switch-hints={quickSwitchHintsVisible ? 'true' : undefined}
+        data-session-switch-hints={quickSwitchHintsVisible ? "true" : undefined}
         className={cn(
-          'relative h-full flex flex-col items-center px-2',
-          !noTransition && 'transition-[width] duration-300',
-          'bg-[hsl(var(--sidebar-surface))]'
+          "relative h-full flex flex-col items-center px-2",
+          !noTransition && "transition-[width] duration-300",
+          "bg-[hsl(var(--sidebar-surface))]",
         )}
         style={{ width: 60, flexShrink: 0 }}
       >
         <SidebarWindowDragStrip
-          height={isMac ? SIDEBAR_DRAG_STRIP_HEIGHT.collapsedMac : SIDEBAR_DRAG_STRIP_HEIGHT.collapsed}
+          height={
+            isMac
+              ? SIDEBAR_DRAG_STRIP_HEIGHT.collapsedMac
+              : SIDEBAR_DRAG_STRIP_HEIGHT.collapsed
+          }
         />
 
         {/* macOS 需要避开左上角红绿灯；边栏覆盖全局标题栏拖拽层，因此留白自身也要可拖拽。 */}
-        <div className={cn('w-full flex-shrink-0 titlebar-drag-region', isMac ? 'h-[50px]' : 'h-2')} />
+        <div
+          className={cn(
+            "w-full flex-shrink-0 titlebar-drag-region",
+            isMac ? "h-[50px]" : "h-2",
+          )}
+        />
 
-        {/* 展开按钮：mini rail 的唯一布局控制入口 */}
-        <div className="pt-2">
+        {/* 折叠态将会话放在主路径：控件维持 40px 热区，但把视觉体积收至 32px。 */}
+        <div className="flex flex-col items-center gap-0.5">
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
                 aria-label="展开侧边栏"
                 onClick={() => setSidebarCollapsed(false)}
-                className="size-10 flex items-center justify-center rounded-[12px] text-foreground/60 bg-muted hover:bg-foreground/[0.08] hover:text-foreground transition-colors titlebar-no-drag"
+                className="group flex size-10 items-center justify-center p-1 titlebar-no-drag"
               >
-                <PanelLeftOpen size={17} />
+                <span className="flex size-8 items-center justify-center rounded-[10px] bg-muted text-foreground/60 transition-[background-color,color] duration-150 group-hover:bg-foreground/[0.08] group-hover:text-foreground">
+                  <PanelLeftOpen size={16} />
+                </span>
               </button>
             </TooltipTrigger>
-            <TooltipContent side="right">展开侧边栏 ({navigator.platform.includes('Mac') ? '⌘B' : 'Ctrl+Shift+E'})</TooltipContent>
+            <TooltipContent side="right">
+              展开侧边栏 (
+              {navigator.platform.includes("Mac") ? "⌘B" : "Ctrl+Shift+E"})
+            </TooltipContent>
           </Tooltip>
-        </div>
 
-        <div className="my-3 h-px w-8 bg-border/70" />
+          <div className="my-1 h-px w-6 bg-border/70" />
 
-        {/* 模式切换 */}
-        <div className="flex flex-col items-center gap-1.5">
+          {/* 模式切换保持直接可达，项目选择仍由 Agent 图标的 hover popover 提供。 */}
           <CollapsedWorkspacePopover>
             <button
               type="button"
               aria-label="切换到 Agent 模式（悬停查看项目）"
-              onClick={() => handleRailModeSwitch('agent')}
-              className={cn(
-                'relative size-10 flex items-center justify-center rounded-[12px] transition-colors titlebar-no-drag',
-                mode === 'agent'
-                  ? 'bg-primary/10 text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
-                  : 'text-foreground/45 hover:bg-foreground/[0.06] hover:text-foreground/75'
-              )}
+              onClick={() => handleRailModeSwitch("agent")}
+              className="group relative flex size-10 items-center justify-center p-1 titlebar-no-drag"
             >
-              <Bot size={18} />
+              <span
+                className={cn(
+                  "flex size-8 items-center justify-center rounded-[10px] transition-[background-color,color,box-shadow] duration-150",
+                  mode === "agent"
+                    ? "bg-primary/10 text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]"
+                    : "text-foreground/45 group-hover:bg-foreground/[0.06] group-hover:text-foreground/75",
+                )}
+              >
+                <Bot size={16} />
+              </span>
             </button>
           </CollapsedWorkspacePopover>
 
@@ -3201,39 +3228,48 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
               <button
                 type="button"
                 aria-label="切换到 Chat 模式"
-                onClick={() => handleRailModeSwitch('chat')}
-                className={cn(
-                  'relative size-10 flex items-center justify-center rounded-[12px] transition-colors titlebar-no-drag',
-                  mode === 'chat'
-                    ? 'bg-primary/10 text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
-                    : 'text-foreground/45 hover:bg-foreground/[0.06] hover:text-foreground/75'
-                )}
+                onClick={() => handleRailModeSwitch("chat")}
+                className="group relative flex size-10 items-center justify-center p-1 titlebar-no-drag"
               >
-                <MessageSquare size={17} />
+                <span
+                  className={cn(
+                    "flex size-8 items-center justify-center rounded-[10px] transition-[background-color,color,box-shadow] duration-150",
+                    mode === "chat"
+                      ? "bg-primary/10 text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]"
+                      : "text-foreground/45 group-hover:bg-foreground/[0.06] group-hover:text-foreground/75",
+                  )}
+                >
+                  <MessageSquare size={15} />
+                </span>
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">Chat 模式</TooltipContent>
           </Tooltip>
-        </div>
 
-        <div className="my-3 h-px w-8 bg-border/70" />
+          <div className="my-1 h-px w-6 bg-border/70" />
 
-        {/* 高频操作 */}
-        <div className="flex flex-col items-center gap-1.5">
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
-                aria-label={mode === 'agent' ? '新建 Agent 会话' : '新建 Chat 对话'}
-                onClick={() => { void (mode === 'agent' ? createAgentSessionInWorkspace() : createChat()) }}
-                className="size-10 flex items-center justify-center rounded-xl text-foreground/70 sidebar-control-surface hover:text-foreground transition-colors titlebar-no-drag"
+                aria-label={
+                  mode === "agent" ? "新建 Agent 会话" : "新建 Chat 对话"
+                }
+                onClick={() => {
+                  void (mode === "agent"
+                    ? createAgentSessionInWorkspace()
+                    : createChat());
+                }}
+                className="group flex size-10 items-center justify-center p-1 titlebar-no-drag"
               >
-                <Plus size={16} />
+                <span className="flex size-8 items-center justify-center rounded-[10px] text-foreground/65 transition-[background-color,color] duration-150 group-hover:bg-foreground/[0.07] group-hover:text-foreground">
+                  <Plus size={16} />
+                </span>
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
               <span className="flex items-center gap-2">
-                <span>{mode === 'agent' ? '新会话' : '新对话'}</span>
+                <span>{mode === "agent" ? "新会话" : "新对话"}</span>
                 <ShortcutKeycaps
                   shortcutId="new-session"
                   keycapClassName="h-5 min-w-5 px-1 text-[11px]"
@@ -3249,78 +3285,30 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                 type="button"
                 aria-label="搜索"
                 onClick={() => setSearchDialogOpen(true)}
-                className="size-10 flex items-center justify-center rounded-[12px] text-foreground/45 sidebar-control-surface hover:text-foreground/70 transition-[background-color,color] duration-150 titlebar-no-drag"
+                className="group flex size-10 items-center justify-center p-1 titlebar-no-drag"
               >
-                <Search size={16} />
+                <span className="flex size-8 items-center justify-center rounded-[10px] text-foreground/45 transition-[background-color,color] duration-150 group-hover:bg-foreground/[0.06] group-hover:text-foreground/75">
+                  <Search size={15} />
+                </span>
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">搜索</TooltipContent>
           </Tooltip>
-
-          <WorkspaceComponentRailButton
-            label="Todo"
-            icon={<ListTodo size={16} />}
-            active={isWorkspaceComponentActive('todos')}
-            onClick={() => handleOpenPlanningComponent('todos')}
-          />
-          <WorkspaceComponentRailButton
-            label="日程"
-            icon={<CalendarDays size={16} />}
-            active={isWorkspaceComponentActive('calendar')}
-            onClick={() => handleOpenPlanningComponent('calendar')}
-          />
-          {mode === 'agent' && (
-            <>
-              <WorkspaceComponentRailButton
-                label="Skills"
-                icon={<Blocks size={16} />}
-                active={isWorkspaceComponentActive('skills')}
-                onClick={() => handleOpenCapabilityComponent('skills')}
-                badge={(capabilities?.skills.filter((skill) => skill.hasUpdate).length ?? 0) > 0 ? <span className="absolute -right-1 -top-1 size-2.5 rounded-full bg-blue-500" /> : undefined}
-              />
-              <WorkspaceComponentRailButton
-                label="MCP"
-                icon={<ServerCog size={16} />}
-                active={isWorkspaceComponentActive('mcp')}
-                onClick={() => handleOpenCapabilityComponent('mcp')}
-              />
-              <WorkspaceComponentRailButton
-                label="项目记忆"
-                icon={<Brain size={16} />}
-                active={isWorkspaceComponentActive('memory')}
-                onClick={() => handleOpenCapabilityComponent('memory')}
-              />
-            </>
-          )}
-          <WorkspaceComponentRailButton
-            label="定时任务"
-            icon={<Clock size={16} />}
-            active={isWorkspaceComponentActive('automations')}
-            onClick={() => handleOpenPlanningComponent('automations')}
-            badge={automationCount > 0 ? (
-              <span className={cn(
-                'absolute -right-1 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-medium tabular-nums',
-                isWorkspaceComponentActive('automations') ? 'bg-primary-foreground text-primary' : 'bg-primary text-primary-foreground',
-              )}>{formatAutomationCount(automationCount)}</span>
-            ) : undefined}
-          />
         </div>
 
-        <div className="my-3 h-px w-8 bg-border/70" />
-
-        {/* 最近/关键会话入口 */}
-        <div className="flex-1 min-h-0 w-full overflow-y-auto scrollbar-thin">
-          <div className="flex flex-col items-center gap-1.5 pb-2">
+        {/* 会话列表不再和 Todo、日程、Skills 等次级入口抢占垂直空间。 */}
+        <div className="mt-2 flex-1 min-h-0 w-full overflow-y-auto scrollbar-thin">
+          <div className="flex flex-col items-center gap-0.5 pb-2">
             {railRecentItems.map((item) => (
               <RailRecentButton
                 key={`${item.type}-${item.id}`}
                 item={item}
                 miniMapDisabled={!sessionHoverPreviewEnabled}
                 onSelect={(selected) => {
-                  if (selected.type === 'agent') {
-                    handleSelectAgentSession(selected.id, selected.title)
+                  if (selected.type === "agent") {
+                    handleSelectAgentSession(selected.id, selected.title);
                   } else {
-                    handleSelectConversation(selected.id, selected.title)
+                    handleSelectConversation(selected.id, selected.title);
                   }
                 }}
               />
@@ -3328,15 +3316,95 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
           </div>
         </div>
 
-        {/* 更新入口 + 用户头像（点击打开设置） */}
-        <div className="flex flex-col items-center gap-1.5 pt-3 pb-3">
+        {/* 次级工作区工具收纳至底部菜单，始终可达且不挤压会话入口。 */}
+        <div className="flex flex-col items-center gap-0.5 border-t border-border/50 py-2">
+          <DropdownMenu>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="更多工作区工具"
+                    className="group relative flex size-10 items-center justify-center p-1 titlebar-no-drag"
+                  >
+                    <span
+                      className={cn(
+                        "flex size-8 items-center justify-center rounded-[10px] text-foreground/45 transition-[background-color,color] duration-150 group-hover:bg-foreground/[0.06] group-hover:text-foreground/75",
+                        hasActiveCollapsedTool &&
+                          "bg-primary/10 text-foreground",
+                      )}
+                    >
+                      <MoreHorizontal size={17} />
+                    </span>
+                    {hasActiveCollapsedTool && (
+                      <span className="absolute right-1 top-1 size-1.5 rounded-full bg-primary" />
+                    )}
+                  </button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="right">更多工作区工具</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent side="right" align="end" className="min-w-40">
+              <DropdownMenuItem
+                onSelect={() => handleOpenPlanningComponent("todos")}
+              >
+                <ListTodo />
+                Todo
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => handleOpenPlanningComponent("calendar")}
+              >
+                <CalendarDays />
+                日程
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => handleOpenPlanningComponent("automations")}
+              >
+                <Clock />
+                定时任务
+                {automationCount > 0 && (
+                  <span className="ml-auto rounded-full bg-primary px-1.5 text-[10px] font-medium leading-4 text-primary-foreground tabular-nums">
+                    {formatAutomationCount(automationCount)}
+                  </span>
+                )}
+              </DropdownMenuItem>
+              {mode === "agent" && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={() => handleOpenCapabilityComponent("skills")}
+                  >
+                    <Blocks />
+                    Skills
+                    {(capabilities?.skills.filter((skill) => skill.hasUpdate)
+                      .length ?? 0) > 0 && (
+                      <span className="ml-auto size-2 rounded-full bg-blue-500" />
+                    )}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => handleOpenCapabilityComponent("mcp")}
+                  >
+                    <ServerCog />
+                    MCP
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => handleOpenCapabilityComponent("memory")}
+                  >
+                    <Brain />
+                    项目记忆
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           {hasUpdate && (
             <SidebarUpdateButton
               status={updateStatus}
               onClick={handleUpdateButtonClick}
               tooltipSide="right"
-              className="size-10 flex items-center justify-center rounded-[12px]"
-              readyDotClassName="absolute top-0 right-0 w-2 h-2 rounded-full bg-primary"
+              className="group size-10 p-1"
+              readyDotClassName="absolute right-1 top-1 size-2 rounded-full bg-primary"
             />
           )}
           <Tooltip>
@@ -3345,11 +3413,13 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                 type="button"
                 aria-label="打开设置"
                 onClick={handleOpenSettings}
-                className="relative size-10 flex items-center justify-center rounded-[12px] transition-colors titlebar-no-drag hover:bg-foreground/5"
+                className="group relative flex size-10 items-center justify-center p-1 titlebar-no-drag"
               >
-                <UserAvatar avatar={userProfile.avatar} size={28} />
+                <span className="flex size-8 items-center justify-center rounded-[10px] transition-colors duration-150 group-hover:bg-foreground/[0.06]">
+                  <UserAvatar avatar={userProfile.avatar} size={24} />
+                </span>
                 {hasEnvironmentIssues && (
-                  <span className="absolute top-0 right-0 w-2 h-2 rounded-full bg-red-500" />
+                  <span className="absolute right-1 top-1 size-2 rounded-full bg-red-500" />
                 )}
               </button>
             </TooltipTrigger>
@@ -3363,7 +3433,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
         {moveDialog}
         <SearchDialog />
       </div>
-    )
+    );
   }
 
   // ===== 展开状态：完整侧边栏 =====
