@@ -1,8 +1,10 @@
 /** 企业 Skills内嵌 Tab：远端访问和文件写入均经主进程 IPC。 */
 import * as React from 'react'
+import { useAtomValue } from 'jotai'
 import { Building2, Check, Download, Loader2, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import type { EnterpriseSkill, EnterpriseSkillListResponse, SkillMeta } from '@proma/shared'
+import { cloudUserAtom } from '@/atoms/cloud-auth'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { EnterpriseSkillDetailSheet } from './EnterpriseSkillDetailSheet'
@@ -15,6 +17,42 @@ interface EnterpriseSkillsTabProps {
   onInstalled: () => void | Promise<void>
 }
 
+const CATALOG_CACHE_TTL_MS = 5 * 60 * 1000
+
+interface CachedCatalogResponse {
+  response: EnterpriseSkillListResponse
+  loadedAt: number
+}
+
+const catalogResponsesByUserId = new Map<string, CachedCatalogResponse>()
+const catalogRequestsByUserId = new Map<string, Promise<EnterpriseSkillListResponse>>()
+
+function unavailableCatalog(reason: string): EnterpriseSkillListResponse {
+  return { items: [], availability: { enabled: false, reason } }
+}
+
+async function loadEnterpriseSkillsCatalog(
+  userId: string,
+  force = false,
+): Promise<EnterpriseSkillListResponse> {
+  const cached = catalogResponsesByUserId.get(userId)
+  if (!force && cached && Date.now() - cached.loadedAt < CATALOG_CACHE_TTL_MS) return cached.response
+
+  const inFlight = catalogRequestsByUserId.get(userId)
+  if (inFlight) return inFlight
+
+  const request = window.electronAPI.enterpriseSkills.list()
+    .then((response) => {
+      catalogResponsesByUserId.set(userId, { response, loadedAt: Date.now() })
+      return response
+    })
+    .finally(() => {
+      catalogRequestsByUserId.delete(userId)
+    })
+  catalogRequestsByUserId.set(userId, request)
+  return request
+}
+
 interface EnterpriseSkillInstallState {
   localSkill?: SkillMeta
   isInstalled: boolean
@@ -22,26 +60,36 @@ interface EnterpriseSkillInstallState {
 }
 
 export function EnterpriseSkillsTab({ workspaceSlug, search, installedSkills, onInstalled }: EnterpriseSkillsTabProps): React.ReactElement {
-  const [response, setResponse] = React.useState<EnterpriseSkillListResponse | null>(null)
-  const [loading, setLoading] = React.useState(false)
+  const cloudUser = useAtomValue(cloudUserAtom)
+  const userId = cloudUser?.id ?? null
+  const [response, setResponse] = React.useState<EnterpriseSkillListResponse | null>(() => (
+    userId ? catalogResponsesByUserId.get(userId)?.response ?? null : null
+  ))
+  const [loading, setLoading] = React.useState(() => Boolean(userId && !catalogResponsesByUserId.has(userId)))
   const [installingId, setInstallingId] = React.useState<string | null>(null)
   const [selectedSkill, setSelectedSkill] = React.useState<EnterpriseSkill | null>(null)
 
-  const load = React.useCallback(async () => {
+  const load = React.useCallback(async (force = false) => {
+    if (!userId) {
+      setResponse(unavailableCatalog('请登录企业账号，或联系企业管理员开通此功能。'))
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
-      setResponse(await window.electronAPI.enterpriseSkills.list())
+      setResponse(await loadEnterpriseSkillsCatalog(userId, force))
     } catch (error) {
       console.error('[企业 Skills] 加载失败:', error)
-      setResponse({ items: [], availability: { enabled: false, reason: '无法连接企业 Skills 服务' } })
+      setResponse(unavailableCatalog('无法连接企业 Skills 服务'))
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [userId])
 
   React.useEffect(() => {
+    setResponse(userId ? catalogResponsesByUserId.get(userId)?.response ?? null : null)
     void load()
-  }, [load])
+  }, [load, userId])
 
   const localSkillsByEnterpriseId = React.useMemo(() => new Map(
     installedSkills.flatMap((skill) => skill.enterpriseSource ? [[skill.enterpriseSource.skillId, skill] as const] : []),
@@ -98,7 +146,7 @@ export function EnterpriseSkillsTab({ workspaceSlug, search, installedSkills, on
           </h2>
           <p className="mt-1 text-[13px] text-muted-foreground">企业管理员集中发布；安装、更新和本地修改均由你手动控制。</p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading} className="min-h-8">
+        <Button variant="outline" size="sm" onClick={() => void load(true)} disabled={loading} className="min-h-8">
           <RefreshCw size={14} className={cn(loading && 'animate-spin')} />
           刷新
         </Button>

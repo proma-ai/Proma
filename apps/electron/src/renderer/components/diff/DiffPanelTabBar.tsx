@@ -6,7 +6,7 @@
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { Blocks, Brain, Building2, CalendarDays, Clock, FolderOpen, Globe, ListTodo, MessageCircle, PanelRight, Plus, ServerCog, SquareTerminal, X } from 'lucide-react'
+import { Blocks, Brain, CalendarDays, Clock, FolderOpen, Globe, ListTodo, MessageCircle, PanelRight, Plus, ServerCog, SquareTerminal, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getScrollLeftToRevealTab } from '@/lib/tab-visibility'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
@@ -209,10 +209,6 @@ export function DiffPanelTabBar({
                 <DropdownMenuItem onSelect={() => onOpenWorkspaceComponent('skills')}>
                   <Blocks className="size-3.5" />
                   打开 Skills
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onOpenWorkspaceComponent('enterprise')}>
-                  <Building2 className="size-3.5" />
-                  打开企业 Skills
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => onOpenWorkspaceComponent('mcp')}>
                   <ServerCog className="size-3.5" />

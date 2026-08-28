@@ -33,11 +33,23 @@ export interface CloudAuthIpcResponse {
 /** 计费模式 */
 export type BillingMode = 'PREPAID' | 'SUBSCRIPTION'
 
-/** 企业基础信息（账单响应内嵌） */
+/** 企业成员可见的 Skills 权益；实际操作仍由服务端二次鉴权。 */
+export interface EnterpriseSkillsCapability {
+  enabled: boolean
+  canPublish: boolean
+}
+
+/** 企业成员可见的功能集合。 */
+export interface EnterpriseCapabilities {
+  skills: EnterpriseSkillsCapability
+}
+
+/** 企业基础信息与权益（账单响应内嵌） */
 export interface EnterpriseBrief {
   id: string
   name: string
   role: 'ADMIN' | 'MEMBER'
+  capabilities: EnterpriseCapabilities
 }
 
 /** 账单信息 */

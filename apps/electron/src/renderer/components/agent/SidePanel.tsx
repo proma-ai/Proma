@@ -98,6 +98,7 @@ import {
 } from '@/lib/right-panel-tab-history'
 import { rememberStopGenerationTarget } from '@/lib/stop-generation-target'
 import { TerminalTabContent } from '@/components/tabs/TerminalTabContent'
+import { useEnterpriseSkillsAvailability } from '@/hooks/useEnterpriseSkillsAvailability'
 import { shouldShowBothFileSources } from './file-panel-layout'
 
 function getPathBasename(filePath: string): string {
@@ -257,6 +258,7 @@ interface SidePanelProps {
 }
 
 export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, width = 460 }: SidePanelProps): React.ReactElement {
+  const enterpriseSkills = useEnterpriseSkillsAvailability()
   // 按会话保存最近访问顺序。该历史仅存在于当前 renderer 进程，避免恢复失效的临时 Tab。
   const rightPanelTabHistoryRef = React.useRef(new Map<string, AgentSidePanelTab[]>())
   const workspaceTabsRef = React.useRef<WorkspacePanelTab[]>([])
@@ -685,6 +687,18 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     setWorkspaceComponentTabs(validTabs)
   }, [setWorkspaceComponentTabs, workspaceComponentTabs])
 
+  React.useEffect(() => {
+    if (enterpriseSkills.loading || enterpriseSkills.enabled || !workspaceComponentTabs.includes('enterprise')) return
+    setWorkspaceComponentTabs((previous) => previous.filter((component) => component !== 'enterprise'))
+    if (activeTab === 'enterprise') onTabChange('files')
+  }, [activeTab, enterpriseSkills.enabled, enterpriseSkills.loading, onTabChange, setWorkspaceComponentTabs, workspaceComponentTabs])
+
+  const openEnterpriseSkillsTab = React.useCallback((): void => {
+    if (!enterpriseSkills.enabled) return
+    setWorkspaceComponentTabs((previous) => previous.includes('enterprise') ? previous : [...previous, 'enterprise'])
+    onTabChange('enterprise')
+  }, [enterpriseSkills.enabled, onTabChange, setWorkspaceComponentTabs])
+
   const agentStreamState = useAtomValue(agentSessionStreamingStateAtomFamily(sessionId))
   const memoryChangesMap = useAtomValue(workspaceMemoryChangesAtom)
   const setMemoryNavigationRequest = useSetAtom(memoryFileNavigationAtom)
@@ -695,7 +709,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     // `temporary-agent` 是旧的单分支内存状态；新状态使用 exploration:<sessionId>。
     : activeTab === 'temporary-agent' || (activeExplorationSessionId !== null && !activeExplorationBranch) || (activeDelegationSessionId !== null && !activeDelegationSession) || (activeTerminalId !== null && !terminalTabs.some((terminal) => terminal.terminalId === activeTerminalId))
       ? 'files'
-      : isWorkspaceComponentTab(activeTab) && (!workspaceSlug || !workspaceComponentTabs.includes(activeTab))
+      : isWorkspaceComponentTab(activeTab) && (!workspaceSlug || !workspaceComponentTabs.includes(activeTab) || (activeTab === 'enterprise' && !enterpriseSkills.enabled))
         ? 'files'
         : activeTab
 
@@ -995,7 +1009,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   const workspaceTabs = React.useMemo<WorkspacePanelTab[]>(() => [
     { id: 'files', label: '文件', icon: <FolderOpen className="size-3.5" /> },
     { id: 'changes', label: '改动', icon: <FileDiff className="size-3.5" /> },
-    ...workspaceComponentTabs.map((component) => {
+    ...workspaceComponentTabs.filter((component) => component !== 'enterprise' || enterpriseSkills.enabled).map((component) => {
       const meta: Record<WorkspaceComponentTab, { label: string; icon: React.ReactNode }> = {
         todos: { label: 'Todo', icon: <ListTodo className="size-3.5" /> },
         calendar: { label: '日程', icon: <CalendarDays className="size-3.5" /> },
@@ -1045,7 +1059,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       closable: tab.tabId !== browserState.agentTabId,
       activity: showBrowserActivity && activeBrowserTabId !== tab.tabId && browserState.activeTabId === tab.tabId,
     })) ?? []),
-  ], [activeBrowserTabId, browserState, previewFiles, sessions, sessionId, showBrowserActivity, sideChatConversationId, sideDelegationSessionIds, sideTemporaryAgents, terminalTabs, workspaceComponentTabs])
+  ], [activeBrowserTabId, browserState, enterpriseSkills.enabled, previewFiles, sessions, sessionId, showBrowserActivity, sideChatConversationId, sideDelegationSessionIds, sideTemporaryAgents, terminalTabs, workspaceComponentTabs])
   workspaceTabsRef.current = workspaceTabs
 
   const handleCloseWorkspaceTab = React.useCallback((tab: AgentSidePanelTab) => {
@@ -1152,6 +1166,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
             onOpenFile={() => handleWorkspaceTabChange('files')}
             onOpenTerminal={handleOpenTerminal}
             onOpenWorkspaceComponent={(component) => {
+              if (component === 'enterprise' && !enterpriseSkills.enabled) return
               setWorkspaceComponentTabs((previous) => previous.includes(component) ? previous : [...previous, component])
               onTabChange(component)
             }}
@@ -1206,8 +1221,8 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
           ) : effectiveActiveTab === 'automations' ? (
             automationFormOpen ? <AutomationFormView embedded /> : <PlanningView embedded componentTab="automations" />
           ) : effectiveActiveTab === 'skills' ? (
-            <AgentSkillsView embedded componentTab="skills" workspaceId={currentWorkspaceId ?? undefined} sessionId={sessionId} />
-          ) : effectiveActiveTab === 'enterprise' ? (
+            <AgentSkillsView embedded componentTab="skills" workspaceId={currentWorkspaceId ?? undefined} sessionId={sessionId} onOpenEnterprise={openEnterpriseSkillsTab} />
+          ) : effectiveActiveTab === 'enterprise' && enterpriseSkills.enabled ? (
             <AgentSkillsView embedded componentTab="enterprise" workspaceId={currentWorkspaceId ?? undefined} sessionId={sessionId} />
           ) : effectiveActiveTab === 'mcp' ? (
             <AgentSkillsView embedded componentTab="mcp" workspaceId={currentWorkspaceId ?? undefined} sessionId={sessionId} />

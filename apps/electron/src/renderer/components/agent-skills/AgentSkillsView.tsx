@@ -12,7 +12,7 @@
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { toast } from 'sonner'
-import { Blocks, ChevronDown, ChevronRight, Search, Plus, FolderOpen, Check, Sparkles, Loader2 } from 'lucide-react'
+import { Blocks, Building2, ChevronDown, ChevronRight, Search, Plus, FolderOpen, Check, Sparkles, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
@@ -37,6 +37,7 @@ import { McpDetailSheet } from './McpDetailSheet'
 import { BuiltinMcpDetailSheet } from './BuiltinMcpDetailSheet'
 import { ImportSkillDialog } from './ImportSkillDialog'
 import { EnterpriseSkillsTab } from './EnterpriseSkillsTab'
+import { useEnterpriseSkillsAvailability } from '@/hooks/useEnterpriseSkillsAvailability'
 import { PublishEnterpriseSkillDialog } from './PublishEnterpriseSkillDialog'
 import { WorkspaceMemoryTab } from './WorkspaceMemoryTab'
 import { groupSkills } from './skillGrouping'
@@ -94,7 +95,15 @@ export function AgentSkillsView({
   componentTab,
   workspaceId,
   sessionId,
-}: { embedded?: boolean; componentTab?: 'skills' | 'enterprise' | 'mcp'; workspaceId?: string; sessionId?: string } = {}): React.ReactElement {
+  onOpenEnterprise,
+}: {
+  embedded?: boolean
+  componentTab?: 'skills' | 'enterprise' | 'mcp'
+  workspaceId?: string
+  sessionId?: string
+  /** 嵌入右侧 Skills Tab 时，打开独立的企业 Skills Tab。 */
+  onOpenEnterprise?: () => void
+} = {}): React.ReactElement {
   const data = useAgentSkillsData(workspaceId)
   const bumpCapabilities = useSetAtom(workspaceCapabilitiesVersionAtom)
   const setPendingPrompt = useSetAtom(agentPendingPromptAtom)
@@ -116,10 +125,9 @@ export function AgentSkillsView({
   const [editingMcp, setEditingMcp] = React.useState<{ name: string; entry: McpServerEntry } | null>(null)
   const [selectedBuiltinMcp, setSelectedBuiltinMcp] = React.useState<BuiltinMcpServerSummary | null>(null)
   const [showImport, setShowImport] = React.useState(false)
-  // 企业资格必须区分“尚在加载”与“已确认不可用”：否则无会话时直达企业库会在 IPC 返回前被错误重定向。
-  const [enterpriseSkillsAvailability, setEnterpriseSkillsAvailability] = React.useState<'loading' | 'enabled' | 'disabled'>('loading')
-  const enterpriseSkillsEnabled = enterpriseSkillsAvailability === 'enabled'
-  const [enterpriseCanPublish, setEnterpriseCanPublish] = React.useState(false)
+  const enterpriseSkills = useEnterpriseSkillsAvailability()
+  const enterpriseSkillsEnabled = enterpriseSkills.enabled
+  const enterpriseCanPublish = enterpriseSkills.canPublish
   const [skillToPublish, setSkillToPublish] = React.useState<SkillMeta | null>(null)
   const [wsPopoverOpen, setWsPopoverOpen] = React.useState(false)
   const [pendingDeleteSkill, setPendingDeleteSkill] = React.useState<SkillMeta | null>(null)
@@ -127,6 +135,16 @@ export function AgentSkillsView({
   const [isDeletingSkill, setIsDeletingSkill] = React.useState(false)
   const [isDeletingMcp, setIsDeletingMcp] = React.useState(false)
   const [classifyingSkills, setClassifyingSkills] = React.useState(false)
+
+  const openEnterpriseSkills = React.useCallback((): void => {
+    if (!enterpriseSkillsEnabled) return
+    if (embedded && onOpenEnterprise) {
+      onOpenEnterprise()
+      return
+    }
+    setTab('enterprise')
+  }, [embedded, enterpriseSkillsEnabled, onOpenEnterprise, setTab])
+  const showEnterpriseLauncher = enterpriseSkillsEnabled && (!embedded || onOpenEnterprise !== undefined)
 
   const q = search.trim().toLowerCase()
 
@@ -169,34 +187,10 @@ export function AgentSkillsView({
   const selectedSkill = data.skills.find((s) => s.slug === selectedSkillSlug) ?? null
   const selectedIsBuiltin = selectedSkill ? data.defaultSkillSlugs.has(selectedSkill.slug) : false
 
-  // 企业库入口和发布入口均以服务端资格为准；主进程与 API 仍会二次鉴权。
   React.useEffect(() => {
-    let cancelled = false
-    setEnterpriseSkillsAvailability('loading')
-    setEnterpriseCanPublish(false)
-    if (!data.workspaceSlug) {
-      setEnterpriseSkillsAvailability('disabled')
-      return undefined
-    }
-    void window.electronAPI.enterpriseSkills.list()
-      .then((result) => {
-        if (cancelled) return
-        const enabled = result.availability?.enabled === true
-        setEnterpriseSkillsAvailability(enabled ? 'enabled' : 'disabled')
-        setEnterpriseCanPublish(enabled && result.availability?.canPublish === true)
-      })
-      .catch((error) => {
-        if (cancelled) return
-        console.warn('[企业 Skills] 获取企业资格失败:', error)
-        setEnterpriseSkillsAvailability('disabled')
-      })
-    return () => { cancelled = true }
-  }, [data.workspaceSlug])
-
-  React.useEffect(() => {
-    // 只在服务端已确认无资格后回退；不能把“加载中”误判为禁用。
-    if (enterpriseSkillsAvailability === 'disabled' && tab === 'enterprise') setTab('skills')
-  }, [enterpriseSkillsAvailability, setTab, tab])
+    // 资格仅在服务端确认禁用后才回退；加载中或缓存刷新时保留当前视图。
+    if (!enterpriseSkills.loading && !enterpriseSkillsEnabled && tab === 'enterprise') setTab('skills')
+  }, [enterpriseSkills.loading, enterpriseSkillsEnabled, setTab, tab])
 
   React.useEffect(() => {
     if (!skillDetailNavigation || data.loading) return
@@ -449,6 +443,16 @@ export function AgentSkillsView({
               <Plus size={14} />
               <span>导入</span>
             </button>
+            {showEnterpriseLauncher && (
+              <button
+                type="button"
+                onClick={openEnterpriseSkills}
+                className="flex h-8 items-center gap-1.5 rounded-lg bg-primary/10 px-3 text-[13px] font-medium text-primary transition-[background-color,transform] hover:bg-primary/15 active:scale-[0.96]"
+              >
+                <Building2 size={14} />
+                <span>企业 Skills</span>
+              </button>
+            )}
           </>
         )}
 

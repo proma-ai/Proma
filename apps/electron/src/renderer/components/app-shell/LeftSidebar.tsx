@@ -11,7 +11,7 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Star, Settings, Plus, CirclePlus, Trash2, Pencil, PanelLeft, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, FolderInput, FolderPlus, GripVertical, Clock, CalendarDays, ChevronRight, ChevronDown, ChevronUp, Blocks, Brain, Building2, ListTodo, ServerCog, GitBranch, Download, Loader2, RotateCw } from 'lucide-react'
+import { Pin, PinOff, Star, Settings, Plus, CirclePlus, Trash2, Pencil, PanelLeft, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, FolderInput, FolderPlus, GripVertical, Clock, CalendarDays, ChevronRight, ChevronDown, ChevronUp, Blocks, Brain, ListTodo, ServerCog, GitBranch, Download, Loader2, RotateCw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
@@ -3325,14 +3325,6 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
               )}>{formatAutomationCount(automationCount)}</span>
             ) : undefined}
           />
-          {mode === 'agent' && (
-            <WorkspaceComponentRailButton
-              label="企业 Skills"
-              icon={<Building2 size={16} />}
-              active={isWorkspaceComponentActive('enterprise')}
-              onClick={() => handleOpenCapabilityComponent('enterprise')}
-            />
-          )}
         </div>
 
         <div className="my-3 h-px w-8 bg-border/70" />
@@ -3533,14 +3525,6 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
             )}>{formatAutomationCount(automationCount)}</span>
           ) : undefined}
         />
-        {mode === 'agent' && (
-          <WorkspaceComponentSidebarEntry
-            label="企业 Skills"
-            icon={<Building2 size={16} />}
-            active={isWorkspaceComponentActive('enterprise')}
-            onClick={() => handleOpenCapabilityComponent('enterprise')}
-          />
-        )}
       </div>
 
       {/* Chat 模式 active 视图：置顶 + 对话历史，结构与 Agent active 视图保持一致 */}

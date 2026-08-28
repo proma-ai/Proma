@@ -615,6 +615,7 @@ function CloudInitializer(): null {
   const setBillingLoading = useSetAtom(billingLoadingAtom)
   const setQuotaExceeded = useSetAtom(quotaExceededDialogAtom)
   const cloudUser = useAtomValue(cloudUserAtom)
+  const hasEnterprise = useAtomValue(billingInfoAtom)?.enterprise != null
 
   useEffect(() => {
     if (!isCloudMode()) return
@@ -622,7 +623,13 @@ function CloudInitializer(): null {
   }, [setAuthLoading, setUser])
 
   useEffect(() => {
-    if (!isCloudMode() || !cloudUser) return
+    if (!isCloudMode()) return
+    // 认证用户切换时不能短暂复用上一账号的企业权益快照。
+    setBilling(null)
+    if (!cloudUser) {
+      setBillingLoading(false)
+      return
+    }
     const stopBilling = initializeBilling(setBilling, setBillingLoading, setQuotaExceeded)
     const refresh = (): void => {
       void window.electronAPI.cloudBilling.getBilling().then((result) => {
@@ -637,6 +644,17 @@ function CloudInitializer(): null {
       window.removeEventListener('focus', refresh)
     }
   }, [cloudUser?.id, setBilling, setBillingLoading, setQuotaExceeded])
+
+  useEffect(() => {
+    if (!isCloudMode() || !cloudUser || hasEnterprise) return
+    // 非企业成员才需要等待管理员随后授予企业资格；常驻企业成员不为此轮询。
+    const timer = window.setInterval(() => {
+      void window.electronAPI.cloudBilling.getBilling().then((result) => {
+        if (result.success && result.data) setBilling(result.data)
+      }).catch(console.error)
+    }, 5 * 60 * 1000)
+    return () => window.clearInterval(timer)
+  }, [cloudUser?.id, hasEnterprise, setBilling])
 
   return null
 }
