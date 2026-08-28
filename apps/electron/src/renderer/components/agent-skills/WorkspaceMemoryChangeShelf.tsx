@@ -6,7 +6,8 @@ interface WorkspaceMemoryChangeShelfProps {
   changes: WorkspaceMemoryFileChange[]
   /** 用户主动从局部 Diff 打开某一个对应的原始记忆文件。 */
   onOpenFile?: (change: WorkspaceMemoryFileChange) => void
-  onBackToMemory?: () => void
+  /** 完成查看局部 Diff 后关闭其临时宿主（嵌入式右侧项目记忆 Tab）。 */
+  onDismissChanges?: () => void
   className?: string
 }
 
@@ -50,8 +51,8 @@ function MemoryChangeDiff({
   )
 }
 
-/** 项目记忆变更的只读 Diff 列表；完整记忆由用户主动切换查看。 */
-export function WorkspaceMemoryChangeShelf({ changes, onOpenFile, onBackToMemory, className }: WorkspaceMemoryChangeShelfProps): React.ReactElement | null {
+/** 项目记忆变更的只读 Diff 列表；完整记忆仅由用户主动从工作区 Tab 打开。 */
+export function WorkspaceMemoryChangeShelf({ changes, onOpenFile, onDismissChanges, className }: WorkspaceMemoryChangeShelfProps): React.ReactElement | null {
   if (changes.length === 0) return null
 
   return (
@@ -61,7 +62,7 @@ export function WorkspaceMemoryChangeShelf({ changes, onOpenFile, onBackToMemory
           <h2 className="text-sm font-semibold text-foreground">项目记忆已更新</h2>
           <p className="mt-1 text-xs text-muted-foreground">{changes.length} 个文件变更</p>
         </div>
-        {onBackToMemory && <Button size="sm" variant="ghost" className="h-8 shrink-0 px-2 text-xs" onClick={onBackToMemory}>全部记忆</Button>}
+        {onDismissChanges && <Button size="sm" variant="ghost" className="h-8 shrink-0 px-2 text-xs" onClick={onDismissChanges}>完成</Button>}
       </div>
       <div className="space-y-5">
         {changes.map((change) => <MemoryChangeDiff key={`${change.relativePath}:${change.changedAt}`} change={change} onOpenFile={onOpenFile} />)}

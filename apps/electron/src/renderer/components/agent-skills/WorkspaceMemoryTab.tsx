@@ -29,6 +29,8 @@ interface WorkspaceMemoryTabProps {
   workspaceSlug: string
   /** 仅嵌入 Agent 右侧工作区时传入，用于展示当前会话的记忆变更 Diff。 */
   sessionId?: string
+  /** 记忆 Diff 查看结束或失效时关闭当前会话的项目记忆 Tab，避免回退到完整记忆。 */
+  onCloseChangeView?: () => void
   /** 能力中心传入的统一搜索词；嵌入组件未传时提供自己的内容搜索。 */
   search?: string
   embedded?: boolean
@@ -68,7 +70,7 @@ function filterNodes(nodes: SkillFileNode[], query: string, contentMatchPaths = 
   return result
 }
 
-export function WorkspaceMemoryTab({ workspaceSlug, sessionId, search, embedded = false }: WorkspaceMemoryTabProps): React.ReactElement {
+export function WorkspaceMemoryTab({ workspaceSlug, sessionId, search, embedded = false, onCloseChangeView }: WorkspaceMemoryTabProps): React.ReactElement {
   const { createAgent } = useCreateSession()
   const setPendingPrompt = useSetAtom(agentPendingPromptAtom)
   const [memoryNavigationRequest, setMemoryNavigationRequest] = useAtom(memoryFileNavigationAtom)
@@ -243,6 +245,13 @@ export function WorkspaceMemoryTab({ workspaceSlug, sessionId, search, embedded 
       setMemoryNavigationRequest(null)
     })()
   }, [memoryChanges, memoryNavigationRequest, openAutoFile, sessionId, setMemoryNavigationRequest, workspaceSlug])
+
+  React.useEffect(() => {
+    if (!embedded || !activeChangeId || activeMemoryChange) return
+    // Diff 对应的临时变更已经被消费或被新变更替换时，不能落回完整记忆列表。
+    // 完整记忆只由用户主动打开项目记忆 Tab 查看。
+    onCloseChangeView?.()
+  }, [activeChangeId, activeMemoryChange, embedded, onCloseChangeView])
 
   React.useEffect(() => {
     if (!latestMemoryChange) return
@@ -425,7 +434,7 @@ export function WorkspaceMemoryTab({ workspaceSlug, sessionId, search, embedded 
           setActiveChangeId(null)
           void openAutoFile(change.relativePath)
         }}
-        onBackToMemory={() => setActiveChangeId(null)}
+        onDismissChanges={embedded ? onCloseChangeView : undefined}
         className="h-full min-h-0 overflow-auto bg-content-area p-3"
       />
     )
