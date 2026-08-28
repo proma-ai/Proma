@@ -37,6 +37,10 @@ interface FileGroup {
   dirName: string
   /** 保留会话、项目与附加目录的改动来源标识。 */
   sources: ChangeSource[]
+  /** 当前 Git 仓库的改动文件数和行数汇总（不受文件树层级影响）。 */
+  fileCount: number
+  totalAdditions: number
+  totalDeletions: number
   tree: Array<DiffFileTreeNode<GitFileEntry>>
 }
 
@@ -252,6 +256,9 @@ export const DiffChangesList = React.memo(function DiffChangesList({
       gitRoot,
       dirName: gitRoot ? gitRoot.split('/').pop() || gitRoot : '/',
       sources: collectDiffChangeSources(groupFiles),
+      fileCount: groupFiles.length,
+      totalAdditions: groupFiles.reduce((sum, file) => sum + file.additions, 0),
+      totalDeletions: groupFiles.reduce((sum, file) => sum + file.deletions, 0),
       tree: buildDiffFileTree(groupFiles),
     }))
     return { fileGroups: result, matchedFilesCount: filteredFiles.length }
@@ -348,6 +355,11 @@ export const DiffChangesList = React.memo(function DiffChangesList({
                       </span>
                     )
                   })}
+                  <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[11px] font-normal tabular-nums">
+                    <span className="text-muted-foreground/60">{group.fileCount} 个文件</span>
+                    {group.totalAdditions > 0 && <span className="text-emerald-600 dark:text-emerald-400">+{group.totalAdditions}</span>}
+                    {group.totalDeletions > 0 && <span className="text-red-600 dark:text-red-400">-{group.totalDeletions}</span>}
+                  </span>
                   {onOpenDirectoryTerminal && (
                     <Tooltip>
                       <TooltipTrigger asChild>
