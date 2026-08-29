@@ -763,6 +763,10 @@ export interface AgentSessionMeta {
   starred?: boolean
   /** 是否已归档 */
   archived?: boolean
+  /**
+   * 尚未发送首条消息的临时输入会话。该标记须持久化，避免应用重启后在侧栏中冒出空会话。
+   */
+  isDraft?: boolean
   /** 附加的外部目录路径列表（绝对路径，作为 SDK additionalDirectories 传递） */
   attachedDirectories?: string[]
   /** 附加的外部文件路径列表（绝对路径，发送时以父目录作为 SDK additionalDirectories） */

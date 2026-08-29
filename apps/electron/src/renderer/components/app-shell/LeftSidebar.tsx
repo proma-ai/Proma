@@ -577,6 +577,7 @@ function getSyncableDelegatedChildren(
 ): AgentSessionMeta[] {
   return getDirectDelegatedChildren(sessions, parentSessionId).filter((child) => (
     !child.archived
+    && !child.isDraft
     && !draftSessionIds.has(child.id)
   ))
 }
@@ -592,6 +593,7 @@ function getArchivedDelegatedChildren(
 ): AgentSessionMeta[] {
   return getDirectDelegatedChildren(sessions, parentSessionId).filter((child) => (
     child.archived
+    && !child.isDraft
     && !draftSessionIds.has(child.id)
   ))
 }
@@ -1030,6 +1032,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       if (viewMode !== 'active') return []
       const filtered = agentSessions.filter((s) =>
         s.pinned
+        && !s.isDraft
         && !draftSessionIds.has(s.id)
         && !hasPinnedVisibleParent(s, agentSessions)
       )
@@ -1043,6 +1046,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       session,
       childSessions: getDirectDelegatedChildren(agentSessions, session.id).filter((child) => (
         !child.archived
+        && !child.isDraft
         && !draftSessionIds.has(child.id)
         && !isHiddenAutomationSession(child)
       )),
@@ -1643,6 +1647,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
         agentSessions.filter((session) =>
           !session.archived
           && !session.pinned
+          && !session.isDraft
           && !draftSessionIds.has(session.id)
           && !!session.sourceAutomationId
         )
@@ -2290,6 +2295,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
         agentSessions.filter((session) =>
           !session.archived
           && !session.pinned
+          && !session.isDraft
           && !draftSessionIds.has(session.id)
           // 自动任务会话不进入项目列表，统一归到「自动任务」视图
           && !isHiddenAutomationSession(session)
@@ -2365,7 +2371,9 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       return
     }
 
-    const recent = sessions.find((s) => !s.archived && !draftSessionIds.has(s.id))
+    const recent = isChatMode
+      ? conversations.find((conversation) => !conversation.archived && !draftSessionIds.has(conversation.id))
+      : agentSessions.find((session) => !session.archived && !session.isDraft && !draftSessionIds.has(session.id))
     if (recent) {
       openSession(targetMode, recent.id, recent.title)
       return
@@ -2414,6 +2422,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     return agentSessions
       .filter((session) =>
         !session.archived
+        && !session.isDraft
         && !draftSessionIds.has(session.id)
         && (!currentWorkspaceId || session.workspaceId === currentWorkspaceId)
         // 自动任务会话不出现在收起态 Rail，与展开态列表保持一致

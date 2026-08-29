@@ -307,13 +307,13 @@ export function listActiveAgentSessions(): AgentSessionMeta[] {
 /** 获取归档会话，只有用户进入归档视图时才调用。 */
 export function listArchivedAgentSessions(): AgentSessionMeta[] {
   const index = readIndex()
-  return sortSessionsByUpdatedAtDesc(index.sessions.filter((session) => session.archived))
+  return sortSessionsByUpdatedAtDesc(index.sessions.filter((session) => session.archived && !session.isDraft))
 }
 
 /** 获取归档数量，不把归档会话元数据传到 renderer。 */
 export function countArchivedAgentSessions(): number {
   const index = readIndex()
-  return index.sessions.reduce((count, session) => count + (session.archived ? 1 : 0), 0)
+  return index.sessions.reduce((count, session) => count + (session.archived && !session.isDraft ? 1 : 0), 0)
 }
 
 /**
@@ -393,6 +393,7 @@ export function createAgentSession(
   modelId?: string,
   agentCwdMode?: AgentCwdMode,
   sessionWorkbenchLayout?: SessionWorkbenchLayout,
+  isDraft?: boolean,
 ): AgentSessionMeta {
   const index = readIndex()
   const now = Date.now()
@@ -408,6 +409,8 @@ export function createAgentSession(
     workspaceId,
     agentCwdMode: workspaceId ? agentCwdMode ?? 'project' : undefined,
     sessionWorkbenchLayout: workspaceId ? sessionWorkbenchLayout ?? 'root' : undefined,
+    // 仅由会话入口显式创建的临时输入会话设置；必须跨重启保留。
+    isDraft: isDraft || undefined,
     // 新会话继承已持久化的全局思考偏好，之后仍可按会话单独调整。
     reasoningLevel: defaultThinkingLevel,
     createdAt: now,
@@ -590,7 +593,7 @@ export function getAgentSessionSDKMessages(id: string): SDKMessage[] {
  */
 export function updateAgentSessionMeta(
   id: string,
-  updates: Partial<Pick<AgentSessionMeta, 'title' | 'channelId' | 'modelId' | 'sdkSessionId' | 'piSessionFile' | 'piEntryBindings' | 'codexFastMode' | 'reasoningLevel' | 'openAIThinkingLevel' | 'workspaceId' | 'activeWorktree' | 'pinned' | 'starred' | 'archived' | 'attachedDirectories' | 'attachedFiles' | 'forkSourceDir' | 'explorationParentSessionId' | 'explorationSourceMessageId' | 'explorationSourceLabel' | 'explorationTitleInitializedAt' | 'stoppedByUser' | 'permissionMode' | 'completedButUnconfirmed' | 'sourceAutomationId' | 'automationGraduated' | 'parentSessionId' | 'rootSessionId' | 'sourceDelegationId' | 'delegationRole' | 'delegationStatus' | 'delegationDepth' | 'delegationGoal'>>,
+  updates: Partial<Pick<AgentSessionMeta, 'title' | 'channelId' | 'modelId' | 'sdkSessionId' | 'piSessionFile' | 'piEntryBindings' | 'codexFastMode' | 'reasoningLevel' | 'openAIThinkingLevel' | 'workspaceId' | 'activeWorktree' | 'pinned' | 'starred' | 'archived' | 'isDraft' | 'attachedDirectories' | 'attachedFiles' | 'forkSourceDir' | 'explorationParentSessionId' | 'explorationSourceMessageId' | 'explorationSourceLabel' | 'explorationTitleInitializedAt' | 'stoppedByUser' | 'permissionMode' | 'completedButUnconfirmed' | 'sourceAutomationId' | 'automationGraduated' | 'parentSessionId' | 'rootSessionId' | 'sourceDelegationId' | 'delegationRole' | 'delegationStatus' | 'delegationDepth' | 'delegationGoal'>>,
 ): AgentSessionMeta {
   const index = readIndex()
   const idx = index.sessions.findIndex((s) => s.id === id)
@@ -1214,7 +1217,8 @@ export function autoArchiveAgentSessions(daysThreshold: number): number {
   let count = 0
 
   for (const session of index.sessions) {
-    if (!session.pinned && !session.archived && session.updatedAt < threshold) {
+    // 草稿没有侧栏入口；自动归档后无法由 Welcome 恢复，会变成不可达记录。
+    if (!session.isDraft && !session.pinned && !session.archived && session.updatedAt < threshold) {
       session.archived = true
       count++
     }

@@ -2370,8 +2370,9 @@ export function registerIpcHandlers(): void {
   // 创建 Agent 会话
   ipcMain.handle(
     AGENT_IPC_CHANNELS.CREATE_SESSION,
-    async (_, title?: string, channelId?: string, workspaceId?: string, modelId?: string): Promise<AgentSessionMeta> => {
-      const session = createAgentSession(title, channelId, workspaceId, modelId)
+    async (_, title?: string, channelId?: string, workspaceId?: string, modelId?: string, isDraft?: boolean): Promise<AgentSessionMeta> => {
+      if (isDraft !== undefined && typeof isDraft !== 'boolean') throw new Error('Agent 草稿状态非法')
+      const session = createAgentSession(title, channelId, workspaceId, modelId, undefined, undefined, isDraft)
       feishuBridgeManager.ensureSessionMirror(session).catch((error) => {
         console.error('[飞书 Session 镜像] 新会话建群失败:', error)
       })
@@ -2581,6 +2582,10 @@ export function registerIpcHandlers(): void {
       if (newPinned && current.archived) {
         updates.archived = false
       }
+      // 用户明确置顶临时草稿时，将其提升为普通会话，避免被草稿过滤后不可见。
+      if (newPinned && current.isDraft) {
+        updates.isDraft = false
+      }
       return updateAgentSessionMeta(id, updates)
     }
   )
@@ -2623,6 +2628,10 @@ export function registerIpcHandlers(): void {
       const updates: Partial<AgentSessionMeta> = { archived: newArchived }
       if (newArchived && current.pinned) {
         updates.pinned = false
+      }
+      // 手动归档是明确的保留意图；将草稿提升为普通归档会话，保留可见入口。
+      if (newArchived && current.isDraft) {
+        updates.isDraft = false
       }
       return updateAgentSessionMeta(id, updates)
     }

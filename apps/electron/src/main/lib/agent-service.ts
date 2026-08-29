@@ -250,9 +250,10 @@ export async function runAgent(
   const route = registerWebContents(input.sessionId, webContents)
   // deferred queue runs carry their queue id as an internal extension.
   const queueMessageId = (input as Partial<AgentDeferredQueueMessageInput>).queueMessageId
-  // 开始新一轮执行时清除"完成未确认"标记
+  // 开始新一轮执行时清除"完成未确认"与持久化草稿标记。
+  // 草稿标记不能只留在 renderer 内存，否则重启后会重新出现在侧栏。
   try {
-    updateAgentSessionMeta(input.sessionId, { completedButUnconfirmed: false })
+    updateAgentSessionMeta(input.sessionId, { completedButUnconfirmed: false, isDraft: false })
   } catch { /* 新会话可能尚未写入索引 */ }
   // 自动任务会话"毕业"：用户手动发消息（非定时触发）即视为接管，标记后该会话回到普通项目列表，
   // 调度器也不再复用它注入新的定时运行。

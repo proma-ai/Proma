@@ -566,8 +566,8 @@ export interface ElectronAPI {
   /** 获取归档会话数量，不返回归档元数据 */
   countArchivedAgentSessions: () => Promise<number>
 
-  /** 创建 Agent 会话 */
-  createAgentSession: (title?: string, channelId?: string, workspaceId?: string, modelId?: string) => Promise<AgentSessionMeta>
+  /** 创建 Agent 会话；草稿会话在首条消息发送前不会出现在侧栏。 */
+  createAgentSession: (title?: string, channelId?: string, workspaceId?: string, modelId?: string, isDraft?: boolean) => Promise<AgentSessionMeta>
 
   /** 获取当前主进程仍在执行的 Agent 会话，供 renderer 重载后恢复运行态 */
   listActiveAgentSessionSnapshots: () => Promise<AgentActiveSessionSnapshot[]>
@@ -1839,8 +1839,8 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.COUNT_ARCHIVED_SESSIONS)
   },
 
-  createAgentSession: (title?: string, channelId?: string, workspaceId?: string, modelId?: string) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.CREATE_SESSION, title, channelId, workspaceId, modelId)
+  createAgentSession: (title?: string, channelId?: string, workspaceId?: string, modelId?: string, isDraft?: boolean) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.CREATE_SESSION, title, channelId, workspaceId, modelId, isDraft)
   },
 
   listActiveAgentSessionSnapshots: () => {

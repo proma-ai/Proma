@@ -2139,13 +2139,17 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
       return next
     })
 
-    // 取消 draft 标记，让会话出现在侧边栏
+    // 取消 draft 标记，让会话出现在侧边栏。主进程会在实际启动时持久化清除
+    // isDraft；这里先乐观更新，避免 IPC 往返期间仍被侧栏过滤。
     setDraftSessionIds((prev: Set<string>) => {
       if (!prev.has(sessionId)) return prev
       const next = new Set(prev)
       next.delete(sessionId)
       return next
     })
+    setAgentSessions((prev) => prev.map((session) => (
+      session.id === sessionId && session.isDraft ? { ...session, isDraft: false } : session
+    )))
 
     // 初始化流式状态（startedAt 由渲染进程生成，传递给主进程原样回传，确保竞态保护使用同一个值）
     const streamStartedAt = Date.now()
@@ -2207,7 +2211,7 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
         return map
       })
     })
-  }, [createBaseAdditionalDirectories, preparePendingFilesForSend, restoreQueuedAttachmentsToPending, sessionId, agentChannelId, agentModelId, agentChannelProvider, currentWorkspaceId, streaming, backgroundWaiting, suggestion, hasAvailableModel, store, consumeQuotedSelection, setStreamingStates, setAgentStreamErrors, setPromptSuggestions, setInputContent, setLiveMessagesMap, permissionMode, messagesLoaded, setQueuedMessages, setQuotedSelectionMap, sendPlainTextAgentMessage, isLegacyTranscript, isStopping])
+  }, [createBaseAdditionalDirectories, preparePendingFilesForSend, restoreQueuedAttachmentsToPending, sessionId, agentChannelId, agentModelId, agentChannelProvider, currentWorkspaceId, streaming, backgroundWaiting, suggestion, hasAvailableModel, store, consumeQuotedSelection, setStreamingStates, setAgentStreamErrors, setPromptSuggestions, setInputContent, setLiveMessagesMap, setDraftSessionIds, setAgentSessions, permissionMode, messagesLoaded, setQueuedMessages, setQuotedSelectionMap, sendPlainTextAgentMessage, isLegacyTranscript, isStopping])
 
   /** 停止生成。异常流未发出终态时，允许再次下发幂等的 abort 请求。 */
   const handleStop = React.useCallback((): void => {
