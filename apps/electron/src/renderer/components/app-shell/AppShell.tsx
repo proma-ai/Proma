@@ -12,7 +12,7 @@ import { LeftSidebar } from './LeftSidebar'
 import { RightSidePanel } from './RightSidePanel'
 import { MainArea } from '@/components/tabs/MainArea'
 import { appModeAtom } from '@/atoms/app-mode'
-import { agentDiffPanelTabAtom, agentSessionsAtom, agentSidePanelLayoutAtomFamily, agentSidePanelLayoutMapAtom, agentSidePanelSplitMapAtom, currentAgentSessionIdAtom, currentSessionSidePanelOpenAtom, isWorkspaceComponentTab, pruneAgentSidePanelLayouts, fileBrowserExpandedPathsAtom, fileBrowserScrollTopMapAtom, pruneFileBrowserStateMap } from '@/atoms/agent-atoms'
+import { agentDiffPanelTabAtom, agentSessionComponentOpenMapAtom, agentSessionsAtom, agentSidePanelLayoutAtomFamily, agentSidePanelLayoutMapAtom, agentSidePanelSplitMapAtom, currentAgentSessionIdAtom, currentSessionSidePanelOpenAtom, isWorkspaceComponentTab, pruneAgentSidePanelLayouts, fileBrowserExpandedPathsAtom, fileBrowserScrollTopMapAtom, pruneFileBrowserStateMap } from '@/atoms/agent-atoms'
 import { leftSidebarWidthAtom } from '@/atoms/sidebar-atoms'
 import { sidebarCollapsedAtom } from '@/atoms/tab-atoms'
 import { clampRightPanelWidth, getRightPanelMaxWidth } from './right-panel-layout'
@@ -76,6 +76,8 @@ export function AppShell(): React.ReactElement {
   const currentWorkspace = workspaces.find((workspace) => workspace.id === currentWorkspaceId)
   const currentSessionId = useAtomValue(currentAgentSessionIdAtom)
   const activeRightPanelTab = useAtomValue(agentDiffPanelTabAtom).get(currentSessionId ?? '')
+  const setAgentDiffPanelTabs = useSetAtom(agentDiffPanelTabAtom)
+  const setAgentSessionComponentOpenMap = useSetAtom(agentSessionComponentOpenMapAtom)
   const activeRightPanelSplit = useAtomValue(agentSidePanelSplitMapAtom).get(currentSessionId ?? '') ?? null
   const isPanelOpen = useAtomValue(currentSessionSidePanelOpenAtom)
   const automationForm = useAtomValue(automationFormAtom)
@@ -86,7 +88,33 @@ export function AppShell(): React.ReactElement {
   const productivityTools = useAtomValue(productivityToolsAtom)
   React.useEffect(() => {
     if (!productivityTools.obsidianEnabled && activeView === 'vault') setActiveView('conversations')
-  }, [activeView, productivityTools.obsidianEnabled, setActiveView])
+
+    const isEnabled = (tab: string): boolean => (
+      (tab !== 'todos' || productivityTools.todosEnabled)
+      && (tab !== 'calendar' || productivityTools.calendarEnabled)
+      && (tab !== 'vault' || productivityTools.obsidianEnabled)
+    )
+    setAgentSessionComponentOpenMap((previous) => {
+      let changed = false
+      const next = Object.fromEntries(Object.entries(previous).map(([sessionId, tabs]) => {
+        const enabledTabs = tabs.filter(isEnabled)
+        if (enabledTabs.length !== tabs.length) changed = true
+        return [sessionId, enabledTabs]
+      }))
+      return changed ? next : previous
+    })
+    setAgentDiffPanelTabs((previous) => {
+      let changed = false
+      const next = new Map(previous)
+      for (const [sessionId, tab] of previous) {
+        if (!isEnabled(tab)) {
+          next.set(sessionId, 'files')
+          changed = true
+        }
+      }
+      return changed ? next : previous
+    })
+  }, [activeView, productivityTools.calendarEnabled, productivityTools.obsidianEnabled, productivityTools.todosEnabled, setActiveView, setAgentDiffPanelTabs, setAgentSessionComponentOpenMap])
   const showRightPanel = appMode === 'agent' && !!currentSessionId && !(automationForm.open && activeView !== 'conversations') && activeView !== 'planning' && activeView !== 'agent-skills'
   const isWindows = React.useMemo(() => detectIsWindows(), [])
 

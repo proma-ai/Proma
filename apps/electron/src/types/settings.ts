@@ -284,9 +284,9 @@ export const DEFAULT_PRODUCTIVITY_TOOLS_SETTINGS: ProductivityToolsSettings = {
 export function normalizeProductivityToolsSettings(input: unknown): ProductivityToolsSettings {
   const raw = input && typeof input === 'object' ? input as Partial<ProductivityToolsSettings> : {}
   return {
-    todosEnabled: raw.todosEnabled ?? true,
-    calendarEnabled: raw.calendarEnabled ?? true,
-    obsidianEnabled: raw.obsidianEnabled ?? true,
+    todosEnabled: typeof raw.todosEnabled === 'boolean' ? raw.todosEnabled : true,
+    calendarEnabled: typeof raw.calendarEnabled === 'boolean' ? raw.calendarEnabled : true,
+    obsidianEnabled: typeof raw.obsidianEnabled === 'boolean' ? raw.obsidianEnabled : true,
   }
 }
 
