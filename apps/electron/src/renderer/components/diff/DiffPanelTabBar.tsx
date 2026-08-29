@@ -96,6 +96,9 @@ export function DiffPanelTabBar({
   // 仅鼠标在菜单外取消时抑制 Radix 的回焦；Esc 与键盘选择必须保留可见焦点。
   const suppressPointerDismissFocusRestoreRef = React.useRef(false)
   const tabListRef = React.useRef<HTMLDivElement>(null)
+  const scrollbarTrackRef = React.useRef<HTMLDivElement>(null)
+  const scrollbarThumbRef = React.useRef<HTMLDivElement>(null)
+  const [hasHorizontalOverflow, setHasHorizontalOverflow] = React.useState(false)
   const tabRefs = React.useRef(new Map<AgentSidePanelTab, HTMLDivElement>())
   const barRef = React.useRef<HTMLDivElement>(null)
   const suppressClickTabRef = React.useRef<AgentSidePanelTab | null>(null)
@@ -113,6 +116,25 @@ export function DiffPanelTabBar({
     onAddTabMenuOpenChange?.(open)
   }, [onAddTabMenuOpenChange])
 
+  const syncScrollbarThumb = React.useCallback(() => {
+    const tabList = tabListRef.current
+    const track = scrollbarTrackRef.current
+    const thumb = scrollbarThumbRef.current
+    if (!tabList) return
+
+    const maxScrollLeft = tabList.scrollWidth - tabList.clientWidth
+    const overflow = maxScrollLeft > 1
+    setHasHorizontalOverflow((previous) => previous === overflow ? previous : overflow)
+    if (!overflow || !track || !thumb) return
+
+    const trackWidth = track.clientWidth
+    const thumbWidth = Math.min(trackWidth, Math.max(24, trackWidth * tabList.clientWidth / tabList.scrollWidth))
+    const maxThumbOffset = trackWidth - thumbWidth
+    const thumbOffset = maxScrollLeft > 0 ? maxThumbOffset * tabList.scrollLeft / maxScrollLeft : 0
+    thumb.style.width = `${thumbWidth}px`
+    thumb.style.transform = `translateX(${thumbOffset}px)`
+  }, [])
+
   React.useLayoutEffect(() => {
     const tabList = tabListRef.current
     const activeTabElement = tabRefs.current.get(activeTab)
@@ -122,7 +144,56 @@ export function DiffPanelTabBar({
     if (nextScrollLeft !== tabList.scrollLeft) {
       tabList.scrollTo({ left: nextScrollLeft, behavior: 'smooth' })
     }
-  }, [activeTab, tabs.length])
+    syncScrollbarThumb()
+  }, [activeTab, syncScrollbarThumb, tabs.length])
+
+  React.useLayoutEffect(() => {
+    const tabList = tabListRef.current
+    const track = scrollbarTrackRef.current
+    if (!tabList) return
+
+    const observer = new ResizeObserver(syncScrollbarThumb)
+    observer.observe(tabList)
+    if (track) observer.observe(track)
+    syncScrollbarThumb()
+    return () => observer.disconnect()
+  }, [hasHorizontalOverflow, syncScrollbarThumb, tabs.length])
+
+  React.useEffect(() => {
+    const tabList = tabListRef.current
+    if (!tabList) return
+    tabList.addEventListener('scroll', syncScrollbarThumb, { passive: true })
+    return () => tabList.removeEventListener('scroll', syncScrollbarThumb)
+  }, [syncScrollbarThumb])
+
+  const handleScrollbarThumbPointerDown = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const tabList = tabListRef.current
+    const track = scrollbarTrackRef.current
+    if (!tabList || !track || event.button !== 0) return
+
+    event.preventDefault()
+    event.stopPropagation()
+    const startX = event.clientX
+    const startScrollLeft = tabList.scrollLeft
+    const maxScrollLeft = tabList.scrollWidth - tabList.clientWidth
+    const thumbWidth = Math.min(track.clientWidth, Math.max(24, track.clientWidth * tabList.clientWidth / tabList.scrollWidth))
+    const maxThumbOffset = track.clientWidth - thumbWidth
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      if (maxThumbOffset <= 0) return
+      const nextScrollLeft = startScrollLeft + (moveEvent.clientX - startX) * maxScrollLeft / maxThumbOffset
+      tabList.scrollLeft = Math.max(0, Math.min(maxScrollLeft, nextScrollLeft))
+    }
+    const handleUp = () => {
+      document.removeEventListener('pointermove', handleMove)
+      document.removeEventListener('pointerup', handleUp)
+      document.removeEventListener('pointercancel', handleUp)
+    }
+
+    document.addEventListener('pointermove', handleMove)
+    document.addEventListener('pointerup', handleUp)
+    document.addEventListener('pointercancel', handleUp)
+  }, [])
 
   const selectTab = React.useCallback((tab: AgentSidePanelTab) => {
     if (suppressClickTabRef.current === tab) {
@@ -217,8 +288,9 @@ export function DiffPanelTabBar({
   return (
     <div ref={barRef} className="relative flex h-10 shrink-0 items-center border-b border-border/50 bg-content-area">
       <div className="pointer-events-none absolute inset-0 titlebar-drag-region" />
-      <div className="relative flex min-w-0 flex-1 items-center titlebar-no-drag">
-        <div ref={tabListRef} className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overscroll-x-contain px-2 py-1 scrollbar-none" role="tablist" aria-label="右侧工作区">
+      <div className="relative flex h-full min-w-0 flex-1 items-center titlebar-no-drag">
+        <div className="relative flex min-w-0 flex-1 self-stretch">
+          <div ref={tabListRef} className="flex h-9 min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overscroll-x-contain px-2 pt-1.5 pb-0.5 scrollbar-none" role="tablist" aria-label="右侧工作区">
           {orderedTabs.map((tab) => {
             const selected = activeTab === tab.id
             const isSplitView = visibleTabs?.left !== undefined && visibleTabs.right !== undefined
@@ -316,6 +388,16 @@ export function DiffPanelTabBar({
               </ContextMenu>
             ) : <React.Fragment key={tab.id}>{tabNode}</React.Fragment>
           })}
+          </div>
+          {hasHorizontalOverflow && (
+            <div ref={scrollbarTrackRef} className="pointer-events-none absolute bottom-0.5 left-2 right-2 h-[2px] rounded-full">
+              <div
+                ref={scrollbarThumbRef}
+                className="pointer-events-auto h-full cursor-grab rounded-full bg-muted-foreground/30 transition-[background-color] hover:bg-muted-foreground/50 active:cursor-grabbing"
+                onPointerDown={handleScrollbarThumbPointerDown}
+              />
+            </div>
+          )}
         </div>
         {activeTabAction && <div className="ml-1 flex shrink-0 items-center titlebar-no-drag">{activeTabAction}</div>}
         {visibleTabs?.left && visibleTabs.right && onCollapseSplit && (
