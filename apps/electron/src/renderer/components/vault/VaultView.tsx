@@ -342,6 +342,7 @@ function VaultMarkdownPane({
   readResult,
   loading,
   hasVault,
+  reopenVersion,
   onSave,
   onRename,
   onOpenTutorial,
@@ -349,6 +350,7 @@ function VaultMarkdownPane({
   readResult: VaultReadResult | null
   loading: boolean
   hasVault: boolean
+  reopenVersion: number
   onSave: (nextContent: string, options?: { silent?: boolean; expectedSha256?: string }) => Promise<void>
   onRename: (name: string) => Promise<void>
   onOpenTutorial: () => void
@@ -373,7 +375,7 @@ function VaultMarkdownPane({
   return (
     <section className="flex min-w-0 flex-1 flex-col bg-muted/25">
       <VaultMarkdownEditor
-        key={getVaultEditorKey(readResult.relativePath)}
+        key={getVaultEditorKey(readResult.relativePath, reopenVersion)}
         readResult={readResult}
         onSave={onSave}
         onRename={onRename}
@@ -391,6 +393,7 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
   const [files, setFiles] = React.useState<VaultFileEntry[]>([])
   const [loading, setLoading] = React.useState(true)
   const [fileLoading, setFileLoading] = React.useState(false)
+  const [editorReopenVersion, setEditorReopenVersion] = React.useState(0)
   const [selectedFile, setSelectedFile] = useAtom(selectedVaultFileAtom)
   const [focusedFolder, setFocusedFolder] = useAtom(focusedVaultFolderAtom)
   const [readResult, setReadResult] = useAtom(vaultReadResultAtom)
@@ -557,12 +560,18 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
   }, [refreshVaultCandidates])
 
   const openFile = React.useCallback(async (relativePath: string): Promise<void> => {
+    const reopenCurrentFile = selectedFileRef.current === relativePath
     const requestId = ++readRequestRef.current
     selectFile(relativePath)
     setFileLoading(true)
     try {
       const result = await window.electronAPI.readVaultFile(relativePath)
-      if (requestId === readRequestRef.current) setReadResult(result)
+      if (requestId === readRequestRef.current) {
+        setReadResult(result)
+        // An explicit click on the selected note is the recovery path after an
+        // external-write conflict: discard the local draft and remount from disk.
+        if (reopenCurrentFile) setEditorReopenVersion((version) => version + 1)
+      }
     } catch (error) {
       if (requestId === readRequestRef.current) {
         toast.error(error instanceof Error ? error.message : '无法打开笔记')
@@ -867,6 +876,7 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
             readResult={readResult}
             loading={fileLoading}
             hasVault={config !== null}
+            reopenVersion={editorReopenVersion}
             onSave={save}
             onRename={rename}
             onOpenTutorial={() => setVaultHelpOpen(true)}
