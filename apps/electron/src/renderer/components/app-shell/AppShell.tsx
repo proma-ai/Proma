@@ -18,6 +18,7 @@ import { sidebarCollapsedAtom } from '@/atoms/tab-atoms'
 import { clampRightPanelWidth, getRightPanelMaxWidth } from './right-panel-layout'
 import { automationFormAtom } from '@/atoms/automation-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
+import { productivityToolsAtom } from '@/atoms/ui-preferences'
 import { useProjectActions } from '@/hooks/useProjectActions'
 import { WorkspaceMemoryChangeObserver } from '@/components/agent-skills/WorkspaceMemoryChangeObserver'
 import { settingsOpenAtom } from '@/atoms/settings-tab'
@@ -81,7 +82,11 @@ export function AppShell(): React.ReactElement {
   const settingsOpen = useAtomValue(settingsOpenAtom)
   const setSettingsOpen = useSetAtom(settingsOpenAtom)
   // 定时任务表单打开时隐藏右侧文件面板，让中间区域扩展到全宽（表单内含自己的右栏配置）
-  const activeView = useAtomValue(activeViewAtom)
+  const [activeView, setActiveView] = useAtom(activeViewAtom)
+  const productivityTools = useAtomValue(productivityToolsAtom)
+  React.useEffect(() => {
+    if (!productivityTools.obsidianEnabled && activeView === 'vault') setActiveView('conversations')
+  }, [activeView, productivityTools.obsidianEnabled, setActiveView])
   const showRightPanel = appMode === 'agent' && !!currentSessionId && !(automationForm.open && activeView !== 'conversations') && activeView !== 'planning' && activeView !== 'agent-skills'
   const isWindows = React.useMemo(() => detectIsWindows(), [])
 

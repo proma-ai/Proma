@@ -1018,7 +1018,8 @@ export class AgentOrchestrator {
       // 从源会话继承并持久化，避免历史相对路径在恢复时切换到另一文件根。
 
       // 必须与 runtime 接收的附加目录保持一致；视觉助手据此限制允许外发的图片路径。
-      const vaultUserContext = getVaultUserContext(sessionId)
+      const productivityTools = appSettings.productivityTools
+      const vaultUserContext = productivityTools.obsidianEnabled ? getVaultUserContext(sessionId) : null
       const attachedDirectories = collectAttachedDirectories({
         extraDirs: additionalDirectories,
         sessionMeta,
@@ -1026,7 +1027,7 @@ export class AgentOrchestrator {
       })
       const allAdditionalDirectories = resolveRuntimeAdditionalDirectories(
         attachedDirectories,
-        getAgentVaultRoots(),
+        productivityTools.obsidianEnabled ? getAgentVaultRoots() : [],
       )
       const browserAllowedRoots = [...new Set([
         workspaceId ? agentCwd : undefined,
@@ -1057,6 +1058,7 @@ export class AgentOrchestrator {
         permissionMode: permissionModeOverride ?? sessionMeta?.permissionMode ?? PROMA_DEFAULT_PERMISSION_MODE,
         triggeredBy: input.triggeredBy,
         windowsShellAvailable: process.platform !== 'win32' || runtimeEnv.shellKind != null,
+        productivityTools,
       })
       piBuiltinTools = builtinMcpResult.tools
       const collaborationAvailable = builtinMcpResult.collaborationAvailable
@@ -1102,8 +1104,8 @@ export class AgentOrchestrator {
         console.log(`[Agent 编排] 注入 mentioned_tools: ${mentionedSkills?.length ?? 0} skills, ${mentionedMcpServers?.length ?? 0} MCP`)
       }
       const referencedPlanningBlock = buildReferencedPlanningPrompt(
-        mentionedTodoIds,
-        mentionedCalendarEventIds,
+        productivityTools.todosEnabled ? mentionedTodoIds : undefined,
+        productivityTools.calendarEnabled ? mentionedCalendarEventIds : undefined,
         { requireToolRead: true },
       )
       if (referencedPlanningBlock) {
@@ -1461,6 +1463,7 @@ export class AgentOrchestrator {
         currentModelId: selectedModelId,
         projectInstructions,
         projectKnowledgeMaintenanceApproved,
+        productivityTools,
         memoryGuidance,
         memoryRefreshOpportunity,
       }) + (automationContext ? `\n\n## 定时任务执行上下文\n\n${automationContext}` : '')

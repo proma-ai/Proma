@@ -92,6 +92,7 @@ import {
   discardInapplicableAutomationScheduleFields,
 } from './automation-tool-schema'
 import { getConfiguredVaultFileSystem, getVaultConfig } from '../vault-service'
+import type { ProductivityToolsSettings } from '../../../types'
 
 type PiSdk = typeof import('@earendil-works/pi-coding-agent')
 
@@ -111,6 +112,8 @@ export interface PiBuiltinToolsContext {
   triggeredBy?: 'user' | 'automation' | 'delegation' | 'external'
   /** Windows 设备是否已有可供 Pi Bash 使用的 Git Bash 或 WSL。 */
   windowsShellAvailable?: boolean
+  /** 用户关闭的生产力能力不能注入给 Agent。 */
+  productivityTools?: ProductivityToolsSettings
 }
 
 function jsonToolResult(payload: unknown): AgentToolResult<unknown> {
@@ -1469,9 +1472,15 @@ export async function buildPiBuiltinTools(
     console.error('[Pi 桥接] 注入 automation 工具失败:', error)
   }
 
-  // 任务/日程是 Pi native customTools。
+  // 任务/日程是 Pi native customTools；关闭的能力不会出现在本轮 Agent 工具集中。
   try {
-    tools.push(...buildPlanningTools(sdk, ctx))
+    const productivityTools = ctx.productivityTools
+    const planningTools = buildPlanningTools(sdk, ctx).filter((tool) => {
+      if (tool.name.includes('_todo')) return productivityTools?.todosEnabled ?? true
+      if (tool.name.includes('_calendar')) return productivityTools?.calendarEnabled ?? true
+      return (productivityTools?.todosEnabled ?? true) || (productivityTools?.calendarEnabled ?? true)
+    })
+    tools.push(...planningTools)
   } catch (error) {
     console.error('[Pi 桥接] 注入任务/日程工具失败:', error)
   }

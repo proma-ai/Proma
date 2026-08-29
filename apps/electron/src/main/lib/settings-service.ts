@@ -7,7 +7,7 @@
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { getSettingsPath } from './config-paths'
-import { DEFAULT_THEME_MODE } from '../../types'
+import { DEFAULT_THEME_MODE, normalizeProductivityToolsSettings } from '../../types'
 import type { AgentIslandSettings, AppSettings } from '../../types'
 
 function sanitizeAgentIslandSettings(input: unknown): AgentIslandSettings | undefined {
@@ -37,6 +37,7 @@ export function getSettings(): AppSettings {
       windowsShellPreference: 'auto',
       agentThinking: { type: 'adaptive' },
       gitAttributionEnabled: true,
+      productivityTools: normalizeProductivityToolsSettings(undefined),
     }
   }
 
@@ -72,6 +73,8 @@ export function getSettings(): AppSettings {
       agentThinking: settings.agentThinking ?? { type: 'adaptive' },
       // 缺省 true：老配置文件未写该字段时保持推广默认开启
       gitAttributionEnabled: settings.gitAttributionEnabled ?? true,
+      // 缺省全部开启：老配置文件不会因升级意外隐藏生产力工具。
+      productivityTools: normalizeProductivityToolsSettings(data.productivityTools),
       // 仅保留 macOS 原生 Island 开关；清理旧非原生 surface 的持久化残留字段。
       agentIsland: sanitizeAgentIslandSettings(data.agentIsland),
     }
@@ -89,6 +92,7 @@ export function getSettings(): AppSettings {
       windowsShellPreference: 'auto',
       agentThinking: { type: 'adaptive' },
       gitAttributionEnabled: true,
+      productivityTools: normalizeProductivityToolsSettings(undefined),
     }
   }
 }
@@ -107,6 +111,9 @@ export function updateSettings(updates: Partial<AppSettings>): AppSettings {
     agentIsland: updates.agentIsland === undefined
       ? sanitizeAgentIslandSettings(current.agentIsland)
       : sanitizeAgentIslandSettings({ ...current.agentIsland, ...updates.agentIsland }),
+    productivityTools: updates.productivityTools === undefined
+      ? normalizeProductivityToolsSettings(current.productivityTools)
+      : normalizeProductivityToolsSettings({ ...current.productivityTools, ...updates.productivityTools }),
   }
   const filePath = getSettingsPath()
 

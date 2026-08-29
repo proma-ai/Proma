@@ -267,6 +267,29 @@ export interface VisionRelaySettings {
   modelId?: string
 }
 
+/** 可在通用设置中关闭的本地生产力工具；缺省保持开启以兼容已有用户。 */
+export interface ProductivityToolsSettings {
+  todosEnabled: boolean
+  calendarEnabled: boolean
+  obsidianEnabled: boolean
+}
+
+export const DEFAULT_PRODUCTIVITY_TOOLS_SETTINGS: ProductivityToolsSettings = {
+  todosEnabled: true,
+  calendarEnabled: true,
+  obsidianEnabled: true,
+}
+
+/** 容错读取旧配置与手写 settings.json，未知或缺失字段默认开启。 */
+export function normalizeProductivityToolsSettings(input: unknown): ProductivityToolsSettings {
+  const raw = input && typeof input === 'object' ? input as Partial<ProductivityToolsSettings> : {}
+  return {
+    todosEnabled: raw.todosEnabled ?? true,
+    calendarEnabled: raw.calendarEnabled ?? true,
+    obsidianEnabled: raw.obsidianEnabled ?? true,
+  }
+}
+
 /** 提升此版本可要求用户重新确认更新后的受管浏览器风险告知。 */
 export const BROWSER_RISK_DISCLAIMER_VERSION = 1
 
@@ -340,6 +363,8 @@ export interface AppSettings {
   browserRiskDisclaimerVersion?: number
   /** 用户手动开启的 Proma 内置能力 ID 列表（默认关闭的 Nano Banana）。 */
   builtinMcpEnabledIds?: string[]
+  /** Todo、日程与 Obsidian 的可见性和 Agent 工具注入开关，默认全部开启。 */
+  productivityTools: ProductivityToolsSettings
   /** 启动时自动清理临时文件（proma-preview、proma-installers），默认 true */
   autoCleanupTempOnStart?: boolean
   /** 自动清理 N 天前已归档会话的 SDK 数据（0 = 禁用，默认 0） */

@@ -27,6 +27,7 @@ import {
 import { agentDiffUnseenChangesAtom, currentAgentSessionIdAtom } from '@/atoms/agent-atoms'
 import type { AgentSidePanelTab, WorkspaceComponentTab } from '@/atoms/agent-atoms'
 import { groupRightWorkspaceTabs, type RightWorkspacePane } from '@/lib/right-workspace-split'
+import type { ProductivityToolsSettings } from '@/types/settings'
 
 export interface RightWorkspaceTabDragState {
   tabId: AgentSidePanelTab
@@ -54,6 +55,7 @@ interface DiffPanelTabBarProps {
   onOpenTerminal?: () => void
   onOpenWorkspaceComponent?: (component: WorkspaceComponentTab) => void
   onOpenVault?: () => void
+  productivityTools?: ProductivityToolsSettings
   onOpenChat?: () => void
   /** 仅当前右侧 Tab 需要的紧凑动作，渲染于标签列表之后，不影响内容区布局。 */
   activeTabAction?: React.ReactNode
@@ -77,6 +79,7 @@ export function DiffPanelTabBar({
   onOpenTerminal,
   onOpenWorkspaceComponent,
   onOpenVault,
+  productivityTools = { todosEnabled: true, calendarEnabled: true, obsidianEnabled: true },
   onOpenChat,
   activeTabAction,
   visibleTabs,
@@ -458,14 +461,18 @@ export function DiffPanelTabBar({
             {onOpenWorkspaceComponent && (
               <>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => onOpenWorkspaceComponent('todos')}>
-                  <ListTodo className="size-3.5" />
-                  打开 Todo
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onOpenWorkspaceComponent('calendar')}>
-                  <CalendarDays className="size-3.5" />
-                  打开日程
-                </DropdownMenuItem>
+                {productivityTools.todosEnabled && (
+                  <DropdownMenuItem onSelect={() => onOpenWorkspaceComponent('todos')}>
+                    <ListTodo className="size-3.5" />
+                    打开 Todo
+                  </DropdownMenuItem>
+                )}
+                {productivityTools.calendarEnabled && (
+                  <DropdownMenuItem onSelect={() => onOpenWorkspaceComponent('calendar')}>
+                    <CalendarDays className="size-3.5" />
+                    打开日程
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem onSelect={() => onOpenWorkspaceComponent('skills')}>
                   <Blocks className="size-3.5" />
                   打开 Skills
