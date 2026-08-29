@@ -14,6 +14,7 @@ import { VaultLiveMarkdownEditor } from './VaultLiveMarkdownEditor'
 import type { LiveMarkdownTextSelection } from '@/components/markdown/LiveMarkdownEditor'
 import { SelectionActionPopover } from '@/components/selection/SelectionActionPopover'
 import { focusChatInput } from '@/components/chat/focus-chat-input'
+import { getOrCreateSideChat } from '@/lib/side-chat'
 import { insertAgentInputQuote } from '@/lib/agent-input-quote'
 import { useFocusAgentSessionInput } from '@/hooks/useFocusAgentSessionInput'
 import {
@@ -322,11 +323,11 @@ function VaultMarkdownEditor({
 
     openSelectionChatPendingRef.current = true
     try {
-      const conversation = await window.electronAPI.createConversation(
+      const conversation = await getOrCreateSideChat(sessionId, () => window.electronAPI.createConversation(
         'Obsidian 选区问答',
         selectedChatModel?.modelId,
         selectedChatModel?.channelId,
-      )
+      ))
       setConversations((previous) => previous.some((item) => item.id === conversation.id) ? previous : [conversation, ...previous])
       setConversationDrafts((previous) => new Map(previous).set(conversation.id, '我的问题：'))
       setSideChatMap((previous) => new Map(previous).set(sessionId, conversation.id))

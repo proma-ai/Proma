@@ -298,6 +298,14 @@ export const LiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, Liv
           // rAF 仍可覆盖 ink-mde 只读预览的 selection transaction 时序。
           view.dom.addEventListener('mouseup', scheduleSelectionReport)
           return {
+            update: (update) => {
+              // Pointer selections are reported on mouseup to avoid a moving popover;
+              // keyboard selection has no mouseup, so report it after CodeMirror commits.
+              const isPointerSelection = update.transactions.some((transaction) => transaction.isUserEvent('select.pointer'))
+              if (update.selectionSet && update.view.hasFocus && !isPointerSelection) {
+                scheduleSelectionReport()
+              }
+            },
             destroy: () => {
               view.dom.removeEventListener('mouseup', scheduleSelectionReport)
               if (selectionFrame) cancelAnimationFrame(selectionFrame)

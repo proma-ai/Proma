@@ -1847,8 +1847,8 @@ export function registerIpcHandlers(): void {
   // 注意：通过 event.sender 获取 webContents 用于推送流式事件
   ipcMain.handle(
     CHAT_IPC_CHANNELS.SEND_MESSAGE,
-    async (event, input: ChatSendInput): Promise<void> => {
-      await sendMessage(input, event.sender)
+    async (event, input: ChatSendInput): Promise<boolean> => {
+      return sendMessage(input, event.sender)
     }
   )
 

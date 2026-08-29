@@ -65,7 +65,7 @@ interface ChatInputProps {
   /** 设置待发送附件 */
   onSetPendingAttachments: React.Dispatch<React.SetStateAction<PendingAttachment[]>>
   /** 发送消息回调 */
-  onSend: (content: string) => void
+  onSend: (content: string) => Promise<boolean>
   /** 停止生成回调 */
   onStop: () => void
   /** 清除上下文回调 */
@@ -94,14 +94,21 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
       return map
     })
   }, [conversationId, setDraftsMap])
-  const setContent = React.useCallback((value: string) => {
+  const setContent = React.useCallback((value: React.SetStateAction<string>) => {
     setDraftSyncVersions((prev) => {
       const map = new Map(prev)
       map.set(conversationId, (map.get(conversationId) ?? 0) + 1)
       return map
     })
-    setContentFromEditor(value)
-  }, [conversationId, setContentFromEditor, setDraftSyncVersions])
+    setDraftsMap((prev) => {
+      const current = prev.get(conversationId) ?? ''
+      const nextValue = typeof value === 'function' ? value(current) : value
+      const map = new Map(prev)
+      if (nextValue.trim() === '') map.delete(conversationId)
+      else map.set(conversationId, nextValue)
+      return map
+    })
+  }, [conversationId, setDraftsMap, setDraftSyncVersions])
 
   const [selectedModel] = useConversationModel()
   const [thinkingEnabled, setThinkingEnabled] = useConversationThinkingEnabled()
@@ -269,7 +276,7 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
   }, [setPendingAttachments])
 
   /** 发送消息 */
-  const handleSend = React.useCallback((contentOverride?: string): void => {
+  const handleSend = React.useCallback(async (contentOverride?: string): Promise<void> => {
     const contentToSend = contentOverride ?? content
     const canSendCurrentContent = (contentToSend.trim().length > 0 || pendingAttachments.length > 0)
       && selectedModel !== null
@@ -280,8 +287,14 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
       toast.error('当前无网络连接，请检查网络后重试')
       return
     }
-    onSend(contentToSend.trim())
+    const submittedContent = contentToSend
+    // sendMessage 的 IPC Promise 会等到完整流式结束才 resolve。提交时先清空，
+    // 但失败时无损恢复；函数式更新不会覆盖等待期间输入的新草稿。
     setContent('')
+    const sent = await onSend(contentToSend.trim())
+    if (!sent) {
+      setContent((current) => current ? `${submittedContent}\n${current}` : submittedContent)
+    }
     // 附件清理由 ChatView 的 handleSend 负责
   }, [content, onSend, pendingAttachments.length, selectedModel, streaming])
 

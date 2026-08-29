@@ -384,7 +384,7 @@ export interface ElectronAPI {
   // ===== 消息发送 =====
 
   /** 发送消息（触发 AI 流式响应） */
-  sendMessage: (input: ChatSendInput) => Promise<void>
+  sendMessage: (input: ChatSendInput) => Promise<boolean>
 
   /** 中止生成 */
   stopGeneration: (conversationId: string) => Promise<void>

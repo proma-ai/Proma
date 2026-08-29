@@ -188,7 +188,7 @@ export function serializeQuotedSelectionMention(quote: QuotedSelection): string 
 /** 为输入框内的历史或文件选区构建简短 chip 标签。 */
 export function buildQuotedSelectionLabel(quote: QuotedSelection): string {
   if (quote.sourceType === 'agent-history') return buildAgentHistoryQuoteLabel(quote)
-  const filename = (quote.sourceLabel ?? quote.filePath).split('/').pop() || quote.filePath
+  const filename = (quote.sourceLabel ?? quote.filePath).split(/[\\/]/).pop() || quote.filePath
   const preview = Array.from(quote.text.replace(/\s+/g, ' ').trim()).slice(0, 25).join('')
   return `${filename}：${preview}`
 }

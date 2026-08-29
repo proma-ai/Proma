@@ -49,6 +49,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { PIERRE_FILE_CSS } from '@/components/agent/tool-result-renderers/pierre-styles'
 import { SelectionActionPopover } from '@/components/selection/SelectionActionPopover'
 import { focusChatInput } from '@/components/chat/focus-chat-input'
+import { getOrCreateSideChat } from '@/lib/side-chat'
 import { insertAgentInputQuote } from '@/lib/agent-input-quote'
 import { SELECTION_ACTION_POPOVER_SELECTOR } from '@/lib/quoted-selection'
 import { copyTextToClipboard } from '@/lib/clipboard'
@@ -1398,11 +1399,11 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
 
     openSelectionChatPendingRef.current = true
     try {
-      const conversation = await window.electronAPI.createConversation(
+      const conversation = await getOrCreateSideChat(sessionId, () => window.electronAPI.createConversation(
         '预览选区问答',
         selectedChatModel?.modelId,
         selectedChatModel?.channelId,
-      )
+      ))
       setConversations((prev) => prev.some((item) => item.id === conversation.id) ? prev : [conversation, ...prev])
       setConversationDrafts((prev) => new Map(prev).set(conversation.id, '我的问题：'))
       setSideChatMap((prev) => new Map(prev).set(sessionId, conversation.id))
