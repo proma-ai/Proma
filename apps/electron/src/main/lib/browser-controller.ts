@@ -976,13 +976,18 @@ export class BrowserController {
     const visible = layout.visible && bounds.width > 4 && bounds.height > 4 && !!this.owner && !this.owner.isDestroyed() && this.owner.isVisible()
     if (!visible) {
       // 弹层避让隐藏会带来真实尺寸；卸载清理使用零尺寸，不需要快照。
-      const snapshot = shouldReturnLayoutSnapshotOnHide({
+      const wantsSnapshot = shouldReturnLayoutSnapshotOnHide({
         visible: layout.visible,
         boundsWidth: bounds.width,
         boundsHeight: bounds.height,
         tabCurrentlyVisible: tab.state.visible,
         isPresented: this.hasPresentation(browserSession.sessionId, tab.tabId),
-      }) ? tab.layoutSnapshot ?? null : null
+      })
+      // 首次避让可能还没有后台缓存快照：在视图仍可见时现场截取一帧，
+      // 避免 renderer 露出灰底。异步等待只发生在首次。
+      let snapshot: BrowserLayoutSnapshot | null = wantsSnapshot ? tab.layoutSnapshot ?? null : null
+      if (wantsSnapshot && !snapshot) snapshot = await this.captureLayoutSnapshot(tab)
+      if (snapshot) tab.layoutSnapshot = snapshot
       const changedSessions = new Set<BrowserSessionRecord>()
       if (this.hideTabView(tab)) changedSessions.add(browserSession)
       this.removePresentation(browserSession.sessionId, tab.tabId)

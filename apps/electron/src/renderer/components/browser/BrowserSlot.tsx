@@ -6,15 +6,19 @@ import { nextBrowserLayoutRevision } from './browser-layout-revision'
 // 主进程也不会覆盖随后已挂载 tab 的可见性和边界。
 // WebContentsView 是原生子视图，天然盖在 renderer DOM 之上；CSS z-index 无法反转。
 // 它的可见性由三件事控制：Slot 尺寸、Tab 生命周期，以及 suppressed 避让状态——
-// 右侧加号菜单等 renderer 弹层需要覆盖原生视图时，先隐藏原生视图并展示最近一次
-// 页面快照作为静态占位，弹层关闭后立即恢复，避免页面跳动或白屏。
+// 右侧加号菜单等 renderer 弹层需要覆盖原生视图时，先展示最近一次页面快照作为
+// 静态占位，再隐藏原生视图；弹层关闭后保持占位直到视图确认重新挂载，
+// 保证两个切换方向都不出现灰帧闪烁。
 
 export function BrowserSlot({ sessionId, tabId, suppressed = false }: { sessionId: string; tabId: string; suppressed?: boolean }): React.ReactElement {
   const ref = React.useRef<HTMLDivElement>(null)
   const suppressedRef = React.useRef(suppressed)
   const requestIdRef = React.useRef(0)
-  const publishRef = React.useRef<((slotVisible: boolean, immediate?: boolean) => void) | null>(null)
+  const publishRef = React.useRef<((slotVisible: boolean) => void) | null>(null)
+  const snapshotRef = React.useRef<BrowserLayoutSnapshot | null>(null)
   const [snapshot, setSnapshot] = React.useState<BrowserLayoutSnapshot | null>(null)
+  // 主进程确认当前展示的是本 Slot 的原生视图；占位图只在视图未展示时兜底。
+  const [viewPresented, setViewPresented] = React.useState(true)
 
   React.useLayoutEffect(() => {
     const element = ref.current
@@ -40,35 +44,27 @@ export function BrowserSlot({ sessionId, tabId, suppressed = false }: { sessionI
       })
         .then((result) => {
           if (requestId !== requestIdRef.current) return
-          if (visible) {
-            setSnapshot(null)
-          } else if (result) {
-            setSnapshot(result)
-          }
+          if (result) snapshotRef.current = result
+          setSnapshot(snapshotRef.current)
+          setViewPresented(visible)
         })
         .catch((error) => console.error('[受管浏览器] 更新浏览器布局失败:', error))
     }
-    const publish = (slotVisible: boolean, immediate = false) => {
+    const publish = (slotVisible: boolean) => {
       if (frame) cancelAnimationFrame(frame)
-      if (immediate) {
-        frame = 0
-        commitLayout(slotVisible)
-        return
-      }
       frame = requestAnimationFrame(() => {
         frame = 0
         commitLayout(slotVisible)
       })
     }
     publishRef.current = publish
-    const publishCurrentVisibility = (immediate = false) => publish(true, immediate)
-    const observer = new ResizeObserver(() => publishCurrentVisibility())
-    const publishBounded = () => publishCurrentVisibility()
+    const observer = new ResizeObserver(() => publish(true))
+    const publishBounded = () => publish(true)
     observer.observe(element)
     window.addEventListener('resize', publishBounded)
     // Tab 切换时先前 Slot 会立即发出 hide。新 Slot 不能再等一帧才 show，
     // 否则快速左右切换时原生视图会停留在隐藏状态，表现为页面内容消失。
-    publishCurrentVisibility(true)
+    commitLayout(true)
     return () => {
       publishRef.current = null
       observer.disconnect()
@@ -79,8 +75,8 @@ export function BrowserSlot({ sessionId, tabId, suppressed = false }: { sessionI
     }
   }, [sessionId, tabId])
 
-  // 避让状态变化时立即切换：打开弹层先拿到真实尺寸再隐藏，恢复时立即重新挂载原生视图。
-  // 首次挂载已在 layout effect 中发布过，跳过避免重复 IPC。
+  // 避让状态变化时立即发布；快照占位图的显隐由下方 render 依据 suppressed 同帧决定，
+  // 不等 IPC 往返，因此打开瞬间不会露出灰底。
   const isFirstSuppressedRunRef = React.useRef(true)
   React.useEffect(() => {
     suppressedRef.current = suppressed
@@ -88,12 +84,16 @@ export function BrowserSlot({ sessionId, tabId, suppressed = false }: { sessionI
       isFirstSuppressedRunRef.current = false
       return
     }
-    publishRef.current?.(true, true)
+    publishRef.current?.(true)
   }, [suppressed])
+
+  // 打开避让：suppressed 变化的同一次 commit 就渲染占位图（原生视图此时尚未隐藏，
+  // 画面像素无缝衔接）；关闭避让：占位图保留到主进程确认重新挂载为止。
+  const showSnapshotImage = (suppressed || !viewPresented) && snapshot
 
   return (
     <div ref={ref} className="relative flex-1 min-h-0 overflow-hidden bg-muted/15 titlebar-no-drag" aria-label="受管浏览器页面">
-      {snapshot && (
+      {showSnapshotImage && (
         <img
           src={`data:${snapshot.mimeType};base64,${snapshot.base64}`}
           alt=""
