@@ -596,7 +596,7 @@ export const agentSidePanelLayoutAtomFamily = atomFamily((sessionId: string) => 
   },
 ))
 
-/** 文件来源选择：按会话持久化，未存储的会话默认显示会话文件。 */
+/** 文件来源选择：按会话持久化，未存储的会话默认显示项目文件。 */
 export type AgentFileSourceFilter = 'session' | 'project'
 export const agentFileSourceFilterMapAtom = atomWithStorage<Record<string, AgentFileSourceFilter>>(
   'proma-agent-file-source-filter-map',

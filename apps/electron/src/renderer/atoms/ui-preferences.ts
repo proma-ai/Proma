@@ -5,6 +5,7 @@
  */
 
 import { atom } from 'jotai'
+import { DEFAULT_PRODUCTIVITY_TOOLS_SETTINGS, type ProductivityToolsSettings } from '@/types/settings'
 
 // ===== Jotai Atoms =====
 
@@ -17,6 +18,9 @@ export const richTextRenderingEnabledAtom = atom<boolean>(false)
 /** 左侧会话列表悬浮预览迷你地图（默认关闭，需手动开启） */
 export const sessionHoverPreviewEnabledAtom = atom<boolean>(false)
 
+/** 默认全部可见；初始化后由通用设置同步。 */
+export const productivityToolsAtom = atom<ProductivityToolsSettings>(DEFAULT_PRODUCTIVITY_TOOLS_SETTINGS)
+
 // ===== 初始化 =====
 
 /**
@@ -25,13 +29,15 @@ export const sessionHoverPreviewEnabledAtom = atom<boolean>(false)
 export async function initializeUiPreferences(
   setLongTextPasteAsAttachmentEnabled?: (enabled: boolean) => void,
   setRichTextRenderingEnabled?: (enabled: boolean) => void,
-  setSessionHoverPreviewEnabled?: (enabled: boolean) => void
+  setSessionHoverPreviewEnabled?: (enabled: boolean) => void,
+  setProductivityTools?: (settings: ProductivityToolsSettings) => void,
 ): Promise<void> {
   try {
     const settings = await window.electronAPI.getSettings()
     setLongTextPasteAsAttachmentEnabled?.(settings.longTextPasteAsAttachmentEnabled ?? false)
     setRichTextRenderingEnabled?.(settings.richTextRenderingEnabled ?? false)
     setSessionHoverPreviewEnabled?.(settings.sessionHoverPreviewEnabled ?? false)
+    setProductivityTools?.(settings.productivityTools)
   } catch (error) {
     console.error('[UI偏好] 初始化失败:', error)
   }
@@ -69,5 +75,15 @@ export async function updateSessionHoverPreviewEnabled(enabled: boolean): Promis
     await window.electronAPI.updateSettings({ sessionHoverPreviewEnabled: enabled })
   } catch (error) {
     console.error('[UI偏好] 更新会话悬浮预览设置失败:', error)
+  }
+}
+
+/** 更新 Todo、日程与 Obsidian 的通用可用性设置。 */
+export async function updateProductivityTools(settings: ProductivityToolsSettings): Promise<void> {
+  try {
+    await window.electronAPI.updateSettings({ productivityTools: settings })
+  } catch (error) {
+    console.error('[UI偏好] 更新生产力工具设置失败:', error)
+    throw error
   }
 }

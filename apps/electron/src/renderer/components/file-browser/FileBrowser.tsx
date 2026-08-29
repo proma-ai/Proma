@@ -58,6 +58,10 @@ import {
   canBeSticky,
 } from './tree-row-layout'
 import { setFilePanelDragData, dispatchInsertFileMention } from '@/lib/file-panel-drag'
+import { getFileBrowserRootsFromKey, getFileBrowserRootsKey } from './file-browser-roots'
+import type { FileBrowserRoot, FileScope } from './file-browser-roots'
+
+export type { FileBrowserRoot, FileScope } from './file-browser-roots'
 
 /** 计算目标路径相对 rootPath 的祖先目录集合（不含 rootPath 自身、含目标的所有上级） */
 export function computeRevealAncestors(rootPath: string, targetPath: string): Set<string> {
@@ -86,13 +90,6 @@ export function isPathUnderRoot(rootPath: string, targetPath: string): boolean {
   const root = rootPath.replace(/[/\\]+$/, '')
   if (targetPath === root) return true
   return targetPath.startsWith(root + '/') || targetPath.startsWith(root + '\\')
-}
-
-export type FileScope = 'project' | 'session'
-
-export interface FileBrowserRoot {
-  path: string
-  scope: FileScope
 }
 
 interface ScopedFileEntry extends FileEntry {
@@ -141,10 +138,11 @@ function getFileBrowserStateKey(sessionId: string | null, roots: readonly FileBr
 }
 
 export function FileBrowser({ rootPath, roots, hideToolbar, embedded, hideEmpty, access, projectRootPath, showSessionBadge = true, onAddToChat, onFilePreview, onOpenDirectoryTerminal }: FileBrowserProps): React.ReactElement {
-  const browserRoots = React.useMemo<FileBrowserRoot[]>(() => {
-    if (roots && roots.length > 0) return roots.filter((root) => Boolean(root.path))
-    return rootPath ? [{ path: rootPath, scope: 'project' }] : []
-  }, [rootPath, roots])
+  const rootsKey = getFileBrowserRootsKey(roots)
+  const browserRoots = React.useMemo<FileBrowserRoot[]>(
+    () => getFileBrowserRootsFromKey(rootsKey, rootPath),
+    [rootPath, rootsKey],
+  )
   const [entries, setEntries] = React.useState<ScopedFileEntry[]>([])
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)

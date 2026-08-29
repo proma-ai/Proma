@@ -49,7 +49,7 @@ export function groupArchivedAgentSessionsByProject({
   const unassignedSessions: AgentSessionMeta[] = []
 
   for (const session of sessions) {
-    if (!session.archived || excludedSessionIds.has(session.id)) continue
+    if (!session.archived || session.isDraft || excludedSessionIds.has(session.id)) continue
     if (session.sourceAutomationId) {
       automationSessions.push(session)
       continue

@@ -2383,8 +2383,9 @@ export function registerIpcHandlers(): void {
   // 创建 Agent 会话
   ipcMain.handle(
     AGENT_IPC_CHANNELS.CREATE_SESSION,
-    async (_, title?: string, channelId?: string, workspaceId?: string, modelId?: string): Promise<AgentSessionMeta> => {
-      const session = createAgentSession(title, channelId, workspaceId, modelId)
+    async (_, title?: string, channelId?: string, workspaceId?: string, modelId?: string, isDraft?: boolean): Promise<AgentSessionMeta> => {
+      if (isDraft !== undefined && typeof isDraft !== 'boolean') throw new Error('Agent 草稿状态非法')
+      const session = createAgentSession(title, channelId, workspaceId, modelId, undefined, undefined, isDraft)
       feishuBridgeManager.ensureSessionMirror(session).catch((error) => {
         console.error('[飞书 Session 镜像] 新会话建群失败:', error)
       })
@@ -2594,6 +2595,10 @@ export function registerIpcHandlers(): void {
       if (newPinned && current.archived) {
         updates.archived = false
       }
+      // 用户明确置顶临时草稿时，将其提升为普通会话，避免被草稿过滤后不可见。
+      if (newPinned && current.isDraft) {
+        updates.isDraft = false
+      }
       return updateAgentSessionMeta(id, updates)
     }
   )
@@ -2636,6 +2641,10 @@ export function registerIpcHandlers(): void {
       const updates: Partial<AgentSessionMeta> = { archived: newArchived }
       if (newArchived && current.pinned) {
         updates.pinned = false
+      }
+      // 手动归档是明确的保留意图；将草稿提升为普通归档会话，保留可见入口。
+      if (newArchived && current.isDraft) {
+        updates.isDraft = false
       }
       return updateAgentSessionMeta(id, updates)
     }
@@ -5908,6 +5917,23 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(VAULT_IPC_CHANNELS.READ_FILE, async (_, relativePath: unknown) => {
     if (typeof relativePath !== 'string') throw new Error('Vault relativePath 必填')
     return getConfiguredVaultFileSystem().readFile(relativePath)
+  })
+
+  ipcMain.handle(VAULT_IPC_CHANNELS.RESOLVE_MEDIA, async (_, noteRelativePath: unknown, src: unknown): Promise<ResolvedFileUrl | null> => {
+    if (typeof noteRelativePath !== 'string' || typeof src !== 'string') return null
+    const resolvedPath = getConfiguredVaultFileSystem().resolveMedia(noteRelativePath, src)
+    return resolvedPath ? { url: registerPromaFilePath(resolvedPath) } : null
+  })
+
+  ipcMain.handle(VAULT_IPC_CHANNELS.SAVE_PASTED_IMAGE, async (_, input: unknown): Promise<{ src: string } | null> => {
+    if (!input || typeof input !== 'object') return null
+    const value = input as Record<string, unknown>
+    if (typeof value.noteRelativePath !== 'string' || typeof value.mimeType !== 'string' || typeof value.base64 !== 'string') return null
+    return getConfiguredVaultFileSystem().savePastedImage({
+      noteRelativePath: value.noteRelativePath,
+      mimeType: value.mimeType,
+      base64: value.base64,
+    })
   })
 
   ipcMain.handle(VAULT_IPC_CHANNELS.WRITE_FILE, async (_, input: unknown) => {

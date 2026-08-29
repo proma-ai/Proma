@@ -23,4 +23,5 @@ describe('Pi WSL Bash', () => {
   test('Given a Linux path When converting for WSL Then leaves it unchanged', () => {
     expect(windowsPathToWslPath('/home/alice/project')).toBe('/home/alice/project')
   })
+
 })

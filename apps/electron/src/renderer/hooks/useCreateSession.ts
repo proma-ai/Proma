@@ -85,6 +85,7 @@ export function useCreateSession(): CreateSessionActions {
         options?.channelId ?? agentChannelId ?? undefined,
         currentWorkspaceId || undefined,
         options?.modelId ?? agentModelId ?? undefined,
+        options?.draft,
       )
       setAgentSessions((prev) => [meta, ...prev])
       if (options?.open !== false) openSession('agent', meta.id, meta.title)

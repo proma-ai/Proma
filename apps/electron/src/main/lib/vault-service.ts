@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   closeSync,
   existsSync,
@@ -23,17 +23,28 @@ import type {
   VaultFocus,
   VaultReadResult,
   VaultRenameInput,
+  VaultSavePastedImageInput,
   VaultSummary,
   VaultWriteInput,
   VaultWriteResult,
 } from '@proma/shared'
 import { getDefaultVaultDir, getVaultConfigPath, resolveDefaultVaultDir } from './config-paths'
 import { readJsonFileSafe, writeJsonFileAtomic, writeTextFileAtomic } from './safe-file'
+import { isValidImageBytes } from './image-content-validation'
 
 const MAX_VAULT_FILE_BYTES = 2 * 1024 * 1024
 const MAX_VAULT_FILES = 5_000
 const MAX_VAULT_DEPTH = 16
 const HIDDEN_DIRECTORY_PREFIX = '.'
+const MAX_VAULT_PASTED_IMAGE_BYTES = 10 * 1024 * 1024
+// Reject oversize renderer IPC before decoding into an additional Node Buffer.
+const MAX_VAULT_PASTED_IMAGE_BASE64_CHARS = Math.ceil(MAX_VAULT_PASTED_IMAGE_BYTES / 3) * 4
+const PASTED_IMAGE_EXTENSIONS: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+}
 
 function sha256(content: string): string {
   return createHash('sha256').update(content, 'utf-8').digest('hex')
@@ -227,6 +238,8 @@ export function getVaultUserContext(sessionId: string): VaultUserContextSnapshot
 export interface VaultFileSystem {
   listFiles(): VaultFileEntry[]
   readFile(relativePath: string): VaultReadResult
+  resolveMedia(noteRelativePath: string, src: string): string | null
+  savePastedImage(input: VaultSavePastedImageInput): { src: string } | null
   writeFile(input: VaultWriteInput): VaultWriteResult
   createUntitledNote(inboxPath: string, content?: string, now?: Date): VaultWriteResult
   createUntitledNoteInFolder(folderPath: string, content?: string, now?: Date): VaultWriteResult
@@ -290,6 +303,57 @@ export function createVaultFileSystem(rootPath: string): VaultFileSystem {
       sha256: sha256(content),
       modifiedAt: stats.mtimeMs,
     }
+  }
+
+  const resolveMedia = (noteRelativePath: string, src: string): string | null => {
+    if (typeof src !== 'string' || !src.trim() || src.includes('\0')) return null
+    const note = getSafeVaultTarget(root, noteRelativePath)
+    const source = src.trim().replace(/[?#].*$/, '')
+    if (!source) return null
+
+    let candidate: string
+    try {
+      candidate = source.toLowerCase().startsWith('file:')
+        ? decodeURIComponent(new URL(source).pathname)
+        : resolve(dirname(note.absolutePath), decodeURIComponent(source))
+    } catch {
+      return null
+    }
+    if (!isWithinRoot(root, candidate)) return null
+
+    const relativeCandidate = toRelativePath(root, candidate)
+    try {
+      const target = getSafeVaultPath(root, relativeCandidate)
+      return existsSync(target.absolutePath) && lstatSync(target.absolutePath).isFile() ? target.absolutePath : null
+    } catch {
+      return null
+    }
+  }
+
+  const savePastedImage = (input: VaultSavePastedImageInput): { src: string } | null => {
+    const extension = PASTED_IMAGE_EXTENSIONS[input.mimeType]
+    if (!extension || typeof input.base64 !== 'string' || input.base64.length === 0 || input.base64.length > MAX_VAULT_PASTED_IMAGE_BASE64_CHARS) return null
+    const normalizedBase64 = input.base64.replace(/\s/g, '')
+    if (!normalizedBase64 || normalizedBase64.length > MAX_VAULT_PASTED_IMAGE_BASE64_CHARS || normalizedBase64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(normalizedBase64)) return null
+
+    let data: Buffer
+    try {
+      data = Buffer.from(normalizedBase64, 'base64')
+    } catch {
+      return null
+    }
+    if (data.length === 0 || data.length > MAX_VAULT_PASTED_IMAGE_BYTES || !isValidImageBytes(input.mimeType, data)) return null
+
+    const note = getSafeVaultTarget(root, input.noteRelativePath)
+    const directory = dirname(note.relativePath)
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const filename = `pasted-image-${timestamp}-${randomUUID()}.${extension}`
+    const mediaRelativePath = directory === '.' ? `assets/${filename}` : `${directory}/assets/${filename}`
+    const target = getSafeVaultPath(root, mediaRelativePath)
+    mkdirSync(dirname(target.absolutePath), { recursive: true })
+    const revalidated = getSafeVaultPath(root, mediaRelativePath)
+    writeFileSync(revalidated.absolutePath, data, { flag: 'wx' })
+    return { src: toRelativePath(dirname(note.absolutePath), revalidated.absolutePath) }
   }
 
   const writeFile = (input: VaultWriteInput): VaultWriteResult => {
@@ -413,7 +477,7 @@ export function createVaultFileSystem(rootPath: string): VaultFileSystem {
     unlinkSync(revalidated.absolutePath)
   }
 
-  return { listFiles, readFile, writeFile, createUntitledNote, createUntitledNoteInFolder, createFolder, renameFile, deleteFile }
+  return { listFiles, readFile, resolveMedia, savePastedImage, writeFile, createUntitledNote, createUntitledNoteInFolder, createFolder, renameFile, deleteFile }
 }
 
 

@@ -1,6 +1,5 @@
 import { existsSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
 import { spawn, type IPty } from 'node-pty'
 import {
   isTerminalProfile,
@@ -9,10 +8,10 @@ import {
   type TerminalInput,
   type TerminalOutputAck,
   type TerminalOutputEvent,
-  type TerminalProfile,
   type TerminalResizeInput,
   type TerminalState,
 } from '@proma/shared'
+import { resolveTerminalShell } from './terminal-shell-resolver'
 
 type MessagePortLike = {
   on(event: 'message', listener: (event: { data: unknown }) => void): void
@@ -116,8 +115,8 @@ function createTerminal(input: RuntimeTerminalCreateInput): void {
     return
   }
   const profile = isTerminalProfile(input.profile) ? input.profile : 'default'
-  const shell = resolveShell(profile)
   try {
+    const shell = resolveTerminalShell(profile)
     const cwd = getSafeCwd(input.cwd, input.strictCwd === true)
     const pty = spawn(shell.file, shell.args, {
       name: 'xterm-256color',
@@ -245,30 +244,6 @@ function isDirectory(path: string | undefined): path is string {
 
 function normalizeDimension(value: number): number {
   return Number.isFinite(value) ? Math.max(1, Math.floor(value)) : 1
-}
-
-function resolveShell(profile: TerminalProfile): { file: string; args: string[]; title: string } {
-  if (process.platform === 'darwin') {
-    const shell = profile === 'bash' ? '/bin/bash' : process.env.SHELL || '/bin/zsh'
-    return { file: shell, args: ['-l'], title: shell.split('/').pop() || 'Terminal' }
-  }
-  if (process.platform === 'win32') return resolveWindowsShell(profile)
-  const shell = profile === 'zsh' ? '/bin/zsh' : process.env.SHELL || '/bin/bash'
-  return { file: shell, args: ['-l'], title: shell.split('/').pop() || 'Terminal' }
-}
-
-function resolveWindowsShell(profile: TerminalProfile): { file: string; args: string[]; title: string } {
-  const programFiles = process.env.ProgramFiles || 'C:\\Program Files'
-  const gitBash = join(programFiles, 'Git', 'bin', 'bash.exe')
-  const powershell = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
-  if (profile === 'wsl') return { file: 'wsl.exe', args: [], title: 'WSL' }
-  if (profile === 'git-bash' && existsSync(gitBash)) return { file: gitBash, args: ['--login', '-i'], title: 'Git Bash' }
-  if (profile === 'cmd') return { file: process.env.ComSpec || 'cmd.exe', args: [], title: 'Command Prompt' }
-  if (profile === 'pwsh' || profile === 'powershell') return { file: 'pwsh.exe', args: ['-NoLogo'], title: 'PowerShell' }
-  // 默认使用系统 Windows PowerShell；PowerShell 7、Git Bash 与 WSL 由 profile 显式选择。
-  if (profile === 'default' && existsSync(powershell)) return { file: powershell, args: ['-NoLogo'], title: 'PowerShell' }
-  if (profile === 'default') return { file: process.env.ComSpec || 'cmd.exe', args: [], title: 'Command Prompt' }
-  return { file: process.env.ComSpec || 'cmd.exe', args: [], title: 'Command Prompt' }
 }
 
 function isRuntimeRequest(value: unknown): value is RuntimeRequest {

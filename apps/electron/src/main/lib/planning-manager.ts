@@ -1342,6 +1342,8 @@ export function snoozePlanningReminder(id: string, minutes: number): PlanningRem
   return (result.changes ?? 0) > 0 ? getReminder(id) : undefined
 }
 function getReminder(id: string): PlanningReminder | undefined { const row = getDatabase().prepare('SELECT * FROM planning_reminders WHERE id=:id').get({ id }) as ReminderRow | undefined; return row ? reminderFromRow(row) : undefined }
+/** 读取提醒以在上层能力开关中核验其归属类型。 */
+export function getPlanningReminder(id: string): PlanningReminder | undefined { return getReminder(id) }
 export function listActivePlanningReminders(): ActivePlanningReminder[] {
   const rows = getDatabase().prepare(`SELECT * FROM planning_reminders WHERE status='pending' AND COALESCE(snoozed_until,trigger_at) <= :now ORDER BY COALESCE(snoozed_until,trigger_at)`).all({ now: Date.now() }) as ReminderRow[]
   return rows.flatMap((row): ActivePlanningReminder[] => { const target = row.target_type === 'todo' ? getTodo(row.target_id) : getCalendarEvent(row.target_id); if (!target) return []; return [{ ...reminderFromRow(row), targetTitle: target.title, group: target.group, tags: target.tags }] })

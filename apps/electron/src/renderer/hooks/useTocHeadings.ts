@@ -49,7 +49,13 @@ export function useTocHeadings(
         if (!text) continue
         const level = el.dataset.tocLevel ? Number(el.dataset.tocLevel) : Number(el.tagName.slice(1))
         if (!Number.isInteger(level) || level < 1 || level > 6) continue
-        if (!el.id) el.id = slug(text)
+        const generatedId = slug(text)
+        // Preserve author-provided heading ids, but keep our generated anchors in
+        // sync when a preview updates a heading in place (including same-length edits).
+        if (!el.id || el.dataset.tocGeneratedId === 'true') {
+          el.id = generatedId
+          el.dataset.tocGeneratedId = 'true'
+        }
         next.push({ id: el.id, level, text, el })
       }
       setHeadings((prev) => (sameHeadings(prev, next) ? prev : next))
@@ -73,7 +79,7 @@ export function useTocHeadings(
     }
 
     const observer = new MutationObserver(schedule)
-    observer.observe(container, { childList: true, subtree: true })
+    observer.observe(container, { childList: true, characterData: true, subtree: true })
 
     return () => {
       observer.disconnect()

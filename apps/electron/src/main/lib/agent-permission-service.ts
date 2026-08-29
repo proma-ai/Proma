@@ -249,7 +249,8 @@ export class AgentPermissionService {
     // 安全工具白名单
     if (SAFE_TOOLS.includes(toolName)) return true
 
-    // Bash 工具：检查命令是否匹配安全模式
+    // Bash 工具：检查命令是否匹配安全模式。PowerShell 尚无等价的命令
+    // 分类器，因此全部经用户确认，不能按只读命令自动放行。
     if (toolName === 'Bash') {
       const command = typeof input.command === 'string' ? input.command : ''
       return isSafeBashCommand(command)
@@ -264,6 +265,10 @@ export class AgentPermissionService {
   private isWhitelisted(sessionId: string, toolName: string, input: Record<string, unknown>): boolean {
     const whitelist = this.sessionWhitelists.get(sessionId)
     if (!whitelist) return false
+
+    // PowerShell 尚未实现命令级白名单和危险命令分类，绝不能把某次
+    // 批准扩展为整个工具的会话授权。
+    if (toolName === 'PowerShell') return false
 
     // 非 Bash 工具：检查工具名是否在白名单中
     if (toolName !== 'Bash') {
@@ -285,7 +290,8 @@ export class AgentPermissionService {
     const whitelist = this.getOrCreateWhitelist(sessionId)
 
     if (toolName !== 'Bash') {
-      whitelist.allowedTools.add(toolName)
+      // 防御性兜底：即使调用方错误请求“始终允许”，PowerShell 也不得进入工具级白名单。
+      if (toolName !== 'PowerShell') whitelist.allowedTools.add(toolName)
     } else {
       const command = typeof input.command === 'string' ? input.command : ''
       const baseCommand = this.extractBaseCommand(command)
@@ -333,7 +339,7 @@ export class AgentPermissionService {
     input: Record<string, unknown>,
     options: CanUseToolOptions,
   ): PermissionRequest {
-    const command = toolName === 'Bash' && typeof input.command === 'string'
+    const command = (toolName === 'Bash' || toolName === 'PowerShell') && typeof input.command === 'string'
       ? input.command
       : undefined
 
@@ -351,6 +357,8 @@ export class AgentPermissionService {
       sdkDisplayName: options.displayName,
       sdkTitle: options.title,
       sdkDescription: options.description,
+      // PowerShell 目前没有 Bash 等价的命令级白名单和危险分类；每次都要求明确批准。
+      ...(toolName === 'PowerShell' ? { allowAlways: false } : {}),
     }
   }
 
@@ -363,6 +371,10 @@ export class AgentPermissionService {
         return typeof input.command === 'string'
           ? `执行命令: ${input.command.slice(0, 200)}`
           : '执行 Bash 命令'
+      case 'PowerShell':
+        return typeof input.command === 'string'
+          ? `执行 PowerShell 命令: ${input.command.slice(0, 200)}`
+          : '执行 PowerShell 命令'
       case 'Write':
         return typeof input.file_path === 'string'
           ? `写入文件: ${input.file_path}`

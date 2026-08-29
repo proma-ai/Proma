@@ -163,6 +163,7 @@ import type {
   VaultFocus,
   VaultReadResult,
   VaultRenameInput,
+  VaultSavePastedImageInput,
   VaultSummary,
   VaultWriteInput,
   VaultWriteResult,
@@ -532,6 +533,8 @@ export interface ElectronAPI {
   authorizeDiscoveredVault: (rootPath: string, options?: { inboxPath?: string; allowAgentWrites?: boolean }) => Promise<VaultSummary>
   listVaultFiles: () => Promise<VaultFileEntry[]>
   readVaultFile: (relativePath: string) => Promise<VaultReadResult>
+  resolveVaultMedia: (noteRelativePath: string, src: string) => Promise<import('@proma/shared').ResolvedFileUrl | null>
+  saveVaultPastedImage: (input: VaultSavePastedImageInput) => Promise<{ src: string } | null>
   writeVaultFile: (input: VaultWriteInput) => Promise<VaultWriteResult>
   createUntitledVaultFile: () => Promise<VaultWriteResult>
   createUntitledVaultFileInFolder: (folderPath: string) => Promise<VaultWriteResult>
@@ -614,8 +617,8 @@ export interface ElectronAPI {
   /** 获取归档会话数量，不返回归档元数据 */
   countArchivedAgentSessions: () => Promise<number>
 
-  /** 创建 Agent 会话 */
-  createAgentSession: (title?: string, channelId?: string, workspaceId?: string, modelId?: string) => Promise<AgentSessionMeta>
+  /** 创建 Agent 会话；草稿会话在首条消息发送前不会出现在侧栏。 */
+  createAgentSession: (title?: string, channelId?: string, workspaceId?: string, modelId?: string, isDraft?: boolean) => Promise<AgentSessionMeta>
 
   /** 获取当前主进程仍在执行的 Agent 会话，供 renderer 重载后恢复运行态 */
   listActiveAgentSessionSnapshots: () => Promise<AgentActiveSessionSnapshot[]>
@@ -1932,6 +1935,8 @@ const electronAPI: ElectronAPI = {
   authorizeDiscoveredVault: (rootPath: string, options?: { inboxPath?: string; allowAgentWrites?: boolean }) => ipcRenderer.invoke(VAULT_IPC_CHANNELS.AUTHORIZE_CANDIDATE, rootPath, options),
   listVaultFiles: () => ipcRenderer.invoke(VAULT_IPC_CHANNELS.LIST_FILES),
   readVaultFile: (relativePath: string) => ipcRenderer.invoke(VAULT_IPC_CHANNELS.READ_FILE, relativePath),
+  resolveVaultMedia: (noteRelativePath: string, src: string) => ipcRenderer.invoke(VAULT_IPC_CHANNELS.RESOLVE_MEDIA, noteRelativePath, src),
+  saveVaultPastedImage: (input: VaultSavePastedImageInput) => ipcRenderer.invoke(VAULT_IPC_CHANNELS.SAVE_PASTED_IMAGE, input),
   writeVaultFile: (input: VaultWriteInput) => ipcRenderer.invoke(VAULT_IPC_CHANNELS.WRITE_FILE, input),
   createUntitledVaultFile: () => ipcRenderer.invoke(VAULT_IPC_CHANNELS.CREATE_UNTITLED_FILE),
   createUntitledVaultFileInFolder: (folderPath: string) => ipcRenderer.invoke(VAULT_IPC_CHANNELS.CREATE_UNTITLED_FILE_IN_FOLDER, folderPath),
@@ -2035,8 +2040,8 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.COUNT_ARCHIVED_SESSIONS)
   },
 
-  createAgentSession: (title?: string, channelId?: string, workspaceId?: string, modelId?: string) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.CREATE_SESSION, title, channelId, workspaceId, modelId)
+  createAgentSession: (title?: string, channelId?: string, workspaceId?: string, modelId?: string, isDraft?: boolean) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.CREATE_SESSION, title, channelId, workspaceId, modelId, isDraft)
   },
 
   listActiveAgentSessionSnapshots: () => {

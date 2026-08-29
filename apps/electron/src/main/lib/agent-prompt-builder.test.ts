@@ -37,6 +37,7 @@ function buildPrompt(agentCwd: string): string {
     sessionId: 'session-1',
     agentCwd,
     permissionMode: 'bypassPermissions',
+    productivityTools: { todosEnabled: true, calendarEnabled: true, obsidianEnabled: true },
   })
 }
 
@@ -65,6 +66,7 @@ describe('项目与会话工作台提示词', () => {
       sessionId: 'session-1',
       agentCwd: '/tmp/sample-project',
       permissionMode: 'bypassPermissions',
+    productivityTools: { todosEnabled: true, calendarEnabled: true, obsidianEnabled: true },
       projectInstructions: {
         projectRoot: '/tmp/sample-project',
         sources: [{
@@ -123,6 +125,7 @@ test('Given 新会话 workbench root 布局 When 构建提示词 Then 不再使�
     agentCwd: '/tmp/sample-project',
     sessionWorkbenchLayout: 'root',
     permissionMode: 'bypassPermissions',
+    productivityTools: { todosEnabled: true, calendarEnabled: true, obsidianEnabled: true },
   })
 
   expect(prompt).toContain('/session-1`，用于本次任务')

@@ -50,7 +50,7 @@ export function MarkdownToc({ containerRef, contentKey, enabled, onOpenChange }:
   return (
     <nav
       aria-label="文档目录"
-      className="flex flex-col w-52 shrink-0 self-start max-h-full m-2 rounded-lg bg-muted/40"
+      className="m-2 flex h-[calc(100%-1rem)] min-h-0 w-52 shrink-0 self-start flex-col rounded-lg bg-muted/40"
     >
       <div className="flex items-center gap-2 px-3 pt-2 pb-1">
         <div className="min-w-0 flex-1 text-[11px] font-medium text-foreground/40 select-none">目录</div>
@@ -70,7 +70,7 @@ export function MarkdownToc({ containerRef, contentKey, enabled, onOpenChange }:
           </Tooltip>
         )}
       </div>
-      <div ref={listRef} className="min-h-0 overflow-auto scrollbar-thin px-1 pb-2">
+      <div ref={listRef} className="min-h-0 flex-1 overflow-auto scrollbar-thin px-1 pb-2">
         {headings.map((heading) => {
           const active = heading.id === activeId
           return (

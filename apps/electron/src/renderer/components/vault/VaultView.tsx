@@ -222,21 +222,37 @@ function VaultMarkdownEditor({
   onOpenTutorial,
 }: {
   readResult: VaultReadResult
-  onSave: (nextContent: string, options?: { silent?: boolean }) => Promise<void>
+  onSave: (nextContent: string, options?: { silent?: boolean; expectedSha256?: string }) => Promise<void>
   onRename: (name: string) => Promise<void>
   onOpenTutorial: () => void
 }): React.ReactElement {
   const [draft, setDraft] = React.useState(readResult.content)
-  const previousReadContentRef = React.useRef(readResult.content)
+  const lastReadContentRef = React.useRef(readResult.content)
+  const saveBaseRef = React.useRef({ content: readResult.content, sha256: readResult.sha256 })
+  const externalConflictRef = React.useRef(false)
   const [saving, setSaving] = React.useState(false)
   const [filename, setFilename] = React.useState(displayDocumentTitle(readResult.relativePath.split('/').pop() ?? readResult.relativePath))
   const editorPageRef = React.useRef<HTMLDivElement>(null)
   React.useEffect(() => {
-    const previousReadContent = previousReadContentRef.current
-    previousReadContentRef.current = readResult.content
-    if (!shouldAdoptVaultReadContent(draft, previousReadContent)) return
+    const previousReadContent = lastReadContentRef.current
+    if (readResult.content === previousReadContent) return
+    lastReadContentRef.current = readResult.content
+
+    // A direct Agent/external write must never replace the revision used to save
+    // a dirty draft. Keeping the prior SHA forces the existing optimistic-write
+    // conflict path instead of silently overwriting the Agent's document.
+    if (!shouldAdoptVaultReadContent(draft, previousReadContent) && readResult.content !== draft) {
+      if (!externalConflictRef.current) {
+        externalConflictRef.current = true
+        toast.error('笔记已被外部修改；本地草稿未保存，请重新打开后合并')
+      }
+      return
+    }
+
+    externalConflictRef.current = false
+    saveBaseRef.current = { content: readResult.content, sha256: readResult.sha256 }
     setDraft(readResult.content)
-  }, [draft, readResult.content])
+  }, [draft, readResult.content, readResult.sha256])
 
 
   const handleEditorPageWheel = (event: React.WheelEvent<HTMLDivElement>): void => {
@@ -248,20 +264,20 @@ function VaultMarkdownEditor({
   }
 
   const save = React.useCallback(async (silent = false): Promise<void> => {
-    if (saving || draft === readResult.content) return
+    if (saving || externalConflictRef.current || draft === saveBaseRef.current.content) return
     setSaving(true)
     try {
-      await onSave(draft, { silent })
+      await onSave(draft, { silent, expectedSha256: saveBaseRef.current.sha256 })
     } finally {
       setSaving(false)
     }
-  }, [draft, onSave, readResult.content, saving])
+  }, [draft, onSave, saving])
 
   React.useEffect(() => {
-    if (saving || draft === readResult.content) return
+    if (saving || externalConflictRef.current || draft === saveBaseRef.current.content) return
     const timer = window.setTimeout(() => { void save(true) }, 700)
     return () => window.clearTimeout(timer)
-  }, [draft, readResult.content, save, saving])
+  }, [draft, save, saving])
 
   const rename = async (): Promise<void> => {
     const currentName = displayDocumentTitle(readResult.relativePath.split('/').pop() ?? readResult.relativePath)
@@ -311,6 +327,7 @@ function VaultMarkdownEditor({
         </div>
         <div className="min-h-0 flex-1">
           <VaultLiveMarkdownEditor
+            relativePath={readResult.relativePath}
             value={draft}
             onChange={setDraft}
             onSave={() => { void save() }}
@@ -325,6 +342,7 @@ function VaultMarkdownPane({
   readResult,
   loading,
   hasVault,
+  reopenVersion,
   onSave,
   onRename,
   onOpenTutorial,
@@ -332,7 +350,8 @@ function VaultMarkdownPane({
   readResult: VaultReadResult | null
   loading: boolean
   hasVault: boolean
-  onSave: (nextContent: string, options?: { silent?: boolean }) => Promise<void>
+  reopenVersion: number
+  onSave: (nextContent: string, options?: { silent?: boolean; expectedSha256?: string }) => Promise<void>
   onRename: (name: string) => Promise<void>
   onOpenTutorial: () => void
 }): React.ReactElement {
@@ -356,7 +375,7 @@ function VaultMarkdownPane({
   return (
     <section className="flex min-w-0 flex-1 flex-col bg-muted/25">
       <VaultMarkdownEditor
-        key={getVaultEditorKey(readResult.relativePath)}
+        key={getVaultEditorKey(readResult.relativePath, reopenVersion)}
         readResult={readResult}
         onSave={onSave}
         onRename={onRename}
@@ -374,6 +393,7 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
   const [files, setFiles] = React.useState<VaultFileEntry[]>([])
   const [loading, setLoading] = React.useState(true)
   const [fileLoading, setFileLoading] = React.useState(false)
+  const [editorReopenVersion, setEditorReopenVersion] = React.useState(0)
   const [selectedFile, setSelectedFile] = useAtom(selectedVaultFileAtom)
   const [focusedFolder, setFocusedFolder] = useAtom(focusedVaultFolderAtom)
   const [readResult, setReadResult] = useAtom(vaultReadResultAtom)
@@ -495,6 +515,35 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
     void refresh({ showLoading })
   }, [refresh, refreshToken])
 
+  // Agent tools can edit a Vault file directly, outside the renderer's own save
+  // IPC. Poll only the currently open note, never the whole Vault tree, so this
+  // stays scoped and a remote edit is reflected without changing navigation.
+  React.useEffect(() => {
+    const relativePath = readResult?.relativePath
+    const sha256 = readResult?.sha256
+    if (!relativePath || !sha256) return
+    let cancelled = false
+    let checking = false
+    const checkCurrentFile = async (): Promise<void> => {
+      if (checking || cancelled || selectedFileRef.current !== relativePath) return
+      checking = true
+      try {
+        const next = await window.electronAPI.readVaultFile(relativePath)
+        if (!cancelled && selectedFileRef.current === relativePath && next.sha256 !== sha256) setReadResult(next)
+      } catch {
+        // A concurrent rename/delete follows the existing refresh and open-file
+        // error paths; the lightweight current-file check remains silent.
+      } finally {
+        checking = false
+      }
+    }
+    const timer = window.setInterval(() => { void checkCurrentFile() }, 1_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [readResult?.relativePath, readResult?.sha256, setReadResult])
+
   const refreshVaultCandidates = React.useCallback(async (): Promise<void> => {
     setCandidatesLoading(true)
     try {
@@ -511,12 +560,18 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
   }, [refreshVaultCandidates])
 
   const openFile = React.useCallback(async (relativePath: string): Promise<void> => {
+    const reopenCurrentFile = selectedFileRef.current === relativePath
     const requestId = ++readRequestRef.current
     selectFile(relativePath)
     setFileLoading(true)
     try {
       const result = await window.electronAPI.readVaultFile(relativePath)
-      if (requestId === readRequestRef.current) setReadResult(result)
+      if (requestId === readRequestRef.current) {
+        setReadResult(result)
+        // An explicit click on the selected note is the recovery path after an
+        // external-write conflict: discard the local draft and remount from disk.
+        if (reopenCurrentFile) setEditorReopenVersion((version) => version + 1)
+      }
     } catch (error) {
       if (requestId === readRequestRef.current) {
         toast.error(error instanceof Error ? error.message : '无法打开笔记')
@@ -616,13 +671,13 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
     }
   }
 
-  const save = async (content: string, { silent = false }: { silent?: boolean } = {}): Promise<void> => {
+  const save = async (content: string, { silent = false, expectedSha256 }: { silent?: boolean; expectedSha256?: string } = {}): Promise<void> => {
     if (!readResult) return
     try {
       const result = await window.electronAPI.writeVaultFile({
         relativePath: readResult.relativePath,
         content,
-        expectedSha256: readResult.sha256,
+        expectedSha256: expectedSha256 ?? readResult.sha256,
       })
       if (!result.ok) {
         toast.error('文件已在外部修改，请重新打开后再保存')
@@ -821,6 +876,7 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
             readResult={readResult}
             loading={fileLoading}
             hasVault={config !== null}
+            reopenVersion={editorReopenVersion}
             onSave={save}
             onRename={rename}
             onOpenTutorial={() => setVaultHelpOpen(true)}
