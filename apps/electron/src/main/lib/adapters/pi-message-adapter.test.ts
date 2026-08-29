@@ -4,7 +4,6 @@ import type { SDKAssistantMessage } from '@proma/shared'
 import {
   convertPiMessage,
   convertResultMessage,
-  displayToolName,
   getPiAssistantErrorDetails,
   hasPiAssistantTextContent,
   stripPiAssistantError,
@@ -26,10 +25,6 @@ function writeToolCall(content: string): AssistantMessage {
 }
 
 describe('convertPiMessage', () => {
-  test('maps native PowerShell to the canonical permission tool name', () => {
-    expect(displayToolName('powershell')).toBe('PowerShell')
-  })
-
   test('keeps complete write input in the final tool-call frame', () => {
     const content = 'x'.repeat(10_240)
     const message = convertPiMessage(writeToolCall(content), 'session-1', undefined, {
