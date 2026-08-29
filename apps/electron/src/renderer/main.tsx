@@ -94,7 +94,8 @@ const isVoiceDictationIndicatorWindow = new URLSearchParams(window.location.sear
 const isDetachedPreviewWindow = new URLSearchParams(window.location.search).get('window') === 'detached-preview'
 const isWorkspaceMemoryWindow = new URLSearchParams(window.location.search).get('window') === 'workspace-memory'
 const isAgentStatusHoverWindow = new URLSearchParams(window.location.search).get('window') === 'agent-status-hover'
-const isMainWindow = !isQuickTaskWindow && !isVoiceDictationIndicatorWindow && !isDetachedPreviewWindow && !isWorkspaceMemoryWindow && !isAgentStatusHoverWindow
+const isAddTabMenuWindow = new URLSearchParams(window.location.search).get('window') === 'add-tab-menu'
+const isMainWindow = !isQuickTaskWindow && !isVoiceDictationIndicatorWindow && !isDetachedPreviewWindow && !isWorkspaceMemoryWindow && !isAgentStatusHoverWindow && !isAddTabMenuWindow
 
 initializePerformanceMonitor()
 
@@ -1054,6 +1055,15 @@ if (isQuickTaskWindow) {
       <React.StrictMode>
         <ThemeInitializer />
         <HoverPanel />
+      </React.StrictMode>
+    )
+  })
+} else if (isAddTabMenuWindow) {
+  import('./components/diff/AddTabMenuWindowApp').then(({ AddTabMenuWindowApp }) => {
+    ReactDOM.createRoot(document.getElementById('root')!).render(
+      <React.StrictMode>
+        <ThemeInitializer />
+        <AddTabMenuWindowApp />
       </React.StrictMode>
     )
   })

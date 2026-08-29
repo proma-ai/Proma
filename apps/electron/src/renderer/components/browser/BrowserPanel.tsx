@@ -20,19 +20,14 @@ import { browserPendingNavigationMapAtom } from '@/atoms/browser-atoms'
 import { BrowserSlot } from './BrowserSlot'
 import { shouldReuseInitialBrowserTab } from './agent-browser-link-utils'
 
-/** 加号菜单最多 7 项；为原生 WebContentsView 预留完整菜单及安全间距。 */
-const ADD_TAB_MENU_CLEARANCE_PX = 256
-
 interface BrowserPanelProps {
   sessionId: string
   /** 由右侧统一顶栏选中的网页。 */
   tabId: string
   state: BrowserViewState | null
-  /** 右侧加号菜单展开时，原生浏览器必须避让其 renderer 区域。 */
-  isAddTabMenuOpen?: boolean
 }
 
-export function BrowserPanel({ sessionId, tabId, state, isAddTabMenuOpen = false }: BrowserPanelProps): React.ReactElement {
+export function BrowserPanel({ sessionId, tabId, state }: BrowserPanelProps): React.ReactElement {
   const [url, setUrl] = React.useState(state?.url ?? '')
   const [riskAcknowledged, setRiskAcknowledged] = React.useState<boolean | null>(null)
   const [savingRiskAcknowledgement, setSavingRiskAcknowledgement] = React.useState(false)
@@ -132,10 +127,7 @@ export function BrowserPanel({ sessionId, tabId, state, isAddTabMenuOpen = false
         )}
       </div>
       {riskAcknowledged === true ? (
-        <div
-          className="flex flex-1 min-h-0 flex-col"
-          style={isAddTabMenuOpen ? { paddingTop: ADD_TAB_MENU_CLEARANCE_PX } : undefined}
-        >
+        <div className="flex flex-1 min-h-0 flex-col">
           <BrowserSlot key={tabId} sessionId={sessionId} tabId={tabId} />
         </div>
       ) : (

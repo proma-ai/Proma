@@ -27,6 +27,8 @@ export function BrowserSlot({ sessionId, tabId }: { sessionId: string; tabId: st
           x: Math.round(rect.x), y: Math.round(rect.y),
           width: Math.round(rect.width), height: Math.round(rect.height),
         },
+      }).catch((error) => {
+        console.warn('[受管浏览器] 更新浏览器布局失败:', error)
       })
     }
     const publish = (visible: boolean, preserveSessionOnHide = false, immediate = false) => {
@@ -53,7 +55,9 @@ export function BrowserSlot({ sessionId, tabId }: { sessionId: string; tabId: st
       observer.disconnect()
       window.removeEventListener('resize', publishBounded)
       if (frame) cancelAnimationFrame(frame)
-      void setLayout({ sessionId, tabId, revision: nextBrowserLayoutRevision(), visible: false, preserveSessionOnHide: false, bounds: { x: 0, y: 0, width: 0, height: 0 } })
+      void setLayout({ sessionId, tabId, revision: nextBrowserLayoutRevision(), visible: false, preserveSessionOnHide: false, bounds: { x: 0, y: 0, width: 0, height: 0 } }).catch((error) => {
+        console.warn('[受管浏览器] 清理浏览器布局失败:', error)
+      })
     }
   }, [sessionId, tabId])
 

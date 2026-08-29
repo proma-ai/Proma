@@ -7,6 +7,19 @@ export interface BrowserViewBounds {
   height: number
 }
 
+export type BrowserAddTabMenuAction = 'browser' | 'file' | 'terminal' | 'todos' | 'calendar' | 'skills' | 'mcp' | 'memory' | 'automations' | 'vault'
+
+export interface BrowserAddTabMenuInput {
+  sessionId: string
+  x: number
+  y: number
+}
+
+export interface BrowserAddTabMenuActionInput {
+  token: string
+  action: BrowserAddTabMenuAction
+}
+
 export interface BrowserViewLayout {
   sessionId: string
   tabId?: string
