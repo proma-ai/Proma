@@ -6,18 +6,10 @@
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { Blocks, Brain, CalendarDays, Clock, Columns2, FolderOpen, Globe, ListTodo, MessageCircle, PanelRight, Plus, Repeat2, ServerCog, SquareTerminal, X } from 'lucide-react'
-import { OBSIDIAN_NAME, ObsidianIcon } from '@/components/obsidian/obsidian-brand'
+import { Columns2, PanelRight, Plus, Repeat2, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getScrollLeftToRevealTab } from '@/lib/tab-visibility'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -47,9 +39,7 @@ interface DiffPanelTabBarProps {
   activeTab: AgentSidePanelTab
   onTabChange: (tab: AgentSidePanelTab) => void
   onCloseTab: (tab: AgentSidePanelTab) => void
-  onOpenBrowser: () => void
-  /** 加号菜单是否展开；供原生浏览器视图临时避让。 */
-  onAddTabMenuOpenChange?: (open: boolean) => void
+  onOpenNativeAddTabMenu: (position: { x: number; y: number }) => void
   onOpenFile: () => void
   onOpenTerminal?: () => void
   onOpenWorkspaceComponent?: (component: WorkspaceComponentTab) => void
@@ -71,8 +61,7 @@ export function DiffPanelTabBar({
   activeTab,
   onTabChange,
   onCloseTab,
-  onOpenBrowser,
-  onAddTabMenuOpenChange,
+  onOpenNativeAddTabMenu,
   onOpenFile,
   onOpenTerminal,
   onOpenWorkspaceComponent,
@@ -91,27 +80,17 @@ export function DiffPanelTabBar({
   const setUnseenMap = useSetAtom(agentDiffUnseenChangesAtom)
   const currentSessionId = useAtomValue(currentAgentSessionIdAtom)
   const unseenChanges = unseenMap.get(currentSessionId ?? '') ?? false
-  const [isAddTabMenuOpen, setIsAddTabMenuOpen] = React.useState(false)
   const [isSplitTabGroupHovered, setIsSplitTabGroupHovered] = React.useState(false)
-  // 仅鼠标在菜单外取消时抑制 Radix 的回焦；Esc 与键盘选择必须保留可见焦点。
-  const suppressPointerDismissFocusRestoreRef = React.useRef(false)
   const tabListRef = React.useRef<HTMLDivElement>(null)
   const tabRefs = React.useRef(new Map<AgentSidePanelTab, HTMLDivElement>())
   const barRef = React.useRef<HTMLDivElement>(null)
   const suppressClickTabRef = React.useRef<AgentSidePanelTab | null>(null)
   const activeTabDragCancelRef = React.useRef<(() => void) | null>(null)
 
-  React.useEffect(() => () => onAddTabMenuOpenChange?.(false), [onAddTabMenuOpenChange])
   React.useEffect(() => () => activeTabDragCancelRef.current?.(), [])
   React.useEffect(() => {
     if (!visibleTabs?.left || !visibleTabs.right) setIsSplitTabGroupHovered(false)
   }, [visibleTabs?.left, visibleTabs?.right])
-
-  const handleAddTabMenuOpenChange = React.useCallback((open: boolean) => {
-    if (open) suppressPointerDismissFocusRestoreRef.current = false
-    setIsAddTabMenuOpen(open)
-    onAddTabMenuOpenChange?.(open)
-  }, [onAddTabMenuOpenChange])
 
   React.useLayoutEffect(() => {
     const tabList = tabListRef.current
@@ -334,93 +313,25 @@ export function DiffPanelTabBar({
             <TooltipContent side="bottom">退出并排，保留当前标签</TooltipContent>
           </Tooltip>
         )}
-        <DropdownMenu open={isAddTabMenuOpen} onOpenChange={handleAddTabMenuOpenChange}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className="mr-1 inline-flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-[background-color,color,transform] hover:bg-muted hover:text-foreground active:scale-[0.96]"
-                  aria-label="添加右侧工作区标签"
-                >
-                  <Plus className="size-4" />
-                </button>
-              </DropdownMenuTrigger>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">添加标签</TooltipContent>
-          </Tooltip>
-          <DropdownMenuContent
-            align="end"
-            className="z-[100] min-w-40 titlebar-no-drag"
-            onPointerDownOutside={() => { suppressPointerDismissFocusRestoreRef.current = true }}
-            onCloseAutoFocus={(event) => {
-              if (!suppressPointerDismissFocusRestoreRef.current) return
-              suppressPointerDismissFocusRestoreRef.current = false
-              event.preventDefault()
-            }}
-          >
-            <DropdownMenuItem onSelect={onOpenBrowser}>
-              <Globe className="size-3.5" />
-              新建浏览器标签
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={onOpenFile}>
-              <FolderOpen className="size-3.5" />
-              打开文件
-            </DropdownMenuItem>
-            {onOpenTerminal && (
-              <DropdownMenuItem onSelect={onOpenTerminal}>
-                <SquareTerminal className="size-3.5" />
-                新建终端
-              </DropdownMenuItem>
-            )}
-            {onOpenWorkspaceComponent && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => onOpenWorkspaceComponent('todos')}>
-                  <ListTodo className="size-3.5" />
-                  打开 Todo
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onOpenWorkspaceComponent('calendar')}>
-                  <CalendarDays className="size-3.5" />
-                  打开日程
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onOpenWorkspaceComponent('skills')}>
-                  <Blocks className="size-3.5" />
-                  打开 Skills
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onOpenWorkspaceComponent('mcp')}>
-                  <ServerCog className="size-3.5" />
-                  打开 MCP
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onOpenWorkspaceComponent('memory')}>
-                  <Brain className="size-3.5" />
-                  打开项目记忆
-                </DropdownMenuItem>
-              </>
-            )}
-            {onOpenChat && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={onOpenChat}>
-                  <MessageCircle className="size-3.5" />
-                  打开问答
-                </DropdownMenuItem>
-              </>
-            )}
-            {onOpenWorkspaceComponent && (
-              <DropdownMenuItem onSelect={() => onOpenWorkspaceComponent('automations')}>
-                <Clock className="size-3.5" />
-                打开定时任务
-              </DropdownMenuItem>
-            )}
-            {onOpenVault && (
-              <DropdownMenuItem onSelect={onOpenVault}>
-                <ObsidianIcon className="size-3.5" />
-                打开 {OBSIDIAN_NAME}
-              </DropdownMenuItem>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className="mr-1 inline-flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-[background-color,color,transform] hover:bg-muted hover:text-foreground active:scale-[0.96]"
+              aria-label="添加右侧工作区标签"
+              onClick={(event) => {
+                const buttonRect = event.currentTarget.getBoundingClientRect()
+                onOpenNativeAddTabMenu({
+                  x: event.screenX,
+                  y: event.screenY + buttonRect.bottom - event.clientY,
+                })
+              }}
+            >
+              <Plus className="size-4" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">添加标签</TooltipContent>
+        </Tooltip>
         {onClose && (
           <Tooltip>
             <TooltipTrigger asChild>

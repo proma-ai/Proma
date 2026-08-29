@@ -84,6 +84,7 @@ import { hasActiveAgentSessions, stopAllAgents } from './lib/agent-service'
 import { stopAllTerminals } from './lib/terminal-service'
 import { disposePiMcpConnections } from './lib/adapters/pi-mcp-tools'
 import { browserController } from './lib/browser-controller'
+import { destroyAddTabMenuWindow, prepareAddTabMenuWindow } from './lib/add-tab-menu-window'
 import { markRunningDelegationsAsInterrupted } from './lib/agent-session-manager'
 import { stopAllGenerations } from './lib/chat-service'
 import { configureUpdater, initAutoUpdater, cleanupUpdater } from './lib/updater/auto-updater'
@@ -647,6 +648,7 @@ function createWindow(): void {
   }
 
   mainWindow.on('closed', () => {
+    destroyAddTabMenuWindow()
     setStoredMainWindow(null)
     browserController.dispose()
     mainWindow = null
@@ -725,6 +727,12 @@ async function bootstrap(): Promise<void> {
 
   // Create main window (will be shown when ready)
   createWindow()
+
+  // 预热加号菜单窗口，避免第一次点击时才初始化 renderer。
+  const menuWindowOwner = getMainWindow()
+  if (menuWindowOwner && !menuWindowOwner.isDestroyed()) {
+    prepareAddTabMenuWindow(menuWindowOwner)
+  }
 
   // Create system tray icon
   const hoverWin = process.platform === 'win32' ? getAgentStatusHoverWindow() : null
@@ -927,6 +935,7 @@ app.on('before-quit', () => {
   // 注销全局快捷键
   unregisterAllGlobalShortcuts()
   // 销毁辅助窗口
+  destroyAddTabMenuWindow()
   destroyQuickTaskWindow()
   destroyVoiceDictationWindow()
   destroyAgentStatusHoverWindow()

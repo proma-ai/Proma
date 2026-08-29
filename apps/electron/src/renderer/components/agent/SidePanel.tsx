@@ -1178,6 +1178,30 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     handleOpenTerminal(directoryPath, `终端 · ${directoryName}`)
   }, [handleOpenTerminal])
 
+  const handleOpenNativeAddTabMenu = React.useCallback(async (position: { x: number; y: number }) => {
+    const openMenu = (window.electronAPI as Partial<typeof window.electronAPI>).openAgentAddTabMenu
+    if (typeof openMenu !== 'function') return
+    try {
+      const action = await openMenu({ sessionId, x: position.x, y: position.y })
+      if (action === 'browser') {
+        await handleOpenBrowserTab()
+      } else if (action === 'file') {
+        handleWorkspaceTabChange('files')
+      } else if (action === 'terminal') {
+        handleOpenTerminal()
+      } else if (action === 'vault') {
+        setWorkspaceComponentTabs((previous) => previous.includes('vault') ? previous : [...previous, 'vault'])
+        setIsOpen(true)
+        handleWorkspaceTabChange('vault')
+      } else if (action === 'todos' || action === 'calendar' || action === 'skills' || action === 'mcp' || action === 'memory' || action === 'automations') {
+        setWorkspaceComponentTabs((previous) => previous.includes(action) ? previous : [...previous, action])
+        handleWorkspaceTabChange(action)
+      }
+    } catch (error) {
+      console.error('[SidePanel] 打开原生加号菜单失败:', error)
+    }
+  }, [handleOpenBrowserTab, handleOpenTerminal, handleWorkspaceTabChange, sessionId, setIsOpen, setWorkspaceComponentTabs])
+
   const handleCloseBrowserTab = React.useCallback(async (browserTabId: string): Promise<boolean> => {
     try {
       const state = await window.electronAPI.closeAgentBrowserTab({ sessionId, tabId: browserTabId })
@@ -1226,9 +1250,6 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   }, [activeBrowserTabId, browserState?.tabs, returnToPreviousTabAfterClose])
 
   const showBrowserActivity = Boolean(browserState?.activity && browserState.executionSource !== 'user')
-  // WebContentsView 是原生子视图，会盖住 renderer 的 portal。加号菜单打开时，
-  // BrowserSlot 会临时隐藏原生视图并展示快照占位，而不是压缩页面布局。
-  const [isAddTabMenuOpen, setIsAddTabMenuOpen] = React.useState(false)
   const workspaceTabs = React.useMemo<WorkspacePanelTab[]>(() => [
     { id: 'files', label: '文件', icon: <FolderOpen className="size-3.5" /> },
     { id: 'changes', label: '改动', icon: <FileDiff className="size-3.5" /> },
@@ -1544,7 +1565,6 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
               sessionId={sessionId}
               tabId={paneBrowserTabId}
               state={browserState}
-              isAddTabMenuOpen={isAddTabMenuOpen}
             />
           </div>
         )
@@ -1740,8 +1760,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
             activeTab={effectiveActiveTab}
             onTabChange={handleWorkspaceTabChange}
             onCloseTab={handleCloseWorkspaceTab}
-            onOpenBrowser={() => void handleOpenBrowserTab()}
-            onAddTabMenuOpenChange={setIsAddTabMenuOpen}
+            onOpenNativeAddTabMenu={handleOpenNativeAddTabMenu}
             onOpenFile={() => handleWorkspaceTabChange('files')}
             onOpenTerminal={handleOpenTerminal}
             onOpenWorkspaceComponent={(component) => {

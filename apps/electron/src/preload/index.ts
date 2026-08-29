@@ -263,7 +263,10 @@ export interface ElectronAPI {
   selectAgentBrowserTab: (input: import('@proma/shared').BrowserTabInput) => Promise<import('@proma/shared').BrowserViewState>
   closeAgentBrowserTab: (input: import('@proma/shared').BrowserTabInput) => Promise<import('@proma/shared').BrowserViewState | null>
   getAgentBrowserState: (sessionId: string) => Promise<import('@proma/shared').BrowserViewState | null>
-  setAgentBrowserLayout: (layout: import('@proma/shared').BrowserViewLayout) => Promise<import('@proma/shared').BrowserLayoutSnapshot | null>
+  setAgentBrowserLayout: (layout: import('@proma/shared').BrowserViewLayout) => Promise<void>
+  openAgentAddTabMenu: (input: import('@proma/shared').BrowserAddTabMenuInput) => Promise<import('@proma/shared').BrowserAddTabMenuAction | null>
+  selectAgentAddTabMenuAction: (input: import('@proma/shared').BrowserAddTabMenuActionInput) => Promise<void>
+  onAgentAddTabMenuToken: (callback: (token: string) => void) => () => void
   minimizeAgentBrowser: (sessionId: string) => Promise<void>
   navigateAgentBrowser: (input: import('@proma/shared').BrowserNavigateInput) => Promise<import('@proma/shared').BrowserViewState>
   goBackAgentBrowser: (sessionId: string) => Promise<import('@proma/shared').BrowserViewState>
@@ -1434,7 +1437,20 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_BROWSER_STATE, sessionId)
   },
   setAgentBrowserLayout: (layout: import('@proma/shared').BrowserViewLayout) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SET_BROWSER_LAYOUT, layout) as Promise<import('@proma/shared').BrowserLayoutSnapshot | null>
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SET_BROWSER_LAYOUT, layout) as Promise<void>
+  },
+  openAgentAddTabMenu: (input: import('@proma/shared').BrowserAddTabMenuInput) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.OPEN_ADD_TAB_MENU, input) as Promise<import('@proma/shared').BrowserAddTabMenuAction | null>
+  },
+  selectAgentAddTabMenuAction: (input: import('@proma/shared').BrowserAddTabMenuActionInput) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SELECT_ADD_TAB_MENU_ACTION, input) as Promise<void>
+  },
+  onAgentAddTabMenuToken: (callback: (token: string) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, token: unknown): void => {
+      if (typeof token === 'string') callback(token)
+    }
+    ipcRenderer.on(AGENT_IPC_CHANNELS.SET_ADD_TAB_MENU_TOKEN, listener)
+    return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.SET_ADD_TAB_MENU_TOKEN, listener) }
   },
   minimizeAgentBrowser: (sessionId: string) => ipcRenderer.invoke(AGENT_IPC_CHANNELS.MINIMIZE_BROWSER, sessionId),
   navigateAgentBrowser: (input: import('@proma/shared').BrowserNavigateInput) => {

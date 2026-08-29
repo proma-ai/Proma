@@ -7,10 +7,17 @@ export interface BrowserViewBounds {
   height: number
 }
 
-/** 原生视图临时避让 renderer 浮层时使用的静态占位截图；只保存在主进程内存。 */
-export interface BrowserLayoutSnapshot {
-  mimeType: 'image/jpeg'
-  base64: string
+export type BrowserAddTabMenuAction = 'browser' | 'file' | 'terminal' | 'todos' | 'calendar' | 'skills' | 'mcp' | 'memory' | 'automations' | 'vault'
+
+export interface BrowserAddTabMenuInput {
+  sessionId: string
+  x: number
+  y: number
+}
+
+export interface BrowserAddTabMenuActionInput {
+  token: string
+  action: BrowserAddTabMenuAction
 }
 
 export interface BrowserViewLayout {

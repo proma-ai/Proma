@@ -150,7 +150,9 @@ import type {
   SavePlanningSyncProfileInput,
   BrowserViewState,
   BrowserViewLayout,
-  BrowserLayoutSnapshot,
+  BrowserAddTabMenuAction,
+  BrowserAddTabMenuInput,
+  BrowserAddTabMenuActionInput,
   BrowserNavigateInput,
   BrowserTabInput,
   BrowserCreateTabInput,
@@ -158,6 +160,7 @@ import type {
 import type { UserProfile, AppSettings } from '../types'
 import { getRuntimeStatus, getGitRepoStatus, reinitializeRuntime } from './lib/runtime-init'
 import { browserController } from './lib/browser-controller'
+import { isBrowserAddTabMenuAction, openAddTabMenuWindow, selectAddTabMenuAction } from './lib/add-tab-menu-window'
 import { acknowledgeTerminalOutput, closeTerminalsForSession, createTerminal, getTerminalSnapshot, killTerminal, resizeTerminal, writeTerminal } from './lib/terminal-service'
 import { getMainWindow } from './lib/main-window-store'
 import { resolveBrowserProfileKey } from './lib/browser-profile-policy'
@@ -1265,6 +1268,31 @@ async function withOAuthDeviceCodeQr<T extends CodexOAuthDeviceCode | XaiOAuthDe
     console.warn('[OAuth] 生成设备码二维码失败:', error)
     return deviceCode
   }
+}
+
+function isValidBrowserViewLayout(value: unknown): value is BrowserViewLayout {
+  if (!value || typeof value !== 'object') return false
+  const layout = value as Record<string, unknown>
+  const bounds = layout.bounds
+  if (!bounds || typeof bounds !== 'object') return false
+  const rect = bounds as Record<string, unknown>
+  const isFiniteCoordinate = (candidate: unknown): candidate is number => (
+    typeof candidate === 'number' && Number.isFinite(candidate) && Math.abs(candidate) <= 1_000_000
+  )
+  const isValidDimension = (candidate: unknown): candidate is number => (
+    typeof candidate === 'number' && Number.isFinite(candidate) && candidate >= 0 && candidate <= 100_000
+  )
+  return (
+    typeof layout.sessionId === 'string' && layout.sessionId.length > 0
+    && (layout.tabId === undefined || typeof layout.tabId === 'string')
+    && typeof layout.visible === 'boolean'
+    && (layout.preserveSessionOnHide === undefined || typeof layout.preserveSessionOnHide === 'boolean')
+    && Number.isSafeInteger(layout.revision)
+    && isFiniteCoordinate(rect.x)
+    && isFiniteCoordinate(rect.y)
+    && isValidDimension(rect.width)
+    && isValidDimension(rect.height)
+  )
 }
 
 export function registerIpcHandlers(): void {
@@ -2415,12 +2443,32 @@ export function registerIpcHandlers(): void {
   )
   ipcMain.handle(
     AGENT_IPC_CHANNELS.SET_BROWSER_LAYOUT,
-    async (event, layout: BrowserViewLayout): Promise<BrowserLayoutSnapshot | null> => {
-      if (!layout || typeof layout.sessionId !== 'string' || !layout.bounds || !Number.isSafeInteger(layout.revision)) throw new Error('无效的浏览器布局。')
+    async (event, layout: BrowserViewLayout): Promise<void> => {
+      if (!isValidBrowserViewLayout(layout)) throw new Error('无效的浏览器布局。')
       await assertBrowserSessionAccess(event.sender.id, layout.sessionId)
-      return browserController.setLayout(layout)
+      browserController.setLayout(layout)
     },
   )
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.OPEN_ADD_TAB_MENU,
+    async (event, input: BrowserAddTabMenuInput): Promise<BrowserAddTabMenuAction | null> => {
+      if (!input || typeof input.sessionId !== 'string' || input.sessionId.length === 0 || !Number.isFinite(input.x) || Math.abs(input.x) > 1_000_000 || !Number.isFinite(input.y) || Math.abs(input.y) > 1_000_000) {
+        throw new Error('无效的右侧工作区菜单位置。')
+      }
+      await assertBrowserSessionAccess(event.sender.id, input.sessionId)
+      const mainWindow = getMainWindow()
+      if (!mainWindow || mainWindow.isDestroyed()) return null
+      return openAddTabMenuWindow(mainWindow, input)
+    },
+  )
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.SELECT_ADD_TAB_MENU_ACTION,
+    async (event, input: BrowserAddTabMenuActionInput): Promise<void> => {
+      if (!input || typeof input.token !== 'string' || input.token.length === 0 || !isBrowserAddTabMenuAction(input.action)) throw new Error('无效的右侧工作区菜单请求。')
+      selectAddTabMenuAction(input.token, input.action, event.sender.id)
+    },
+  )
+
   ipcMain.handle(
     AGENT_IPC_CHANNELS.MINIMIZE_BROWSER,
     async (event, sessionId: string): Promise<void> => {
