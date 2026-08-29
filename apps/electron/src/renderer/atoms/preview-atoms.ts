@@ -112,7 +112,10 @@ export interface QuotedSelection {
   capturedAt: number
 }
 
-/** 每会话的引用选中文本 Map（每次新选中覆盖旧值） */
+/**
+ * 每会话的单条外置选区引用（兼容 Chat 与输入框尚未挂载时的回退）。
+ * Agent 主输入框的多条引用由 RichTextInput 内联 chip 持久化在草稿中。
+ */
 export const quotedSelectionMapAtom = atom<Map<string, QuotedSelection>>(new Map())
 
 /** 当前会话的引用选中文本（派生） */

@@ -38,8 +38,11 @@ import {
 import type { QuotedSelection } from '@/atoms/preview-atoms'
 import {
   buildAgentHistoryQuoteLabel,
+  buildQuotedSelectionLabel,
   parseAgentHistoryQuoteMention,
+  parseQuotedSelectionMention,
   serializeAgentHistoryQuoteMention,
+  serializeQuotedSelectionMention,
 } from '@/lib/quoted-selection'
 import { useOpenPreview } from '@/components/diff/preview-opener'
 import { isImageFilePath } from './file-path-chip'
@@ -191,6 +194,8 @@ export interface RichTextInputHandle {
   insertFileMentions: (items: FilePanelDragItem[]) => void
   /** 在光标处插入可定位的 Agent 历史引用 chip。 */
   insertAgentHistoryQuoteMention: (quote: QuotedSelection) => boolean
+  /** 在光标处插入文件或 Vault 的选区引用 chip；可重复插入、多条并存。 */
+  insertQuotedSelectionMention: (quote: QuotedSelection) => boolean
 }
 
 /**
@@ -621,6 +626,8 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
             const quotePayload = typeof node.attrs.agentHistoryQuote === 'string' && node.attrs.agentHistoryQuote.length > 0
               ? node.attrs.agentHistoryQuote
               : null
+            const quotedSelection = quotePayload ? parseQuotedSelectionMention(`&quote:${quotePayload}`) : null
+            const isNavigableHistoryQuote = quotedSelection?.sourceType === 'agent-history'
             let chipClass = isDirectory ? 'directory-mention-chip' : 'mention-chip'
             if (quotePayload) chipClass = 'agent-history-quote-chip'
             else if (referenceType === 'todo') chipClass = 'todo-mention-chip'
@@ -638,9 +645,9 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
                 ...(referenceType === 'todo' || referenceType === 'calendar_event'
                   ? { 'data-mention-reference-type': referenceType }
                   : {}),
-                ...(quotePayload
+                ...(quotePayload ? { 'data-mention-quote': quotePayload } : {}),
+                ...(isNavigableHistoryQuote
                   ? {
-                      'data-mention-quote': quotePayload,
                       title: '跳转到引用位置并高亮',
                       role: 'button',
                       tabindex: '0',
@@ -1074,6 +1081,30 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
       const payload = marker.slice('&quote:'.length)
       const label = buildAgentHistoryQuoteLabel(quote)
       const id = `${quote.messageId ?? ''}:${quote.selectionStart ?? ''}:${quote.selectionEnd ?? ''}`
+      editor.chain().focus()
+        .insertContent({
+          type: 'mention',
+          attrs: {
+            id,
+            label,
+            mentionSuggestionChar: '&',
+            agentHistoryQuote: payload,
+          },
+        })
+        .insertContent(' ')
+        .run()
+      return true
+    },
+    insertQuotedSelectionMention(quote: QuotedSelection): boolean {
+      if (!editor) return false
+      const marker = serializeQuotedSelectionMention(quote)
+      if (!marker) return false
+
+      const payload = marker.slice('&quote:'.length)
+      const label = buildQuotedSelectionLabel(quote)
+      const id = quote.sourceType === 'agent-history'
+        ? `${quote.messageId ?? ''}:${quote.selectionStart ?? ''}:${quote.selectionEnd ?? ''}`
+        : `${quote.filePath}:${quote.capturedAt}`
       editor.chain().focus()
         .insertContent({
           type: 'mention',

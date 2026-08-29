@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { LiveMarkdownEditor } from '@/components/markdown/LiveMarkdownEditor'
+import { LiveMarkdownEditor, type LiveMarkdownTextSelection } from '@/components/markdown/LiveMarkdownEditor'
 
 const MAX_PASTED_IMAGE_BYTES = 10 * 1024 * 1024
 
@@ -16,6 +16,8 @@ interface VaultLiveMarkdownEditorProps {
   value: string
   onChange: (value: string) => void
   onSave: () => void
+  /** 选区变化由 Vault 外层处理为引用/右侧问答浮窗。 */
+  onTextSelectionChange?: (selection: LiveMarkdownTextSelection | null) => void
   relativePath: string
 }
 

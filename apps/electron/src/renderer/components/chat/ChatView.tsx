@@ -24,6 +24,7 @@ import { PromptEditorSidebar } from './PromptEditorSidebar'
 import type { InlineEditSubmitPayload } from './ChatMessageItem'
 import {
   conversationsAtom,
+  conversationQuotedSelectionMapAtom,
   streamingStatesAtom,
   chatStreamErrorsAtom,
   chatMessageRefreshAtom,
@@ -33,7 +34,6 @@ import {
   INITIAL_MESSAGE_LIMIT,
 } from '@/atoms/chat-atoms'
 import type { PendingAttachment, ChatPendingMessage } from '@/atoms/chat-atoms'
-import { quotedSelectionMapAtom } from '@/atoms/preview-atoms'
 import { promptConfigAtom, promptSidebarOpenAtom, conversationPromptIdAtom, resolveSystemMessage, selectedPromptIdAtom } from '@/atoms/system-prompt-atoms'
 import { activeToolIdsAtom } from '@/atoms/chat-tool-atoms'
 import { userProfileAtom } from '@/atoms/user-profile'
@@ -306,14 +306,14 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
       setPendingAttachments([])
     }
 
-    const quotedSelection = store.get(quotedSelectionMapAtom).get(conversationId)
+    const quotedSelection = store.get(conversationQuotedSelectionMapAtom).get(conversationId)
     const finalContent = quotedSelection
       ? buildQuotedSelectionBlock(quotedSelection) + content
       : content
 
     if (quotedSelection) {
       const capturedAt = quotedSelection.capturedAt
-      store.set(quotedSelectionMapAtom, (prev) => {
+      store.set(conversationQuotedSelectionMapAtom, (prev) => {
         const current = prev.get(conversationId)
         if (!current || current.capturedAt !== capturedAt) return prev
         const next = new Map(prev)

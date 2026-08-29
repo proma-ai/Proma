@@ -8,6 +8,7 @@
 import { atom } from 'jotai'
 import { atomFamily, atomWithStorage } from 'jotai/utils'
 import type { ConversationMeta, ChatMessage, FileAttachment, ChatToolActivity, Channel } from '@proma/shared'
+import type { QuotedSelection } from './preview-atoms'
 
 /** 全局渠道列表缓存（启动时加载一次，设置变更时刷新） */
 export const channelsAtom = atom<Channel[]>([])
@@ -38,6 +39,9 @@ export const currentConversationIdAtom = atom<string | null>(null)
 
 /** Agent 会话右侧 Chat 面板，key 为 Agent sessionId，value 为 Chat conversationId */
 export const agentSideChatMapAtom = atom<Map<string, string>>(new Map())
+
+/** 右侧 Chat 的单条选区引用；与 Agent 的引用状态隔离，发送后由 ChatView 消费。 */
+export const conversationQuotedSelectionMapAtom = atom<Map<string, QuotedSelection>>(new Map())
 
 /** 当前对话的消息列表 */
 export const currentMessagesAtom = atom<ChatMessage[]>([])

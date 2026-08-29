@@ -40,11 +40,11 @@ import {
 import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-registry'
 import {
   conversationDraftsAtom,
+  conversationQuotedSelectionMapAtom,
   conversationDraftSyncVersionsAtom,
   conversationDraftSyncVersionAtomFamily,
 } from '@/atoms/chat-atoms'
 import type { PendingAttachment } from '@/atoms/chat-atoms'
-import { quotedSelectionMapAtom } from '@/atoms/preview-atoms'
 import {
   useConversationModel,
   useConversationThinkingEnabled,
@@ -77,8 +77,8 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
   // 从 Map atom 读写草稿
   const draftsMap = useAtomValue(conversationDraftsAtom)
   const setDraftsMap = useSetAtom(conversationDraftsAtom)
-  const quotedSelectionMap = useAtomValue(quotedSelectionMapAtom)
-  const setQuotedSelectionMap = useSetAtom(quotedSelectionMapAtom)
+  const quotedSelectionMap = useAtomValue(conversationQuotedSelectionMapAtom)
+  const setQuotedSelectionMap = useSetAtom(conversationQuotedSelectionMapAtom)
   const currentQuotedSelection = quotedSelectionMap.get(conversationId) ?? null
   const content = draftsMap.get(conversationId) ?? ''
   const draftSyncVersion = useAtomValue(conversationDraftSyncVersionAtomFamily(conversationId))
@@ -335,7 +335,8 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
   }, [])
 
   const toolbarItems = React.useMemo<ToolbarItem[]>(() => [
-    { key: 'model', node: <ModelSelector excludedProviders={['openai-codex', 'xai']} useSharedOpenState /> },
+    // Chat 可能与主 Agent 输入框并存；不能复用其全局 open atom，否则两个 Popover 会同时打开、互相关闭。
+    { key: 'model', node: <ModelSelector excludedProviders={['openai-codex', 'xai']} /> },
     {
       key: 'thinking',
       node: (
@@ -434,7 +435,11 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
   )
 
   return (
-    <div className="px-2.5 pb-2.5 md:px-[18px] md:pb-[18px]" data-input-mode="chat">
+    <div
+      className="px-2.5 pb-2.5 md:px-[18px] md:pb-[18px]"
+      data-input-mode="chat"
+      data-conversation-id={conversationId}
+    >
         {/* 卡片式输入容器 — 对标 Cherry Studio: border-radius 17px, 0.5px border */}
         <div
           className={cn(

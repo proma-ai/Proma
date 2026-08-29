@@ -129,6 +129,7 @@ import { inferContextWindow, inferReasoningTransport, isCodexFastModeSupportedMo
 import { fileToBase64, formatFileNames, getFileParentPath } from '@/lib/file-utils'
 import { getFilePanelDragData, INSERT_FILE_MENTION_EVENT, type FilePanelDragItem } from '@/lib/file-panel-drag'
 import { buildQuotedSelectionBlock, expandAgentHistoryQuoteMentions } from '@/lib/quoted-selection'
+import { INSERT_AGENT_INPUT_QUOTE_EVENT, type InsertAgentInputQuoteDetail } from '@/lib/agent-input-quote'
 import { createClipboardPendingFile, createClipboardTextDraft, makeUniqueAttachmentName } from '@/lib/clipboard-text-attachment'
 import { copyTextToClipboard } from '@/lib/clipboard'
 import {
@@ -716,6 +717,15 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
   const handleAddHistoryQuote = React.useCallback((quote: QuotedSelection): boolean => {
     return richTextInputRef.current?.insertAgentHistoryQuoteMention(quote) ?? false
   }, [])
+  React.useEffect(() => {
+    const handleInsertQuote = (event: Event): void => {
+      const detail = (event as CustomEvent<InsertAgentInputQuoteDetail>).detail
+      if (!detail || detail.sessionId !== sessionId) return
+      detail.inserted = richTextInputRef.current?.insertQuotedSelectionMention(detail.quote) ?? false
+    }
+    window.addEventListener(INSERT_AGENT_INPUT_QUOTE_EVENT, handleInsertQuote)
+    return () => window.removeEventListener(INSERT_AGENT_INPUT_QUOTE_EVENT, handleInsertQuote)
+  }, [sessionId])
   const handleAgentHistoryQuoteClick = React.useCallback((quote: QuotedSelection): void => {
     if (
       quote.sourceType !== 'agent-history'

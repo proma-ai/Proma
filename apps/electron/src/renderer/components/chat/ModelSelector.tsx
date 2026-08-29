@@ -140,6 +140,7 @@ export function ModelSelector({
   const [sharedOpen, setSharedOpen] = useAtom(modelSelectorOpenAtom)
   const open = useSharedOpenState ? sharedOpen : localOpen
   const setOpen = useSharedOpenState ? setSharedOpen : setLocalOpen
+  const [tooltipOpen, setTooltipOpen] = React.useState(false)
   const [search, setSearch] = React.useState('')
 
   // 外部模型优先 → per-conversation 模型
@@ -218,6 +219,12 @@ export function ModelSelector({
   if (currentModelInfo) stableModelInfoRef.current = currentModelInfo
   const displayModelInfo = currentModelInfo ?? stableModelInfoRef.current
 
+  // Tooltip 必须始终保持 controlled 或 uncontrolled 之一。此前在 Popover 打开时传 false、关闭时传
+  // undefined，Radix 会发出 controlled/uncontrolled 告警，且与模型 Popover 的 trigger 竞争焦点。
+  React.useEffect(() => {
+    if (open || !displayModelInfo) setTooltipOpen(false)
+  }, [displayModelInfo, open])
+
   /** 选择模型并持久化到当前对话 */
   const handleSelect = (option: ModelOption): void => {
     if (onModelSelect) {
@@ -275,7 +282,10 @@ export function ModelSelector({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       {/* 触发按钮 */}
-      <Tooltip open={open || !displayModelInfo ? false : undefined}>
+      <Tooltip
+        open={tooltipOpen}
+        onOpenChange={(nextOpen) => setTooltipOpen(nextOpen && !open && Boolean(displayModelInfo))}
+      >
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
             <button
