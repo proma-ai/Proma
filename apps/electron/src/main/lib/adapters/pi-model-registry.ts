@@ -615,15 +615,24 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
   }
 }
 
-function normalizePiBaseUrl(baseUrl: string | undefined, provider: ProviderType, api = normalizePiApi(provider)): string | undefined {
+export function normalizePiBaseUrl(baseUrl: string | undefined, provider: ProviderType, api = normalizePiApi(provider)): string | undefined {
   if (!baseUrl) return undefined
+  const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, '')
   if (api === 'anthropic-messages') {
-    return normalizeAnthropicBaseUrlForSdk(resolveAnthropicMessagesUrl(baseUrl, provider))
+    return normalizeAnthropicBaseUrlForSdk(resolveAnthropicMessagesUrl(normalizedBaseUrl, provider))
   }
   if (api === 'openai-responses' || provider === 'custom') {
-    return normalizeOpenAIBaseUrlForSdk(baseUrl)
+    return normalizeOpenAIBaseUrlForSdk(normalizedBaseUrl)
   }
-  return baseUrl.trim().replace(/\/$/, '')
+  // Pi 的 Google adapter 把 `model.baseUrl` 视为已包含 API 版本的完整根路径，
+  // 并明确禁用 Google SDK 自行追加 apiVersion。渠道配置仍以协议根
+  // `https://generativelanguage.googleapis.com` 保存；若这里直接传入，Agent 会请求
+  // `/models/...` 而不是 `/v1beta/models/...`，导致 404。Chat adapter 自己拼 v1beta，
+  // 因此只在 Pi runtime 注册时补齐，且保留用户已填写的 v1/v1beta（含代理路径）。
+  if (api === 'google-generative-ai' && !/\/v1(?:beta)?$/i.test(normalizedBaseUrl)) {
+    return `${normalizedBaseUrl}/v1beta`
+  }
+  return normalizedBaseUrl
 }
 
 export function requiresPromaUserAgent(provider: ProviderType): boolean {
