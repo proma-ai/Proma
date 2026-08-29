@@ -16,7 +16,7 @@ type AddTabMenuWindowState = {
 }
 
 const MENU_WIDTH = 224
-const MENU_HEIGHT = 348
+const MENU_HEIGHT = 356
 const MENU_MARGIN = 8
 const VALID_ACTIONS = new Set<BrowserAddTabMenuAction>([
   'browser', 'file', 'terminal', 'todos', 'calendar', 'skills', 'mcp', 'memory', 'automations', 'vault',

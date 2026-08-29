@@ -321,9 +321,12 @@ export function DiffPanelTabBar({
               aria-label="添加右侧工作区标签"
               onClick={(event) => {
                 const buttonRect = event.currentTarget.getBoundingClientRect()
+                const keyboardActivation = event.detail === 0
                 onOpenNativeAddTabMenu({
-                  x: event.screenX,
-                  y: event.screenY + buttonRect.bottom - event.clientY,
+                  x: keyboardActivation ? window.screenX + buttonRect.right : event.screenX,
+                  y: keyboardActivation
+                    ? window.screenY + buttonRect.bottom
+                    : event.screenY + buttonRect.bottom - event.clientY,
                 })
               }}
             >

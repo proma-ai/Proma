@@ -8,6 +8,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, VAULT_IPC_CHANNELS, AGENT_ISLAND_IPC_CHANNELS, TERMINAL_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS } from '../types'
+
 import type {
   RuntimeStatus,
   GitRepoStatus,
@@ -197,6 +198,14 @@ import type {
   NotificationSoundType,
 } from '../types'
 import { QUICK_TASK_IPC_CHANNELS, TRAY_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, WINDOWS_AGENT_ISLAND_IPC_CHANNELS } from '../types'
+
+const addTabMenuTokenListeners = new Set<(token: string) => void>()
+let latestAddTabMenuToken: string | null = null
+ipcRenderer.on(AGENT_IPC_CHANNELS.SET_ADD_TAB_MENU_TOKEN, (_event, token: unknown) => {
+  if (typeof token !== 'string') return
+  latestAddTabMenuToken = token
+  for (const listener of addTabMenuTokenListeners) listener(token)
+})
 
 /**
  * 暴露给渲染进程的 API 接口定义
@@ -1446,11 +1455,9 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SELECT_ADD_TAB_MENU_ACTION, input) as Promise<void>
   },
   onAgentAddTabMenuToken: (callback: (token: string) => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, token: unknown): void => {
-      if (typeof token === 'string') callback(token)
-    }
-    ipcRenderer.on(AGENT_IPC_CHANNELS.SET_ADD_TAB_MENU_TOKEN, listener)
-    return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.SET_ADD_TAB_MENU_TOKEN, listener) }
+    addTabMenuTokenListeners.add(callback)
+    if (latestAddTabMenuToken) callback(latestAddTabMenuToken)
+    return () => { addTabMenuTokenListeners.delete(callback) }
   },
   minimizeAgentBrowser: (sessionId: string) => ipcRenderer.invoke(AGENT_IPC_CHANNELS.MINIMIZE_BROWSER, sessionId),
   navigateAgentBrowser: (input: import('@proma/shared').BrowserNavigateInput) => {
