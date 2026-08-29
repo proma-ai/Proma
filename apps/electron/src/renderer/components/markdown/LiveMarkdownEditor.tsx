@@ -13,11 +13,22 @@ export interface LiveMarkdownEditorHandle {
   getView: () => EditorView | null
 }
 
+/** CodeMirror 选区的文本与可用于浮层定位的视口坐标。 */
+export interface LiveMarkdownTextSelection {
+  text: string
+  x: number
+  y: number
+}
+
 interface LiveMarkdownEditorProps {
   value: string
   onChange: (value: string) => void
   onSave?: () => void
   onCancel?: () => void
+  /** 编辑器异步挂载完成后通知外层（用于恢复外层滚动位置）。 */
+  onReady?: () => void
+  /** CodeMirror 的选区不必经过 DOM Selection，直接向外提供可靠的文本与锚点。 */
+  onTextSelectionChange?: (selection: LiveMarkdownTextSelection | null) => void
   /** 只读时沿用同一套 Live Preview 渲染，但不允许修改源文档。 */
   readOnly?: boolean
   /** 将本地 Markdown 图片映射为当前来源授权的安全 URL。 */
@@ -39,6 +50,8 @@ const markdownSyntaxMarkerNames = new Set([
   'HeaderMark',
   'LinkMark',
   'QuoteMark',
+  // ink-mde 使用 GFM parser；隐藏 ~~ 定界符，让删除线呈现与 Obsidian Live Preview 一致。
+  'StrikethroughMark',
 ])
 const hiddenMarkdownSyntax = Decoration.replace({ class: 'live-markdown-syntax-hidden' })
 const pendingListHeading = Decoration.mark({ class: 'live-markdown-pending-list-heading' })
@@ -188,6 +201,8 @@ export const LiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, Liv
   onChange,
   onSave,
   onCancel,
+  onReady,
+  onTextSelectionChange,
   readOnly = false,
   resolveImageSrc,
   savePastedImage,
@@ -201,10 +216,14 @@ export const LiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, Liv
   const onChangeRef = React.useRef(onChange)
   const onSaveRef = React.useRef(onSave)
   const onCancelRef = React.useRef(onCancel)
+  const onReadyRef = React.useRef(onReady)
+  const onTextSelectionChangeRef = React.useRef(onTextSelectionChange)
   valueRef.current = value
   onChangeRef.current = onChange
   onSaveRef.current = onSave
   onCancelRef.current = onCancel
+  onReadyRef.current = onReady
+  onTextSelectionChangeRef.current = onTextSelectionChange
 
   React.useImperativeHandle(ref, () => ({
     focus: () => instanceRef.current?.focus(),
@@ -249,7 +268,50 @@ export const LiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, Liv
         markdownHeadingMarkers,
         ViewPlugin.define((view) => {
           viewRef.current = view
-          return { destroy: () => { if (viewRef.current === view) viewRef.current = null } }
+          let selectionFrame = 0
+          const reportSelection = (): void => {
+            selectionFrame = 0
+            const range = view.state.selection.main
+            if (range.empty) {
+              onTextSelectionChangeRef.current?.(null)
+              return
+            }
+            const text = view.state.sliceDoc(range.from, range.to).trim()
+            // Mouse drag 结束后 CodeMirror 才会同步 selection；延迟到下一帧读取，
+            // 覆盖只读/Live Preview 中浏览器 DOM selection 与 editor state 的时序差异。
+            const coords = view.coordsAtPos(range.head) ?? view.coordsAtPos(range.from)
+            if (!text || !coords) {
+              onTextSelectionChangeRef.current?.(null)
+              return
+            }
+            onTextSelectionChangeRef.current?.({
+              text,
+              x: (coords.left + coords.right) / 2,
+              y: coords.top - 12,
+            })
+          }
+          const scheduleSelectionReport = (): void => {
+            if (selectionFrame) cancelAnimationFrame(selectionFrame)
+            selectionFrame = requestAnimationFrame(reportSelection)
+          }
+          // 只在鼠标松开后展示动作，不要在拖选过程中不断弹出、跟随选区移动。
+          // rAF 仍可覆盖 ink-mde 只读预览的 selection transaction 时序。
+          view.dom.addEventListener('mouseup', scheduleSelectionReport)
+          return {
+            update: (update) => {
+              // Pointer selections are reported on mouseup to avoid a moving popover;
+              // keyboard selection has no mouseup, so report it after CodeMirror commits.
+              const isPointerSelection = update.transactions.some((transaction) => transaction.isUserEvent('select.pointer'))
+              if (update.selectionSet && update.view.hasFocus && !isPointerSelection) {
+                scheduleSelectionReport()
+              }
+            },
+            destroy: () => {
+              view.dom.removeEventListener('mouseup', scheduleSelectionReport)
+              if (selectionFrame) cancelAnimationFrame(selectionFrame)
+              if (viewRef.current === view) viewRef.current = null
+            },
+          }
         }),
         ...markdownSyntaxVisibility,
         createLiveMarkdownBlockPreview(resolveImageSrc, savePastedImage),
@@ -267,6 +329,7 @@ export const LiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, Liv
       instanceRef.current = instance
       if (instance.getDoc() !== valueRef.current) instance.update(valueRef.current)
       ready = true
+      onReadyRef.current?.()
     })
 
     const scheduler = createMeasureScheduler(() => viewRef.current)

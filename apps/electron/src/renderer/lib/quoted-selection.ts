@@ -29,6 +29,17 @@ interface AgentHistoryQuoteMarkerPayload {
   turn?: number
 }
 
+/** 可嵌入输入框、支持多条的通用选区引用 payload（文件或 Vault 选区）。 */
+interface InlineQuotedSelectionPayload {
+  version: 2
+  text: string
+  filePath: string
+  sourceType: QuotedSelectionSourceType
+  sourceLabel?: string
+  startLine?: number
+  endLine?: number
+}
+
 export function escapeXmlAttribute(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -157,6 +168,31 @@ export function serializeAgentHistoryQuoteMention(quote: QuotedSelection): strin
   return `${AGENT_HISTORY_QUOTE_MENTION_PREFIX}${encodeURIComponent(JSON.stringify(payload))}`
 }
 
+/** 将文件/Vault 选区编码为与历史引用同款的内联 chip marker，可在一条草稿中累积多次。 */
+export function serializeQuotedSelectionMention(quote: QuotedSelection): string | null {
+  if (!isNonEmptyString(quote.text) || !isNonEmptyString(quote.filePath)) return null
+  if (quote.sourceType === 'agent-history') return serializeAgentHistoryQuoteMention(quote)
+
+  const payload: InlineQuotedSelectionPayload = {
+    version: 2,
+    text: quote.text,
+    filePath: quote.filePath,
+    sourceType: 'file',
+    ...(isNonEmptyString(quote.sourceLabel) && { sourceLabel: quote.sourceLabel }),
+    ...(isPositiveInteger(quote.startLine) && { startLine: quote.startLine }),
+    ...(isPositiveInteger(quote.endLine) && { endLine: quote.endLine }),
+  }
+  return `${AGENT_HISTORY_QUOTE_MENTION_PREFIX}${encodeURIComponent(JSON.stringify(payload))}`
+}
+
+/** 为输入框内的历史或文件选区构建简短 chip 标签。 */
+export function buildQuotedSelectionLabel(quote: QuotedSelection): string {
+  if (quote.sourceType === 'agent-history') return buildAgentHistoryQuoteLabel(quote)
+  const filename = (quote.sourceLabel ?? quote.filePath).split(/[\\/]/).pop() || quote.filePath
+  const preview = Array.from(quote.text.replace(/\s+/g, ' ').trim()).slice(0, 25).join('')
+  return `${filename}：${preview}`
+}
+
 /** 为已发送消息生成展示用历史引用 marker，允许缺少旧版本的定位字段。 */
 export function serializeAgentHistoryQuoteDisplayMention(quote: QuotedSelection): string | null {
   if (quote.sourceType !== 'agent-history' || !isNonEmptyString(quote.text) || !isNonEmptyString(quote.messageId)) {
@@ -179,26 +215,59 @@ export function serializeAgentHistoryQuoteDisplayMention(quote: QuotedSelection)
   return `${AGENT_HISTORY_QUOTE_MENTION_PREFIX}${encodeURIComponent(JSON.stringify(payload))}`
 }
 
-/** 将历史引用 marker 替换为可复制的 chip 文案，避免把内部 payload 暴露给剪贴板。 */
+/** 将选区引用 marker 替换为可复制的 chip 文案，避免把内部 payload 暴露给剪贴板。 */
 export function replaceAgentHistoryQuoteMentionsWithLabels(text: string): string {
   return text.replace(AGENT_HISTORY_QUOTE_MENTION_REGEX, (marker) => {
-    const quote = parseAgentHistoryQuoteMention(marker)
-    return quote ? buildAgentHistoryQuoteLabel(quote) : marker
+    const quote = parseQuotedSelectionMention(marker)
+    return quote ? buildQuotedSelectionLabel(quote) : marker
   })
 }
 
-/** 解码单个内联 Agent 历史引用 marker；无效输入保持为普通文本。 */
-export function parseAgentHistoryQuoteMention(marker: string): QuotedSelection | null {
+/** 解码任意内联选区引用 marker；兼容既有 version 1 Agent 历史 payload。 */
+export function parseQuotedSelectionMention(marker: string): QuotedSelection | null {
   if (!marker.startsWith(AGENT_HISTORY_QUOTE_MENTION_PREFIX)) return null
   const payload = marker.slice(AGENT_HISTORY_QUOTE_MENTION_PREFIX.length)
   if (!payload || /\s/.test(payload)) return null
+  try {
+    const value: unknown = JSON.parse(decodeURIComponent(payload))
+    if (value && typeof value === 'object') {
+      const record = value as Record<string, unknown>
+      if (
+        record.version === 2
+        && isNonEmptyString(record.text)
+        && isNonEmptyString(record.filePath)
+        && record.sourceType === 'file'
+        && (record.sourceLabel === undefined || isNonEmptyString(record.sourceLabel))
+        && (record.startLine === undefined || isPositiveInteger(record.startLine))
+        && (record.endLine === undefined || isPositiveInteger(record.endLine))
+      ) {
+        return {
+          text: record.text,
+          filePath: record.filePath,
+          sourceType: 'file',
+          ...(isNonEmptyString(record.sourceLabel) && { sourceLabel: record.sourceLabel }),
+          ...(isPositiveInteger(record.startLine) && { startLine: record.startLine }),
+          ...(isPositiveInteger(record.endLine) && { endLine: record.endLine }),
+          capturedAt: 0,
+        }
+      }
+    }
+  } catch {
+    return null
+  }
   return parseAgentHistoryQuotePayload(payload)
+}
+
+/** 兼容旧调用：仅返回可定位的 Agent 历史引用。 */
+export function parseAgentHistoryQuoteMention(marker: string): QuotedSelection | null {
+  const quote = parseQuotedSelectionMention(marker)
+  return quote?.sourceType === 'agent-history' ? quote : null
 }
 
 /** 在真正发送给 Agent 前，将草稿内联 marker 替换为既有 XML 上下文块。 */
 export function expandAgentHistoryQuoteMentions(text: string): string {
   return text.replace(AGENT_HISTORY_QUOTE_MENTION_REGEX, (marker) => {
-    const quote = parseAgentHistoryQuoteMention(marker)
+    const quote = parseQuotedSelectionMention(marker)
     if (!quote) return marker
     return buildQuotedSelectionBlock(quote)
   })

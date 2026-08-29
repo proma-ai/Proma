@@ -260,7 +260,7 @@ function filterHistory(
 export async function sendMessage(
   input: ChatSendInput,
   webContents: WebContents,
-): Promise<void> {
+): Promise<boolean> {
   const {
     conversationId, userMessage, channelId,
     modelId, systemMessage: customSystemMessage, contextLength, contextDividers, attachments,
@@ -274,8 +274,11 @@ export async function sendMessage(
   const channels = listChannels()
   const channel = channels.find((c) => c.id === channelId)
   if (!channel) {
-    webContents.send(CHAT_IPC_CHANNELS.STREAM_ERROR, { conversationId, error: '渠道不存在' })
-    return
+    webContents.send(CHAT_IPC_CHANNELS.STREAM_ERROR, {
+      conversationId,
+      error: '渠道不存在',
+    })
+    return false
   }
 
   // Subscription OAuth uses Pi provider-specific transports, which Chat mode does
@@ -287,7 +290,7 @@ export async function sendMessage(
       conversationId,
       error: `Chat 模式暂不支持 ${providerName}，请切换到 Agent 模式使用。`,
     })
-    return
+    return false
   }
 
   // 2. 获取 API Key 和 Base URL
@@ -298,7 +301,7 @@ export async function sendMessage(
     const token = getAuthToken()
     if (!token) {
       webContents.send(CHAT_IPC_CHANNELS.STREAM_ERROR, { conversationId, error: '未登录 Cloud 账户' })
-      return
+      return false
     }
     apiKey = token
     baseUrl = getCloudApiConfig().baseUrl
@@ -306,8 +309,11 @@ export async function sendMessage(
     try {
       apiKey = await resolveChannelRuntimeApiKey(channelId)
     } catch {
-      webContents.send(CHAT_IPC_CHANNELS.STREAM_ERROR, { conversationId, error: '解密 API Key 失败' })
-      return
+      webContents.send(CHAT_IPC_CHANNELS.STREAM_ERROR, {
+        conversationId,
+        error: '解密 API Key 失败',
+      })
+      return false
     }
     baseUrl = channel.baseUrl
   }
@@ -527,11 +533,11 @@ export async function sendMessage(
       model: modelId,
       messageId: (accumulatedContent.trim() || accumulatedGeneratedAttachments.length > 0) ? assistantMsgId : undefined,
     })
-
     // Proma 官方渠道对话完成后通知渲染进程刷新余额
     if (channel.provider === 'proma') {
       broadcastBillingChanged()
     }
+    return true
   } catch (error) {
     if (controller.signal.aborted) {
       console.log(`[聊天服务] 对话 ${conversationId} 已被用户中止`)
@@ -554,7 +560,7 @@ export async function sendMessage(
       } else {
         webContents.send(CHAT_IPC_CHANNELS.STREAM_COMPLETE, { conversationId, model: modelId })
       }
-      return
+      return true
     }
 
     const errorMessage = error instanceof Error ? error.message : '未知错误'
@@ -607,6 +613,7 @@ export async function sendMessage(
       conversationId,
       error: errorMessage,
     })
+    return false
   } finally {
     activeControllers.delete(conversationId)
   }

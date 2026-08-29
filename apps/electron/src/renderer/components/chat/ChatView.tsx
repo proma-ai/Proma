@@ -24,6 +24,7 @@ import { PromptEditorSidebar } from './PromptEditorSidebar'
 import type { InlineEditSubmitPayload } from './ChatMessageItem'
 import {
   conversationsAtom,
+  conversationQuotedSelectionMapAtom,
   streamingStatesAtom,
   chatStreamErrorsAtom,
   chatMessageRefreshAtom,
@@ -33,7 +34,6 @@ import {
   INITIAL_MESSAGE_LIMIT,
 } from '@/atoms/chat-atoms'
 import type { PendingAttachment, ChatPendingMessage } from '@/atoms/chat-atoms'
-import { quotedSelectionMapAtom } from '@/atoms/preview-atoms'
 import { promptConfigAtom, promptSidebarOpenAtom, conversationPromptIdAtom, resolveSystemMessage, selectedPromptIdAtom } from '@/atoms/system-prompt-atoms'
 import { activeToolIdsAtom } from '@/atoms/chat-tool-atoms'
 import { userProfileAtom } from '@/atoms/user-profile'
@@ -241,8 +241,8 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
       messageCountBeforeSend?: number
       contextDividersOverride?: string[]
     },
-  ): Promise<void> => {
-    if (!selectedModel) return
+  ): Promise<boolean> => {
+    if (!selectedModel) return false
 
     const consumePending = options?.consumePendingAttachments ?? true
 
@@ -306,21 +306,10 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
       setPendingAttachments([])
     }
 
-    const quotedSelection = store.get(quotedSelectionMapAtom).get(conversationId)
+    const quotedSelection = store.get(conversationQuotedSelectionMapAtom).get(conversationId)
     const finalContent = quotedSelection
       ? buildQuotedSelectionBlock(quotedSelection) + content
       : content
-
-    if (quotedSelection) {
-      const capturedAt = quotedSelection.capturedAt
-      store.set(quotedSelectionMapAtom, (prev) => {
-        const current = prev.get(conversationId)
-        if (!current || current.capturedAt !== capturedAt) return prev
-        const next = new Map(prev)
-        next.delete(conversationId)
-        return next
-      })
-    }
 
     // 初始化当前对话的流式状态
     setStreamingStates((prev) => {
@@ -363,11 +352,12 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
       enabledToolIds: activeToolIds.length > 0 ? activeToolIds : undefined,
     }
 
-    // 乐观更新：立即在 UI 中显示用户消息
+    // 乐观更新：立即在 UI 中显示用户消息；若 IPC 拒绝则移除该临时消息并保留草稿/引用。
+    const temporaryMessageId = `temp-${Date.now()}`
     setMessages((prev) => [
       ...prev,
       {
-        id: `temp-${Date.now()}`,
+        id: temporaryMessageId,
         role: 'user',
         content: finalContent,
         createdAt: Date.now(),
@@ -375,21 +365,35 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
       },
     ])
 
-    window.electronAPI.sendMessage(input).catch((error) => {
+    try {
+      const completed = await window.electronAPI.sendMessage(input)
+      if (!completed) {
+        setMessages((prev) => prev.filter((message) => message.id !== temporaryMessageId))
+        return false
+      }
+      if (quotedSelection) {
+        const capturedAt = quotedSelection.capturedAt
+        store.set(conversationQuotedSelectionMapAtom, (prev) => {
+          const current = prev.get(conversationId)
+          if (!current || current.capturedAt !== capturedAt) return prev
+          const next = new Map(prev)
+          next.delete(conversationId)
+          return next
+        })
+      }
+      return true
+    } catch (error) {
       console.error('[ChatView] 发送消息失败:', error)
+      setMessages((prev) => prev.filter((message) => message.id !== temporaryMessageId))
       setStreamingStates((prev) => {
         if (!prev.has(conversationId)) return prev
         const map = new Map(prev)
         map.delete(conversationId)
         return map
       })
-      // 显示错误横幅，确保用户看到发送失败的反馈
-      setChatStreamErrors((prev) => {
-        const map = new Map(prev)
-        map.set(conversationId, '发送失败，请重试')
-        return map
-      })
-    })
+      setChatStreamErrors((prev) => new Map(prev).set(conversationId, '发送失败，请重试'))
+      return false
+    }
   }, [
     conversationId,
     selectedModel,

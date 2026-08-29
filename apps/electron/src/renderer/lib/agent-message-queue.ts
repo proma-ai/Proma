@@ -1,9 +1,9 @@
 import type { AgentStreamState } from '@/atoms/agent-atoms'
 import type { QuotedSelection } from '@/atoms/preview-atoms'
 import {
-  buildAgentHistoryQuoteLabel,
+  buildQuotedSelectionLabel,
   expandAgentHistoryQuoteMentions,
-  parseAgentHistoryQuoteMention,
+  parseQuotedSelectionMention,
 } from './quoted-selection'
 import { ENCODED_MENTION_VALUE_PATTERN, PLAIN_MENTION_VALUE_PATTERN } from './mention-patterns'
 
@@ -174,13 +174,15 @@ function renderQueuedParagraphHtml(text: string): string {
     }
 
     const marker = match[0]
-    const quote = parseAgentHistoryQuoteMention(marker)
+    const quote = parseQuotedSelectionMention(marker)
     if (!quote) {
       html += escapeHtml(marker)
     } else {
       const payload = marker.slice('&quote:'.length)
-      const id = `${quote.messageId ?? ''}:${quote.selectionStart ?? ''}:${quote.selectionEnd ?? ''}`
-      const label = buildAgentHistoryQuoteLabel(quote)
+      const id = quote.sourceType === 'agent-history'
+        ? `${quote.messageId ?? ''}:${quote.selectionStart ?? ''}:${quote.selectionEnd ?? ''}`
+        : `${quote.filePath}:${quote.capturedAt}`
+      const label = buildQuotedSelectionLabel(quote)
       html += `<span data-type="mention" data-id="${escapeHtmlAttribute(id)}" data-label="${escapeHtmlAttribute(label)}" data-mention-suggestion-char="&" data-mention-quote="${escapeHtmlAttribute(payload)}">${escapeHtml(label)}</span>`
     }
     lastIndex = match.index + marker.length
@@ -236,13 +238,15 @@ export function getQueuedMessageDisplayParts(text: string): QueuedMessageDisplay
 
     const groups = match.groups ?? {}
     if (groups.quote) {
-      const quote = parseAgentHistoryQuoteMention(`&quote:${groups.quote}`)
+      const quote = parseQuotedSelectionMention(`&quote:${groups.quote}`)
       if (quote) {
         parts.push({
           type: 'reference',
           referenceType: 'quote',
-          id: `${quote.messageId ?? ''}:${quote.selectionStart ?? ''}:${quote.selectionEnd ?? ''}`,
-          label: buildAgentHistoryQuoteLabel(quote),
+          id: quote.sourceType === 'agent-history'
+            ? `${quote.messageId ?? ''}:${quote.selectionStart ?? ''}:${quote.selectionEnd ?? ''}`
+            : `${quote.filePath}:${quote.capturedAt}`,
+          label: buildQuotedSelectionLabel(quote),
         })
       } else {
         parts.push({ type: 'text', value: match[0] })
