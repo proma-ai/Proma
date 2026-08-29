@@ -1439,11 +1439,11 @@ function buildAgentTerminalTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDe
     sdk.defineTool({
       name: 'TerminalExecute',
       label: '在可见终端执行命令',
-      description: 'Run one command in a visible Agent-owned terminal Tab. Omit terminalId to open a new Tab, or provide the ID of a current-session running terminal to reuse it. The user can see and interrupt it. Call TerminalRead with the returned terminal ID when you need to inspect its output; output is never pushed into this tool result.',
-      promptSnippet: 'Use the visible terminal for user-attended commands that benefit from execution visibility. Before reusing a terminal, call TerminalList and reuse only a current-session terminal with a matching cwd whose previous command you observed finish; otherwise omit terminalId to open a new Tab. If the result matters, call TerminalRead after it has produced output instead of assuming output is returned automatically.',
+      description: 'Run one command in a visible Agent-owned terminal Tab. Prefer terminalId to reuse a safe matching current-session terminal; omit it only when no terminal can be reused. The user can see and interrupt it. Call TerminalRead with the returned terminal ID when you need to inspect its output; output is never pushed into this tool result.',
+      promptSnippet: 'Use the visible terminal only for user-attended commands that benefit from execution visibility. Before every visible terminal command, call TerminalList and prefer a current-session running terminal with a matching cwd whose previous command you observed finish; pass its terminalId to avoid opening another Tab. Omit terminalId only when no safe candidate exists, the cwd or shell must differ, or the user needs a separately visible concurrent session. Do not reuse an interactive, long-running, or unverified-busy terminal. Use TerminalRead to confirm completion or inspect results; do not assume output is returned automatically.',
       parameters: Type.Object({
         command: Type.String({ description: 'Complete command to execute in the controlled shell. Do not prepend shell wrappers.' }),
-        terminalId: Type.Optional(Type.String({ description: 'Current-session running Agent terminal to reuse. First inspect candidates with TerminalList; do not reuse an interactive, long-running, or unverified-busy terminal.' })),
+        terminalId: Type.Optional(Type.String({ description: 'Preferred when a matching safe current-session terminal is available. First inspect candidates with TerminalList; do not reuse an interactive, long-running, or unverified-busy terminal.' })),
         cwd: Type.Optional(Type.String({ description: 'Absolute or Agent-CWD-relative directory within the current authorized roots. Used only when opening a new terminal.' })),
         title: Type.Optional(Type.String({ description: 'Short visible terminal title. Used only when opening a new terminal.' })),
         shell: Type.Optional(Type.String({ description: `${shellProfileDescription} Used only when opening a new terminal. When reusing terminalId, an explicitly mismatching shell fails; omit it to keep the existing shell.` })),
@@ -1468,7 +1468,7 @@ function buildAgentTerminalTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDe
       name: 'TerminalRead',
       label: '读取 Agent 终端输出',
       description: 'Read bounded buffered output from one current-session Agent-owned terminal. By default returns the latest 12,000 characters of normalized text. Use offset and limit to page earlier output; it can read output after the terminal exits until the terminal or session is closed.',
-      promptSnippet: 'After starting a visible terminal command, use TerminalRead whenever you need its result. Start with the default tail; use the returned nextOffset to page forward or a smaller offset to inspect earlier output. Do not assume terminal output is automatically returned.',
+      promptSnippet: 'After starting a visible terminal command, use TerminalRead whenever you need its result or need to confirm it finished before reusing its terminal. Start with the default tail; use the returned nextOffset to page forward or a smaller offset to inspect earlier output. Do not assume terminal output is automatically returned.',
       parameters: Type.Object({
         terminalId: Type.String({ description: 'Terminal ID returned by TerminalOpen, TerminalExecute, or TerminalList.' }),
         offset: Type.Optional(Type.Number({ description: 'Optional non-negative character offset in the terminal output stream. Omit to read the latest output.' })),
@@ -1485,8 +1485,8 @@ function buildAgentTerminalTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDe
     sdk.defineTool({
       name: 'TerminalList',
       label: '列出 Agent 终端',
-      description: 'List terminals owned by the current Agent session, including cwd and running/exited state. Use this before deciding whether a visible terminal can be safely reused. It never exposes terminal output.',
-      promptSnippet: 'Inspect Agent-owned terminal metadata before deciding whether to reuse a visible terminal; do not read terminal output unless needed.',
+      description: 'List terminals owned by the current Agent session, including cwd and running/exited state. Use this before every visible terminal command to find a safe terminal to reuse. It never exposes terminal output.',
+      promptSnippet: 'Before every visible terminal command, inspect Agent-owned terminal metadata and prefer a safe matching terminal to avoid opening another Tab. Read terminal output only when needed to confirm its previous command finished.',
       parameters: Type.Object({}),
       async execute() {
         return jsonToolResult({ terminals: listAgentTerminals(ctx.sessionId) })

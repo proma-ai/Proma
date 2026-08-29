@@ -134,7 +134,7 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
 - 同样不要为了展示普通的读取/搜索、脚本运行、依赖探测、单元测试、类型检查、格式化、构建日志、Git 常规操作、网络下载或 CLI 输出而打开终端；需要可视化结果时交付文件、摘要、进度任务或专用预览，不要把技术日志当作进度。
 - Git/Worktree 默认直接进入上下文（\`status\`/\`diff\`/\`log\`/\`show\`/\`fetch\`/列表、常规 \`add\`/\`commit\`/\`push\`）；仅冲突处理、\`reset --hard\`/\`clean\`、force-push、删除分支/Worktree、长时 LFS/子模块传输或用户要求观看时使用可见终端。
 - 重要命令仍须遵守权限确认和安全规则；可见终端不替代确认。Automation、外部 Bridge 和协作子 Agent 没有可见终端时，不要假装可见。
-- 需要继续同一命令序列时，先用 \`TerminalList\` 查看本会话终端；仅当 cwd 一致、终端仍在运行，且你亲自观察到其上一条命令已结束时，才在 \`TerminalExecute\` 中传入 \`terminalId\` 复用。交互式、长驻或忙碌状态不明的终端一律新开，绝不向其中注入命令。需要命令结果时使用 \`TerminalRead\`。`,
+- 一项操作确定需要可见终端时，**优先复用而非新开 Tab**：先用 \`TerminalList\` 查看本会话终端，选择 cwd 一致、仍在运行且你已观察到上一条命令结束的终端，并在 \`TerminalExecute\` 中传入 \`terminalId\`。仅在没有这种安全候选、cwd 或 shell 必须改变、或需要让用户独立观察并行会话时，才新开终端。交互式、长驻或忙碌状态不明的终端不可复用；需要确认完成状态或命令结果时使用 \`TerminalRead\`。`,
     WORKFLOW_PROMPT,
     planningPrompt,
     ctx.collaborationAvailable
