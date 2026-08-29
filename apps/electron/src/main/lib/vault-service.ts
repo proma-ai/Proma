@@ -37,6 +37,8 @@ const MAX_VAULT_FILES = 5_000
 const MAX_VAULT_DEPTH = 16
 const HIDDEN_DIRECTORY_PREFIX = '.'
 const MAX_VAULT_PASTED_IMAGE_BYTES = 10 * 1024 * 1024
+// Reject oversize renderer IPC before decoding into an additional Node Buffer.
+const MAX_VAULT_PASTED_IMAGE_BASE64_CHARS = Math.ceil(MAX_VAULT_PASTED_IMAGE_BYTES / 3) * 4
 const PASTED_IMAGE_EXTENSIONS: Record<string, string> = {
   'image/png': 'png',
   'image/jpeg': 'jpg',
@@ -330,8 +332,9 @@ export function createVaultFileSystem(rootPath: string): VaultFileSystem {
 
   const savePastedImage = (input: VaultSavePastedImageInput): { src: string } | null => {
     const extension = PASTED_IMAGE_EXTENSIONS[input.mimeType]
-    const normalizedBase64 = typeof input.base64 === 'string' ? input.base64.replace(/\s/g, '') : ''
-    if (!extension || !normalizedBase64 || normalizedBase64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(normalizedBase64)) return null
+    if (!extension || typeof input.base64 !== 'string' || input.base64.length === 0 || input.base64.length > MAX_VAULT_PASTED_IMAGE_BASE64_CHARS) return null
+    const normalizedBase64 = input.base64.replace(/\s/g, '')
+    if (!normalizedBase64 || normalizedBase64.length > MAX_VAULT_PASTED_IMAGE_BASE64_CHARS || normalizedBase64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(normalizedBase64)) return null
 
     let data: Buffer
     try {

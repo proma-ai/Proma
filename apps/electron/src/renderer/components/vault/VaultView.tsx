@@ -222,21 +222,37 @@ function VaultMarkdownEditor({
   onOpenTutorial,
 }: {
   readResult: VaultReadResult
-  onSave: (nextContent: string, options?: { silent?: boolean }) => Promise<void>
+  onSave: (nextContent: string, options?: { silent?: boolean; expectedSha256?: string }) => Promise<void>
   onRename: (name: string) => Promise<void>
   onOpenTutorial: () => void
 }): React.ReactElement {
   const [draft, setDraft] = React.useState(readResult.content)
-  const previousReadContentRef = React.useRef(readResult.content)
+  const lastReadContentRef = React.useRef(readResult.content)
+  const saveBaseRef = React.useRef({ content: readResult.content, sha256: readResult.sha256 })
+  const externalConflictRef = React.useRef(false)
   const [saving, setSaving] = React.useState(false)
   const [filename, setFilename] = React.useState(displayDocumentTitle(readResult.relativePath.split('/').pop() ?? readResult.relativePath))
   const editorPageRef = React.useRef<HTMLDivElement>(null)
   React.useEffect(() => {
-    const previousReadContent = previousReadContentRef.current
-    previousReadContentRef.current = readResult.content
-    if (!shouldAdoptVaultReadContent(draft, previousReadContent)) return
+    const previousReadContent = lastReadContentRef.current
+    if (readResult.content === previousReadContent) return
+    lastReadContentRef.current = readResult.content
+
+    // A direct Agent/external write must never replace the revision used to save
+    // a dirty draft. Keeping the prior SHA forces the existing optimistic-write
+    // conflict path instead of silently overwriting the Agent's document.
+    if (!shouldAdoptVaultReadContent(draft, previousReadContent) && readResult.content !== draft) {
+      if (!externalConflictRef.current) {
+        externalConflictRef.current = true
+        toast.error('笔记已被外部修改；本地草稿未保存，请重新打开后合并')
+      }
+      return
+    }
+
+    externalConflictRef.current = false
+    saveBaseRef.current = { content: readResult.content, sha256: readResult.sha256 }
     setDraft(readResult.content)
-  }, [draft, readResult.content])
+  }, [draft, readResult.content, readResult.sha256])
 
 
   const handleEditorPageWheel = (event: React.WheelEvent<HTMLDivElement>): void => {
@@ -248,20 +264,20 @@ function VaultMarkdownEditor({
   }
 
   const save = React.useCallback(async (silent = false): Promise<void> => {
-    if (saving || draft === readResult.content) return
+    if (saving || externalConflictRef.current || draft === saveBaseRef.current.content) return
     setSaving(true)
     try {
-      await onSave(draft, { silent })
+      await onSave(draft, { silent, expectedSha256: saveBaseRef.current.sha256 })
     } finally {
       setSaving(false)
     }
-  }, [draft, onSave, readResult.content, saving])
+  }, [draft, onSave, saving])
 
   React.useEffect(() => {
-    if (saving || draft === readResult.content) return
+    if (saving || externalConflictRef.current || draft === saveBaseRef.current.content) return
     const timer = window.setTimeout(() => { void save(true) }, 700)
     return () => window.clearTimeout(timer)
-  }, [draft, readResult.content, save, saving])
+  }, [draft, save, saving])
 
   const rename = async (): Promise<void> => {
     const currentName = displayDocumentTitle(readResult.relativePath.split('/').pop() ?? readResult.relativePath)
@@ -333,7 +349,7 @@ function VaultMarkdownPane({
   readResult: VaultReadResult | null
   loading: boolean
   hasVault: boolean
-  onSave: (nextContent: string, options?: { silent?: boolean }) => Promise<void>
+  onSave: (nextContent: string, options?: { silent?: boolean; expectedSha256?: string }) => Promise<void>
   onRename: (name: string) => Promise<void>
   onOpenTutorial: () => void
 }): React.ReactElement {
@@ -646,13 +662,13 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
     }
   }
 
-  const save = async (content: string, { silent = false }: { silent?: boolean } = {}): Promise<void> => {
+  const save = async (content: string, { silent = false, expectedSha256 }: { silent?: boolean; expectedSha256?: string } = {}): Promise<void> => {
     if (!readResult) return
     try {
       const result = await window.electronAPI.writeVaultFile({
         relativePath: readResult.relativePath,
         content,
-        expectedSha256: readResult.sha256,
+        expectedSha256: expectedSha256 ?? readResult.sha256,
       })
       if (!result.ok) {
         toast.error('文件已在外部修改，请重新打开后再保存')

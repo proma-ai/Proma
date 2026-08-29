@@ -46,12 +46,41 @@ export function isStandaloneRawMarkdownHtml(line: string): boolean {
   return findRawHtmlBlockEnd([line], 0) === 0
 }
 
+function isEscaped(source: string, offset: number): boolean {
+  let slashCount = 0
+  for (let index = offset - 1; index >= 0 && source[index] === '\\'; index -= 1) slashCount += 1
+  return slashCount % 2 === 1
+}
+
+function inlineCodeRanges(source: string): Array<{ from: number; to: number }> {
+  const ranges: Array<{ from: number; to: number }> = []
+  let opening: { from: number; length: number } | null = null
+  for (let index = 0; index < source.length; index += 1) {
+    if (source[index] !== '`' || isEscaped(source, index)) continue
+    let end = index + 1
+    while (source[end] === '`') end += 1
+    const length = end - index
+    if (!opening) opening = { from: index, length }
+    else if (opening.length === length) {
+      ranges.push({ from: opening.from, to: end })
+      opening = null
+    }
+    index = end - 1
+  }
+  return ranges
+}
+
+function overlapsInlineCode(ranges: Array<{ from: number; to: number }>, from: number, to: number): boolean {
+  return ranges.some((range) => from < range.to && to > range.from)
+}
+
 /**
  * Finds the inline syntaxes that ink-mde leaves literal in reading mode.
  * Ranges include the delimiters so CodeMirror can replace the complete source span.
  */
 export function findInlineLiveMarkdownPreviews(line: string): InlineLiveMarkdownPreview[] {
   const previews: InlineLiveMarkdownPreview[] = []
+  const codeRanges = inlineCodeRanges(line)
   const mathPatterns = [
     { pattern: /(^|[^\\])\$([^$\n]+)\$/g, contentIndex: 2, markerOffset: (match: RegExpExecArray) => match[1]!.length },
     { pattern: /\\\(([^\n]*?)\\\)/g, contentIndex: 1, markerOffset: () => 0 },
@@ -61,10 +90,12 @@ export function findInlineLiveMarkdownPreviews(line: string): InlineLiveMarkdown
     let match: RegExpExecArray | null
     while ((match = pattern.exec(line)) !== null) {
       const from = match.index + markerOffset(match)
+      const to = from + match[0]!.length - markerOffset(match)
+      if (isEscaped(line, from) || overlapsInlineCode(codeRanges, from, to)) continue
       previews.push({
         kind: 'math',
         from,
-        to: from + match[0]!.length - markerOffset(match),
+        to,
         content: match[contentIndex]!,
       })
     }
@@ -73,10 +104,13 @@ export function findInlineLiveMarkdownPreviews(line: string): InlineLiveMarkdown
   const imagePattern = /!\[([^\]]*)\]\((?:<([^>]+)>|([^\s)]+))(?:\s+(?:"([^"]*)"|'([^']*)'|\(([^)]*)\)))?\)/g
   let image: RegExpExecArray | null
   while ((image = imagePattern.exec(line)) !== null) {
+    const from = image.index
+    const to = image.index + image[0]!.length
+    if (isEscaped(line, from) || overlapsInlineCode(codeRanges, from, to)) continue
     previews.push({
       kind: 'image',
-      from: image.index,
-      to: image.index + image[0]!.length,
+      from,
+      to,
       src: image[2] ?? image[3] ?? '',
       alt: image[1] ?? '',
       title: image[4] ?? image[5] ?? image[6] ?? '',
@@ -86,10 +120,13 @@ export function findInlineLiveMarkdownPreviews(line: string): InlineLiveMarkdown
   const autoLinkPattern = /<(https?:\/\/[^\s<>]+)>/g
   let autoLink: RegExpExecArray | null
   while ((autoLink = autoLinkPattern.exec(line)) !== null) {
+    const from = autoLink.index
+    const to = autoLink.index + autoLink[0]!.length
+    if (isEscaped(line, from) || overlapsInlineCode(codeRanges, from, to)) continue
     previews.push({
       kind: 'autolink',
-      from: autoLink.index,
-      to: autoLink.index + autoLink[0]!.length,
+      from,
+      to,
       content: autoLink[1]!,
     })
   }
