@@ -109,6 +109,20 @@ function registerWebContents(sessionId: string, wc: WebContents) {
   return route
 }
 
+/**
+ * 更新已有 run 的 renderer 目标，但绝不能取得新的 owner。
+ *
+ * 排队或中断消息不创建新 run；若它们调用 bind()，旧 run 的终态将因 owner
+ * 不匹配而无法投递，renderer 会永久保留 running 状态。
+ */
+function rebindWebContents(sessionId: string, wc: WebContents) {
+  const previousWebContents = streamRoutes.get(sessionId)?.target
+  if (previousWebContents && previousWebContents !== wc) streamForwarder.clear(sessionId)
+  const route = streamRoutes.rebind(sessionId, wc)
+  attachWebContentsCleanup(wc)
+  return route
+}
+
 function getStreamRouteTargets(): Map<string, WebContents> {
   const targets = new Map<string, WebContents>()
   for (const snapshot of orchestrator.listActiveSessionSnapshots()) {
@@ -577,7 +591,7 @@ export async function submitOrEnqueueAgentMessage(
   input: AgentSubmitOrEnqueueInput,
   webContents: WebContents,
 ): Promise<AgentSubmitOrEnqueueResult> {
-  registerWebContents(input.sessionId, webContents)
+  rebindWebContents(input.sessionId, webContents)
 
   if (input.dispatch === 'now' && orchestrator.isActive(input.sessionId)) {
     try {
@@ -608,7 +622,7 @@ export async function submitOrEnqueueAgentMessage(
 
 /** 兼容旧调用：仅将消息追加到主进程 deferred queue。 */
 export function enqueueAgentQueuedMessage(input: AgentDeferredQueueMessageInput, webContents: WebContents): void {
-  registerWebContents(input.sessionId, webContents)
+  rebindWebContents(input.sessionId, webContents)
   agentQueueCoordinator.enqueue(input)
 }
 
