@@ -1,7 +1,7 @@
 {
   "name": "proma",
   "version": "0.1.1",
-  "description": "The next gen ai software with general agents",
+  "description": "Proma，为专业用户设计的 Agent",
   "type": "module",
   "private": true,
   "workspaces": [

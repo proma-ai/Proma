@@ -1,7 +1,7 @@
 {
   "name": "@proma/electron",
   "version": "0.19.1",
-  "description": "Proma next gen ai software with general agents - Electron App",
+  "description": "Proma，为专业用户设计的 Agent - Electron App",
   "main": "dist/main.cjs",
   "author": {
     "name": "ErlichLiu",
