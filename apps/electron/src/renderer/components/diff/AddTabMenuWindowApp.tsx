@@ -75,7 +75,7 @@ export function AddTabMenuWindowApp(): React.ReactElement {
               type="button"
               className={cn(
                 'flex h-8 w-full shrink-0 items-center gap-2 rounded-md px-2 text-left text-xs outline-none transition-colors',
-                'hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground',
+                'hover:bg-accent hover:text-accent-foreground',
               )}
               onPointerDown={(event) => {
                 if (event.button === 0) event.preventDefault()
