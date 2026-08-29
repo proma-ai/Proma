@@ -1357,6 +1357,18 @@ export class AgentOrchestrator {
           })
         }
 
+        // Pi 的原生 PowerShell 尚未具备 Proma Bash 等价的命令级安全分类和白名单。
+        // 因此即使用户处在 bypassPermissions 模式，每条命令也必须显示并单次确认，
+        // 防止一次批准扩大为整个 PowerShell 工具的会话授权。
+        if (toolName === 'PowerShell') {
+          if (currentMode === 'plan') {
+            return { behavior: 'deny' as const, message: '计划模式下不允许执行 PowerShell 命令，请在计划审批通过后再执行' }
+          }
+          return permissionService.requestSingleApproval(sessionId, toolName, input, options, (request) => {
+            this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'permission_request', request } })
+          })
+        }
+
         // ── 普通工具的权限分派 ──
 
         switch (currentMode) {

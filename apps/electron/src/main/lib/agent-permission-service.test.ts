@@ -9,12 +9,12 @@ test('Given a PowerShell command When it is approved Then the approval is visibl
   const service = new AgentPermissionService()
   const controller = new AbortController()
   let firstRequest: { requestId: string; command?: string; description?: string; allowAlways?: boolean } | undefined
-  const canUseTool = service.createCanUseTool('session-1', (request) => { firstRequest = request })
-
-  const firstResult = canUseTool(
+  const firstResult = service.requestSingleApproval(
+    'session-1',
     'PowerShell',
     { command: 'Get-Location' },
     permissionOptions(controller.signal, 'tool-1'),
+    (request) => { firstRequest = request },
   )
 
   expect(firstRequest?.command).toBe('Get-Location')
@@ -24,10 +24,12 @@ test('Given a PowerShell command When it is approved Then the approval is visibl
   expect((await firstResult).behavior).toBe('allow')
 
   let secondRequest: { requestId: string; allowAlways?: boolean } | undefined
-  const secondResult = service.createCanUseTool('session-1', (request) => { secondRequest = request })(
+  const secondResult = service.requestSingleApproval(
+    'session-1',
     'PowerShell',
     { command: 'Remove-Item -Recurse .\\build' },
     permissionOptions(controller.signal, 'tool-2'),
+    (request) => { secondRequest = request },
   )
 
   expect(secondRequest?.allowAlways).toBe(false)
