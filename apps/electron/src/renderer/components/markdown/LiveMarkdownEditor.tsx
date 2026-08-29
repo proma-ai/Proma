@@ -4,7 +4,7 @@ import { Prec, RangeSetBuilder, StateEffect, StateField, type EditorState, type 
 import { Decoration, EditorView, ViewPlugin, keymap, type DecorationSet } from '@codemirror/view'
 import ink, { type Instance } from 'ink-mde'
 import { cn } from '@/lib/utils'
-import { liveMarkdownBlockPreview } from './LiveMarkdownPreview'
+import { createLiveMarkdownBlockPreview, type ResolveLiveMarkdownImageSrc, type SaveLiveMarkdownPastedImage } from './LiveMarkdownPreview'
 
 export interface LiveMarkdownEditorHandle {
   focus: () => void
@@ -20,6 +20,10 @@ interface LiveMarkdownEditorProps {
   onCancel?: () => void
   /** 只读时沿用同一套 Live Preview 渲染，但不允许修改源文档。 */
   readOnly?: boolean
+  /** 将本地 Markdown 图片映射为当前来源授权的安全 URL。 */
+  resolveImageSrc?: ResolveLiveMarkdownImageSrc
+  /** 保存剪贴板图片并返回其可写入 Markdown 的相对来源。 */
+  savePastedImage?: SaveLiveMarkdownPastedImage
   extensions?: readonly Extension[]
   className?: string
 }
@@ -185,6 +189,8 @@ export const LiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, Liv
   onSave,
   onCancel,
   readOnly = false,
+  resolveImageSrc,
+  savePastedImage,
   extensions = [],
   className,
 }, ref): React.ReactElement {
@@ -246,7 +252,7 @@ export const LiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, Liv
           return { destroy: () => { if (viewRef.current === view) viewRef.current = null } }
         }),
         ...markdownSyntaxVisibility,
-        liveMarkdownBlockPreview,
+        createLiveMarkdownBlockPreview(resolveImageSrc, savePastedImage),
         ...extensions,
       ].map((extension) => ({ type: 'default' as const, value: extension })),
       search: false,
@@ -291,7 +297,18 @@ export const LiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, Liv
   React.useEffect(() => {
     const instance = instanceRef.current
     if (!instance || instance.getDoc() === value) return
+    // External document refreshes (for example an Agent writing the opened Vault
+    // note) must not eject a reader back to the top of a long CodeMirror document.
+    const scroller = hostRef.current?.querySelector<HTMLElement>('.cm-scroller')
+    const scrollTop = scroller?.scrollTop
+    const scrollLeft = scroller?.scrollLeft
     instance.update(value)
+    if (scroller && scrollTop !== undefined && scrollLeft !== undefined) {
+      requestAnimationFrame(() => {
+        scroller.scrollTop = scrollTop
+        scroller.scrollLeft = scrollLeft
+      })
+    }
   }, [value])
 
   return <div ref={hostRef} className={cn('live-markdown-editor vault-ink-mde h-full min-h-0', className)} />

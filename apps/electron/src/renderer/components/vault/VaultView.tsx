@@ -311,6 +311,7 @@ function VaultMarkdownEditor({
         </div>
         <div className="min-h-0 flex-1">
           <VaultLiveMarkdownEditor
+            relativePath={readResult.relativePath}
             value={draft}
             onChange={setDraft}
             onSave={() => { void save() }}
@@ -494,6 +495,35 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
     initialRefreshRef.current = false
     void refresh({ showLoading })
   }, [refresh, refreshToken])
+
+  // Agent tools can edit a Vault file directly, outside the renderer's own save
+  // IPC. Poll only the currently open note, never the whole Vault tree, so this
+  // stays scoped and a remote edit is reflected without changing navigation.
+  React.useEffect(() => {
+    const relativePath = readResult?.relativePath
+    const sha256 = readResult?.sha256
+    if (!relativePath || !sha256) return
+    let cancelled = false
+    let checking = false
+    const checkCurrentFile = async (): Promise<void> => {
+      if (checking || cancelled || selectedFileRef.current !== relativePath) return
+      checking = true
+      try {
+        const next = await window.electronAPI.readVaultFile(relativePath)
+        if (!cancelled && selectedFileRef.current === relativePath && next.sha256 !== sha256) setReadResult(next)
+      } catch {
+        // A concurrent rename/delete follows the existing refresh and open-file
+        // error paths; the lightweight current-file check remains silent.
+      } finally {
+        checking = false
+      }
+    }
+    const timer = window.setInterval(() => { void checkCurrentFile() }, 1_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [readResult?.relativePath, readResult?.sha256, setReadResult])
 
   const refreshVaultCandidates = React.useCallback(async (): Promise<void> => {
     setCandidatesLoading(true)

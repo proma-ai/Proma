@@ -429,10 +429,11 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     markdownSourceMode: activeMarkdownEditing && markdownSourceMode,
   }), [filePath, loading, activeMarkdownEditing, markdownSourceMode, newContent.length, officeHtml.length, officeHtmlUrl, htmlPreviewUrl, htmlSourceMode, oldContent.length, previewOnly, viewMode])
 
-  // 目录提取只需在「文件本身或其内容」变化时重建，避免 loading/编辑态切换造成的抖动
+  // 目录必须随完整 Markdown 内容更新：仅使用长度会漏掉等长标题修改，留下
+  // 旧标题、旧锚点或错误层级。loading/编辑态切换仍不参与该 key，避免无关抖动。
   const tocContentKey = React.useMemo(
-    () => JSON.stringify({ filePath, previewContentVersion, newLength: newContent.length }),
-    [filePath, previewContentVersion, newContent.length],
+    () => JSON.stringify({ filePath, previewContentVersion, content: newContent }),
+    [filePath, previewContentVersion, newContent],
   )
 
   // ===== 选中文本引用（Quoted Selection）=====

@@ -121,6 +121,7 @@ import type {
   VaultFocus,
   VaultReadResult,
   VaultRenameInput,
+  VaultSavePastedImageInput,
   VaultSummary,
   VaultWriteInput,
   VaultWriteResult,
@@ -484,6 +485,8 @@ export interface ElectronAPI {
   authorizeDiscoveredVault: (rootPath: string, options?: { inboxPath?: string; allowAgentWrites?: boolean }) => Promise<VaultSummary>
   listVaultFiles: () => Promise<VaultFileEntry[]>
   readVaultFile: (relativePath: string) => Promise<VaultReadResult>
+  resolveVaultMedia: (noteRelativePath: string, src: string) => Promise<import('@proma/shared').ResolvedFileUrl | null>
+  saveVaultPastedImage: (input: VaultSavePastedImageInput) => Promise<{ src: string } | null>
   writeVaultFile: (input: VaultWriteInput) => Promise<VaultWriteResult>
   createUntitledVaultFile: () => Promise<VaultWriteResult>
   createUntitledVaultFileInFolder: (folderPath: string) => Promise<VaultWriteResult>
@@ -1736,6 +1739,8 @@ const electronAPI: ElectronAPI = {
   authorizeDiscoveredVault: (rootPath: string, options?: { inboxPath?: string; allowAgentWrites?: boolean }) => ipcRenderer.invoke(VAULT_IPC_CHANNELS.AUTHORIZE_CANDIDATE, rootPath, options),
   listVaultFiles: () => ipcRenderer.invoke(VAULT_IPC_CHANNELS.LIST_FILES),
   readVaultFile: (relativePath: string) => ipcRenderer.invoke(VAULT_IPC_CHANNELS.READ_FILE, relativePath),
+  resolveVaultMedia: (noteRelativePath: string, src: string) => ipcRenderer.invoke(VAULT_IPC_CHANNELS.RESOLVE_MEDIA, noteRelativePath, src),
+  saveVaultPastedImage: (input: VaultSavePastedImageInput) => ipcRenderer.invoke(VAULT_IPC_CHANNELS.SAVE_PASTED_IMAGE, input),
   writeVaultFile: (input: VaultWriteInput) => ipcRenderer.invoke(VAULT_IPC_CHANNELS.WRITE_FILE, input),
   createUntitledVaultFile: () => ipcRenderer.invoke(VAULT_IPC_CHANNELS.CREATE_UNTITLED_FILE),
   createUntitledVaultFileInFolder: (folderPath: string) => ipcRenderer.invoke(VAULT_IPC_CHANNELS.CREATE_UNTITLED_FILE_IN_FOLDER, folderPath),

@@ -5894,6 +5894,23 @@ export function registerIpcHandlers(): void {
     return getConfiguredVaultFileSystem().readFile(relativePath)
   })
 
+  ipcMain.handle(VAULT_IPC_CHANNELS.RESOLVE_MEDIA, async (_, noteRelativePath: unknown, src: unknown): Promise<ResolvedFileUrl | null> => {
+    if (typeof noteRelativePath !== 'string' || typeof src !== 'string') return null
+    const resolvedPath = getConfiguredVaultFileSystem().resolveMedia(noteRelativePath, src)
+    return resolvedPath ? { url: registerPromaFilePath(resolvedPath) } : null
+  })
+
+  ipcMain.handle(VAULT_IPC_CHANNELS.SAVE_PASTED_IMAGE, async (_, input: unknown): Promise<{ src: string } | null> => {
+    if (!input || typeof input !== 'object') return null
+    const value = input as Record<string, unknown>
+    if (typeof value.noteRelativePath !== 'string' || typeof value.mimeType !== 'string' || typeof value.base64 !== 'string') return null
+    return getConfiguredVaultFileSystem().savePastedImage({
+      noteRelativePath: value.noteRelativePath,
+      mimeType: value.mimeType,
+      base64: value.base64,
+    })
+  })
+
   ipcMain.handle(VAULT_IPC_CHANNELS.WRITE_FILE, async (_, input: unknown) => {
     if (!input || typeof input !== 'object') throw new Error('Vault 写入参数非法')
     const value = input as Record<string, unknown>
