@@ -800,7 +800,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
 
   const fileSourceFilterMap = useAtomValue(agentFileSourceFilterMapAtom)
   const setFileSourceFilterMap = useSetAtom(agentFileSourceFilterMapAtom)
-  const fileSourceFilter = fileSourceFilterMap[sessionId] ?? 'session'
+  const fileSourceFilter = fileSourceFilterMap[sessionId] ?? 'project'
   const setFileSourceFilter = React.useCallback((source: AgentFileSourceFilter) => {
     setFileSourceFilterMap((prev) => {
       if (prev[sessionId] === source) return prev
@@ -1631,20 +1631,6 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
                     role="tab"
                     className={cn(
                       'relative flex-1 h-7 px-2 text-[11px] transition-colors select-none',
-                      fileSourceFilter === 'session'
-                        ? 'app-tab-active text-foreground'
-                        : 'app-tab-inactive text-muted-foreground hover:text-foreground',
-                    )}
-                    aria-selected={fileSourceFilter === 'session'}
-                    onClick={() => setFileSourceFilter('session')}
-                  >
-                    会话文件
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    className={cn(
-                      'relative flex-1 h-7 px-2 text-[11px] transition-colors select-none',
                       fileSourceFilter === 'project'
                         ? 'app-tab-active text-foreground'
                         : 'app-tab-inactive text-muted-foreground hover:text-foreground',
@@ -1654,13 +1640,27 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
                   >
                     项目文件
                   </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    className={cn(
+                      'relative flex-1 h-7 px-2 text-[11px] transition-colors select-none',
+                      fileSourceFilter === 'session'
+                        ? 'app-tab-active text-foreground'
+                        : 'app-tab-inactive text-muted-foreground hover:text-foreground',
+                    )}
+                    aria-selected={fileSourceFilter === 'session'}
+                    onClick={() => setFileSourceFilter('session')}
+                  >
+                    会话文件
+                  </button>
                 </div>
               )}
             </FileSearchBar>
             {showBothFileSources ? (
               <div className="grid min-h-0 flex-1 grid-cols-2 divide-x divide-border/70 overflow-hidden pt-2">
-                {renderFileSourceContent('session')}
                 {renderFileSourceContent('project')}
+                {renderFileSourceContent('session')}
               </div>
             ) : (
               <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin pt-1">
