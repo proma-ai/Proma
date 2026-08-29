@@ -20,9 +20,6 @@ import { browserPendingNavigationMapAtom } from '@/atoms/browser-atoms'
 import { BrowserSlot } from './BrowserSlot'
 import { shouldReuseInitialBrowserTab } from './agent-browser-link-utils'
 
-/** 加号菜单最多 7 项；为原生 WebContentsView 预留完整菜单及安全间距。 */
-const ADD_TAB_MENU_CLEARANCE_PX = 256
-
 interface BrowserPanelProps {
   sessionId: string
   /** 由右侧统一顶栏选中的网页。 */
@@ -132,11 +129,9 @@ export function BrowserPanel({ sessionId, tabId, state, isAddTabMenuOpen = false
         )}
       </div>
       {riskAcknowledged === true ? (
-        <div
-          className="flex flex-1 min-h-0 flex-col"
-          style={isAddTabMenuOpen ? { paddingTop: ADD_TAB_MENU_CLEARANCE_PX } : undefined}
-        >
-          <BrowserSlot key={tabId} sessionId={sessionId} tabId={tabId} />
+        <div className="flex flex-1 min-h-0 flex-col">
+          {/* 加号菜单展开时隐藏原生视图并展示快照占位，弹层浮在静态画面之上，页面不再跳动。 */}
+          <BrowserSlot key={tabId} sessionId={sessionId} tabId={tabId} suppressed={isAddTabMenuOpen} />
         </div>
       ) : (
         <div className="flex flex-1 min-h-0 items-center justify-center bg-muted/15 px-8 text-center">

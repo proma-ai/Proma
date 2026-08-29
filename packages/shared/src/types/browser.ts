@@ -7,6 +7,12 @@ export interface BrowserViewBounds {
   height: number
 }
 
+/** 原生视图临时避让 renderer 浮层时使用的静态占位截图；只保存在主进程内存。 */
+export interface BrowserLayoutSnapshot {
+  mimeType: 'image/jpeg'
+  base64: string
+}
+
 export interface BrowserViewLayout {
   sessionId: string
   tabId?: string

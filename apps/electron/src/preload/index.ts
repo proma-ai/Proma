@@ -263,7 +263,7 @@ export interface ElectronAPI {
   selectAgentBrowserTab: (input: import('@proma/shared').BrowserTabInput) => Promise<import('@proma/shared').BrowserViewState>
   closeAgentBrowserTab: (input: import('@proma/shared').BrowserTabInput) => Promise<import('@proma/shared').BrowserViewState | null>
   getAgentBrowserState: (sessionId: string) => Promise<import('@proma/shared').BrowserViewState | null>
-  setAgentBrowserLayout: (layout: import('@proma/shared').BrowserViewLayout) => Promise<void>
+  setAgentBrowserLayout: (layout: import('@proma/shared').BrowserViewLayout) => Promise<import('@proma/shared').BrowserLayoutSnapshot | null>
   minimizeAgentBrowser: (sessionId: string) => Promise<void>
   navigateAgentBrowser: (input: import('@proma/shared').BrowserNavigateInput) => Promise<import('@proma/shared').BrowserViewState>
   goBackAgentBrowser: (sessionId: string) => Promise<import('@proma/shared').BrowserViewState>
@@ -1434,7 +1434,7 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_BROWSER_STATE, sessionId)
   },
   setAgentBrowserLayout: (layout: import('@proma/shared').BrowserViewLayout) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SET_BROWSER_LAYOUT, layout)
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SET_BROWSER_LAYOUT, layout) as Promise<import('@proma/shared').BrowserLayoutSnapshot | null>
   },
   minimizeAgentBrowser: (sessionId: string) => ipcRenderer.invoke(AGENT_IPC_CHANNELS.MINIMIZE_BROWSER, sessionId),
   navigateAgentBrowser: (input: import('@proma/shared').BrowserNavigateInput) => {

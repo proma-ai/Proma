@@ -1,7 +1,7 @@
 import { app, BrowserWindow, WebContentsView, session as electronSession, type DownloadItem, type Session, type WebContents } from 'electron'
 import path from 'node:path'
 import { realpath, stat } from 'node:fs/promises'
-import type { BrowserExecutionSource, BrowserOperationStatus, BrowserSessionClosed, BrowserTabFocusChange, BrowserTraceAction, BrowserTraceItem, BrowserViewLayout, BrowserViewState, BrowserTabState } from '@proma/shared'
+import type { BrowserExecutionSource, BrowserLayoutSnapshot, BrowserOperationStatus, BrowserSessionClosed, BrowserTabFocusChange, BrowserTraceAction, BrowserTraceItem, BrowserViewLayout, BrowserViewState, BrowserTabState } from '@proma/shared'
 import { AGENT_IPC_CHANNELS } from '@proma/shared'
 import { assertSafeBrowserDestination, assertSafeBrowserDestinationWithFallback, assertSafeBrowserDownloadUrl, assertSafeBrowserUrl, isSupportedBrowserPopupUrl, isTransientBrowserPopupUrl, USER_NEW_TAB_URL } from './browser-policy'
 import { createAuthorizedPreviewUrl, isAuthorizedPreviewProtocol } from './browser-preview-service'
@@ -10,7 +10,7 @@ import { BrowserCdpTimeoutError, BrowserOperationAbortedError, BROWSER_OBSERVE_T
 import { parseBrowserPressAction } from './browser-key-policy'
 import { browserObservationNameLimit, prioritizeBrowserObservationCandidates, resolveBrowserObserveMaxElements } from './browser-observation-policy'
 import { buildPersistentBrowserPartition, resolveBrowserProfileKey } from './browser-profile-policy'
-import { canBrowserSessionTakeForeground, isNewBrowserTabLayoutRevision } from './browser-presentation-policy'
+import { canBrowserSessionTakeForeground, isNewBrowserTabLayoutRevision, shouldReturnLayoutSnapshotOnHide } from './browser-presentation-policy'
 import { hasAcknowledgedBrowserRiskDisclaimer } from './browser-risk-disclaimer'
 import { buildPromaBrowserUserAgent } from './browser-identity'
 import {
@@ -78,6 +78,9 @@ type BrowserTabRecord = {
   lastBounds?: BrowserViewLayout['bounds']
   /** 仅记录当前实际挂载的 owner；隐藏时 detach，但保留 WebContents 及页面状态。 */
   attachedOwner: BrowserWindow | null
+  /** 弹层避让使用的最近一次后台快照；只保存在主进程内存。 */
+  layoutSnapshot?: BrowserLayoutSnapshot
+  layoutSnapshotTimer?: ReturnType<typeof setTimeout>
 }
 type BrowserTabOptions = {
   isLocalPreview?: boolean
@@ -692,7 +695,7 @@ export class BrowserController {
       }) ?? null
       this.emit(browserSession)
     })
-    view.webContents.on('did-stop-loading', () => this.updateNavigationState(browserSession, tab))
+    view.webContents.on('did-stop-loading', () => { this.updateNavigationState(browserSession, tab); this.scheduleLayoutSnapshot(browserSession, tab) })
     view.webContents.on('page-title-updated', () => this.updateNavigationState(browserSession, tab))
     view.webContents.on('did-navigate', () => {
       // 只在主框架真正完成跨文档导航时清理旧站点图标；新页面随后会通过 page-favicon-updated 重新发布。
@@ -700,8 +703,9 @@ export class BrowserController {
       tab.popupInitialNavigationPending = false
       this.invalidateTabDocument(tab)
       this.updateNavigationState(browserSession, tab)
+      this.scheduleLayoutSnapshot(browserSession, tab)
     })
-    view.webContents.on('did-navigate-in-page', () => { tab.popupInitialNavigationPending = false; this.invalidateTabDocument(tab); this.updateNavigationState(browserSession, tab) })
+    view.webContents.on('did-navigate-in-page', () => { tab.popupInitialNavigationPending = false; this.invalidateTabDocument(tab); this.updateNavigationState(browserSession, tab); this.scheduleLayoutSnapshot(browserSession, tab) })
     view.webContents.on('destroyed', () => {
       if (!browserSession.tabs.has(tab.tabId)) return
       this.disposePopupChildren(browserSession, tab.tabId)
@@ -709,6 +713,7 @@ export class BrowserController {
       browserSession.lastLayoutRevisionByTab.delete(tab.tabId)
       this.removePresentation(browserSession.sessionId, tab.tabId)
       this.clearAgentTargetHighlight(tab)
+      this.clearLayoutSnapshotTimer(tab)
       this.detachTabView(tab)
       this.repairTabSelection(browserSession, tab.tabId)
       if (browserSession.tabs.size === 0) {
@@ -953,28 +958,36 @@ export class BrowserController {
     this.pruneBackgroundSessions()
   }
 
-  setLayout(layout: BrowserViewLayout): void {
+  async setLayout(layout: BrowserViewLayout): Promise<BrowserLayoutSnapshot | null> {
     const browserSession = this.sessions.get(layout.sessionId)
-    if (!browserSession) return
+    if (!browserSession) return null
     const tabId = layout.tabId ?? browserSession.activeTabId
     const tab = browserSession.tabs.get(tabId)
     // BrowserSlot 卸载与 tab 关闭可交错，晚到布局不应让 renderer 报错。
-    if (!tab) return
+    if (!tab) return null
     // 双 Pane 中两个 Slot 会交错发布。每个 tab 只和自己的最新 revision 比较，
     // 不能让右 Pane 的 resize 吞掉左 Pane 尚未到达的 show。
     const previousRevision = browserSession.lastLayoutRevisionByTab.get(tab.tabId) ?? 0
-    if (!isNewBrowserTabLayoutRevision(layout.revision, previousRevision)) return
+    if (!isNewBrowserTabLayoutRevision(layout.revision, previousRevision)) return null
     browserSession.lastLayoutRevisionByTab.set(tab.tabId, layout.revision)
     browserSession.preserveSessionOnHide = layout.preserveSessionOnHide === true
 
     const bounds = layout.bounds
     const visible = layout.visible && bounds.width > 4 && bounds.height > 4 && !!this.owner && !this.owner.isDestroyed() && this.owner.isVisible()
     if (!visible) {
+      // 弹层避让隐藏会带来真实尺寸；卸载清理使用零尺寸，不需要快照。
+      const snapshot = shouldReturnLayoutSnapshotOnHide({
+        visible: layout.visible,
+        boundsWidth: bounds.width,
+        boundsHeight: bounds.height,
+        tabCurrentlyVisible: tab.state.visible,
+        isPresented: this.hasPresentation(browserSession.sessionId, tab.tabId),
+      }) ? tab.layoutSnapshot ?? null : null
       const changedSessions = new Set<BrowserSessionRecord>()
       if (this.hideTabView(tab)) changedSessions.add(browserSession)
       this.removePresentation(browserSession.sessionId, tab.tabId)
       this.emitChangedSessions(changedSessions)
-      return
+      return snapshot
     }
 
     // revision 在 renderer 全局单调递增。只有切换 Agent Session 时才用全局 show
@@ -984,7 +997,7 @@ export class BrowserController {
       foregroundSessionId: this.foregroundPresentationSessionId,
       revision: layout.revision,
       latestForegroundRevision: this.latestForegroundPresentationRevision,
-    })) return
+    })) return null
 
     const changedSessions = this.foregroundPresentationSessionId === browserSession.sessionId
       ? new Set<BrowserSessionRecord>()
@@ -1017,7 +1030,46 @@ export class BrowserController {
       this.removePresentation(browserSession.sessionId, tab.tabId)
     }
     this.emitChangedSessions(changedSessions)
-    if (shown) this.pruneBackgroundSessions()
+    if (shown) {
+      this.pruneBackgroundSessions()
+      // 重新展示后异步刷新快照，下次弹层避让时使用较新的画面。
+      this.scheduleLayoutSnapshot(browserSession, tab)
+    }
+    return null
+  }
+
+  /**
+   * WebContentsView 需要为 renderer 的弹层让出原生层时，用最近一次页面截图作为静态占位。
+   * 快照只用于本地 UI 背景，不进入 Agent 工具结果，也不写入会话数据。
+   */
+  private async captureLayoutSnapshot(tab: BrowserTabRecord): Promise<BrowserLayoutSnapshot | null> {
+    try {
+      const image = await withBrowserCdpTimeout(() => tab.view.webContents.capturePage(), 'Page.captureScreenshot', BROWSER_OBSERVE_TIMEOUT_MS + 3_000)
+      if (image.isEmpty()) return null
+      const buffer = image.toJPEG(82)
+      if (buffer.byteLength > MAX_SCREENSHOT_BYTES || !isValidImageBytes('image/jpeg', buffer)) return null
+      return { mimeType: 'image/jpeg', base64: buffer.toString('base64') }
+    } catch (error) {
+      console.warn('[受管浏览器] 弹层占位快照捕获失败:', error)
+      return null
+    }
+  }
+
+  /** 在浏览器正常展示时异步更新快照；弹层打开路径直接复用，不再等待截图。 */
+  private scheduleLayoutSnapshot(browserSession: BrowserSessionRecord, tab: BrowserTabRecord): void {
+    if (tab.layoutSnapshotTimer) clearTimeout(tab.layoutSnapshotTimer)
+    tab.layoutSnapshotTimer = setTimeout(() => {
+      tab.layoutSnapshotTimer = undefined
+      if (!this.isManagedTabCurrent(browserSession, tab) || !tab.state.visible) return
+      void this.captureLayoutSnapshot(tab).then((snapshot) => {
+        if (snapshot && this.isManagedTabCurrent(browserSession, tab) && tab.state.visible) tab.layoutSnapshot = snapshot
+      })
+    }, 160)
+  }
+
+  private clearLayoutSnapshotTimer(tab: BrowserTabRecord): void {
+    if (tab.layoutSnapshotTimer) clearTimeout(tab.layoutSnapshotTimer)
+    tab.layoutSnapshotTimer = undefined
   }
 
   /**
@@ -1061,6 +1113,7 @@ export class BrowserController {
     browserSession.lastLayoutRevisionByTab.delete(tab.tabId)
     this.removePresentation(browserSession.sessionId, tab.tabId)
     this.clearAgentTargetHighlight(tab)
+    this.clearLayoutSnapshotTimer(tab)
     try { if (tab.view.webContents.debugger.isAttached()) tab.view.webContents.debugger.detach() } catch { /* 已销毁 */ }
     this.detachTabView(tab)
     if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close()
@@ -1771,6 +1824,7 @@ export class BrowserController {
     if (this.foregroundPresentationSessionId === sessionId) this.foregroundPresentationSessionId = null
     for (const tab of browserSession.tabs.values()) {
       this.clearAgentTargetHighlight(tab)
+      this.clearLayoutSnapshotTimer(tab)
       try { if (tab.view.webContents.debugger.isAttached()) tab.view.webContents.debugger.detach() } catch { /* 已销毁 */ }
       this.detachTabView(tab)
       if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close()

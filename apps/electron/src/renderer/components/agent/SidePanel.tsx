@@ -1227,7 +1227,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
 
   const showBrowserActivity = Boolean(browserState?.activity && browserState.executionSource !== 'user')
   // WebContentsView 是原生子视图，会盖住 renderer 的 portal。加号菜单打开时，
-  // BrowserPanel 为它保留一个固定避让区，而非 setVisible(false)。
+  // BrowserSlot 会临时隐藏原生视图并展示快照占位，而不是压缩页面布局。
   const [isAddTabMenuOpen, setIsAddTabMenuOpen] = React.useState(false)
   const workspaceTabs = React.useMemo<WorkspacePanelTab[]>(() => [
     { id: 'files', label: '文件', icon: <FolderOpen className="size-3.5" /> },

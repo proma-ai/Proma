@@ -150,6 +150,7 @@ import type {
   SavePlanningSyncProfileInput,
   BrowserViewState,
   BrowserViewLayout,
+  BrowserLayoutSnapshot,
   BrowserNavigateInput,
   BrowserTabInput,
   BrowserCreateTabInput,
@@ -2414,10 +2415,10 @@ export function registerIpcHandlers(): void {
   )
   ipcMain.handle(
     AGENT_IPC_CHANNELS.SET_BROWSER_LAYOUT,
-    async (event, layout: BrowserViewLayout): Promise<void> => {
+    async (event, layout: BrowserViewLayout): Promise<BrowserLayoutSnapshot | null> => {
       if (!layout || typeof layout.sessionId !== 'string' || !layout.bounds || !Number.isSafeInteger(layout.revision)) throw new Error('无效的浏览器布局。')
       await assertBrowserSessionAccess(event.sender.id, layout.sessionId)
-      browserController.setLayout(layout)
+      return browserController.setLayout(layout)
     },
   )
   ipcMain.handle(
