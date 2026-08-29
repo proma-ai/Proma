@@ -25,11 +25,9 @@ interface BrowserPanelProps {
   /** 由右侧统一顶栏选中的网页。 */
   tabId: string
   state: BrowserViewState | null
-  /** 右侧加号菜单展开时，原生浏览器必须避让其 renderer 区域。 */
-  isAddTabMenuOpen?: boolean
 }
 
-export function BrowserPanel({ sessionId, tabId, state, isAddTabMenuOpen = false }: BrowserPanelProps): React.ReactElement {
+export function BrowserPanel({ sessionId, tabId, state }: BrowserPanelProps): React.ReactElement {
   const [url, setUrl] = React.useState(state?.url ?? '')
   const [riskAcknowledged, setRiskAcknowledged] = React.useState<boolean | null>(null)
   const [savingRiskAcknowledgement, setSavingRiskAcknowledgement] = React.useState(false)
@@ -130,8 +128,7 @@ export function BrowserPanel({ sessionId, tabId, state, isAddTabMenuOpen = false
       </div>
       {riskAcknowledged === true ? (
         <div className="flex flex-1 min-h-0 flex-col">
-          {/* 加号菜单展开时隐藏原生视图并展示快照占位，弹层浮在静态画面之上，页面不再跳动。 */}
-          <BrowserSlot key={tabId} sessionId={sessionId} tabId={tabId} suppressed={isAddTabMenuOpen} />
+          <BrowserSlot key={tabId} sessionId={sessionId} tabId={tabId} />
         </div>
       ) : (
         <div className="flex flex-1 min-h-0 items-center justify-center bg-muted/15 px-8 text-center">
