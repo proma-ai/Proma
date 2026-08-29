@@ -130,7 +130,7 @@ export function TabSwitcher(): ReactElement | null {
       }))
 
     const agentCandidates = agentSessions
-      .filter((session) => !session.archived && !draftSessionIds.has(session.id))
+      .filter((session) => !session.archived && !session.isDraft && !draftSessionIds.has(session.id))
       .map(buildAgentCandidate)
 
     const allCandidates = [...chatCandidates, ...agentCandidates]

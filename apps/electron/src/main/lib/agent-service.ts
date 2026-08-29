@@ -109,6 +109,20 @@ function registerWebContents(sessionId: string, wc: WebContents) {
   return route
 }
 
+/**
+ * 更新已有 run 的 renderer 目标，但绝不能取得新的 owner。
+ *
+ * 排队或中断消息不创建新 run；若它们调用 bind()，旧 run 的终态将因 owner
+ * 不匹配而无法投递，renderer 会永久保留 running 状态。
+ */
+function rebindWebContents(sessionId: string, wc: WebContents) {
+  const previousWebContents = streamRoutes.get(sessionId)?.target
+  if (previousWebContents && previousWebContents !== wc) streamForwarder.clear(sessionId)
+  const route = streamRoutes.rebind(sessionId, wc)
+  attachWebContentsCleanup(wc)
+  return route
+}
+
 function getStreamRouteTargets(): Map<string, WebContents> {
   const targets = new Map<string, WebContents>()
   for (const snapshot of orchestrator.listActiveSessionSnapshots()) {
@@ -250,9 +264,10 @@ export async function runAgent(
   const route = registerWebContents(input.sessionId, webContents)
   // deferred queue runs carry their queue id as an internal extension.
   const queueMessageId = (input as Partial<AgentDeferredQueueMessageInput>).queueMessageId
-  // 开始新一轮执行时清除"完成未确认"标记
+  // 开始新一轮执行时清除"完成未确认"与持久化草稿标记。
+  // 草稿标记不能只留在 renderer 内存，否则重启后会重新出现在侧栏。
   try {
-    updateAgentSessionMeta(input.sessionId, { completedButUnconfirmed: false })
+    updateAgentSessionMeta(input.sessionId, { completedButUnconfirmed: false, isDraft: false })
   } catch { /* 新会话可能尚未写入索引 */ }
   // 自动任务会话"毕业"：用户手动发消息（非定时触发）即视为接管，标记后该会话回到普通项目列表，
   // 调度器也不再复用它注入新的定时运行。
@@ -576,7 +591,7 @@ export async function submitOrEnqueueAgentMessage(
   input: AgentSubmitOrEnqueueInput,
   webContents: WebContents,
 ): Promise<AgentSubmitOrEnqueueResult> {
-  registerWebContents(input.sessionId, webContents)
+  rebindWebContents(input.sessionId, webContents)
 
   if (input.dispatch === 'now' && orchestrator.isActive(input.sessionId)) {
     try {
@@ -607,7 +622,7 @@ export async function submitOrEnqueueAgentMessage(
 
 /** 兼容旧调用：仅将消息追加到主进程 deferred queue。 */
 export function enqueueAgentQueuedMessage(input: AgentDeferredQueueMessageInput, webContents: WebContents): void {
-  registerWebContents(input.sessionId, webContents)
+  rebindWebContents(input.sessionId, webContents)
   agentQueueCoordinator.enqueue(input)
 }
 

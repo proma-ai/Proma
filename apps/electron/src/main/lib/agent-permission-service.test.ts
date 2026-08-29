@@ -5,6 +5,7 @@ function permissionOptions(signal: AbortSignal, toolUseID: string): CanUseToolOp
   return { signal, toolUseID, displayName: '删除分组', description: '删除 Todo 分组' }
 }
 
+
 test('Given a destructive planning request When it is approved Then approval is single-use and cannot create a session whitelist', async () => {
   const service = new AgentPermissionService()
   const controller = new AbortController()

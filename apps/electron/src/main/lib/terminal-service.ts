@@ -3,9 +3,12 @@ import {
   TERMINAL_IPC_CHANNELS,
   type AgentTerminalCloseEvent,
   type AgentTerminalOpenEvent,
+  assertTerminalProfileSupported,
+  parseTerminalProfile,
   type TerminalCreateInput,
   type TerminalInput,
   type TerminalOutputAck,
+  type TerminalProfile,
   type TerminalResizeInput,
   type TerminalSnapshot,
   type TerminalState,
@@ -36,6 +39,7 @@ export interface AgentTerminalRecord {
   terminalId: string
   title: string
   cwd: string
+  profile: TerminalProfile
   status: 'running' | 'exited'
   exitCode?: number
 }
@@ -133,19 +137,30 @@ export function killTerminal(terminalId: string): void {
   terminalRuntimeClient.kill(terminalId)
 }
 
-/** 为 Agent 创建其会话归属的可见终端，目录仍受现有文件授权范围限制。 */
+/** 为 Agent 创建其会话归属的可见终端，目录仍受现有文件授权范围限制；profile 决定交互 shell。 */
 export async function openAgentTerminal(input: {
   sessionId: string
   cwd?: string
   title?: string
+  profile?: unknown
+  /** 仅用于未显式指定的 Windows 历史 profile；创建失败时安全回退到 default。 */
+  fallbackToDefaultProfile?: boolean
   agentCwd?: string
   allowedRoots?: string[]
 }): Promise<AgentTerminalRecord> {
   const cwd = resolveAgentTerminalCwd(input)
+  const profile = assertTerminalProfileSupported(parseTerminalProfile(input.profile), process.platform)
   const terminalId = randomUUID()
   const title = input.title?.trim().slice(0, 80) || 'Agent 终端'
-  await createTerminal({ terminalId, sessionId: input.sessionId, cwd, cols: 80, rows: 24 }, { strictCwd: true })
-  const record: AgentTerminalRecord = { sessionId: input.sessionId, terminalId, title, cwd, status: 'running' }
+  let resolvedProfile = profile
+  try {
+    await createTerminal({ terminalId, sessionId: input.sessionId, cwd, profile: resolvedProfile, cols: 80, rows: 24 }, { strictCwd: true })
+  } catch (error) {
+    if (!input.fallbackToDefaultProfile || profile === 'default') throw error
+    resolvedProfile = 'default'
+    await createTerminal({ terminalId, sessionId: input.sessionId, cwd, profile: resolvedProfile, cols: 80, rows: 24 }, { strictCwd: true })
+  }
+  const record: AgentTerminalRecord = { sessionId: input.sessionId, terminalId, title, cwd, profile: resolvedProfile, status: 'running' }
   agentTerminals.set(terminalId, record)
   notifyAgentTerminalOpen(record)
   return record
@@ -160,6 +175,10 @@ export async function executeAgentTerminal(input: {
   command: string
   /** 指定时复用当前 Agent 会话中仍在运行的可见 PTY；省略时创建新终端。 */
   terminalId?: string
+  /** 仅在创建新终端时生效；复用已有终端时必须与其 profile 一致。 */
+  profile?: unknown
+  /** 仅在新建终端且使用 Windows 历史 profile 时生效。 */
+  fallbackToDefaultProfile?: boolean
   cwd?: string
   title?: string
   agentCwd?: string
@@ -167,17 +186,22 @@ export async function executeAgentTerminal(input: {
 }): Promise<AgentTerminalRecord> {
   const command = input.command.trim()
   if (!command || command.length > 64 * 1024) throw new Error('终端命令为空或过长')
+  const profile = assertTerminalProfileSupported(parseTerminalProfile(input.profile), process.platform)
+  const profileWasSpecified = input.profile !== undefined && input.profile !== null && input.profile !== ''
 
   const requestedTerminalId = input.terminalId?.trim()
   if (requestedTerminalId) {
     const record = getOwnedAgentTerminal(input.sessionId, requestedTerminalId)
     if (record.status !== 'running') throw new Error('终端已退出，不能复用')
+    if (profileWasSpecified && record.profile !== profile) {
+      throw new Error(`终端 ${requestedTerminalId} 运行在 ${record.profile}，不能以 ${profile} 复用；请省略 terminalId 另开新终端`)
+    }
     await writeTerminal({ terminalId: record.terminalId, data: `${command}\r` })
     return record
   }
 
   const title = input.title?.trim() || `Agent · ${command.replace(/\s+/g, ' ').slice(0, 48)}`
-  const record = await openAgentTerminal({ ...input, title })
+  const record = await openAgentTerminal({ ...input, profile, title })
   await writeTerminal({ terminalId: record.terminalId, data: `${command}\r` })
   return record
 }
@@ -249,6 +273,7 @@ function notifyAgentTerminalOpen(record: AgentTerminalRecord): void {
     terminalId: record.terminalId,
     title: record.title,
     cwd: record.cwd,
+    profile: record.profile,
   }
   getMainWindow()?.webContents.send(TERMINAL_IPC_CHANNELS.AGENT_OPEN, event)
 }

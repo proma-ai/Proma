@@ -576,14 +576,16 @@
 
 /* Windows 顶部标题栏与系统控制按钮。拖拽区和按钮组分属独立矩形，避免高 DPI 下的 hitmask 重叠。 */
 .window-titlebar {
+  --window-titlebar-controls-width: 138px;
   background-color: hsl(var(--background));
 }
-
 
 .window-controls {
   -webkit-app-region: no-drag;
   app-region: no-drag;
+  width: var(--window-titlebar-controls-width);
   height: 32px;
+  flex: 0 0 var(--window-titlebar-controls-width);
 }
 
 .window-control-btn {

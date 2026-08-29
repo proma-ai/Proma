@@ -1018,7 +1018,8 @@ export class AgentOrchestrator {
       // 从源会话继承并持久化，避免历史相对路径在恢复时切换到另一文件根。
 
       // 必须与 runtime 接收的附加目录保持一致；视觉助手据此限制允许外发的图片路径。
-      const vaultUserContext = getVaultUserContext(sessionId)
+      const productivityTools = appSettings.productivityTools
+      const vaultUserContext = productivityTools.obsidianEnabled ? getVaultUserContext(sessionId) : null
       const attachedDirectories = collectAttachedDirectories({
         extraDirs: additionalDirectories,
         sessionMeta,
@@ -1026,7 +1027,7 @@ export class AgentOrchestrator {
       })
       const allAdditionalDirectories = resolveRuntimeAdditionalDirectories(
         attachedDirectories,
-        getAgentVaultRoots(),
+        productivityTools.obsidianEnabled ? getAgentVaultRoots() : [],
       )
       const browserAllowedRoots = [...new Set([
         workspaceId ? agentCwd : undefined,
@@ -1057,6 +1058,8 @@ export class AgentOrchestrator {
         permissionMode: permissionModeOverride ?? sessionMeta?.permissionMode ?? PROMA_DEFAULT_PERMISSION_MODE,
         triggeredBy: input.triggeredBy,
         windowsShellAvailable: process.platform !== 'win32' || runtimeEnv.shellKind != null,
+        lastWindowsTerminalProfile: appSettings.lastWindowsTerminalProfile,
+        productivityTools,
       })
       piBuiltinTools = builtinMcpResult.tools
       const collaborationAvailable = builtinMcpResult.collaborationAvailable
@@ -1102,8 +1105,8 @@ export class AgentOrchestrator {
         console.log(`[Agent 编排] 注入 mentioned_tools: ${mentionedSkills?.length ?? 0} skills, ${mentionedMcpServers?.length ?? 0} MCP`)
       }
       const referencedPlanningBlock = buildReferencedPlanningPrompt(
-        mentionedTodoIds,
-        mentionedCalendarEventIds,
+        productivityTools.todosEnabled ? mentionedTodoIds : undefined,
+        productivityTools.calendarEnabled ? mentionedCalendarEventIds : undefined,
         { requireToolRead: true },
       )
       if (referencedPlanningBlock) {
@@ -1187,6 +1190,27 @@ export class AgentOrchestrator {
         // 脚本执行（具有潜在副作用，如 node script.js / python main.py）
         if (/\b(node|python[23]?|ruby|perl|php)\s+[^-]/.test(command)) return false
         return true
+      }
+
+      /**
+       * 判断 PowerShell 命令是否可在计划模式只读执行。
+       * 为避免管道、重定向与别名隐含副作用，仅允许显式的只读 cmdlet，或沿用
+       * Bash 策略验证的 Git / JavaScript 工具链探索命令。
+       */
+      const isPowerShellCommandReadOnly = (command: string): boolean => {
+        const trimmed = command.trim()
+        if (!trimmed || /[;`|<>]/.test(trimmed) || /&&|\|\|/.test(trimmed)) return false
+
+        const [commandName] = trimmed.split(/\s+/, 1)
+        const normalizedName = commandName?.toLowerCase()
+        const readOnlyCmdlets = new Set([
+          'get-childitem', 'get-content', 'get-item', 'get-location', 'get-command', 'get-help',
+          'get-process', 'get-date', 'get-culture', 'get-module', 'measure-object',
+          'resolve-path', 'select-string', 'test-path',
+        ])
+        if (normalizedName && readOnlyCmdlets.has(normalizedName)) return true
+
+        return /^(git|bun|npm|pnpm|yarn)\s/.test(trimmed) && isBashCommandReadOnly(trimmed)
       }
 
       // Plan 模式下允许的只读工具（不包含 Write/Edit/Bash 等写操作）
@@ -1355,6 +1379,21 @@ export class AgentOrchestrator {
           })
         }
 
+        // Pi 的原生 PowerShell 尚未具备 Proma Bash 等价的命令级安全分类和白名单。
+        // 在需确认的权限模式中，每条命令都必须显示并单次确认；bypassPermissions
+        // 则遵从其既有语义，允许用户显式跳过所有工具确认。
+        if (toolName === 'PowerShell' && currentMode !== 'bypassPermissions') {
+          if (currentMode === 'plan') {
+            const command = typeof input.command === 'string' ? input.command : ''
+            return isPowerShellCommandReadOnly(command)
+              ? { behavior: 'allow' as const, updatedInput: input }
+              : { behavior: 'deny' as const, message: '计划模式下只允许只读 PowerShell 探索命令，请在计划审批通过后再执行写操作' }
+          }
+          return permissionService.requestSingleApproval(sessionId, toolName, input, options, (request) => {
+            this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'permission_request', request } })
+          })
+        }
+
         // ── 普通工具的权限分派 ──
 
         switch (currentMode) {
@@ -1461,6 +1500,7 @@ export class AgentOrchestrator {
         currentModelId: selectedModelId,
         projectInstructions,
         projectKnowledgeMaintenanceApproved,
+        productivityTools,
         memoryGuidance,
         memoryRefreshOpportunity,
       }) + (automationContext ? `\n\n## 定时任务执行上下文\n\n${automationContext}` : '')

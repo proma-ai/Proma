@@ -8,6 +8,8 @@
 import * as React from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { cn } from "@/lib/utils";
+import { detectIsWindows } from "@/lib/platform";
+import { getWindowTitlebarDragInsetStyle } from "@/lib/window-titlebar-layout";
 import {
   Settings,
   Radio,
@@ -167,6 +169,7 @@ interface SettingsPanelProps {
 export function SettingsPanel({
   onClose,
 }: SettingsPanelProps): React.ReactElement {
+  const isWindows = React.useMemo(() => detectIsWindows(), [])
   const [activeTab, setActiveTab] = useAtom(settingsTabAtom);
   const channelFormDirty = useAtomValue(channelFormDirtyAtom);
   const [closeRequested, setCloseRequested] = useAtom(settingsCloseRequestedAtom);
@@ -296,7 +299,11 @@ export function SettingsPanel({
   return (
     <div className="flex h-full min-h-0 flex-col bg-content-area text-foreground">
       <div className="relative h-[35px] flex-shrink-0 bg-[hsl(var(--sidebar-surface))]">
-        <div aria-hidden="true" className="titlebar-drag-region pointer-events-none absolute inset-0" />
+        <div
+          aria-hidden="true"
+          className="titlebar-drag-region pointer-events-none absolute inset-y-0 left-0"
+          style={getWindowTitlebarDragInsetStyle(isWindows)}
+        />
       </div>
 
       {/* 主体：左导航 + 右内容 */}

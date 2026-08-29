@@ -33,6 +33,8 @@ export function displayToolName(piName: string, input?: Record<string, unknown>)
       return input && isMultiEditInput(piName, input) ? 'MultiEdit' : 'Edit'
     case 'bash':
       return 'Bash'
+    case 'powershell':
+      return 'PowerShell'
     case 'grep':
       return 'Grep'
     case 'find':

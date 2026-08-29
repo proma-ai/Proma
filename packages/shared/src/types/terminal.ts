@@ -20,6 +20,22 @@ export const TERMINAL_IPC_CHANNELS = {
 
 export type TerminalProfile = 'default' | 'zsh' | 'bash' | 'pwsh' | 'powershell' | 'cmd' | 'git-bash' | 'wsl'
 
+const POSIX_TERMINAL_PROFILES = ['default', 'zsh', 'bash'] as const satisfies readonly TerminalProfile[]
+const WINDOWS_TERMINAL_PROFILES = ['default', 'pwsh', 'powershell', 'cmd', 'git-bash', 'wsl'] as const satisfies readonly TerminalProfile[]
+
+/** 返回当前平台允许请求的终端 profile；实际可执行性仍由 Terminal Runtime 在创建 PTY 时校验。 */
+export function getTerminalProfilesForPlatform(platform: string): readonly TerminalProfile[] {
+  if (platform === 'win32') return WINDOWS_TERMINAL_PROFILES
+  if (platform === 'darwin' || platform === 'linux') return POSIX_TERMINAL_PROFILES
+  return ['default']
+}
+
+/** 防止 profile 在不支持它的平台上静默解析为另一个 shell。 */
+export function assertTerminalProfileSupported(profile: TerminalProfile, platform: string): TerminalProfile {
+  if (getTerminalProfilesForPlatform(platform).includes(profile)) return profile
+  throw new Error(`shell ${profile} 不支持当前平台 ${platform}；可选值：${getTerminalProfilesForPlatform(platform).join('、')}`)
+}
+
 export interface TerminalCreateInput {
   terminalId: string
   /** 终端所属 Agent 会话；主进程据此在会话删除时回收 PTY。 */
@@ -76,6 +92,7 @@ export interface AgentTerminalOpenEvent {
   terminalId: string
   title: string
   cwd: string
+  profile?: TerminalProfile
 }
 
 export interface AgentTerminalCloseEvent {
@@ -98,4 +115,15 @@ export function isTerminalProfile(value: unknown): value is TerminalProfile {
     || value === 'cmd'
     || value === 'git-bash'
     || value === 'wsl'
+}
+
+/**
+ * 把外部输入（如 Agent 工具参数）解析为 TerminalProfile。
+ * 省略或空串回退到 default；显式传入未知值时抛错而非静默回退，
+ * 避免调用方误以为终端运行在指定 shell 上。
+ */
+export function parseTerminalProfile(value: unknown): TerminalProfile {
+  if (value === undefined || value === null || value === '') return 'default'
+  if (isTerminalProfile(value)) return value
+  throw new Error(`shell 无效：${String(value)}。可选值：default、pwsh、powershell、cmd、git-bash、wsl、bash、zsh`)
 }

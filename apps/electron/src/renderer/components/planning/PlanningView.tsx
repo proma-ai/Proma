@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { PLANNING_CONFLICT_ERROR } from '@proma/shared'
 import type { PlanningGroup, Todo } from '@proma/shared'
 import { cn } from '@/lib/utils'
+import { productivityToolsAtom } from '@/atoms/ui-preferences'
 import { automationsAtom, automationFormAtom, createEmptyDraft } from '@/atoms/automation-atoms'
 import { AutomationsListView } from '@/components/automation/AutomationsListView'
 import { AgentActionHint } from '@/components/agent/AgentActionHint'
@@ -86,7 +87,18 @@ export function PlanningView({
 }: { embedded?: boolean; componentTab?: PlanningTab } = {}): React.ReactElement {
   // planningTabAtom 的初始值为 Todo；右侧组件由 componentTab 锁定，避免组件 Tab 与内部导航失焦。
   const [tab, setTab] = useAtom(planningTabAtom)
-  const visibleTab = embedded && componentTab ? componentTab : tab
+  const productivityTools = useAtomValue(productivityToolsAtom)
+  const isTabEnabled = React.useCallback((candidate: PlanningTab): boolean => (
+    candidate === 'automations'
+    || (candidate === 'todos' && productivityTools.todosEnabled)
+    || (candidate === 'calendar' && productivityTools.calendarEnabled)
+  ), [productivityTools.calendarEnabled, productivityTools.todosEnabled])
+  const requestedTab = embedded && componentTab ? componentTab : tab
+  const visibleTab = isTabEnabled(requestedTab) ? requestedTab : 'automations'
+  const availableTabs = React.useMemo(() => TABS.filter((item) => isTabEnabled(item.id)), [isTabEnabled])
+  React.useEffect(() => {
+    if (!embedded && visibleTab !== tab) setTab(visibleTab)
+  }, [embedded, setTab, tab, visibleTab])
   const automations = useAtomValue(automationsAtom)
   const setAutomationForm = useSetAtom(automationFormAtom)
   const requestTodoCreate = useSetAtom(planningTodoCreateRequestAtom)
@@ -139,7 +151,7 @@ export function PlanningView({
       {!embedded && (
         <div className="titlebar-no-drag w-full px-6 sm:px-8 xl:px-10">
           <nav className="inline-flex rounded-xl bg-muted/60 p-1 shadow-inner" aria-label="任务日程视图">
-            {TABS.map((item) => <button key={item.id} type="button" onClick={() => setTab(item.id)} className={cn('min-h-9 rounded-lg px-3 text-sm transition-colors', visibleTab === item.id ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{item.label}</button>)}
+            {availableTabs.map((item) => <button key={item.id} type="button" onClick={() => setTab(item.id)} className={cn('min-h-9 rounded-lg px-3 text-sm transition-colors', visibleTab === item.id ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{item.label}</button>)}
           </nav>
         </div>
       )}

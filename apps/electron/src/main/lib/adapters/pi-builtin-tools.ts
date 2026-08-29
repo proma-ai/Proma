@@ -10,10 +10,11 @@
 import { Type } from 'typebox'
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 import type { AgentToolResult } from '@earendil-works/pi-agent-core'
-import { AGENT_IPC_CHANNELS, normalizePathForCompare } from '@proma/shared'
+import { AGENT_IPC_CHANNELS, getTerminalProfilesForPlatform, normalizePathForCompare, parseTerminalProfile } from '@proma/shared'
 import type {
   CreateAutomationInput,
   PromaPermissionMode,
+  TerminalProfile,
   UpdateAutomationInput,
 } from '@proma/shared'
 import { realpathSync } from 'node:fs'
@@ -63,6 +64,7 @@ import {
   updatePlanningTag,
   deletePlanningTag,
   listActivePlanningReminders,
+  getPlanningReminder,
   createPlanningReminder,
   updatePlanningReminder,
   deletePlanningReminder,
@@ -91,7 +93,9 @@ import {
   automationCreateToolParameters,
   discardInapplicableAutomationScheduleFields,
 } from './automation-tool-schema'
+import { updateSettings } from '../settings-service'
 import { getConfiguredVaultFileSystem, getVaultConfig } from '../vault-service'
+import type { ProductivityToolsSettings } from '../../../types'
 
 type PiSdk = typeof import('@earendil-works/pi-coding-agent')
 
@@ -111,6 +115,10 @@ export interface PiBuiltinToolsContext {
   triggeredBy?: 'user' | 'automation' | 'delegation' | 'external'
   /** Windows 设备是否已有可供 Pi Bash 使用的 Git Bash 或 WSL。 */
   windowsShellAvailable?: boolean
+  /** Windows 上省略 shell 时使用用户最近一次明确选择的 profile。 */
+  lastWindowsTerminalProfile?: TerminalProfile
+  /** 用户关闭的生产力能力不能注入给 Agent。 */
+  productivityTools?: ProductivityToolsSettings
 }
 
 function jsonToolResult(payload: unknown): AgentToolResult<unknown> {
@@ -548,6 +556,27 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
 // ===== Pi 专属任务 / 日程工具 =====
 
 function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinition[] {
+  const todosEnabled = ctx.productivityTools?.todosEnabled ?? true
+  const calendarEnabled = ctx.productivityTools?.calendarEnabled ?? true
+  const planningGroupScopeSchema = todosEnabled && calendarEnabled
+    ? Type.Union([Type.Literal('todo'), Type.Literal('calendar')])
+    : todosEnabled ? Type.Literal('todo') : Type.Literal('calendar')
+  const planningReminderTargetTypeSchema = todosEnabled && calendarEnabled
+    ? Type.Union([Type.Literal('todo'), Type.Literal('calendar_event')])
+    : todosEnabled ? Type.Literal('todo') : Type.Literal('calendar_event')
+  const assertPlanningScopeEnabled = (scope: 'todo' | 'calendar'): void => {
+    if ((scope === 'todo' && !todosEnabled) || (scope === 'calendar' && !calendarEnabled)) {
+      throw new Error(`${scope === 'todo' ? 'Todo' : '日程'}功能已关闭`)
+    }
+  }
+  const assertPlanningReminderTargetEnabled = (targetType: 'todo' | 'calendar_event'): void => {
+    assertPlanningScopeEnabled(targetType === 'todo' ? 'todo' : 'calendar')
+  }
+  const assertPlanningReminderEnabled = (id: string): void => {
+    const reminder = getPlanningReminder(id)
+    if (!reminder) throw new Error('提醒不存在')
+    assertPlanningReminderTargetEnabled(reminder.targetType)
+  }
   const optionalPlanningFields = {
     notes: Type.Optional(Type.String({ description: '补充说明' })),
     workspaceId: Type.Optional(Type.String({ description: '所属工作区 ID；不传默认当前工作区' })),
@@ -713,18 +742,20 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
     sdk.defineTool({
       name: 'mcp__planning__list_groups', label: '列出分组',
       description: '列出指定范围的 Todo 或日程分组。创建或归入分组前优先调用，以复用该范围内的现有分组。仅 Pi Agent 可用。',
-      parameters: Type.Object({ scope: Type.Union([Type.Literal('todo'), Type.Literal('calendar')]) }),
+      parameters: Type.Object({ scope: planningGroupScopeSchema }),
       async execute(_id: string, params: unknown) {
         const scope = (params as { scope: 'todo' | 'calendar' }).scope
+        assertPlanningScopeEnabled(scope)
         return jsonToolResult({ groups: listPlanningGroups(scope) })
       },
     }),
     sdk.defineTool({
       name: 'mcp__planning__create_group', label: '创建分组',
       description: '创建 Todo 或日程范围内的独立分组。只在用户明确提出新分组或该范围内现有分组不适用时使用。仅 Pi Agent 可用。',
-      parameters: Type.Object({ scope: Type.Union([Type.Literal('todo'), Type.Literal('calendar')]), name: Type.String(), color: Type.Optional(Type.String()), sortOrder: Type.Optional(Type.Number()) }),
+      parameters: Type.Object({ scope: planningGroupScopeSchema, name: Type.String(), color: Type.Optional(Type.String()), sortOrder: Type.Optional(Type.Number()) }),
       async execute(_id: string, params: unknown) {
         const args = params as { scope: 'todo' | 'calendar'; name: string; color?: string; sortOrder?: number }
+        assertPlanningScopeEnabled(args.scope)
         const group = createPlanningGroup({ scope: args.scope, name: assertNonBlank(args.name, 'name'), color: args.color, sortOrder: args.sortOrder })
         broadcastPlanningChanged(args.scope === 'todo' ? ['todo_groups', 'todos', 'reminders'] : ['calendar_groups', 'calendar_events', 'reminders']); return jsonToolResult({ group })
       },
@@ -732,10 +763,11 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
     sdk.defineTool({
       name: 'mcp__planning__update_group', label: '更新分组',
       description: '更新指定范围内的分组，不能借此移动分组范围。仅 Pi Agent 可用。',
-      parameters: Type.Object({ id: Type.String(), scope: Type.Union([Type.Literal('todo'), Type.Literal('calendar')]), name: Type.Optional(Type.String()), color: Type.Optional(Type.Union([Type.String(), Type.Null()])), sortOrder: Type.Optional(Type.Number()) }),
+      parameters: Type.Object({ id: Type.String(), scope: planningGroupScopeSchema, name: Type.Optional(Type.String()), color: Type.Optional(Type.Union([Type.String(), Type.Null()])), sortOrder: Type.Optional(Type.Number()) }),
       async execute(_id: string, params: unknown) {
         const args = params as Record<string, unknown>
         const scope = args.scope as 'todo' | 'calendar'
+        assertPlanningScopeEnabled(scope)
         const group = updatePlanningGroup({ id: assertNonBlank(args.id as string, 'id'), scope, name: args.name as string | undefined, color: args.color as string | null | undefined, sortOrder: args.sortOrder as number | undefined })
         if (!group) throw new Error('分组不存在'); broadcastPlanningChanged(scope === 'todo' ? ['todo_groups', 'todos', 'reminders'] : ['calendar_groups', 'calendar_events', 'reminders']); return jsonToolResult({ group })
       },
@@ -743,10 +775,11 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
     sdk.defineTool({
       name: 'mcp__planning__delete_group', label: '删除分组',
       description: '删除指定范围内的分组，并仅清除该范围关联对象的分组字段。只在用户明确要求删除时使用。仅 Pi Agent 可用。',
-      parameters: Type.Object({ id: Type.String(), scope: Type.Union([Type.Literal('todo'), Type.Literal('calendar')]) }),
+      parameters: Type.Object({ id: Type.String(), scope: planningGroupScopeSchema }),
       async execute(_id: string, params: unknown) {
         assertPlanningDeleteAllowed(ctx)
         const args = params as { id: string; scope: 'todo' | 'calendar' }
+        assertPlanningScopeEnabled(args.scope)
         const deleted = deletePlanningGroup(args.scope, assertNonBlank(args.id, 'id'))
         if (deleted) broadcastPlanningChanged(args.scope === 'todo' ? ['todo_groups', 'todos', 'reminders'] : ['calendar_groups', 'calendar_events', 'reminders'])
         return jsonToolResult({ deleted })
@@ -780,37 +813,43 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
       name: 'mcp__planning__list_active_reminders', label: '列出到期提醒',
       description: '列出当前已到期且未确认的常驻提醒。用于帮助用户处理提醒，不用于扫描全部历史。仅 Pi Agent 可用。',
       parameters: Type.Object({}),
-      async execute() { return jsonToolResult({ reminders: listActivePlanningReminders() }) },
+      async execute() {
+        return jsonToolResult({
+          reminders: listActivePlanningReminders().filter((reminder) => (
+            reminder.targetType === 'todo' ? todosEnabled : calendarEnabled
+          )),
+        })
+      },
     }),
     sdk.defineTool({
       name: 'mcp__planning__create_reminder', label: '创建提醒',
       description: '为 Todo 或日程创建指定时点的提醒。仅在用户要求提醒且时点明确时使用。仅 Pi Agent 可用。',
-      parameters: Type.Object({ targetType: Type.Union([Type.Literal('todo'), Type.Literal('calendar_event')]), targetId: Type.String(), triggerAt: Type.Number({ description: '提醒触发 Unix 毫秒时间戳' }) }),
-      async execute(_id: string, params: unknown) { const args = params as { targetType: 'todo' | 'calendar_event'; targetId: string; triggerAt: number }; const reminder = createPlanningReminder({ targetType: args.targetType, targetId: assertNonBlank(args.targetId, 'targetId'), triggerAt: args.triggerAt }); broadcastPlanningChanged(['todos', 'calendar_events', 'reminders']); return jsonToolResult({ reminder }) },
+      parameters: Type.Object({ targetType: planningReminderTargetTypeSchema, targetId: Type.String(), triggerAt: Type.Number({ description: '提醒触发 Unix 毫秒时间戳' }) }),
+      async execute(_id: string, params: unknown) { const args = params as { targetType: 'todo' | 'calendar_event'; targetId: string; triggerAt: number }; assertPlanningReminderTargetEnabled(args.targetType); const reminder = createPlanningReminder({ targetType: args.targetType, targetId: assertNonBlank(args.targetId, 'targetId'), triggerAt: args.triggerAt }); broadcastPlanningChanged(['todos', 'calendar_events', 'reminders']); return jsonToolResult({ reminder }) },
     }),
     sdk.defineTool({
       name: 'mcp__planning__update_reminder', label: '更新提醒时间',
       description: '修改未确认提醒的触发时间。仅 Pi Agent 可用。',
       parameters: Type.Object({ id: Type.String(), triggerAt: Type.Number({ description: '新的提醒触发 Unix 毫秒时间戳' }) }),
-      async execute(_id: string, params: unknown) { const args = params as { id: string; triggerAt: number }; const reminder = updatePlanningReminder(assertNonBlank(args.id, 'id'), args.triggerAt); if (!reminder) throw new Error('提醒不存在或已处理'); broadcastPlanningChanged(['todos', 'calendar_events', 'reminders']); return jsonToolResult({ reminder }) },
+      async execute(_id: string, params: unknown) { const args = params as { id: string; triggerAt: number }; const id = assertNonBlank(args.id, 'id'); assertPlanningReminderEnabled(id); const reminder = updatePlanningReminder(id, args.triggerAt); if (!reminder) throw new Error('提醒不存在或已处理'); broadcastPlanningChanged(['todos', 'calendar_events', 'reminders']); return jsonToolResult({ reminder }) },
     }),
     sdk.defineTool({
       name: 'mcp__planning__acknowledge_reminder', label: '确认提醒',
       description: '确认并关闭一个到期提醒，不会删除 Todo 或日程。仅在用户明确要求关闭提醒时使用。仅 Pi Agent 可用。',
       parameters: Type.Object({ id: Type.String() }),
-      async execute(_id: string, params: unknown) { const reminder = acknowledgePlanningReminder(assertNonBlank((params as { id: string }).id, 'id')); if (!reminder) throw new Error('提醒不存在或已处理'); broadcastPlanningChanged(['todos', 'calendar_events', 'reminders']); return jsonToolResult({ reminder }) },
+      async execute(_id: string, params: unknown) { const id = assertNonBlank((params as { id: string }).id, 'id'); assertPlanningReminderEnabled(id); const reminder = acknowledgePlanningReminder(id); if (!reminder) throw new Error('提醒不存在或已处理'); broadcastPlanningChanged(['todos', 'calendar_events', 'reminders']); return jsonToolResult({ reminder }) },
     }),
     sdk.defineTool({
       name: 'mcp__planning__snooze_reminder', label: '推迟提醒',
       description: '将未确认提醒推迟指定分钟数。仅 Pi Agent 可用。',
       parameters: Type.Object({ id: Type.String(), minutes: Type.Number({ description: '推迟分钟数，1 到 10080' }) }),
-      async execute(_id: string, params: unknown) { const args = params as { id: string; minutes: number }; const reminder = snoozePlanningReminder(assertNonBlank(args.id, 'id'), args.minutes); if (!reminder) throw new Error('提醒不存在或已处理'); broadcastPlanningChanged(['todos', 'calendar_events', 'reminders']); return jsonToolResult({ reminder }) },
+      async execute(_id: string, params: unknown) { const args = params as { id: string; minutes: number }; const id = assertNonBlank(args.id, 'id'); assertPlanningReminderEnabled(id); const reminder = snoozePlanningReminder(id, args.minutes); if (!reminder) throw new Error('提醒不存在或已处理'); broadcastPlanningChanged(['todos', 'calendar_events', 'reminders']); return jsonToolResult({ reminder }) },
     }),
     sdk.defineTool({
       name: 'mcp__planning__delete_reminder', label: '删除提醒',
       description: '删除提醒记录。只在用户明确要求彻底删除提醒时使用。仅 Pi Agent 可用。',
       parameters: Type.Object({ id: Type.String() }),
-      async execute(_id: string, params: unknown) { assertPlanningDeleteAllowed(ctx); const deleted = deletePlanningReminder(assertNonBlank((params as { id: string }).id, 'id')); if (deleted) broadcastPlanningChanged(['todos', 'calendar_events', 'reminders']); return jsonToolResult({ deleted }) },
+      async execute(_id: string, params: unknown) { assertPlanningDeleteAllowed(ctx); const id = assertNonBlank((params as { id: string }).id, 'id'); assertPlanningReminderEnabled(id); const deleted = deletePlanningReminder(id); if (deleted) broadcastPlanningChanged(['todos', 'calendar_events', 'reminders']); return jsonToolResult({ deleted }) },
     }),
   ] as unknown as ToolDefinition[]
 }
@@ -1325,37 +1364,89 @@ function buildAgentTerminalTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDe
   // 无用户在场的来源不能启动或驱动本地交互终端；这既没有可见性，也会扩大自动任务与外部 Bridge 的权限。
   if (ctx.triggeredBy === 'automation' || ctx.triggeredBy === 'delegation' || ctx.triggeredBy === 'external') return []
 
-  const terminalInput = (args: Record<string, unknown>): { cwd?: string; title?: string } => ({
+  const supportedTerminalProfiles = getTerminalProfilesForPlatform(process.platform)
+  const shellProfileDescription = process.platform === 'win32'
+    ? `Shell profile for the new terminal: ${supportedTerminalProfiles.join(' | ')}. default uses Windows PowerShell when available; pwsh, git-bash, and wsl select their respective Windows shell. Invalid values fail explicitly instead of falling back.`
+    : process.platform === 'darwin'
+      ? `Shell profile for the new terminal: ${supportedTerminalProfiles.join(' | ')}. default preserves the user's configured login shell; zsh and bash apply only to this terminal. Windows-only profiles fail explicitly.`
+      : `Shell profile for the new terminal: ${supportedTerminalProfiles.join(' | ')}. default uses the configured login shell when available; zsh and bash apply only to this terminal. Unsupported profiles fail explicitly.`
+  const defaultShellBehavior = process.platform === 'win32'
+    ? 'If shell is omitted, Proma reuses the user’s last selected Windows shell when available; otherwise it uses the platform default.'
+    : 'If shell is omitted, Proma uses the platform default shell without persisting an explicit per-terminal selection.'
+
+  let lastWindowsTerminalProfile = ctx.lastWindowsTerminalProfile
+  const terminalInput = (args: Record<string, unknown>): { cwd?: string; title?: string; profile?: TerminalProfile } => ({
     ...(typeof args.cwd === 'string' && args.cwd.trim() ? { cwd: args.cwd.trim() } : {}),
     ...(typeof args.title === 'string' && args.title.trim() ? { title: args.title.trim() } : {}),
+    ...('shell' in args ? { profile: parseTerminalProfile(args.shell) } : {}),
   })
+  const resolveTerminalInput = (
+    args: Record<string, unknown>,
+    options: { reuse: boolean } = { reuse: false },
+  ): { input: ReturnType<typeof terminalInput>; explicit: boolean; usingRememberedProfile: boolean } => {
+    const explicit = Object.prototype.hasOwnProperty.call(args, 'shell')
+    const input = terminalInput(args)
+    const rememberedProfile = !options.reuse && !explicit && process.platform === 'win32'
+      ? lastWindowsTerminalProfile
+      : undefined
+    const profile = options.reuse && !explicit ? undefined : input.profile ?? rememberedProfile
+    return {
+      input: { ...input, ...(profile ? { profile } : {}) },
+      explicit,
+      usingRememberedProfile: rememberedProfile !== undefined && rememberedProfile !== 'default',
+    }
+  }
+  const recordExplicitProfile = (profile: TerminalProfile, explicit: boolean): void => {
+    if (!explicit || process.platform !== 'win32') return
+    try {
+      updateSettings({ lastWindowsTerminalProfile: profile })
+      lastWindowsTerminalProfile = profile
+    } catch (error) {
+      console.warn('[终端] 保存最近 Shell 失败:', error)
+    }
+  }
+  const clearUnavailableRememberedProfile = (profile: TerminalProfile, usingRememberedProfile: boolean): void => {
+    if (!usingRememberedProfile || profile !== 'default' || process.platform !== 'win32') return
+    lastWindowsTerminalProfile = undefined
+    try {
+      updateSettings({ lastWindowsTerminalProfile: undefined })
+    } catch (error) {
+      console.warn('[终端] 清理不可用的最近 Shell 失败:', error)
+    }
+  }
   const agentContext = { sessionId: ctx.sessionId, agentCwd: ctx.agentCwd, allowedRoots: ctx.allowedRoots }
 
   return [
     sdk.defineTool({
       name: 'TerminalOpen',
       label: '打开 Agent 终端',
-      description: 'Open a visible terminal Tab in the Agent right workspace. cwd controls the initial directory and must resolve within the current session’s authorized directories; it is not an OS sandbox. This tool opens an interactive terminal but does not run a command.',
+      description: `Open a visible terminal Tab in the Agent right workspace. cwd controls the initial directory and must resolve within the current session’s authorized directories; it is not an OS sandbox. ${defaultShellBehavior} This tool opens an interactive terminal but does not run a command.`,
       promptSnippet: 'Open a visible Agent terminal at an authorized cwd. Do not use it to silently run commands.',
       parameters: Type.Object({
         cwd: Type.Optional(Type.String({ description: 'Absolute or Agent-CWD-relative initial directory. It must resolve within the current session’s authorized roots.' })),
         title: Type.Optional(Type.String({ description: 'Short visible terminal title.' })),
+        shell: Type.Optional(Type.String({ description: shellProfileDescription })),
       }),
       async execute(_toolCallId, params) {
-        const record = await openAgentTerminal({ ...agentContext, ...terminalInput(params as Record<string, unknown>) })
+        const args = params as Record<string, unknown>
+        const { input, explicit, usingRememberedProfile } = resolveTerminalInput(args)
+        const record = await openAgentTerminal({ ...agentContext, ...input, fallbackToDefaultProfile: usingRememberedProfile })
+        recordExplicitProfile(record.profile, explicit)
+        clearUnavailableRememberedProfile(record.profile, usingRememberedProfile)
         return jsonToolResult({ terminal: record, visible: true, outputSharedWithAgent: false })
       },
     }),
     sdk.defineTool({
       name: 'TerminalExecute',
       label: '在可见终端执行命令',
-      description: 'Run one command in a visible Agent-owned terminal Tab. Omit terminalId to open a new Tab, or provide the ID of a current-session running terminal to reuse it. The user can see and interrupt it. Call TerminalRead with the returned terminal ID when you need to inspect its output; output is never pushed into this tool result.',
-      promptSnippet: 'Use the visible terminal for user-attended commands that benefit from execution visibility. Before reusing a terminal, call TerminalList and reuse only a current-session terminal with a matching cwd whose previous command you observed finish; otherwise omit terminalId to open a new Tab. If the result matters, call TerminalRead after it has produced output instead of assuming output is returned automatically.',
+      description: 'Run one command in a visible Agent-owned terminal Tab. Prefer terminalId to reuse a safe matching current-session terminal; omit it only when no terminal can be reused. The user can see and interrupt it. Call TerminalRead with the returned terminal ID when you need to inspect its output; output is never pushed into this tool result.',
+      promptSnippet: 'Use the visible terminal only for user-attended commands that benefit from execution visibility. Before every visible terminal command, call TerminalList and prefer a current-session running terminal with a matching cwd whose previous command you observed finish; pass its terminalId to avoid opening another Tab. Omit terminalId only when no safe candidate exists, the cwd or shell must differ, or the user needs a separately visible concurrent session. Do not reuse an interactive, long-running, or unverified-busy terminal. Use TerminalRead to confirm completion or inspect results; do not assume output is returned automatically.',
       parameters: Type.Object({
         command: Type.String({ description: 'Complete command to execute in the controlled shell. Do not prepend shell wrappers.' }),
-        terminalId: Type.Optional(Type.String({ description: 'Current-session running Agent terminal to reuse. First inspect candidates with TerminalList; do not reuse an interactive, long-running, or unverified-busy terminal.' })),
+        terminalId: Type.Optional(Type.String({ description: 'Preferred when a matching safe current-session terminal is available. First inspect candidates with TerminalList; do not reuse an interactive, long-running, or unverified-busy terminal.' })),
         cwd: Type.Optional(Type.String({ description: 'Absolute or Agent-CWD-relative directory within the current authorized roots. Used only when opening a new terminal.' })),
         title: Type.Optional(Type.String({ description: 'Short visible terminal title. Used only when opening a new terminal.' })),
+        shell: Type.Optional(Type.String({ description: `${shellProfileDescription} Used only when opening a new terminal. When reusing terminalId, an explicitly mismatching shell fails; omit it to keep the existing shell.` })),
       }),
       async execute(_toolCallId, params) {
         const args = params as Record<string, unknown>
@@ -1364,7 +1455,12 @@ function buildAgentTerminalTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDe
         const terminalId = typeof args.terminalId === 'string' && args.terminalId.trim()
           ? args.terminalId.trim()
           : undefined
-        const record = await executeAgentTerminal({ ...agentContext, ...terminalInput(args), command, terminalId })
+        const { input, explicit, usingRememberedProfile } = resolveTerminalInput(args, { reuse: Boolean(terminalId) })
+        const record = await executeAgentTerminal({ ...agentContext, ...input, command, terminalId, fallbackToDefaultProfile: usingRememberedProfile })
+        if (!terminalId) {
+          recordExplicitProfile(record.profile, explicit)
+          clearUnavailableRememberedProfile(record.profile, usingRememberedProfile)
+        }
         return jsonToolResult({ terminal: record, commandStarted: true, reused: Boolean(terminalId), outputSharedWithAgent: false })
       },
     }),
@@ -1372,7 +1468,7 @@ function buildAgentTerminalTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDe
       name: 'TerminalRead',
       label: '读取 Agent 终端输出',
       description: 'Read bounded buffered output from one current-session Agent-owned terminal. By default returns the latest 12,000 characters of normalized text. Use offset and limit to page earlier output; it can read output after the terminal exits until the terminal or session is closed.',
-      promptSnippet: 'After starting a visible terminal command, use TerminalRead whenever you need its result. Start with the default tail; use the returned nextOffset to page forward or a smaller offset to inspect earlier output. Do not assume terminal output is automatically returned.',
+      promptSnippet: 'After starting a visible terminal command, use TerminalRead whenever you need its result or need to confirm it finished before reusing its terminal. Start with the default tail; use the returned nextOffset to page forward or a smaller offset to inspect earlier output. Do not assume terminal output is automatically returned.',
       parameters: Type.Object({
         terminalId: Type.String({ description: 'Terminal ID returned by TerminalOpen, TerminalExecute, or TerminalList.' }),
         offset: Type.Optional(Type.Number({ description: 'Optional non-negative character offset in the terminal output stream. Omit to read the latest output.' })),
@@ -1389,8 +1485,8 @@ function buildAgentTerminalTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDe
     sdk.defineTool({
       name: 'TerminalList',
       label: '列出 Agent 终端',
-      description: 'List terminals owned by the current Agent session, including cwd and running/exited state. Use this before deciding whether a visible terminal can be safely reused. It never exposes terminal output.',
-      promptSnippet: 'Inspect Agent-owned terminal metadata before deciding whether to reuse a visible terminal; do not read terminal output unless needed.',
+      description: 'List terminals owned by the current Agent session, including cwd and running/exited state. Use this before every visible terminal command to find a safe terminal to reuse. It never exposes terminal output.',
+      promptSnippet: 'Before every visible terminal command, inspect Agent-owned terminal metadata and prefer a safe matching terminal to avoid opening another Tab. Read terminal output only when needed to confirm its previous command finished.',
       parameters: Type.Object({}),
       async execute() {
         return jsonToolResult({ terminals: listAgentTerminals(ctx.sessionId) })
@@ -1469,9 +1565,15 @@ export async function buildPiBuiltinTools(
     console.error('[Pi 桥接] 注入 automation 工具失败:', error)
   }
 
-  // 任务/日程是 Pi native customTools。
+  // 任务/日程是 Pi native customTools；关闭的能力不会出现在本轮 Agent 工具集中。
   try {
-    tools.push(...buildPlanningTools(sdk, ctx))
+    const productivityTools = ctx.productivityTools
+    const planningTools = buildPlanningTools(sdk, ctx).filter((tool) => {
+      if (tool.name.includes('_todo')) return productivityTools?.todosEnabled ?? true
+      if (tool.name.includes('_calendar')) return productivityTools?.calendarEnabled ?? true
+      return (productivityTools?.todosEnabled ?? true) || (productivityTools?.calendarEnabled ?? true)
+    })
+    tools.push(...planningTools)
   } catch (error) {
     console.error('[Pi 桥接] 注入任务/日程工具失败:', error)
   }
