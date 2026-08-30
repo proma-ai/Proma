@@ -20,7 +20,7 @@ import { join, dirname } from 'node:path'
 import { accessSync, constants, existsSync, mkdirSync, realpathSync } from 'node:fs'
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 import { app } from 'electron'
-import type { AgentSendInput, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, AgentSessionMeta, AgentActiveSessionSnapshot, CodexOAuthCredentials, XaiOAuthCredentials, TypedError, SDKMessage, SDKAssistantMessage, AgentStreamPayload, AgentAssistantDeltaPayload, RewindSessionResult, SkillActivation } from '@proma/shared'
+import type { AgentSendInput, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, AgentSessionMeta, AgentActiveSessionSnapshot, CodexOAuthCredentials, XaiOAuthCredentials, TypedError, SDKMessage, SDKAssistantMessage, AgentStreamPayload, AgentAssistantDeltaPayload, RewindSessionResult, SkillActivation, TurnTiming } from '@proma/shared'
 import {
   PROMA_DEFAULT_PERMISSION_MODE,
   PROMA_PERMISSION_MODE_CONFIG,
@@ -133,6 +133,41 @@ function isAssistantDeltaSDKMessage(message: SDKMessage): message is SDKMessage 
   return record.type === 'assistant_delta'
     && typeof record.uuid === 'string'
     && !!record.delta
+}
+
+/**
+ * 单次回复的文本 delta 计时累加器。
+ *
+ * 只统计可见文本（`text_delta`）的活跃区间：思考与工具调用 token 不计入净生成时长。
+ * 累加器仅在运行时存在，最终经 `finalize` 附加到 result 消息（`_timing`）并随会话持久化。
+ */
+class TurnTimingAccumulator {
+  private firstDeltaAt = 0
+  private lastDeltaAt = 0
+  private segmentStartAt = 0
+  private genMs = 0
+
+  /** 记录一个可见文本 delta 到达时刻；首个 delta 同时开启新区间 */
+  recordTextDelta(now: number): void {
+    if (this.firstDeltaAt === 0) this.firstDeltaAt = now
+    if (this.segmentStartAt === 0) this.segmentStartAt = now
+    this.lastDeltaAt = now
+  }
+
+  /** 非 delta 消息到达时闭合当前活跃区间（工具执行/空闲间隔不计入生成净时长） */
+  closeSegment(): void {
+    if (this.segmentStartAt !== 0 && this.lastDeltaAt > this.segmentStartAt) {
+      this.genMs += this.lastDeltaAt - this.segmentStartAt
+    }
+    this.segmentStartAt = 0
+  }
+
+  /** turn 结束时产出计时；没有任何可见文本输出时返回 undefined */
+  finalize(runStartedAt: number): TurnTiming | undefined {
+    this.closeSegment()
+    if (this.firstDeltaAt === 0 || this.genMs <= 0) return undefined
+    return { ttftMs: Math.max(0, this.firstDeltaAt - runStartedAt), genMs: this.genMs }
+  }
 }
 
 /** 默认会话标题（用于判断是否需要自动生成） */
@@ -1683,6 +1718,7 @@ export class AgentOrchestrator {
           let drainTimeoutPromise: Promise<'drain_timeout'> | null = null
           const RESULT_DRAIN_TIMEOUT_MS = 2_000
           let visibleRunMessageCount = 0
+          const turnTiming = new TurnTimingAccumulator()
 
           while (true) {
             if (!pendingNext) {
@@ -1713,6 +1749,8 @@ export class AgentOrchestrator {
             pendingNext = null
             let msg = iterResult.value
             if (isAssistantDeltaSDKMessage(msg)) {
+              // 可见文本 delta 打点（思考/工具调用 delta 不计入净生成时长）
+              if (msg.delta.type === 'text_delta') turnTiming.recordTextDelta(Date.now())
               this.eventBus.emit(sessionId, {
                 kind: 'sdk_delta',
                 delta: {
@@ -1725,6 +1763,8 @@ export class AgentOrchestrator {
               })
               continue
             }
+            // 非 delta 消息意味着当前文本区间结束（工具执行/思考/结果等）
+            turnTiming.closeSegment()
             const isPartialMessage = isPartialSDKMessage(msg)
             if (msg.type === 'result') {
               const skillActivations = mergeSkillActivations(
@@ -1743,6 +1783,11 @@ export class AgentOrchestrator {
                 } as unknown as SDKMessage
               }
               pendingSkillActivations = []
+            }
+            // 为 result 消息附加生成计时（与 _durationMs 同模式的运行时字段，随会话持久化）
+            if (msg.type === 'result' && !(msg as { isSyntheticCompactionResult?: boolean }).isSyntheticCompactionResult) {
+              const timing = turnTiming.finalize(streamStartedAt)
+              if (timing) msg = { ...(msg as Record<string, unknown>), _timing: timing } as unknown as SDKMessage
             }
             // isVisibleRunMessage 已抽到独立模块，不含 partial 判断；
             // pi runtime 的流式 partial 消息不应计入可见消息数，故在此显式排除。

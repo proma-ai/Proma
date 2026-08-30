@@ -37,8 +37,9 @@ import { AgentBrowserLinkProvider } from '@/components/browser/AgentBrowserLinkP
 import { AgentHistorySelectionLayer } from './AgentHistorySelectionLayer'
 import { TaskProgressOverlay, type ContextCompactionProgress } from './TaskProgressOverlay'
 import { createMessageGroupRenderCache, groupMessagesForRendering } from './message-group-rendering'
-import type { AgentEventUsage, RetryAttempt, SDKAssistantMessage, SDKMessage, SDKSystemMessage, SDKTextBlock, SDKThinkingBlock } from '@proma/shared'
+import type { AgentEventUsage, RetryAttempt, SDKAssistantMessage, SDKMessage, SDKSystemMessage, SDKTextBlock, SDKThinkingBlock, TurnTiming } from '@proma/shared'
 import { getSDKCompactStatus } from '@proma/shared'
+import { computeTurnSpeed, formatTokPerSec } from '@proma/session-core'
 import { agentLiveMessagesAtomFamily, agentSessionStreamingStateAtomFamily, type AgentStreamState } from '@/atoms/agent-atoms'
 import type { QuotedSelection } from '@/atoms/preview-atoms'
 
@@ -525,9 +526,10 @@ export function formatDuration(ms: number): string {
 }
 
 /** 构建 usage tooltip 多行文本 */
-export function buildUsageTooltip(durationMs: number, usage?: AgentEventUsage): string {
+export function buildUsageTooltip(durationMs: number, usage?: AgentEventUsage, ttftMs?: number): string {
   const lines: string[] = []
   lines.push(`耗时: ${formatDuration(durationMs)}`)
+  if (ttftMs != null && ttftMs > 0) lines.push(`首字: ${formatDuration(ttftMs)}`)
 
   if (usage) {
     const pureInput = (usage.inputTokens ?? 0) - (usage.cacheReadTokens ?? 0) - (usage.cacheCreationTokens ?? 0)
@@ -540,17 +542,21 @@ export function buildUsageTooltip(durationMs: number, usage?: AgentEventUsage): 
   return lines.join('\n')
 }
 
-/** 耗时徽章 — 悬浮显示 token 用量明细 */
-export function DurationBadge({ durationMs, usage }: { durationMs: number; usage?: AgentEventUsage }): React.ReactElement {
+/** 耗时徽章 — 悬浮显示 token 用量明细；携带生成计时时显示 tok/s */
+export function DurationBadge({ durationMs, usage, timing }: { durationMs: number; usage?: AgentEventUsage; timing?: TurnTiming }): React.ReactElement {
+  const speed = computeTurnSpeed({ outputTokens: usage?.outputTokens, ttftMs: timing?.ttftMs, genMs: timing?.genMs })
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <span className="text-[15px] tabular-nums font-light cursor-default">
           {formatDuration(durationMs)}
+          {speed.tokPerSec != null && (
+            <span className="text-muted-foreground/60"> · {formatTokPerSec(speed.tokPerSec)}</span>
+          )}
         </span>
       </TooltipTrigger>
       <TooltipContent side="top">
-        <p className="whitespace-pre-line text-left">{buildUsageTooltip(durationMs, usage)}</p>
+        <p className="whitespace-pre-line text-left">{buildUsageTooltip(durationMs, usage, speed.ttftMs)}</p>
       </TooltipContent>
     </Tooltip>
   )

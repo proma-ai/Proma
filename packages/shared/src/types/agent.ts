@@ -267,6 +267,14 @@ export interface SkillActivation {
   sources: SkillActivationSource[]
 }
 
+/** 一次回复的生成计时（主进程事件循环打点，随 result 消息持久化） */
+export interface TurnTiming {
+  /** 本次运行开始到首个可见文本 delta 的延迟（TTFT） */
+  ttftMs: number
+  /** 可见文本 delta 活跃区间的净时长之和，不含工具执行与空闲间隔 */
+  genMs: number
+}
+
 /** SDK result 消息（查询结束时返回） */
 export interface SDKResultMessage {
   type: 'result'
@@ -292,6 +300,8 @@ export interface SDKResultMessage {
   _channelModelId?: string
   /** 渠道 provider，用于按 Agent SDK 实际运行窗口计算压缩阈值 */
   _channelProvider?: ProviderType
+  /** 生成计时（TTFT 与净生成时长），由主进程编排器在运行时附加 */
+  _timing?: TurnTiming
 }
 
 /** SDK system 消息（init / compact_boundary / permission_denied / task_started / task_progress / task_notification） */

@@ -50,3 +50,12 @@ export { searchTurns, type SearchHit, type SearchOptions } from './search'
 export { selectTurns, type SelectOptions } from './select'
 export { renderTranscriptMarkdown, type RenderMarkdownOptions } from './render-markdown'
 export { estimateTokens } from './tokens'
+
+// Turn 速度（tok/s / TTFT）计算
+export {
+  computeTurnSpeed,
+  formatTokPerSec,
+  isTurnTiming,
+  type TurnSpeed,
+  type TurnSpeedInput,
+} from './turn-speed'

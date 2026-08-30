@@ -37,6 +37,7 @@ import {
 export { groupIntoTurns, getGroupPreview, extractUserText } from '@proma/session-core'
 export type { MessageGroup, AssistantTurn } from '@proma/session-core'
 import { DurationBadge } from './AgentMessages'
+import { isTurnTiming } from '@proma/session-core'
 import {
   Message,
   MessageHeader,
@@ -74,6 +75,7 @@ import type {
   SDKContentBlock,
   SDKResultMessage,
   AgentEventUsage,
+  TurnTiming,
   SDKToolUseBlock,
   SDKToolResultBlock,
   RecoveryAction,
@@ -202,15 +204,16 @@ function CompactStatusNotice({ message }: { message: SDKSystemMessage }): React.
 
 // extractMeta / MessageMeta 已迁移至 @proma/session-core
 
-/** 从 turn 消息列表中提取 result 消息的耗时和用量数据 */
-function extractTurnUsage(turnMessages: SDKMessage[]): { durationMs?: number; usage?: AgentEventUsage } {
+/** 从 turn 消息列表中提取 result 消息的耗时、用量与生成计时数据 */
+function extractTurnUsage(turnMessages: SDKMessage[]): { durationMs?: number; usage?: AgentEventUsage; timing?: TurnTiming } {
   for (const msg of turnMessages) {
     if (msg.type !== 'result') continue
     const resultMsg = msg as SDKResultMessage
     const raw = msg as Record<string, unknown>
     const durationMs = typeof raw._durationMs === 'number' ? raw._durationMs : undefined
+    const timing = isTurnTiming(raw._timing) ? raw._timing : undefined
     const u = resultMsg.usage
-    if (!u) return { durationMs }
+    if (!u) return { durationMs, timing }
     // 多 entry 场景（Task 子 Agent 等）：取最大 contextWindow
     let contextWindow: number | undefined
     if (resultMsg.modelUsage) {
@@ -235,6 +238,7 @@ function extractTurnUsage(turnMessages: SDKMessage[]): { durationMs?: number; us
         costUsd: resultMsg.total_cost_usd,
         contextWindow,
       },
+      timing,
     }
   }
   return {}
@@ -428,7 +432,7 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
   }
 
   // 从 turnMessages 中提取 result 消息的耗时和用量
-  const { durationMs, usage } = extractTurnUsage(turn.turnMessages)
+  const { durationMs, usage, timing } = extractTurnUsage(turn.turnMessages)
 
   // 只在用户点击停止时显示中断徽章。
   // aborted_streaming / aborted_tools 是流式追加消息时的软中断，语义是继续补充信息。
@@ -597,7 +601,7 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
         if (!hasDuration && !hasActions && !showStoppedBadge) return null
         return (
           <MessageActions className="pl-[46px] mt-0.5 min-h-[28px] justify-start">
-            {hasDuration && <DurationBadge durationMs={durationMs!} usage={usage} />}
+            {hasDuration && <DurationBadge durationMs={durationMs!} usage={usage} timing={timing} />}
             {textContent && <CopyButton content={textContent} />}
             {textContent && onCreateTodo && (
               <MessageAction tooltip="标记为 Todo" onClick={() => onCreateTodo(textContent)}>
