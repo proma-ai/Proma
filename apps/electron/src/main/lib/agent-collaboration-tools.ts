@@ -38,7 +38,7 @@ import {
   createToolCallIdempotencyCache,
   resolveDelegationPermissionMode,
 } from './agent-collaboration-utils'
-import { assertEnabledModelForChannel, listEnabledAgentModelsForChannel } from './agent-model-selection'
+import { listEnabledAgentModelsForChannel, listEnabledAgentModelsGrouped, resolveDelegationModelTarget } from './agent-model-selection'
 
 interface CollaborationToolContext {
   sessionId: string
@@ -232,18 +232,21 @@ interface DelegateAgentArgs {
   task: string
   expectedOutput?: string
   permissionMode?: PromaPermissionMode
+  channelId?: string
   modelId?: string
 }
 
 interface StartDelegationResult {
   record: DelegationRecord
   effectivePermissionMode: PromaPermissionMode
+  effectiveChannelId: string
   effectiveModelId?: string
 }
 
 interface PiDelegationToolResult {
   delegationId: string
   effectivePermissionMode: PromaPermissionMode
+  effectiveChannelId?: string
   effectiveModelId?: string
 }
 
@@ -569,25 +572,31 @@ function getCurrentParentPermissionMode(
   return latestParent?.permissionMode ?? parent?.permissionMode ?? fallback
 }
 
-function getAvailableAgentModels(ctx: CollaborationToolContext): Record<string, unknown> {
+function getAvailableAgentModels(ctx: CollaborationToolContext, targetChannelId?: string): Record<string, unknown> {
   const currentModelId = ctx.modelId?.trim() || undefined
-  const summary = listEnabledAgentModelsForChannel(ctx.channelId, '读取协作子会话可用模型')
+  if (targetChannelId) {
+    const summary = listEnabledAgentModelsForChannel(targetChannelId, '读取协作子会话可用模型')
+    return {
+      ...summary,
+      models: summary.models.map((model) => ({
+        ...model,
+        current: model.id === currentModelId,
+      })),
+      currentModelId,
+    }
+  }
+  const grouped = listEnabledAgentModelsGrouped()
   return {
-    channelId: summary.channelId,
-    channelName: summary.channelName,
-    provider: summary.provider,
-    currentModelId,
-    currentModelAvailable: currentModelId
-      ? summary.models.some((model) => model.id === currentModelId)
-      : false,
-    models: summary.models.map((model) => ({
-      ...model,
-      current: model.id === currentModelId,
+    channels: grouped.channels.map((channel) => ({
+      ...channel,
+      models: channel.models.map((model) => ({
+        ...model,
+        current: channel.channelId === ctx.channelId && model.id === currentModelId,
+      })),
     })),
-    modelCount: summary.models.length,
-    note: summary.models.length > 0
-      ? '创建协作子会话时，可从 models[].id 中选择 modelId；不传则继承 currentModelId。'
-      : '当前渠道没有启用的 Agent 模型，请先在渠道设置中启用模型。',
+    currentChannelId: ctx.channelId,
+    currentModelId,
+    note: '创建协作子会话时：跨渠道请同时传 channelId + modelId；仅传 modelId 将在全部已启用渠道内解析（命中多个渠道会要求消歧）；都不传则继承父会话。',
   }
 }
 
@@ -634,17 +643,19 @@ function startDelegation(
     parentPermissionMode,
     args.permissionMode,
   )
-  const effectiveModelId = args.modelId !== undefined
-    ? assertEnabledModelForChannel({
-        channelId: ctx.channelId,
-        modelId: args.modelId,
-        purpose: '创建协作子会话',
-      })
-    : ctx.modelId?.trim() || undefined
+  const resolvedModelTarget = resolveDelegationModelTarget({
+    channelId: args.channelId,
+    modelId: args.modelId,
+    fallbackChannelId: ctx.channelId,
+    fallbackModelId: ctx.modelId?.trim() || undefined,
+    purpose: '创建协作子会话',
+  })
+  const effectiveChannelId = resolvedModelTarget.channelId
+  const effectiveModelId = resolvedModelTarget.modelId
 
   const { completion, resolveCompletion } = createDelegationCompletion()
 
-  const child = createAgentSession(title, ctx.channelId, ctx.workspaceId, effectiveModelId)
+  const child = createAgentSession(title, effectiveChannelId, ctx.workspaceId, effectiveModelId)
   const rootSessionId = parent?.rootSessionId ?? parent?.id ?? ctx.sessionId
   updateAgentSessionMeta(child.id, {
     parentSessionId: ctx.sessionId,
@@ -662,7 +673,7 @@ function startDelegation(
     delegationId,
     parentSessionId: ctx.sessionId,
     childSessionId: child.id,
-    channelId: ctx.channelId,
+    channelId: effectiveChannelId,
     modelId: effectiveModelId,
     title,
     role,
@@ -688,7 +699,7 @@ function startDelegation(
     {
       sessionId: child.id,
       userMessage: prompt,
-      channelId: ctx.channelId,
+      channelId: effectiveChannelId,
       modelId: effectiveModelId,
       workspaceId: ctx.workspaceId,
       permissionModeOverride: permissionMode,
@@ -716,7 +727,7 @@ function startDelegation(
     })
   })
 
-  return { record, effectivePermissionMode: permissionMode, effectiveModelId }
+  return { record, effectivePermissionMode: permissionMode, effectiveChannelId, effectiveModelId }
 }
 
 // ===== Pi Runtime 桥接 =====
@@ -745,7 +756,8 @@ export function buildPiCollaborationTools(
     role: roleType,
     task: Type.String({ description: '发送给子 Agent 的完整任务说明' }),
     expectedOutput: Type.Optional(Type.String({ description: '希望子 Agent 最终返回的格式或要点' })),
-    modelId: Type.Optional(Type.String({ description: '可选目标模型 ID' })),
+    channelId: Type.Optional(Type.String({ description: '可选目标渠道 ID；与 modelId 搭配可将子会话委派给其他渠道的模型' })),
+    modelId: Type.Optional(Type.String({ description: '可选目标模型 ID；未传 channelId 时在全部已启用渠道内解析' })),
   })
 
   function piJsonResult(payload: unknown): { content: Array<{ type: 'text'; text: string }>; details: unknown } {
@@ -759,10 +771,13 @@ export function buildPiCollaborationTools(
     sdk.defineTool({
       name: 'mcp__collaboration__list_available_agent_models',
       label: '列出可用模型',
-      description: '列出当前父会话渠道下已启用、可用于协作子 Agent 的模型。需要给 delegate_agent/delegate_agents 指定 modelId 前应先调用此工具。',
-      parameters: Type.Object({}),
-      async execute() {
-        return piJsonResult(getAvailableAgentModels(ctx))
+      description: '列出可用于协作子 Agent 的模型。不传参数时返回全部已启用渠道的分组视图；传入 channelId 则只返回该渠道的模型。需要给 delegate_agent/delegate_agents 指定 modelId（跨渠道时同时传 channelId）前应先调用此工具。',
+      parameters: Type.Object({
+        channelId: Type.Optional(Type.String({ description: '可选渠道 ID；传入则只返回该渠道的模型，不传则返回全部已启用渠道的分组视图' })),
+      }),
+      async execute(_toolCallId: string, params: unknown) {
+        const args = params as { channelId?: string }
+        return piJsonResult(getAvailableAgentModels(ctx, args.channelId))
       },
     }),
     sdk.defineTool({
@@ -774,7 +789,8 @@ export function buildPiCollaborationTools(
         role: roleType,
         task: Type.String({ description: '发送给子 Agent 的完整任务说明，必须自包含必要上下文' }),
         expectedOutput: Type.Optional(Type.String({ description: '希望子 Agent 最终返回的格式或要点' })),
-        modelId: Type.Optional(Type.String({ description: '可选目标模型 ID' })),
+        channelId: Type.Optional(Type.String({ description: '可选目标渠道 ID；与 modelId 搭配可将子会话委派给其他渠道的模型。仅传 channelId 时使用该渠道第一个启用模型' })),
+        modelId: Type.Optional(Type.String({ description: '可选目标模型 ID；未传 channelId 时在全部已启用渠道内解析，命中多个渠道会要求消歧' })),
       }),
       async execute(toolCallId: string, params: unknown) {
         const args = params as DelegateAgentArgs
@@ -784,6 +800,7 @@ export function buildPiCollaborationTools(
           return {
             delegationId: created.record.delegationId,
             effectivePermissionMode: created.effectivePermissionMode,
+            effectiveChannelId: created.effectiveChannelId,
             effectiveModelId: created.effectiveModelId,
           }
         })
@@ -821,6 +838,7 @@ export function buildPiCollaborationTools(
               created.push({
                 delegationId: started.record.delegationId,
                 effectivePermissionMode: started.effectivePermissionMode,
+                effectiveChannelId: started.effectiveChannelId,
                 effectiveModelId: started.effectiveModelId,
               })
             } catch (error) {
@@ -842,6 +860,10 @@ export function buildPiCollaborationTools(
           effectiveModels: batch.created.map((item) => ({
             delegationId: item.delegationId,
             modelId: item.effectiveModelId,
+          })),
+          effectiveChannels: batch.created.map((item) => ({
+            delegationId: item.delegationId,
+            channelId: item.effectiveChannelId,
           })),
           failures: batch.failures,
           createdCount: batch.created.length,
