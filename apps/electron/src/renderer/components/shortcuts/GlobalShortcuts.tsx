@@ -13,7 +13,7 @@ import { useEffect, useCallback } from 'react'
 import { useAtomValue, useSetAtom, useAtom, useStore } from 'jotai'
 import { appModeAtom } from '@/atoms/app-mode'
 import { settingsOpenAtom, channelFormDirtyAtom, settingsCloseRequestedAtom } from '@/atoms/settings-tab'
-import { searchDialogOpenAtom } from '@/atoms/search-atoms'
+import { GLOBAL_SEARCH_SCOPE, searchDialogOpenAtom, searchScopeAtom } from '@/atoms/search-atoms'
 import {
   tabsAtom,
   activeTabIdAtom,
@@ -75,6 +75,7 @@ export function GlobalShortcuts(): null {
   const channelFormDirty = useAtomValue(channelFormDirtyAtom)
   const setSettingsCloseRequested = useSetAtom(settingsCloseRequestedAtom)
   const [searchOpen, setSearchOpen] = useAtom(searchDialogOpenAtom)
+  const setSearchScope = useSetAtom(searchScopeAtom)
   const [shortcutGuideOpen, setShortcutGuideOpen] = useAtom(shortcutGuideOpenAtom)
   const [sidebarCollapsed, setSidebarCollapsed] = useAtom(sidebarCollapsedAtom)
   const setShortcutOverrides = useSetAtom(shortcutOverridesAtom)
@@ -170,7 +171,10 @@ export function GlobalShortcuts(): null {
   // Cmd+Shift+F / Ctrl+Shift+F → 全局搜索
   useShortcut(
     'global-search',
-    useCallback(() => setSearchOpen(true), [setSearchOpen]),
+    useCallback(() => {
+      setSearchScope(GLOBAL_SEARCH_SCOPE)
+      setSearchOpen(true)
+    }, [setSearchOpen, setSearchScope]),
   )
 
   // Cmd+N → 新建对话/会话（根据当前模式）

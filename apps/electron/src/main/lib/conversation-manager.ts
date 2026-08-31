@@ -430,6 +430,7 @@ export async function searchConversationMessages(query: string): Promise<Message
         matchStart: hit.matchStart,
         matchLength: hit.matchLength,
         archived: conv.archived,
+        updatedAt: conv.updatedAt,
       })
     }
   }

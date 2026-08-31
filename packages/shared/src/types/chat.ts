@@ -194,6 +194,8 @@ export interface MessageSearchResult {
   matchLength: number
   /** 是否已归档 */
   archived?: boolean
+  /** 会话更新时间戳，用于跨类型统一排序 */
+  updatedAt: number
 }
 
 // ===== 消息发送 =====

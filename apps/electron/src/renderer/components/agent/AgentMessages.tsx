@@ -29,6 +29,14 @@ import { tabMinimapCacheAtom } from '@/atoms/tab-atoms'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import { ScrollPositionManager } from '@/hooks/useScrollPositionMemory'
 import { cn } from '@/lib/utils'
+import {
+  applyMessageSearchHighlight,
+  attemptMessageSearchNavigation,
+  resolveMessageSearchAnchorId,
+  type MessageSearchAnchor,
+  type MessageSearchNavigationRequest,
+} from '@/lib/message-search-navigation'
+import { useMessageSearchNavigation } from '@/hooks/use-message-search-navigation'
 import { Spinner } from '@/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { groupIntoTurns, AssistantLogo, MessageGroupRenderer, getGroupId, getGroupPreview, extractUserText, buildTaskProgressDataForTurn, type MessageGroup } from './SDKMessageRenderer'
@@ -249,6 +257,11 @@ interface CustomHighlightRegistry {
 
 type HighlightConstructor = new (...ranges: Range[]) => unknown
 
+interface NamedRangeHighlightResult {
+  applied: boolean
+  usesBrowserSelection: boolean
+}
+
 function getMessageTextPosition(messageElement: HTMLElement, offset: number): TextPosition | null {
   if (!Number.isInteger(offset) || offset < 0) return null
 
@@ -296,18 +309,47 @@ function getCustomHighlightRegistry(): CustomHighlightRegistry | undefined {
   return (globalThis.CSS as unknown as { highlights?: CustomHighlightRegistry }).highlights
 }
 
-function applyAgentHistoryQuoteHighlight(range: Range): boolean {
+function applyNamedRangeHighlight(
+  range: Range,
+  name: string,
+  fallbackToSelection: boolean,
+): NamedRangeHighlightResult {
   const registry = getCustomHighlightRegistry()
   const Highlight = (globalThis as unknown as { Highlight?: HighlightConstructor }).Highlight
   if (registry && Highlight) {
-    registry.set(AGENT_HISTORY_QUOTE_HIGHLIGHT_NAME, new Highlight(range))
-    return false
+    registry.set(name, new Highlight(range))
+    return { applied: true, usesBrowserSelection: false }
   }
 
+  if (!fallbackToSelection) return { applied: false, usesBrowserSelection: false }
   const selection = window.getSelection()
-  selection?.removeAllRanges()
-  selection?.addRange(range)
-  return true
+  if (!selection) return { applied: false, usesBrowserSelection: false }
+  selection.removeAllRanges()
+  selection.addRange(range)
+  return { applied: true, usesBrowserSelection: true }
+}
+
+function getPersistedMessageIds(message: SDKMessage): string[] {
+  const record = message as Record<string, unknown>
+  const nestedMessage = record.message && typeof record.message === 'object'
+    ? record.message as Record<string, unknown>
+    : undefined
+  return [record.id, record.uuid, nestedMessage?.id, record._promaStableKey]
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+}
+
+function toMessageSearchAnchors(groups: MessageGroup[]): MessageSearchAnchor[] {
+  return groups.map((group) => {
+    const messages = group.type === 'assistant-turn'
+      ? group.assistantMessages
+      : group.type === 'user'
+        ? [group.message]
+        : [group.identityMessage]
+    return {
+      anchorId: getGroupId(group),
+      messageIds: messages.flatMap(getPersistedMessageIds),
+    }
+  })
 }
 
 /** 空状态引导 — 使用 WelcomeEmptyState */
@@ -584,7 +626,7 @@ function AgentRunningIndicator({ startedAt }: { startedAt?: number }): React.Rea
 }
 
 interface AgentTranscriptHistoryHandle {
-  scrollToMessage: (messageId: string, onMounted?: (target: HTMLElement) => void) => void
+  scrollToMessage: (messageId: string, onMounted?: (target: HTMLElement) => void) => boolean
 }
 
 interface AgentTranscriptHistoryProps {
@@ -802,14 +844,15 @@ const AgentTranscriptHistory = React.forwardRef<AgentTranscriptHistoryHandle, Ag
     scrollToMessage: (messageId, onMounted) => {
       const target = Array.from(scrollRef.current?.querySelectorAll<HTMLElement>('[data-message-id]') ?? [])
         .find((element) => element.dataset.messageId === messageId)
-      if (!target) return
+      if (!target) return false
 
       stopScroll()
       if (onMounted) {
         onMounted(target)
-        return
+        return true
       }
       target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+      return true
     },
   }), [scrollRef, stopScroll])
 
@@ -916,7 +959,7 @@ export const AgentMessages = React.memo(function AgentMessages({
     const root = historySelectionRootRef.current
     if (!root) return
     const clearOnPointerDown = (): void => {
-      // 仅清理已存在的高亮；不读取 Selection 或触发历史渲染。
+      // 用户开始新的页面交互后清理历史引用提示。
       clearHistoryQuoteHighlight()
     }
     // 保留根外点击的高亮清理；该监听不参与选区捕获热路径。
@@ -949,7 +992,11 @@ export const AgentMessages = React.memo(function AgentMessages({
         const range = getAgentHistoryQuoteRange(target, navigation.quote)
         if (!range) return
         target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
-        selectionHighlightUsesBrowserSelectionRef.current = applyAgentHistoryQuoteHighlight(range)
+        selectionHighlightUsesBrowserSelectionRef.current = applyNamedRangeHighlight(
+          range,
+          AGENT_HISTORY_QUOTE_HIGHLIGHT_NAME,
+          true,
+        ).usesBrowserSelection
       }
 
       const targetIndex = visibleGroupsRef.current.findIndex((group) => getGroupId(group) === messageId)
@@ -966,6 +1013,32 @@ export const AgentMessages = React.memo(function AgentMessages({
 
     return () => window.cancelAnimationFrame(frame)
   }, [clearHistoryQuoteHighlight, historyQuoteNavigation, sessionId])
+
+  const locateSearchResult = React.useCallback((navigation: MessageSearchNavigationRequest) => {
+    const anchorId = resolveMessageSearchAnchorId(
+      toMessageSearchAnchors(visibleGroupsRef.current),
+      navigation.messageId,
+    ) ?? navigation.messageId
+    return attemptMessageSearchNavigation({
+      navigation,
+      findTarget: () => {
+        let target: HTMLElement | null = null
+        historyRef.current?.scrollToMessage(anchorId, (element) => { target = element })
+        return target
+      },
+      canRetry: false,
+      scrollToTarget: (target) => target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' }),
+      highlightTarget: applyMessageSearchHighlight,
+    })
+  }, [])
+
+  useMessageSearchNavigation({
+    sessionType: 'agent',
+    sessionId,
+    ready,
+    retryKey: readySessionId,
+    locate: locateSearchResult,
+  })
 
   // 实时文本仅从 liveMessages 读取。AgentStreamState 只保留运行/控制状态，
   // 避免每个 sdk_delta 同时更新 transcript 和 legacy content 两条路径。

@@ -2,6 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
+::highlight(proma-message-search) {
+  background-color: hsl(var(--search-highlight-background));
+  color: hsl(var(--search-highlight-foreground));
+}
+
 /* ===== 全局字体与渲染优化 =====
  * 优先 Inter Variable（自托管，见 main.tsx 引入） → SF Pro Text（macOS 系统） → system-ui；
  * 数字使用 tabular-nums，配合 cv11/ss01/ss03 让字形接近 Vercel / Linear 的现代感。
@@ -96,6 +101,10 @@
   }
 
   :root {
+    /* 跨主题搜索定位色：固定高对比黄底深字，不跟随可能接近页面背景的品牌主色。 */
+    --search-highlight-background: 50 98% 64%;
+    --search-highlight-foreground: 222 47% 11%;
+
     --background: 0 0% 100%;
     --foreground: 0 0% 3.9%;
     --muted: 0 0% 96.1%;

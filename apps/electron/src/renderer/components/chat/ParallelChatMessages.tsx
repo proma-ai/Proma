@@ -187,19 +187,20 @@ function MessageColumn({
     >
       <div className="flex flex-col gap-6 p-4">
         {messages.map((message) => (
-          <ChatMessageItem
-            key={message.id}
-            message={message}
-            conversationId={conversationId}
-            allMessages={allMessages}
-            onDeleteMessage={onDeleteMessage}
-            onResendMessage={onResendMessage}
-            onStartInlineEdit={onStartInlineEdit}
-            onSubmitInlineEdit={onSubmitInlineEdit}
-            onCancelInlineEdit={onCancelInlineEdit}
-            isInlineEditing={message.id === inlineEditingMessageId}
-            isParallelMode
-          />
+          <div key={message.id} data-message-id={message.id}>
+            <ChatMessageItem
+              message={message}
+              conversationId={conversationId}
+              allMessages={allMessages}
+              onDeleteMessage={onDeleteMessage}
+              onResendMessage={onResendMessage}
+              onStartInlineEdit={onStartInlineEdit}
+              onSubmitInlineEdit={onSubmitInlineEdit}
+              onCancelInlineEdit={onCancelInlineEdit}
+              isInlineEditing={message.id === inlineEditingMessageId}
+              isParallelMode
+            />
+          </div>
         ))}
         {/* assistant 列：流式生成 / 停止后等待磁盘消息的临时消息 */}
         {side === 'assistant' && (streaming || streamingContent || streamingReasoning) && (

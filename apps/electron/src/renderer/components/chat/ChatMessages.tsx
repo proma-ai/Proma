@@ -49,6 +49,12 @@ import { getModelLogo, resolveModelProvider } from '@/lib/model-logo'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import { tabMinimapCacheAtom } from '@/atoms/tab-atoms'
+import {
+  applyMessageSearchHighlight,
+  attemptMessageSearchNavigation,
+  type MessageSearchNavigationRequest,
+} from '@/lib/message-search-navigation'
+import { useMessageSearchNavigation } from '@/hooks/use-message-search-navigation'
 import type { ChatMessage, ChatToolActivity } from '@proma/shared'
 
 // ===== 滚动到顶部加载更多 =====
@@ -189,6 +195,7 @@ export function ChatMessages({
   const userProfile = useAtomValue(userProfileAtom)
   const channels = useAtomValue(channelsAtom)
   const setMinimapCache = useSetAtom(tabMinimapCacheAtom)
+  const searchRootRef = React.useRef<HTMLDivElement>(null)
 
   // 平滑流式输出：将高频更新转为逐字渲染
   const { displayedContent: rawSmoothContent } = useSmoothStream({
@@ -311,6 +318,27 @@ export function ChatMessages({
     }
   }, [parallelMode, hasMore, handleLoadMore])
 
+  const locateSearchResult = React.useCallback((navigation: MessageSearchNavigationRequest) => (
+    attemptMessageSearchNavigation({
+      navigation,
+      findTarget: (messageId) => Array.from(
+        searchRootRef.current?.querySelectorAll<HTMLElement>('[data-message-id]') ?? [],
+      ).find((element) => element.dataset.messageId === messageId) ?? null,
+      canRetry: hasMore,
+      retry: loadingMore ? undefined : () => { void handleLoadMore() },
+      scrollToTarget: (target) => target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' }),
+      highlightTarget: applyMessageSearchHighlight,
+    })
+  ), [handleLoadMore, hasMore, loadingMore])
+
+  useMessageSearchNavigation({
+    sessionType: 'chat',
+    sessionId: conversationId,
+    ready,
+    retryKey: messages,
+    locate: locateSearchResult,
+  })
+
   // 迷你地图数据（必须在所有条件分支之前调用，遵守 hooks 规则）
   const minimapItems: MinimapItem[] = React.useMemo(
     () => messages.map((m) => ({
@@ -337,23 +365,25 @@ export function ChatMessages({
   // 并排模式
   if (parallelMode) {
     return (
-      <ParallelChatMessages
-        messages={messages}
-        conversationId={conversationId}
-        streaming={streaming}
-        streamingContent={smoothContent}
-        streamingReasoning={smoothReasoning}
-        startedAt={startedAt}
-        contextDividers={contextDividers}
-        onDeleteDivider={onDeleteDivider}
-        onDeleteMessage={onDeleteMessage}
-        onResendMessage={onResendMessage}
-        onStartInlineEdit={onStartInlineEdit}
-        onSubmitInlineEdit={onSubmitInlineEdit}
-        onCancelInlineEdit={onCancelInlineEdit}
-        inlineEditingMessageId={inlineEditingMessageId}
-        loadingMore={loadingMore}
-      />
+      <div ref={searchRootRef} className="contents">
+        <ParallelChatMessages
+          messages={messages}
+          conversationId={conversationId}
+          streaming={streaming}
+          streamingContent={smoothContent}
+          streamingReasoning={smoothReasoning}
+          startedAt={startedAt}
+          contextDividers={contextDividers}
+          onDeleteDivider={onDeleteDivider}
+          onDeleteMessage={onDeleteMessage}
+          onResendMessage={onResendMessage}
+          onStartInlineEdit={onStartInlineEdit}
+          onSubmitInlineEdit={onSubmitInlineEdit}
+          onCancelInlineEdit={onCancelInlineEdit}
+          inlineEditingMessageId={inlineEditingMessageId}
+          loadingMore={loadingMore}
+        />
+      </div>
     )
   }
 
@@ -361,7 +391,8 @@ export function ChatMessages({
   const dividerSet = new Set(contextDividers)
 
   return (
-    <Conversation resize={ready && !transitioning ? 'smooth' : 'instant'} className={ready ? (skipFadeIn ? 'opacity-100' : 'opacity-100 transition-opacity duration-200') : 'opacity-0'}>
+    <div ref={searchRootRef} className="contents">
+      <Conversation resize={ready && !transitioning ? 'smooth' : 'instant'} className={ready ? (skipFadeIn ? 'opacity-100' : 'opacity-100 transition-opacity duration-200') : 'opacity-0'}>
       <ScrollPositionManager id={conversationId} ready={ready} />
       {/* 滚动到顶部时自动加载更多历史 */}
       <ScrollTopLoader
@@ -446,6 +477,7 @@ export function ChatMessages({
       </ConversationContent>
       <ScrollMinimap items={minimapItems} />
       <ConversationScrollButton />
-    </Conversation>
+      </Conversation>
+    </div>
   )
 }

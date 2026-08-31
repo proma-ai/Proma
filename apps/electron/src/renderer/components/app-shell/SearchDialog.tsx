@@ -17,10 +17,24 @@
 
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
-import { Search, X, MessageSquare, Bot, Archive, Loader2 } from 'lucide-react'
+import { Search, X, MessageSquare, Bot, Archive, Loader2, Folder, FolderOpen, ChevronDown } from 'lucide-react'
 import { Dialog, DialogContent, DialogPortal, DialogTitle } from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
-import { searchDialogOpenAtom } from '@/atoms/search-atoms'
+import { SearchMatchHighlight } from './SearchMatchHighlight'
+import {
+  GLOBAL_SEARCH_SCOPE,
+  updateMessageSearchNavigationAtom,
+  searchDialogOpenAtom,
+  searchScopeAtom,
+} from '@/atoms/search-atoms'
 import { conversationsAtom, channelsAtom } from '@/atoms/chat-atoms'
 import {
   agentSessionsAtom,
@@ -29,7 +43,6 @@ import {
   agentPendingPromptAtom,
 } from '@/atoms/agent-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
-import { appModeAtom } from '@/atoms/app-mode'
 import { useOpenSession } from '@/hooks/useOpenSession'
 import { useCreateSession } from '@/hooks/useCreateSession'
 import { sessionHoverPreviewEnabledAtom } from '@/atoms/ui-preferences'
@@ -37,32 +50,21 @@ import {
   SessionMiniMapPopover,
   useSessionMiniMapHover,
 } from '@/components/session-preview/SessionMiniMapPopover'
-import type {
-  MessageSearchResult,
-  AgentMessageSearchResult,
-} from '@proma/shared'
 import { findBestSearchMatch } from '@proma/shared'
-
-/** 标题搜索结果项 */
-interface TitleResult {
-  id: string
-  title: string
-  type: 'chat' | 'agent'
-  archived?: boolean
-  updatedAt: number
-}
-
-/** 内容搜索结果项（统一格式） */
-interface ContentResult {
-  id: string
-  title: string
-  type: 'chat' | 'agent'
-  messageId: string
-  snippet: string
-  matchStart: number
-  matchLength: number
-  archived?: boolean
-}
+import {
+  buildSearchScopePlan,
+  buildGlobalSearchRequest,
+  createGlobalTitleResults,
+  getGlobalSearchResultKey,
+  mergeGlobalContentResults,
+  type GlobalContentResult as ContentResult,
+  type GlobalTitleResult as TitleResult,
+} from '@/lib/global-search-results'
+import { createMessageSearchNavigation } from '@/lib/message-search-navigation'
+import {
+  SEARCH_DIALOG_LAYERS,
+  SEARCH_SCOPE_MENU_MODAL,
+} from '@/lib/search-dialog-layering'
 
 type SearchResult = TitleResult | ContentResult
 
@@ -80,11 +82,7 @@ function HighlightText({ text, query }: { text: string; query: string }): React.
   const after = text.slice(match.matchStart + match.matchLength)
 
   return (
-    <>
-      {before}
-      <mark className="bg-primary/20 text-foreground rounded-sm px-0.5">{matchedText}</mark>
-      {after}
-    </>
+    <SearchMatchHighlight before={before} match={matchedText} after={after} />
   )
 }
 
@@ -101,11 +99,7 @@ function HighlightSnippet({ snippet, matchStart, matchLength }: {
   const after = snippet.slice(matchStart + matchLength)
 
   return (
-    <>
-      {before}
-      <mark className="bg-primary/20 text-foreground rounded-sm px-0.5">{match}</mark>
-      {after}
-    </>
+    <SearchMatchHighlight before={before} match={match} after={after} />
   )
 }
 
@@ -205,17 +199,19 @@ function SearchResultRow({
 
 export function SearchDialog(): React.ReactElement {
   const [open, setOpen] = useAtom(searchDialogOpenAtom)
+  const [searchScope, setSearchScope] = useAtom(searchScopeAtom)
+  const updateMessageSearchNavigation = useSetAtom(updateMessageSearchNavigationAtom)
   const conversations = useAtomValue(conversationsAtom)
   const agentSessions = useAtomValue(agentSessionsAtom)
   const sessionHoverPreviewEnabled = useAtomValue(sessionHoverPreviewEnabledAtom)
   const agentWorkspaces = useAtomValue(agentWorkspacesAtom)
   const channels = useAtomValue(channelsAtom)
-  const appMode = useAtomValue(appModeAtom)
   const currentAgentChannelId = useAtomValue(agentChannelIdAtom)
   const setAgentPendingPrompt = useSetAtom(agentPendingPromptAtom)
   const setActiveView = useSetAtom(activeViewAtom)
   const openSession = useOpenSession()
   const { createAgent } = useCreateSession()
+  const isProjectSearch = searchScope.kind === 'project'
 
   const workspaceNameMap = React.useMemo(() => {
     const map = new Map<string, string>()
@@ -238,6 +234,7 @@ export function SearchDialog(): React.ReactElement {
   const [selectedIndex, setSelectedIndex] = React.useState(0)
   const [loading, setLoading] = React.useState(false)
   const [hasSearched, setHasSearched] = React.useState(false)
+  const [selectedWorkspaceIds, setSelectedWorkspaceIds] = React.useState<string[]>([])
   const inputRef = React.useRef<HTMLInputElement>(null)
   const listRef = React.useRef<HTMLDivElement>(null)
   const isComposingRef = React.useRef(false)
@@ -256,8 +253,7 @@ export function SearchDialog(): React.ReactElement {
     isComposingRef.current = false
   }, [])
 
-  const handleClearQuery = React.useCallback(() => {
-    setQuery('')
+  const resetSearchResults = React.useCallback(() => {
     setCommittedQuery('')
     setTitleResults([])
     setContentResults([])
@@ -265,8 +261,25 @@ export function SearchDialog(): React.ReactElement {
     setSelectedIndex(0)
     searchTokenRef.current += 1
     setLoading(false)
-    inputRef.current?.focus()
   }, [])
+
+  const handleClearQuery = React.useCallback(() => {
+    setQuery('')
+    resetSearchResults()
+    inputRef.current?.focus()
+  }, [resetSearchResults])
+
+  const handleWorkspaceCheckedChange = React.useCallback((workspaceId: string, checked: boolean) => {
+    setSelectedWorkspaceIds((current) => checked
+      ? [...new Set([...current, workspaceId])]
+      : current.filter((id) => id !== workspaceId))
+    resetSearchResults()
+  }, [resetSearchResults])
+
+  const handleSelectAllWorkspaces = React.useCallback(() => {
+    setSelectedWorkspaceIds([])
+    resetSearchResults()
+  }, [resetSearchResults])
 
   /**
    * 执行一次搜索：标题前端过滤 + 内容主进程 IPC 并行调用。
@@ -289,64 +302,43 @@ export function SearchDialog(): React.ReactElement {
     setLoading(true)
     setSelectedIndex(0)
 
-    const isChatMode = appMode === 'chat'
-    const isAgentMode = appMode === 'agent'
-    const matchesTitle = (title: string): boolean => findBestSearchMatch(title, q) !== null
-    const titles: TitleResult[] = (isChatMode
-      ? conversations
-        .filter((c) => matchesTitle(c.title))
-        .map((c) => ({ id: c.id, title: c.title, type: 'chat' as const, archived: c.archived, updatedAt: c.updatedAt }))
-      : isAgentMode
-        ? agentSessions
-          .filter((s) => matchesTitle(s.title))
-          .map((s) => ({ id: s.id, title: s.title, type: 'agent' as const, archived: s.archived, updatedAt: s.updatedAt }))
-        : [])
-      .sort((a, b) => b.updatedAt - a.updatedAt)
-      .slice(0, 20)
+    const scopePlan = buildSearchScopePlan({
+      projectWorkspaceId: isProjectSearch ? searchScope.workspaceId : undefined,
+      selectedWorkspaceIds,
+    })
+    const request = buildGlobalSearchRequest(scopePlan.workspaceIds)
+    const titles = scopePlan.includeTitleMatches
+      ? createGlobalTitleResults({
+        query: q,
+        conversations,
+        agentSessions,
+        selectedWorkspaceIds,
+      })
+      : []
 
     setTitleResults(titles)
 
     try {
       const [chatResults, agentResults] = await Promise.all([
-        isChatMode ? window.electronAPI.searchConversationMessages(q) : Promise.resolve([]),
-        isAgentMode ? window.electronAPI.searchAgentSessionMessages(q) : Promise.resolve([]),
+        request.includeChat ? window.electronAPI.searchConversationMessages(q) : Promise.resolve([]),
+        window.electronAPI.searchAgentSessionMessages(q, request.agentOptions),
       ])
       if (token !== searchTokenRef.current) return
 
-      const titleIds = new Set(titles.map((t) => t.id))
-      const chatContent: ContentResult[] = (chatResults as MessageSearchResult[])
-        .filter((r) => !titleIds.has(r.conversationId))
-        .map((r) => ({
-          id: r.conversationId,
-          title: r.conversationTitle,
-          type: 'chat' as const,
-          messageId: r.messageId,
-          snippet: r.snippet,
-          matchStart: r.matchStart,
-          matchLength: r.matchLength,
-          archived: r.archived,
-        }))
-      const agentContent: ContentResult[] = (agentResults as AgentMessageSearchResult[])
-        .filter((r) => !titleIds.has(r.sessionId))
-        .map((r) => ({
-          id: r.sessionId,
-          title: r.sessionTitle,
-          type: 'agent' as const,
-          messageId: r.messageId,
-          snippet: r.snippet,
-          matchStart: r.matchStart,
-          matchLength: r.matchLength,
-          archived: r.archived,
-        }))
-
-      setContentResults([...chatContent, ...agentContent])
+      const titleResultKeys = new Set(titles.map((result) => getGlobalSearchResultKey(result.type, result.id)))
+      setContentResults(mergeGlobalContentResults({
+        query: q,
+        titleResultKeys,
+        chatResults,
+        agentResults,
+      }))
     } catch (error) {
       console.error('[搜索] 内容搜索失败:', error)
       if (token === searchTokenRef.current) setContentResults([])
     } finally {
       if (token === searchTokenRef.current) setLoading(false)
     }
-  }, [query, conversations, agentSessions, appMode])
+  }, [query, conversations, agentSessions, selectedWorkspaceIds, isProjectSearch, searchScope])
 
   const handleAgentSearch = React.useCallback(async () => {
     const q = query.trim()
@@ -358,13 +350,23 @@ export function SearchDialog(): React.ReactElement {
     const channelId = deepseekChannel?.id ?? currentAgentChannelId ?? undefined
 
     const configDir = import.meta.env.DEV ? '.proma-dev' : '.proma'
-    const prompt = `请帮我在 Proma 的全部会话历史中搜索与以下描述相关的内容：
+    const selectedWorkspaceIdSet = new Set(selectedWorkspaceIds)
+    const selectedWorkspaces = agentWorkspaces.filter((workspace) => selectedWorkspaceIdSet.has(workspace.id))
+    const selectedSessionIds = agentSessions
+      .filter((session) => session.workspaceId && selectedWorkspaceIdSet.has(session.workspaceId))
+      .map((session) => session.id)
+    const scopeDescription = selectedWorkspaces.length === 0
+      ? `- Chat 会话消息文件：~/${configDir}/conversations/ 目录下所有 .jsonl 文件
+- Agent 会话消息文件：~/${configDir}/agent-sessions/ 目录下所有 .jsonl 文件`
+      : `- 仅搜索 Agent 项目：${selectedWorkspaces.map((workspace) => workspace.name).join('、')}
+- 允许搜索的会话文件名：${selectedSessionIds.length > 0 ? selectedSessionIds.map((id) => `${id}.jsonl`).join('、') : '当前所选项目暂无会话'}
+- Agent 会话消息目录：~/${configDir}/agent-sessions/`
+    const prompt = `请帮我在 Proma 的会话历史中搜索与以下描述相关的内容：
 
 "${q}"
 
 搜索范围：
-- Chat 会话消息文件：~/${configDir}/conversations/ 目录下所有 .jsonl 文件
-- Agent 会话消息文件：~/${configDir}/agent-sessions/ 目录下所有 .jsonl 文件
+${scopeDescription}
 
 要求：
 1. 理解用户描述的语义，不要求关键词完全匹配，根据内容相关性判断
@@ -376,8 +378,9 @@ export function SearchDialog(): React.ReactElement {
 
     setAgentPendingPrompt({ sessionId, message: prompt })
     setOpen(false)
+    setSearchScope(GLOBAL_SEARCH_SCOPE)
     setActiveView('conversations')
-  }, [query, channels, currentAgentChannelId, createAgent, setAgentPendingPrompt, setOpen, setActiveView])
+  }, [query, channels, currentAgentChannelId, createAgent, setAgentPendingPrompt, setOpen, setSearchScope, setActiveView, selectedWorkspaceIds, agentWorkspaces, agentSessions])
 
   // 全部结果列表（标题在前、内容在后）
   const allResults = React.useMemo<SearchResult[]>(
@@ -387,7 +390,11 @@ export function SearchDialog(): React.ReactElement {
 
   // 导航到对话/会话
   const navigateToResult = React.useCallback((result: TitleResult | ContentResult) => {
+    updateMessageSearchNavigation(isContentResult(result)
+      ? { type: 'request', navigation: createMessageSearchNavigation(result, committedQuery) }
+      : { type: 'clear' })
     setOpen(false)
+    setSearchScope(GLOBAL_SEARCH_SCOPE)
     setActiveView('conversations')
 
     if (result.type === 'chat') {
@@ -399,7 +406,12 @@ export function SearchDialog(): React.ReactElement {
       const title = session?.title ?? result.title
       openSession('agent', result.id, title)
     }
-  }, [setOpen, setActiveView, openSession, conversations, agentSessions])
+  }, [updateMessageSearchNavigation, committedQuery, setOpen, setSearchScope, setActiveView, openSession, conversations, agentSessions])
+
+  const handleOpenChange = React.useCallback((nextOpen: boolean): void => {
+    setOpen(nextOpen)
+    if (!nextOpen) setSearchScope(GLOBAL_SEARCH_SCOPE)
+  }, [setOpen, setSearchScope])
 
   /**
    * Enter 键语义：
@@ -437,27 +449,23 @@ export function SearchDialog(): React.ReactElement {
     }
   }, [selectedIndex])
 
-  // 打开时重置状态并聚焦
+  // 打开或切换搜索范围时重置状态，避免项目结果残留到全局搜索（反向亦然）。
   React.useEffect(() => {
     if (open) {
-      searchTokenRef.current += 1
+      updateMessageSearchNavigation({ type: 'clear' })
       setQuery('')
-      setCommittedQuery('')
-      setTitleResults([])
-      setContentResults([])
-      setHasSearched(false)
-      setSelectedIndex(0)
-      setLoading(false)
+      setSelectedWorkspaceIds([])
+      resetSearchResults()
       setTimeout(() => inputRef.current?.focus(), 50)
     }
-  }, [open])
+  }, [open, searchScope, resetSearchResults, updateMessageSearchNavigation])
 
   const trimmedQuery = query.trim()
   const canSearch = trimmedQuery.length >= 2 && !loading
   const isQueryDirty = trimmedQuery !== committedQuery
 
   return (
-    <Dialog open={open} onOpenChange={setOpen} modal={false}>
+    <Dialog open={open} onOpenChange={handleOpenChange} modal={false}>
       {/* 非交互式背景遮罩：modal=false 时 Radix 不渲染原生 overlay（避免拦截 hover 预览的事件），
        * 这里手动通过 DialogPortal 在 document.body 渲染一个 pointer-events-none 的 blur 层——
        * Portal 是关键：直接渲染会被父级 stacking context（如 MainContentPanel）困住，导致只覆盖到
@@ -468,19 +476,32 @@ export function SearchDialog(): React.ReactElement {
         <DialogPortal>
           <div
             aria-hidden
-            className="fixed inset-0 z-[99] bg-black/40 pointer-events-none animate-in fade-in-0 duration-150"
+            className="fixed inset-0 bg-black/40 pointer-events-none animate-in fade-in-0 duration-150"
+            style={{ zIndex: SEARCH_DIALOG_LAYERS.overlay }}
           />
         </DialogPortal>
       )}
       <DialogContent
         hideClose
         className="w-[min(720px,calc(100vw_-_32px))] sm:max-w-[720px] p-0 gap-0 overflow-hidden"
+        style={{ zIndex: SEARCH_DIALOG_LAYERS.dialog }}
         aria-describedby={undefined}
       >
-        <DialogTitle className="sr-only">搜索对话</DialogTitle>
+        <DialogTitle className="sr-only">
+          {isProjectSearch ? `搜索项目 ${searchScope.workspaceName}` : '搜索对话'}
+        </DialogTitle>
         {/* 搜索输入框 */}
         <div className="flex items-center gap-2 px-4 py-3 border-b border-border/50">
           <Search size={16} className="text-foreground/40 flex-shrink-0" />
+          {isProjectSearch && (
+            <span
+              className="flex max-w-[180px] shrink-0 items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-[12px] text-foreground/65"
+              title={`搜索项目：${searchScope.workspaceName}`}
+            >
+              <FolderOpen size={12} className="shrink-0 text-primary/70" />
+              <span className="truncate">{searchScope.workspaceName}</span>
+            </span>
+          )}
           <input
             ref={inputRef}
             value={query}
@@ -488,7 +509,7 @@ export function SearchDialog(): React.ReactElement {
             onCompositionStart={handleCompositionStart}
             onCompositionEnd={handleCompositionEnd}
             onKeyDown={handleKeyDown}
-            placeholder="输入关键词，按 Enter 或点击搜索"
+            placeholder={isProjectSearch ? '搜索此项目下的所有 Session' : '输入关键词，按 Enter 或点击搜索'}
             className="min-w-0 flex-1 bg-transparent text-[14px] text-foreground placeholder:text-foreground/40 outline-none"
           />
           {query && (
@@ -513,21 +534,73 @@ export function SearchDialog(): React.ReactElement {
             {loading ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
             <span>搜索</span>
           </button>
-          <button
-            onClick={() => void handleAgentSearch()}
-            disabled={trimmedQuery.length < 2}
-            title="适合在精准搜索找不到的情况下使用，Agent 会帮助你搜索整个 Proma 会话空间"
-            className={cn(
-              'flex shrink-0 items-center gap-1 px-2 py-1 rounded text-[12px] font-medium transition-colors',
-              trimmedQuery.length >= 2
-                ? 'bg-blue-500/10 text-blue-500 hover:bg-blue-500/20'
-                : 'bg-foreground/[0.06] text-foreground/30 cursor-not-allowed'
-            )}
-          >
-            <Bot size={12} />
-            <span>Agent 搜索</span>
-          </button>
+          {!isProjectSearch && (
+            <button
+              onClick={() => void handleAgentSearch()}
+              disabled={trimmedQuery.length < 2}
+              title="适合在精准搜索找不到的情况下使用，Agent 会帮助你搜索整个 Proma 会话空间"
+              className={cn(
+                'flex shrink-0 items-center gap-1 px-2 py-1 rounded text-[12px] font-medium transition-colors',
+                trimmedQuery.length >= 2
+                  ? 'bg-blue-500/10 text-blue-500 hover:bg-blue-500/20'
+                  : 'bg-foreground/[0.06] text-foreground/30 cursor-not-allowed'
+              )}
+            >
+              <Bot size={12} />
+              <span>Agent 搜索</span>
+            </button>
+          )}
         </div>
+
+        {/* 项目范围：不选择时搜索 Chat 与全部 Agent，选择后仅搜索对应 Agent 项目。 */}
+        {!isProjectSearch && agentWorkspaces.length > 0 && (
+          <div className="flex items-center gap-2 border-b border-border/30 px-4 py-2">
+            <span className="text-[11px] text-foreground/40">搜索范围</span>
+            <DropdownMenu modal={SEARCH_SCOPE_MENU_MODAL}>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="flex min-w-0 max-w-[280px] items-center gap-1.5 rounded-md bg-foreground/[0.05] px-2 py-1 text-[12px] text-foreground/65 transition-colors hover:bg-foreground/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label="选择全局搜索项目范围"
+                >
+                  <Folder size={12} className="shrink-0" />
+                  <span className="truncate">
+                    {selectedWorkspaceIds.length === 0 ? '全部项目' : `已选 ${selectedWorkspaceIds.length} 个项目`}
+                  </span>
+                  <ChevronDown size={12} className="shrink-0 text-foreground/35" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="start"
+                className="max-h-[320px] min-w-[240px]"
+                style={{ zIndex: SEARCH_DIALOG_LAYERS.scopeMenu }}
+              >
+                <DropdownMenuLabel className="text-[11px] text-foreground/45">选择一个或多个项目</DropdownMenuLabel>
+                <DropdownMenuCheckboxItem
+                  checked={selectedWorkspaceIds.length === 0}
+                  onCheckedChange={handleSelectAllWorkspaces}
+                >
+                  全部项目
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuSeparator />
+                {agentWorkspaces.map((workspace) => (
+                  <DropdownMenuCheckboxItem
+                    key={workspace.id}
+                    checked={selectedWorkspaceIds.includes(workspace.id)}
+                    onCheckedChange={(checked) => handleWorkspaceCheckedChange(workspace.id, checked === true)}
+                  >
+                    <span className="truncate" title={workspace.name}>{workspace.name}</span>
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <span className="min-w-0 truncate text-[11px] text-foreground/35">
+              {selectedWorkspaceIds.length === 0
+                ? 'Chat 与全部 Agent 项目'
+                : '仅搜索已选 Agent 项目'}
+            </span>
+          </div>
+        )}
 
         {/* 搜索结果 */}
         <div className="relative">
@@ -552,13 +625,15 @@ export function SearchDialog(): React.ReactElement {
           {hasSearched && !loading && allResults.length === 0 && (
             <div className="py-8 flex flex-col items-center gap-3 text-[13px] text-foreground/40">
               <span>未找到匹配结果</span>
-              <button
-                onClick={() => void handleAgentSearch()}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 transition-colors"
-              >
-                <Bot size={12} />
-                <span>试试 Agent 搜索</span>
-              </button>
+              {!isProjectSearch && (
+                <button
+                  onClick={() => void handleAgentSearch()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 transition-colors"
+                >
+                  <Bot size={12} />
+                  <span>试试 Agent 搜索</span>
+                </button>
+              )}
             </div>
           )}
 

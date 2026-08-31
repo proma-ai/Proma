@@ -80,6 +80,7 @@ function writeAgentSessionsIndex(sessions: Array<{
   workspaceId: string
   createdAt: number
   updatedAt: number
+  archived?: boolean
   agentRuntime?: string
   sdkSessionId?: string
   piSessionFile?: string
@@ -292,6 +293,139 @@ describe('Agent 会话 runtime 元数据', () => {
 })
 
 describe('Agent 会话正文搜索', () => {
+  test('Given 多个项目中都有命中 When 指定多个项目搜索 Then 只返回所选项目并保留更新时间', async () => {
+    writeAgentSessionsIndex([
+      { id: 'session-a', title: '项目 A', workspaceId: 'workspace-a', createdAt: 1, updatedAt: 10 },
+      { id: 'session-b', title: '项目 B', workspaceId: 'workspace-b', createdAt: 2, updatedAt: 30 },
+      { id: 'session-c', title: '项目 C', workspaceId: 'workspace-c', createdAt: 3, updatedAt: 50 },
+    ])
+    for (const sessionId of ['session-a', 'session-b', 'session-c']) {
+      writeAgentSessionJsonl(sessionId, [
+        JSON.stringify({ type: 'user', uuid: `${sessionId}-message`, message: { content: [{ type: 'text', text: '范围搜索命中词' }] } }),
+      ])
+    }
+
+    const results = await manager.searchAgentSessionMessages('命中词', {
+      workspaceIds: ['workspace-a', 'workspace-b'],
+    })
+
+    expect(results.map((result) => result.sessionId)).toEqual(['session-b', 'session-a'])
+    expect(results.map((result) => result.updatedAt)).toEqual([30, 10])
+  })
+
+  test('Given 活跃与归档会话包含完整和模糊命中 When 搜索项目 Then 按活跃状态和匹配质量分级排序', async () => {
+    writeAgentSessionsIndex([
+      {
+        id: 'active-exact',
+        title: '活跃完整命中',
+        workspaceId: 'workspace-a',
+        createdAt: 1,
+        updatedAt: 10,
+      },
+      {
+        id: 'active-exact-newer',
+        title: '较新活跃完整命中',
+        workspaceId: 'workspace-a',
+        createdAt: 1,
+        updatedAt: 30,
+      },
+      {
+        id: 'active-fuzzy',
+        title: '活跃模糊命中',
+        workspaceId: 'workspace-a',
+        createdAt: 1,
+        updatedAt: 40,
+      },
+      {
+        id: 'archived-exact',
+        title: '归档完整命中',
+        workspaceId: 'workspace-a',
+        createdAt: 1,
+        updatedAt: 20,
+        archived: true,
+      },
+      {
+        id: 'archived-fuzzy',
+        title: '归档模糊命中',
+        workspaceId: 'workspace-a',
+        createdAt: 1,
+        updatedAt: 50,
+        archived: true,
+      },
+      {
+        id: 'archived-fuzzy-older',
+        title: '较旧归档模糊命中',
+        workspaceId: 'workspace-a',
+        createdAt: 1,
+        updatedAt: 5,
+        archived: true,
+      },
+    ])
+    writeAgentSessionJsonl('active-exact', [
+      JSON.stringify({ type: 'user', uuid: 'active-exact-message', message: { content: [{ type: 'text', text: 'planning' }] } }),
+    ])
+    writeAgentSessionJsonl('active-fuzzy', [
+      JSON.stringify({ type: 'user', uuid: 'active-fuzzy-message', message: { content: [{ type: 'text', text: 'pong' }] } }),
+    ])
+    writeAgentSessionJsonl('active-exact-newer', [
+      JSON.stringify({ type: 'user', uuid: 'active-exact-newer-message', message: { content: [{ type: 'text', text: 'shipping' }] } }),
+    ])
+    writeAgentSessionJsonl('archived-exact', [
+      JSON.stringify({ type: 'user', uuid: 'archived-exact-message', message: { content: [{ type: 'text', text: 'ing' }] } }),
+    ])
+    writeAgentSessionJsonl('archived-fuzzy', [
+      JSON.stringify({ type: 'user', uuid: 'archived-fuzzy-message', message: { content: [{ type: 'text', text: 'pong' }] } }),
+    ])
+    writeAgentSessionJsonl('archived-fuzzy-older', [
+      JSON.stringify({ type: 'user', uuid: 'archived-fuzzy-older-message', message: { content: [{ type: 'text', text: 'pong' }] } }),
+    ])
+
+    const results = await manager.searchAgentSessionMessages('ing', {
+      workspaceIds: ['workspace-a'],
+    })
+
+    expect(results.map((result) => result.sessionId)).toEqual([
+      'active-exact-newer',
+      'active-exact',
+      'active-fuzzy',
+      'archived-exact',
+      'archived-fuzzy',
+      'archived-fuzzy-older',
+    ])
+  })
+
+  test('Given 两个项目都有匹配消息 When 搜索指定项目 Then 只返回该项目下的 Session', async () => {
+    writeAgentSessionsIndex([
+      {
+        id: 'workspace-a-session',
+        title: '项目 A 会话',
+        workspaceId: 'workspace-a',
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      {
+        id: 'workspace-b-session',
+        title: '项目 B 会话',
+        workspaceId: 'workspace-b',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ])
+    writeAgentSessionJsonl('workspace-a-session', [
+      JSON.stringify({ type: 'user', uuid: 'workspace-a-message', message: { content: [{ type: 'text', text: '项目搜索命中词' }] } }),
+    ])
+    writeAgentSessionJsonl('workspace-b-session', [
+      JSON.stringify({ type: 'user', uuid: 'workspace-b-message', message: { content: [{ type: 'text', text: '项目搜索命中词' }] } }),
+    ])
+
+    const results = await manager.searchAgentSessionMessages('项目搜索命中词', {
+      workspaceIds: ['workspace-a'],
+    })
+
+    expect(results.map((result) => result.sessionId)).toEqual(['workspace-a-session'])
+    expect(results.map((result) => result.messageId)).toEqual(['workspace-a-message'])
+  })
+
   test('Given 用户/助手正文和内部块 When 搜索 Then 只返回最多两个不同正文消息命中', async () => {
     writeAgentSessionsIndex([{
       id: 'search-content-session',
@@ -394,6 +528,27 @@ describe('Agent 会话正文搜索', () => {
     expect(results).toHaveLength(200)
     expect([...sessionIds][0]).toBe('session-100')
     expect(results.filter((result) => result.sessionId === 'session-100')).toHaveLength(2)
+  })
+
+  test('Given 项目有超过 100 个命中会话 When 搜索指定项目 Then 覆盖该项目下的全部 Session', async () => {
+    const sessions = createIndexedSessions(101)
+    writeAgentSessionsIndex(sessions)
+    for (const session of sessions) {
+      writeAgentSessionJsonl(session.id, [
+        JSON.stringify({
+          type: 'user',
+          uuid: `${session.id}-message`,
+          message: { content: [{ type: 'text', text: '项目完整搜索命中词' }] },
+        }),
+      ])
+    }
+
+    const results = await manager.searchAgentSessionMessages('项目完整搜索命中词', {
+      workspaceIds: ['workspace-a'],
+    })
+
+    expect(new Set(results.map((result) => result.sessionId))).toHaveLength(101)
+    expect(results.some((result) => result.sessionId === 'session-0')).toBe(true)
   })
 })
 

@@ -860,6 +860,12 @@ export interface AgentMessage {
 
 // ===== Agent 消息搜索 =====
 
+/** Agent 会话正文搜索范围。 */
+export interface AgentMessageSearchOptions {
+  /** 仅搜索指定项目；空数组或省略时搜索全部项目。 */
+  workspaceIds?: string[]
+}
+
 /**
  * Agent 会话消息搜索结果
  */
@@ -880,6 +886,8 @@ export interface AgentMessageSearchResult {
   matchLength: number
   /** 是否已归档 */
   archived?: boolean
+  /** 会话更新时间戳，用于跨类型统一排序 */
+  updatedAt: number
 }
 
 /**

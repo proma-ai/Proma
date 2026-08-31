@@ -90,6 +90,7 @@ import type {
   RewindSessionInput,
   RewindSessionResult,
   AgentMessageSearchResult,
+  AgentMessageSearchOptions,
   AgentSessionReferenceSearchInput,
   AgentSessionReferenceSearchResult,
   DetachedPreviewWindowData,
@@ -617,7 +618,7 @@ export interface ElectronAPI {
   toggleArchiveAgentSession: (id: string) => Promise<AgentSessionMeta>
 
   /** 搜索 Agent 会话消息内容 */
-  searchAgentSessionMessages: (query: string) => Promise<AgentMessageSearchResult[]>
+  searchAgentSessionMessages: (query: string, options?: AgentMessageSearchOptions) => Promise<AgentMessageSearchResult[]>
 
   /** 搜索可引用的 Agent 会话；省略 workspaceId 时跨工作区搜索。 */
   searchAgentSessionReferences: (input: AgentSessionReferenceSearchInput) => Promise<AgentSessionReferenceSearchResult[]>
@@ -1906,8 +1907,8 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.TOGGLE_ARCHIVE, id)
   },
 
-  searchAgentSessionMessages: (query: string) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SEARCH_MESSAGES, query)
+  searchAgentSessionMessages: (query: string, options?: AgentMessageSearchOptions) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SEARCH_MESSAGES, query, options)
   },
 
   searchAgentSessionReferences: (input: AgentSessionReferenceSearchInput) => {

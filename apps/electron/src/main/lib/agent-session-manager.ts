@@ -37,7 +37,9 @@ import type {
   SkillActivation,
   AgentWorkspace,
   ForkSessionInput,
+  AgentMessageSearchOptions,
   AgentMessageSearchResult,
+  SearchMatchKind,
   AgentSessionReferenceSearchInput,
   AgentSessionReferenceSearchResult,
   AgentCwdMode,
@@ -1305,18 +1307,25 @@ export function cleanupStaleAttachedPaths(): number {
 
 /**
  * 搜索 Agent 会话正文。
- * 每个会话最多返回 2 个用户/助手正文命中，最多返回 100 个命中会话。
+ * 每个会话最多返回 2 个用户/助手正文命中；全局搜索最多返回 100 个命中会话，
+ * 指定一个或多个项目时则遍历所选项目的全部会话。
  */
-export async function searchAgentSessionMessages(query: string): Promise<AgentMessageSearchResult[]> {
+export async function searchAgentSessionMessages(
+  query: string,
+  options: AgentMessageSearchOptions = {},
+): Promise<AgentMessageSearchResult[]> {
   if (!query || query.length < 2) return []
 
   const index = readIndex()
-  const results: AgentMessageSearchResult[] = []
+  const rankedResults: RankedAgentMessageSearchResult[] = []
   let matchedSessionCount = 0
+  const workspaceIds = new Set(options?.workspaceIds?.filter(Boolean) ?? [])
 
-  const sortedSessions = [...index.sessions].sort((a, b) => b.updatedAt - a.updatedAt)
+  const sortedSessions = index.sessions
+    .filter((session) => workspaceIds.size === 0 || (session.workspaceId && workspaceIds.has(session.workspaceId)))
+    .sort((a, b) => compareArchivedState(a.archived, b.archived) || b.updatedAt - a.updatedAt)
   for (const session of sortedSessions) {
-    if (matchedSessionCount >= MAX_SEARCH_SESSIONS) break
+    if (workspaceIds.size === 0 && matchedSessionCount >= MAX_SEARCH_SESSIONS) break
 
     const filePath = getAgentSessionMessagesPath(session.id)
     if (!existsSync(filePath)) continue
@@ -1326,20 +1335,46 @@ export async function searchAgentSessionMessages(query: string): Promise<AgentMe
     matchedSessionCount++
 
     for (const hit of hits.slice(0, MAX_SEARCH_HITS_PER_SESSION)) {
-      results.push({
-        sessionId: session.id,
-        sessionTitle: session.title,
-        messageId: hit.messageId,
-        role: hit.role,
-        snippet: hit.snippet,
-        matchStart: hit.matchStart,
-        matchLength: hit.matchLength,
-        archived: session.archived,
+      rankedResults.push({
+        result: {
+          sessionId: session.id,
+          sessionTitle: session.title,
+          messageId: hit.messageId,
+          role: hit.role,
+          snippet: hit.snippet,
+          matchStart: hit.matchStart,
+          matchLength: hit.matchLength,
+          archived: session.archived,
+          updatedAt: session.updatedAt,
+        },
+        matchKind: hit.kind,
+        score: hit.score,
+        sessionUpdatedAt: session.updatedAt,
       })
     }
   }
 
-  return results
+  rankedResults.sort((a, b) => {
+    const archiveOrder = compareArchivedState(a.result.archived, b.result.archived)
+    if (archiveOrder !== 0) return archiveOrder
+
+    const exactOrder = Number(b.matchKind === 'exact') - Number(a.matchKind === 'exact')
+    if (exactOrder !== 0) return exactOrder
+
+    return b.sessionUpdatedAt - a.sessionUpdatedAt || b.score - a.score
+  })
+  return rankedResults.map(({ result }) => result)
+}
+
+interface RankedAgentMessageSearchResult {
+  result: AgentMessageSearchResult
+  matchKind: SearchMatchKind
+  score: number
+  sessionUpdatedAt: number
+}
+
+function compareArchivedState(left?: boolean, right?: boolean): number {
+  return Number(Boolean(left)) - Number(Boolean(right))
 }
 
 interface AgentSearchHit {
@@ -1348,6 +1383,7 @@ interface AgentSearchHit {
   snippet: string
   matchStart: number
   matchLength: number
+  kind: SearchMatchKind
   score: number
 }
 
@@ -1411,7 +1447,15 @@ async function findMatchesInAgentJsonl(
         textContent.slice(snippetStart, snippetEnd) +
         (snippetEnd < textContent.length ? '...' : '')
       const matchStart = match.matchStart - snippetStart + (snippetStart > 0 ? 3 : 0)
-      const hit = { messageId, role, snippet, matchStart, matchLength: match.matchLength, score: match.score }
+      const hit = {
+        messageId,
+        role,
+        snippet,
+        matchStart,
+        matchLength: match.matchLength,
+        kind: match.kind,
+        score: match.score,
+      }
       if (messageId) {
         const existingHit = hitsByMessageId.get(messageId)
         if (!existingHit) {
