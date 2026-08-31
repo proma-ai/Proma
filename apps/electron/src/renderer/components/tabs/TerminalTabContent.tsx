@@ -4,6 +4,7 @@ import { Terminal } from '@xterm/xterm'
 import type { TerminalOutputEvent } from '@proma/shared'
 import '@xterm/xterm/css/xterm.css'
 import { detectIsWindows } from '@/lib/platform'
+import { getWindowsPtyOptions } from '@/lib/terminal-windows-pty'
 
 export interface TerminalTabContentProps {
   terminalId: string
@@ -32,11 +33,14 @@ export function TerminalTabContent({ terminalId, sessionId, cwd, terminateOnUnmo
     const terminal = new Terminal({
       cursorBlink: true,
       convertEol: true,
+      // ConPTY 已经负责光标行的宽度重排；xterm.js 再自行重排会在 Windows
+      // 输入回车或跨行编辑时产生重复换行和光标上跳。
+      reflowCursorLine: false,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
       fontSize: 13,
       lineHeight: 1.25,
       scrollback: 5_000,
-      windowsPty: detectIsWindows() ? { backend: 'conpty' } : undefined,
+      windowsPty: detectIsWindows() ? getWindowsPtyOptions() : undefined,
       theme: {
         background: '#111113',
         foreground: '#e6e6e9',
