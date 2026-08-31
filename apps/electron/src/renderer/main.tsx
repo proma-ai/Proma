@@ -85,6 +85,7 @@ import { ModelHealthInitializer } from './components/ModelHealthInitializer'
 import { cloudUserAtom, cloudAuthLoadingAtom, initializeCloudAuth } from './atoms/cloud-auth'
 import { userProfileAtom } from './atoms/user-profile'
 import { billingInfoAtom, billingLoadingAtom, quotaExceededDialogAtom, initializeBilling } from './atoms/cloud-billing'
+import { LowCreditReminder } from './components/billing/LowCreditReminder'
 import { isCloudMode } from './lib/mode'
 import { initShortcutRegistry, updateShortcutOverrides } from './lib/shortcut-registry'
 import { triggerLegacyScratchPadMigration } from './lib/legacy-scratch-pad-migration'
@@ -1195,6 +1196,7 @@ if (isQuickTaskWindow) {
       <ThemeInitializer />
       <UserProfileInitializer />
       <CloudInitializer />
+      <LowCreditReminder />
       <ModelHealthInitializer />
       <AgentSettingsInitializer />
       <NotificationsInitializer />

@@ -149,7 +149,7 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
 import type { ConversationMeta, AgentSessionMeta, AgentWorkspace, WorkspaceCapabilities } from '@proma/shared'
-import { CloudSidebarCreditIndicator } from './CloudSidebarExtension'
+import { CloudSidebarCreditTooltip } from './CloudSidebarExtension'
 
 function formatAutomationCount(count: number): string {
   return count > 99 ? '99+' : String(count)
@@ -3752,45 +3752,44 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
         )}
       </div>
 
-      {/* Cloud 模式：侧边栏余额指示器 */}
-      <CloudSidebarCreditIndicator />
-
-      {/* 底部：用户资料 + 设置入口 */}
-      <div className="px-3 pb-3">
-        <div className="flex items-center gap-2 rounded-[10px] px-3 py-2 text-foreground/70 transition-colors titlebar-no-drag hover:bg-foreground/[0.04] hover:text-foreground">
-          <button
-            onClick={handleOpenSettings}
-            className="min-w-0 flex flex-1 items-center gap-3 text-left"
-          >
-            <UserAvatar avatar={userProfile.avatar} size={28} />
-            <span className="flex-1 text-sm truncate text-left">{userProfile.userName}</span>
-          </button>
-          {hasUpdate && (
-            <SidebarUpdateButton
-              status={updateStatus}
-              onClick={handleUpdateButtonClick}
-              tooltipSide="top"
-              className="h-6 flex-shrink-0 inline-flex items-center justify-center rounded-full bg-primary/10 px-2 text-[11px] font-medium leading-none text-primary hover:bg-primary/15"
-              readyDotClassName="hidden"
-              showText
-              hideIcon
-            />
-          )}
-          <button
-            type="button"
-            aria-label="打开设置"
-            onClick={handleOpenSettings}
-            className="relative flex size-7 flex-shrink-0 items-center justify-center rounded-[8px] text-foreground/40 transition-colors hover:bg-foreground/[0.05] hover:text-foreground/70"
-          >
-            <div className="relative flex-shrink-0 text-foreground/40">
-              <Settings size={16} />
-              {hasEnvironmentIssues && (
-                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500" />
-              )}
-            </div>
-          </button>
+      {/* 底部：用户资料 + 设置入口；Cloud 额度只在悬浮时以 Tooltip 显示。 */}
+      <CloudSidebarCreditTooltip>
+        <div className="px-3 pb-3">
+          <div className="flex items-center gap-2 rounded-[10px] px-3 py-2 text-foreground/70 transition-colors titlebar-no-drag hover:bg-foreground/[0.04] hover:text-foreground">
+            <button
+              onClick={handleOpenSettings}
+              className="min-w-0 flex flex-1 items-center gap-3 text-left"
+            >
+              <UserAvatar avatar={userProfile.avatar} size={28} />
+              <span className="flex-1 text-sm truncate text-left">{userProfile.userName}</span>
+            </button>
+            {hasUpdate && (
+              <SidebarUpdateButton
+                status={updateStatus}
+                onClick={handleUpdateButtonClick}
+                tooltipSide="top"
+                className="h-6 flex-shrink-0 inline-flex items-center justify-center rounded-full bg-primary/10 px-2 text-[11px] font-medium leading-none text-primary hover:bg-primary/15"
+                readyDotClassName="hidden"
+                showText
+                hideIcon
+              />
+            )}
+            <button
+              type="button"
+              aria-label="打开设置"
+              onClick={handleOpenSettings}
+              className="relative flex size-7 flex-shrink-0 items-center justify-center rounded-[8px] text-foreground/40 transition-colors hover:bg-foreground/[0.05] hover:text-foreground/70"
+            >
+              <div className="relative flex-shrink-0 text-foreground/40">
+                <Settings size={16} />
+                {hasEnvironmentIssues && (
+                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500" />
+                )}
+              </div>
+            </button>
+          </div>
         </div>
-      </div>
+      </CloudSidebarCreditTooltip>
 
       {deleteDialog}
       {projectDeleteDialog}
