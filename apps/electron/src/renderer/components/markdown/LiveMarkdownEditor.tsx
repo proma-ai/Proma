@@ -4,7 +4,10 @@ import { Prec, RangeSetBuilder, StateEffect, StateField, type EditorState, type 
 import { Decoration, EditorView, ViewPlugin, keymap, type DecorationSet } from '@codemirror/view'
 import ink, { type Instance } from 'ink-mde'
 import { cn } from '@/lib/utils'
-import { createLiveMarkdownBlockPreview, type ResolveLiveMarkdownImageSrc, type SaveLiveMarkdownPastedImage } from './LiveMarkdownPreview'
+import { createLiveMarkdownBlockPreview, type ResolveLiveMarkdownImageSrc, type SaveLiveMarkdownPastedImage, type ChangeLiveMarkdownProperties } from './LiveMarkdownPreview'
+export type { ChangeLiveMarkdownProperties } from './LiveMarkdownPreview'
+export type { LiveMarkdownPropertyEntry } from './live-markdown-frontmatter'
+import type { LiveMarkdownPropertyEntry } from './live-markdown-frontmatter'
 
 export interface LiveMarkdownEditorHandle {
   focus: () => void
@@ -35,6 +38,10 @@ interface LiveMarkdownEditorProps {
   resolveImageSrc?: ResolveLiveMarkdownImageSrc
   /** 保存剪贴板图片并返回其可写入 Markdown 的相对来源。 */
   savePastedImage?: SaveLiveMarkdownPastedImage
+  /** Vault adapter callback for editing flat YAML Properties. */
+  onChangeProperties?: ChangeLiveMarkdownProperties
+  /** Vault-only opt-in for replacing flat YAML frontmatter with editable Properties. */
+  enableProperties?: boolean
   extensions?: readonly Extension[]
   className?: string
 }
@@ -206,6 +213,8 @@ export const LiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, Liv
   readOnly = false,
   resolveImageSrc,
   savePastedImage,
+  onChangeProperties,
+  enableProperties = false,
   extensions = [],
   className,
 }, ref): React.ReactElement {
@@ -218,12 +227,18 @@ export const LiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, Liv
   const onCancelRef = React.useRef(onCancel)
   const onReadyRef = React.useRef(onReady)
   const onTextSelectionChangeRef = React.useRef(onTextSelectionChange)
+  const onChangePropertiesRef = React.useRef(onChangeProperties)
   valueRef.current = value
   onChangeRef.current = onChange
   onSaveRef.current = onSave
   onCancelRef.current = onCancel
   onReadyRef.current = onReady
   onTextSelectionChangeRef.current = onTextSelectionChange
+  onChangePropertiesRef.current = onChangeProperties
+
+  const onChangePropertiesProxy = React.useCallback((entries: LiveMarkdownPropertyEntry[]): void => {
+    onChangePropertiesRef.current?.(entries)
+  }, [])
 
   React.useImperativeHandle(ref, () => ({
     focus: () => instanceRef.current?.focus(),
@@ -314,7 +329,7 @@ export const LiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, Liv
           }
         }),
         ...markdownSyntaxVisibility,
-        createLiveMarkdownBlockPreview(resolveImageSrc, savePastedImage),
+        createLiveMarkdownBlockPreview(resolveImageSrc, savePastedImage, onChangePropertiesProxy, enableProperties),
         ...extensions,
       ].map((extension) => ({ type: 'default' as const, value: extension })),
       search: false,

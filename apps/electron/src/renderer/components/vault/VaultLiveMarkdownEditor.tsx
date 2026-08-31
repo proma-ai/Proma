@@ -1,5 +1,6 @@
 import * as React from 'react'
-import { LiveMarkdownEditor, type LiveMarkdownTextSelection } from '@/components/markdown/LiveMarkdownEditor'
+import { LiveMarkdownEditor, type LiveMarkdownTextSelection, type LiveMarkdownPropertyEntry } from '@/components/markdown/LiveMarkdownEditor'
+import { serializeFlatLeadingFrontmatter } from '@/components/markdown/live-markdown-frontmatter'
 
 const MAX_PASTED_IMAGE_BYTES = 10 * 1024 * 1024
 
@@ -23,6 +24,10 @@ interface VaultLiveMarkdownEditorProps {
 
 /** Vault's file adapter around the reusable, domain-neutral Markdown editor. */
 export function VaultLiveMarkdownEditor({ relativePath, ...props }: VaultLiveMarkdownEditorProps): React.ReactElement {
+  const valueRef = React.useRef(props.value)
+  const onChangeRef = React.useRef(props.onChange)
+  valueRef.current = props.value
+  onChangeRef.current = props.onChange
   const mediaRequestsRef = React.useRef(new Map<string, Promise<string | null>>())
   const resolveImageSrc = React.useCallback((src: string): Promise<string | null> => {
     const cached = mediaRequestsRef.current.get(src)
@@ -42,5 +47,13 @@ export function VaultLiveMarkdownEditor({ relativePath, ...props }: VaultLiveMar
     }))?.src ?? null
   }, [relativePath])
 
-  return <LiveMarkdownEditor {...props} resolveImageSrc={resolveImageSrc} savePastedImage={savePastedImage} />
+  const handlePropertiesChange = React.useCallback((entries: LiveMarkdownPropertyEntry[], documentValue?: string): void => {
+    // This callback is retained by the one-time CodeMirror extension. Prefer
+    // its live document snapshot, then the latest controlled value, so a
+    // property change cannot reintroduce body text from a previous render.
+    const nextValue = serializeFlatLeadingFrontmatter(documentValue ?? valueRef.current, entries)
+    onChangeRef.current(nextValue)
+  }, [])
+
+  return <LiveMarkdownEditor {...props} enableProperties onChangeProperties={handlePropertiesChange} resolveImageSrc={resolveImageSrc} savePastedImage={savePastedImage} />
 }
