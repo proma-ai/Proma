@@ -630,11 +630,11 @@ export type PromaEvent =
   | { type: 'permission_mode_changed'; mode: PromaPermissionMode }
   | { type: 'title_updated'; title: string }
   | { type: 'external_run_started'; source: AgentExternalRunSource; sessionId: string; title?: string; workspaceId?: string; modelId?: string; startedAt: number; session?: AgentSessionMeta }
-  /** 普通桌面会话已开始执行；startedAt 用于区分同一会话的连续运行。 */
-  | { type: 'run_started'; startedAt: number }
+  /** 普通桌面会话已开始执行；startedAt 用于展示，runGeneration 是主进程单调递增的可靠代际。 */
+  | { type: 'run_started'; startedAt: number; runGeneration?: number }
   | { type: 'run_resumed'; sessionId: string }
   /** 用户主动停止当前执行；startedAt 防止旧运行的终态覆盖新一轮执行。 */
-  | { type: 'run_stopped'; startedAt?: number }
+  | { type: 'run_stopped'; startedAt?: number; runGeneration?: number }
   // 协作子会话阻塞事件上浮
   | { type: 'delegation_blocked'; delegationId: string; blockedEvent: unknown }
   // 自动任务会话被用户接管（毕业）
@@ -668,6 +668,8 @@ export interface AgentAssistantDeltaPayload {
   session_id?: string
   /** 产生该 Delta 的 Agent run 起始时间；仅存在于运行时 payload，不写入 JSONL。 */
   runStartedAt?: number
+  /** 主进程为本次运行分配的单调代际，优先于时间戳用于拒绝迟到事件。 */
+  runGeneration?: number
   _channelModelId?: string
 }
 
@@ -1255,6 +1257,8 @@ export interface AgentSendInput {
   mentionedCalendarEventIds?: string[]
   /** 渲染进程生成的流式开始时间戳，主进程原样回传到 STREAM_COMPLETE，确保竞态保护比较的是同一个值 */
   startedAt?: number
+  /** 主进程为同一会话分配的单调 run 代际，仅用于运行时事件关联。 */
+  runGeneration?: number
   /** 用户点击错误消息的重试时，指向本轮开始前应删除的错误 UUID。 */
   retryOfErrorUuid?: string
   /** 触发来源：用户手动、定时任务、父 Agent 委派或外部 Bridge（用于权限与 UI 区分）。 */
@@ -1282,8 +1286,8 @@ export interface AgentSubmitOrEnqueueInput extends AgentDeferredQueueMessageInpu
 }
 
 export interface AgentSubmitOrEnqueueResult {
-  /** injected：已注入当前活跃 Agent；queued：已由主进程接管，等待或启动下一轮。 */
-  disposition: 'injected' | 'queued'
+  /** injected：已注入当前活跃 Agent；started：主进程已启动下一轮；queued：仍在等待。 */
+  disposition: 'injected' | 'started' | 'queued'
 }
 
 /** 流式追加消息的输入参数（Agent 流式中发送新消息） */
@@ -1333,6 +1337,13 @@ export interface AgentQueuedMessageStatus {
   userMessage: string
   rawUserMessage?: string
   startedAt: number
+  runGeneration?: number
+}
+
+/** 主进程 deferred queue 的可恢复展示快照。输入保持原样，以便 renderer 重载后继续取消、移动或显示。 */
+export interface AgentQueuedMessageSnapshot {
+  input: AgentDeferredQueueMessageInput
+  queuedAt: number
 }
 
 // ===== 会话迁移输入 =====
@@ -1399,6 +1410,15 @@ export interface AgentActiveSessionSnapshot {
   sessionId: string
   /** 对应当前运行实例的启动时间，用于拒绝陈旧的 renderer 恢复快照。 */
   startedAt: number
+  /** 主进程按 session 单调递增的 run 代际；避免 startedAt 同毫秒碰撞。 */
+  runGeneration?: number
+}
+
+/** Agent 流式错误事件载荷；运行身份用于拒绝迟到错误污染新一轮 UI。 */
+export interface AgentStreamErrorPayload {
+  sessionId: string
+  error: string
+  runGeneration?: number
 }
 
 /**
@@ -1413,8 +1433,10 @@ export interface AgentStreamCompletePayload {
   messages?: AgentMessage[]
   /** 是否由用户手动中止 */
   stoppedByUser?: boolean
-  /** 本轮流式开始时间戳（用于区分新旧流，防止旧流的 complete 事件重置新流状态） */
+  /** 本轮流式开始时间戳（用于展示与旧协议兼容）。 */
   startedAt?: number
+  /** 主进程按 session 单调递增的 run 代际；完成事件仅能结束同一代运行。 */
+  runGeneration?: number
   /** SDK result 消息的 subtype（success / error_max_turns / error_max_budget_usd / error_during_execution 等） */
   resultSubtype?: string
   /** SDK result 消息携带的错误详情（error_during_execution 等场景下的真实错误原因，用于展示具体错误） */
@@ -1730,6 +1752,8 @@ export const AGENT_IPC_CHANNELS = {
   CREATE_SESSION: 'agent:create-session',
   /** 获取当前主进程仍在执行的 Agent 会话快照 */
   ACTIVE_SESSIONS_SNAPSHOT: 'agent:active-sessions-snapshot',
+  /** 获取指定会话中仍由主进程持有的 deferred queue 快照。 */
+  GET_QUEUED_MESSAGES: 'agent:get-queued-messages',
   /** 获取会话 SDKMessage（Phase 4 新格式） */
   GET_SDK_MESSAGES: 'agent:get-sdk-messages',
   /** 更新会话标题 */

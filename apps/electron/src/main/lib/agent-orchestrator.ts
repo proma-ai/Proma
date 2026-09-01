@@ -91,13 +91,13 @@ import { resolveRuntimeAdditionalDirectories } from './agent-orchestrator-vault-
  */
 export interface SessionCallbacks {
   /** 发送流式错误 */
-  onError: (error: string) => void
+  onError: (error: string, opts?: { runGeneration?: number }) => void
   /** 发送流式完成（携带已持久化的消息列表） */
-  onComplete: (messages?: AgentMessage[], opts?: { stoppedByUser?: boolean; startedAt?: number; resultSubtype?: string; resultErrors?: string[]; backgroundTasksPending?: boolean }) => void
+  onComplete: (messages?: AgentMessage[], opts?: { stoppedByUser?: boolean; startedAt?: number; runGeneration?: number; resultSubtype?: string; resultErrors?: string[]; backgroundTasksPending?: boolean }) => void
   /** 发送标题更新 */
   onTitleUpdated: (title: string) => void
   /** 用户消息已持久化，外部入口可据此通知前端切到实时会话 */
-  onRunStarted?: (opts: { startedAt: number }) => void
+  onRunStarted?: (opts: { startedAt: number; runGeneration: number }) => void
 }
 
 type RecoverableAgentQueryOptions = {
@@ -233,7 +233,7 @@ export class AgentOrchestrator {
   private eventBus: AgentEventBus
   private activeSessions = new Map<string, number>()
   private activeSessionStartedAt = new Map<string, number>()
-  private nextRunGeneration = 0
+  private nextRunGenerationBySession = new Map<string, number>()
 
   /** 队列消息本地记录（sessionId → UUID 集合，用于防重） */
   private queuedMessageUuids = new Map<string, Set<string>>()
@@ -710,6 +710,7 @@ export class AgentOrchestrator {
       callbacks.onComplete([], {
         ...options,
         startedAt: options.startedAt ?? streamStartedAt,
+        ...(input.runGeneration != null ? { runGeneration: input.runGeneration } : {}),
         stoppedByUser: options.stoppedByUser === true || stoppedByUser,
       })
     }
@@ -741,7 +742,7 @@ export class AgentOrchestrator {
       // 后续消息会随每次点击重复落盘。
       console.warn(`[Agent 编排] 会话 ${sessionId} 正在处理中，拒绝新请求且不保存用户消息`)
       callbacks.onError(getActiveRunRejectionMessage())
-      callbacks.onComplete([], { startedAt: streamStartedAt })
+      callbacks.onComplete([], { startedAt: streamStartedAt, ...(input.runGeneration != null ? { runGeneration: input.runGeneration } : {}) })
       return
     }
 
@@ -910,10 +911,10 @@ export class AgentOrchestrator {
       completeBeforeRun({ stoppedByUser: true })
       return
     }
-    const runGeneration = ++this.nextRunGeneration
+    const runGeneration = input.runGeneration ?? this.reserveRunGeneration(sessionId)
     this.activeSessions.set(sessionId, runGeneration)
     this.activeSessionStartedAt.set(sessionId, streamStartedAt)
-    callbacks.onRunStarted?.({ startedAt: streamStartedAt })
+    callbacks.onRunStarted?.({ startedAt: streamStartedAt, runGeneration })
 
     const releaseActiveRun = (): void => {
       // 在发送 STREAM_COMPLETE 前释放 active slot，避免渲染进程已进入空闲态、
@@ -931,7 +932,7 @@ export class AgentOrchestrator {
       opts?: { stoppedByUser?: boolean; startedAt?: number; resultSubtype?: string; resultErrors?: string[] },
     ): void => {
       releaseActiveRun()
-      callbacks.onComplete(messages, opts)
+      callbacks.onComplete(messages, { ...opts, runGeneration })
     }
     const failRun = (
       error: string,
@@ -939,8 +940,8 @@ export class AgentOrchestrator {
       opts?: { stoppedByUser?: boolean; startedAt?: number; resultSubtype?: string; resultErrors?: string[] },
     ): void => {
       releaseActiveRun()
-      callbacks.onError(error)
-      callbacks.onComplete(messages, opts)
+      callbacks.onError(error, { runGeneration })
+      callbacks.onComplete(messages, { ...opts, runGeneration })
     }
 
     // 3. 构建 Pi runtime 环境（代理与 Windows shell 配置）。
@@ -1720,6 +1721,7 @@ export class AgentOrchestrator {
                   deltas: [msg.delta],
                   session_id: msg.session_id,
                   runStartedAt: streamStartedAt,
+                  runGeneration,
                   _channelModelId: msg._channelModelId,
                 },
               })
@@ -2224,6 +2226,13 @@ export class AgentOrchestrator {
     console.log(`[Agent 编排] 已中止会话: ${sessionId}`)
   }
 
+  /** 为一个会话预留下一次运行身份。所有 run lifecycle 事件都必须复用该值。 */
+  reserveRunGeneration(sessionId: string): number {
+    const runGeneration = (this.nextRunGenerationBySession.get(sessionId) ?? 0) + 1
+    this.nextRunGenerationBySession.set(sessionId, runGeneration)
+    return runGeneration
+  }
+
   /** 检查指定会话是否正在处理中 */
   isActive(sessionId: string): boolean {
     return this.activeSessions.has(sessionId)
@@ -2234,6 +2243,7 @@ export class AgentOrchestrator {
     return [...this.activeSessions.keys()].map((sessionId) => ({
       sessionId,
       startedAt: this.activeSessionStartedAt.get(sessionId) ?? Date.now(),
+      runGeneration: this.activeSessions.get(sessionId),
     }))
   }
 

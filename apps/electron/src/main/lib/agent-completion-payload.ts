@@ -14,19 +14,20 @@ export interface AgentStreamCompleteTarget {
 }
 
 export function buildAgentStreamCompletePayload(
-  run: Readonly<Pick<AgentSendInput, 'sessionId' | 'triggeredBy'>>,
+  run: Readonly<Pick<AgentSendInput, 'sessionId' | 'triggeredBy' | 'runGeneration'>>,
   details: AgentStreamCompletionDetails = {},
 ): AgentStreamCompletePayload {
   return {
     sessionId: run.sessionId,
     triggeredBy: run.triggeredBy,
+    ...(run.runGeneration != null ? { runGeneration: run.runGeneration } : {}),
     ...details,
   }
 }
 
 export function sendAgentStreamComplete(
   target: AgentStreamCompleteTarget,
-  run: Readonly<Pick<AgentSendInput, 'sessionId' | 'triggeredBy'>>,
+  run: Readonly<Pick<AgentSendInput, 'sessionId' | 'triggeredBy' | 'runGeneration'>>,
   details: AgentStreamCompletionDetails = {},
 ): void {
   target.send(

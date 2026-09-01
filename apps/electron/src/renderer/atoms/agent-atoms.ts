@@ -115,6 +115,8 @@ export interface AgentStreamState {
   compactInFlight?: boolean
   /** 流式开始时间戳（用于思考计时持久化） */
   startedAt?: number
+  /** 主进程按 session 单调递增的 run 代际；避免 startedAt 同毫秒碰撞。 */
+  runGeneration?: number
   /** 重试状态 */
   retrying?: AgentRetryState
 }
