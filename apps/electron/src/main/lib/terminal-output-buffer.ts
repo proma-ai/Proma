@@ -100,14 +100,19 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 /**
- * PTY 输出含颜色、窗口标题、光标移动等控制序列，直接交给模型会降低可读性。
- * 保留换行；孤立 \r 转为换行以让进度刷新仍有可检索文本。
+ * PTY 输出含颜色、窗口标题、光标移动和 ZLE 重绘控制序列，直接交给模型会降低可读性。
+ * 这是可读文本摘要而非终端模拟器：保留真实换行，但忽略孤立 \r 与其他光标操作，
+ * 防止交互行重绘被误表现为多行命令回显。
  */
 function normalizeTerminalText(output: string): string {
   return output
     .replace(/\u001B\][\s\S]*?(?:\u0007|\u001B\\)/g, '') // OSC（如窗口标题）
+    .replace(/\u001BP[\s\S]*?\u001B\\/g, '') // DCS（如光标样式请求）
     .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, '') // CSI（颜色、光标、清屏等）
-    .replace(/\u001B[()][0-?]*[ -/]*[@-~]/g, '') // charset 切换
-    .replace(/\u0000/g, '')
-    .replace(/\r(?!\n)/g, '\n')
+    .replace(/\u001B[()][0-?]*[ -/]*[@-~]/g, '') // 字符集切换
+    .replace(/\u001B[=>78DEHMNOVWXYZc]/g, '') // ESC 单字符控制（如 zsh 的 keypad mode）
+    .replace(/\u001B(?:[ -/][0-~]?|[0-~])?/g, '') // 残留或不完整 ESC 序列
+    .replace(/\r\n/g, '\n')
+    .replace(/[\u0000-\u0008\u000B-\u001A\u001C-\u001F\u007F]/g, '')
+    .replace(/\r/g, '')
 }
