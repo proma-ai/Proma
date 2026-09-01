@@ -17,7 +17,6 @@
 import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { accessSync, constants, existsSync, mkdirSync, realpathSync } from 'node:fs'
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 import { app } from 'electron'
 import type { AgentSendInput, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, AgentSessionMeta, AgentActiveSessionSnapshot, CodexOAuthCredentials, XaiOAuthCredentials, TypedError, SDKMessage, SDKAssistantMessage, AgentStreamPayload, AgentAssistantDeltaPayload, RewindSessionResult, SkillActivation } from '@proma/shared'
@@ -51,7 +50,8 @@ import pkg from '../../../package.json' with { type: 'json' }
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
 import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, removeSDKErrorMessage, updateSDKUserMessageSkillActivations, rewindPiAgentSession, resolveAgentCwd, getActiveWorktreePath, getAgentCwdMode, getSessionWorkbenchLayout } from './agent-session-manager'
-import { getAgentWorkspace, getLocalProjectRootStatus, getProjectFilesPath, getWorkspaceMcpConfig, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles, getWorkspaceAgentsMdPath, readWorkspaceAgentsMd, getWorkspaceMemoryGuidance, isWorkspaceProjectKnowledgeMaintenanceApproved } from './agent-workspace-manager'
+import { getAgentWorkspace, getProjectFilesPath, getWorkspaceMcpConfig, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles, getWorkspaceAgentsMdPath, readWorkspaceAgentsMd, getWorkspaceMemoryGuidance, isWorkspaceProjectKnowledgeMaintenanceApproved } from './agent-workspace-manager'
+import { getLocalProjectRootStatus } from './project-root-health'
 import { getMcpOAuthHeaders } from './mcp-oauth-service'
 import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getSdkConfigDir, getWorkspaceSkillsDir } from './config-paths'
 import { getRuntimeStatus } from './runtime-init'
@@ -209,23 +209,6 @@ function createLocalProjectRootUnavailableError(projectRootPath: string, status?
   error.code = LOCAL_PROJECT_ROOT_UNAVAILABLE_CODE
   error.details = status ? [`目录状态: ${status}`] : undefined
   return error
-}
-
-/** 验证本地项目根，并返回用于跨会话比较的真实规范化路径。 */
-function resolveLocalProjectRootForRewind(projectRootPath: string): string {
-  const status = getLocalProjectRootStatus(projectRootPath)
-  if (status !== 'available') {
-    throw createLocalProjectRootUnavailableError(projectRootPath, status)
-  }
-
-  try {
-    accessSync(projectRootPath, constants.R_OK | constants.W_OK | constants.X_OK)
-    const realRoot = realpathSync(projectRootPath)
-    const normalizedRoot = normalizePathForCompare(realRoot) || realRoot
-    return process.platform === 'win32' ? normalizedRoot.toLowerCase() : normalizedRoot
-  } catch {
-    throw createLocalProjectRootUnavailableError(projectRootPath, 'unavailable')
-  }
 }
 
 // ===== AgentOrchestrator =====
@@ -818,7 +801,7 @@ export class AgentOrchestrator {
         return
       }
 
-      const projectRootStatus = getLocalProjectRootStatus(workspace.projectRootPath)
+      const projectRootStatus = await getLocalProjectRootStatus(workspace.projectRootPath)
       if (projectRootStatus && projectRootStatus !== 'available') {
         reportPreflightError({
           code: 'local_project_root_unavailable',
@@ -2252,29 +2235,6 @@ export class AgentOrchestrator {
   /** 是否存在任意运行中 Agent（含后台运行与外部触发的会话）。 */
   hasActiveSessions(): boolean {
     return this.activeSessions.size > 0
-  }
-
-  /** 同一个真实本地项目根只能由一个运行中会话执行文件回退。 */
-  private hasOtherActiveSessionForLocalProjectRoot(sessionId: string, localProjectRoot: string): boolean {
-    for (const activeSessionId of this.activeSessions.keys()) {
-      if (activeSessionId === sessionId) continue
-
-      const activeSessionMeta = getAgentSessionMeta(activeSessionId)
-      if (!activeSessionMeta?.workspaceId) continue
-
-      const activeWorkspace = getAgentWorkspace(activeSessionMeta.workspaceId)
-      if (!activeWorkspace?.projectRootPath) continue
-
-      try {
-        if (resolveLocalProjectRootForRewind(activeWorkspace.projectRootPath) === localProjectRoot) {
-          return true
-        }
-      } catch {
-        // 运行中的会话已通过启动时校验；若其根后来不可用，无法安全比较，跳过即可。
-      }
-    }
-
-    return false
   }
 
   /**
