@@ -6,6 +6,21 @@ import '@xterm/xterm/css/xterm.css'
 import { detectIsWindows } from '@/lib/platform'
 import { getWindowsPtyOptions } from '@/lib/terminal-windows-pty'
 
+// 保持系统等宽字体的字形度量；仅在 Powerline 私有区字符缺字时回退到 Nerd Font。
+const TERMINAL_FONT_FALLBACKS = [
+  'ui-monospace',
+  'SFMono-Regular',
+  'Menlo',
+  'Monaco',
+  'Consolas',
+  '"MesloLGS NF"',
+  '"JetBrainsMono Nerd Font"',
+  '"JetBrains Mono Nerd Font"',
+  '"FiraCode Nerd Font"',
+  '"Fira Code Nerd Font"',
+  'monospace',
+].join(', ')
+
 export interface TerminalTabContentProps {
   terminalId: string
   sessionId: string
@@ -36,7 +51,7 @@ export function TerminalTabContent({ terminalId, sessionId, cwd, terminateOnUnmo
       // ConPTY 已经负责终端行布局；固定保守 build 让 xterm.js 使用 Windows 的
       // 兼容路径，避免 resize 或输入回车时与 ConPTY 重复重排而导致光标上跳。
       reflowCursorLine: false,
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+      fontFamily: TERMINAL_FONT_FALLBACKS,
       fontSize: 13,
       lineHeight: 1.25,
       scrollback: 5_000,
