@@ -50,6 +50,7 @@ export function SkillDetailView({
   const [editDescription, setEditDescription] = React.useState(skill.description ?? '')
   const [editBody, setEditBody] = React.useState('')
   const [saving, setSaving] = React.useState(false)
+  const [saveFailed, setSaveFailed] = React.useState(false)
 
   const [detailTab, setDetailTab] = React.useState<'body' | 'files'>('body')
   const [fileCount, setFileCount] = React.useState<number | null>(null)
@@ -68,6 +69,7 @@ export function SkillDetailView({
   const updateDraft = React.useCallback((next: Partial<typeof draftRef.current>) => {
     draftRef.current = { ...draftRef.current, ...next }
     failedSnapshotRef.current = null
+    setSaveFailed(false)
     if (next.name !== undefined) setEditName(next.name)
     if (next.description !== undefined) setEditDescription(next.description)
     if (next.body !== undefined) setEditBody(next.body)
@@ -86,6 +88,7 @@ export function SkillDetailView({
       setEditName(next.name)
       setEditDescription(next.description)
       setEditBody(next.body)
+      setSaveFailed(false)
       return
     }
 
@@ -161,13 +164,19 @@ export function SkillDetailView({
         contentRef.current = nextContent
         savedRef.current = snapshot
         failedSnapshotRef.current = null
-        if (mountedRef.current) setContent(nextContent)
+        if (mountedRef.current) {
+          setContent(nextContent)
+          setSaveFailed(false)
+        }
       })
       .catch((err) => {
         if (saveRequestRef.current !== requestId) return
         failedSnapshotRef.current = snapshot
         console.error('[SkillDetail] 自动保存失败:', err)
-        if (mountedRef.current) toast.error('自动保存失败')
+        if (mountedRef.current) {
+          setSaveFailed(true)
+          toast.error('自动保存失败')
+        }
       })
       .finally(() => {
         saveInFlightRef.current = false
@@ -180,6 +189,12 @@ export function SkillDetailView({
   }, [workspaceSlug, skill.slug])
 
   saveDraftRef.current = saveDraft
+
+  const retrySave = React.useCallback(() => {
+    failedSnapshotRef.current = null
+    setSaveFailed(false)
+    saveDraft()
+  }, [saveDraft])
 
   React.useEffect(() => {
     const draft = draftRef.current
@@ -283,9 +298,15 @@ export function SkillDetailView({
             <div className="space-y-2">
             <div className="flex items-center justify-between">
               <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">元数据</h4>
-              <span className="text-xs text-muted-foreground" aria-live="polite">
-                {saving ? '正在保存…' : '自动保存'}
-              </span>
+              {saveFailed ? (
+                <Button size="sm" variant="outline" onClick={retrySave} disabled={saving}>
+                  重试保存
+                </Button>
+              ) : (
+                <span className="text-xs text-muted-foreground" aria-live="polite">
+                  {saving ? '正在保存…' : '自动保存'}
+                </span>
+              )}
             </div>
             <SettingsCard divided>
               <MetaEditRow label="名称" value={editName} onChange={(name) => updateDraft({ name })} />
@@ -319,6 +340,7 @@ export function SkillDetailView({
                     <LiveMarkdownEditor
                       value={editBody}
                       onChange={(body) => updateDraft({ body })}
+                      onSave={retrySave}
                       className="live-markdown-external-scroll skill-detail-live-markdown"
                     />
                   </div>
