@@ -3186,8 +3186,8 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(
     AGENT_IPC_CHANNELS.WRITE_SKILL_CONTENT,
-    async (_, workspaceSlug: string, skillSlug: string, content: string): Promise<void> => {
-      writeWorkspaceSkillContent(workspaceSlug, skillSlug, content)
+    async (_, workspaceSlug: string, skillSlug: string, content: string, expectedContent: string) => {
+      return writeWorkspaceSkillContent(workspaceSlug, skillSlug, content, expectedContent)
     }
   )
 

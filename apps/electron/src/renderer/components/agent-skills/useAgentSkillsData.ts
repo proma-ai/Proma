@@ -47,6 +47,8 @@ export interface AgentSkillsData {
   workspaceName: string
   hasWorkspace: boolean
   loading: boolean
+  /** 当前 skills 快照实际读取自的工作区；切换期间用于避免使用旧数据渲染详情。 */
+  loadedWorkspaceSlug: string
   skills: SkillMeta[]
   defaultSkillSlugs: Set<string>
   skillsDir: string
@@ -83,6 +85,7 @@ export function useAgentSkillsData(workspaceId?: string): AgentSkillsData {
   const workspaceSlug = currentWorkspace?.slug ?? ''
 
   const [loading, setLoading] = React.useState(true)
+  const [loadedWorkspaceSlug, setLoadedWorkspaceSlug] = React.useState('')
   const [skills, setSkills] = React.useState<SkillMeta[]>([])
   const [defaultSkillSlugs, setDefaultSkillSlugs] = React.useState<Set<string>>(new Set())
   const [skillsDir, setSkillsDir] = React.useState('')
@@ -106,6 +109,7 @@ export function useAgentSkillsData(workspaceId?: string): AgentSkillsData {
       setBuiltinMcpServers([])
       setCliIntegrationStatuses([])
       setCliIntegrationProbeState('ready')
+      setLoadedWorkspaceSlug(workspaceSlug)
       setLoading(false)
       return
     }
@@ -129,6 +133,7 @@ export function useAgentSkillsData(workspaceId?: string): AgentSkillsData {
       setBuiltinMcpServers(capabilities.builtinMcpServers)
       const cachedCliStatuses = cliIntegrationStatusCache.get(workspaceSlug)
       const hasFreshCliCache = cachedCliStatuses && Date.now() - cachedCliStatuses.cachedAt < CLI_STATUS_CACHE_TTL_MS
+      setLoadedWorkspaceSlug(workspaceSlug)
       setCliIntegrationProbeState(hasFreshCliCache ? 'ready' : 'loading')
       setCliIntegrationStatuses(cachedCliStatuses?.statuses ?? [])
       setLoading(false)
@@ -307,6 +312,7 @@ export function useAgentSkillsData(workspaceId?: string): AgentSkillsData {
     workspaceName: currentWorkspace?.name ?? '',
     hasWorkspace: !!currentWorkspace,
     loading,
+    loadedWorkspaceSlug,
     skills,
     defaultSkillSlugs,
     skillsDir,

@@ -247,6 +247,7 @@ export function AgentSkillsView({
   const memoryCount = (data.capabilities?.memory.agentsMd.exists ? 1 : 0) + (data.capabilities?.memory.autoMemory.fileCount ?? 0)
 
   const selectedSkill = selectedSkillWorkspaceSlug === data.workspaceSlug
+    && data.loadedWorkspaceSlug === data.workspaceSlug
     ? data.skills.find((s) => s.slug === selectedSkillSlug) ?? null
     : null
   const selectedIsBuiltin = selectedSkill ? data.defaultSkillSlugs.has(selectedSkill.slug) : false

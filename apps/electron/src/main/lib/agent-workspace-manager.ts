@@ -1159,11 +1159,26 @@ export function readWorkspaceSkillContent(workspaceSlug: string, skillSlug: stri
   return readFileSync(mdPath, 'utf-8')
 }
 
-export function writeWorkspaceSkillContent(workspaceSlug: string, skillSlug: string, content: string): void {
+export type SkillContentWriteResult = { written: true } | { written: false; currentContent: string }
+
+/**
+ * 乐观并发写入：仅当磁盘内容仍等于 renderer 上次读取的版本时才覆盖，
+ * 让 renderer 能在外部 Agent 同时编辑时重新读取并合并本地脏字段。
+ */
+export function writeWorkspaceSkillContent(
+  workspaceSlug: string,
+  skillSlug: string,
+  content: string,
+  expectedContent: string,
+): SkillContentWriteResult {
   const dir = resolveSkillDir(workspaceSlug, skillSlug)
   if (!dir) throw new Error(`Skill 不存在: ${workspaceSlug}/${skillSlug}`)
-  writeFileSync(join(dir, 'SKILL.md'), content, 'utf-8')
+  const mdPath = join(dir, 'SKILL.md')
+  const currentContent = readFileSync(mdPath, 'utf-8')
+  if (currentContent !== expectedContent) return { written: false, currentContent }
+  writeFileSync(mdPath, content, 'utf-8')
   console.log(`[Agent 工作区] 已更新 SKILL.md: ${workspaceSlug}/${skillSlug}`)
+  return { written: true }
 }
 
 // ===== Skill 子文件管理 =====

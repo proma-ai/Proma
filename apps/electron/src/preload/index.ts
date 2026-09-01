@@ -750,8 +750,8 @@ export interface ElectronAPI {
   /** 读取 SKILL.md 全文内容 */
   readSkillContent: (workspaceSlug: string, skillSlug: string) => Promise<string>
 
-  /** 写入 SKILL.md 全文内容 */
-  writeSkillContent: (workspaceSlug: string, skillSlug: string, content: string) => Promise<void>
+  /** 基于已读内容乐观写入 SKILL.md；发生外部冲突时返回最新全文。 */
+  writeSkillContent: (workspaceSlug: string, skillSlug: string, content: string, expectedContent: string) => Promise<{ written: boolean; currentContent?: string }>
 
   /** 列出 Skill 目录下的子文件树（不含 SKILL.md） */
   listSkillFiles: (workspaceSlug: string, skillSlug: string) => Promise<import('@proma/shared').SkillFileNode[]>
@@ -2110,12 +2110,13 @@ const electronAPI: ElectronAPI = {
     )
   },
 
-  writeSkillContent: (workspaceSlug: string, skillSlug: string, content: string) => {
+  writeSkillContent: (workspaceSlug: string, skillSlug: string, content: string, expectedContent: string) => {
     return ipcRenderer.invoke(
       AGENT_IPC_CHANNELS.WRITE_SKILL_CONTENT,
       workspaceSlug,
       skillSlug,
       content,
+      expectedContent,
     )
   },
 
