@@ -147,61 +147,36 @@ export function SkillDetailView({
 
     const requestId = ++saveRequestRef.current
     const snapshot = { ...draft }
-    const changedName = snapshot.name !== saved.name
-    const changedDescription = snapshot.description !== saved.description
-    const changedBody = snapshot.body !== saved.body
-    const buildContent = (base: string): string => {
-      let next = base
-      if (changedName || changedDescription) {
-        next = rebuildSkillMd(next, {
-          ...(changedName ? { name: snapshot.name } : {}),
-          ...(changedDescription ? { description: snapshot.description } : {}),
-        })
-      }
-      if (changedBody) next = rebuildSkillMd(next, { body: snapshot.body })
-      return next
-    }
+    const nextContent = rebuildSkillMd(
+      rebuildSkillMd(contentRef.current as string, { name: snapshot.name, description: snapshot.description }),
+      { body: snapshot.body },
+    )
 
-    // 串行化磁盘写入；冲突时从最新全文重新合并本地脏字段，避免覆盖外部 Agent 的其他修改。
+    // 700ms 防抖后串行写入，避免快速连续输入造成写入乱序。
     saveInFlightRef.current = true
     if (mountedRef.current) setSaving(true)
-    void (async () => {
-      try {
-        let expectedContent = contentRef.current as string
-        let nextContent = buildContent(expectedContent)
-        for (let attempt = 0; attempt < 2; attempt += 1) {
-          const result = await window.electronAPI.writeSkillContent(
-            workspaceSlug,
-            skill.slug,
-            nextContent,
-            expectedContent,
-          )
-          if (result.written) {
-            if (saveRequestRef.current !== requestId) return
-            contentRef.current = nextContent
-            savedRef.current = snapshot
-            failedSnapshotRef.current = null
-            if (mountedRef.current) setContent(nextContent)
-            return
-          }
-          expectedContent = result.currentContent ?? expectedContent
-          nextContent = buildContent(expectedContent)
-        }
-        throw new Error('SKILL.md 在保存期间持续被外部修改')
-      } catch (err) {
+    void window.electronAPI.writeSkillContent(workspaceSlug, skill.slug, nextContent)
+      .then(() => {
+        if (saveRequestRef.current !== requestId) return
+        contentRef.current = nextContent
+        savedRef.current = snapshot
+        failedSnapshotRef.current = null
+        if (mountedRef.current) setContent(nextContent)
+      })
+      .catch((err) => {
         if (saveRequestRef.current !== requestId) return
         failedSnapshotRef.current = snapshot
         console.error('[SkillDetail] 自动保存失败:', err)
         if (mountedRef.current) toast.error('自动保存失败')
-      } finally {
+      })
+      .finally(() => {
         saveInFlightRef.current = false
         if (mountedRef.current && saveRequestRef.current === requestId) setSaving(false)
         if (flushPendingRef.current) {
           flushPendingRef.current = false
           saveDraftRef.current()
         }
-      }
-    })()
+      })
   }, [workspaceSlug, skill.slug])
 
   saveDraftRef.current = saveDraft
