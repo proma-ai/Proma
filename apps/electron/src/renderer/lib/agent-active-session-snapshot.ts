@@ -49,7 +49,13 @@ export function mergeActiveAgentSessionSnapshot(
   // 完成处理可能已回收 state.startedAt；单独保留本次挂载期间收到的终态标记，
   // 防止 IPC 快照先在主进程取到、却在完成事件之后才抵达 renderer 时复活旧 run。
   if (latestTerminalRun && isSameOrNewerRun(latestTerminalRun, snapshot)) return current
-  if (current && isSameOrNewerRun(current, snapshot)) return current
+  if (current && isSameOrNewerRun(current, snapshot)) {
+    // 同一 run 已由旧协议事件建立时，补写快照中的 generation，避免后续终态退回时间戳比较。
+    if (current.runGeneration == null && snapshot.runGeneration != null && current.startedAt === snapshot.startedAt) {
+      return { ...current, runGeneration: snapshot.runGeneration }
+    }
+    return current
+  }
   return {
     ...createQueuedAgentStreamState(current, snapshot.startedAt),
     ...(snapshot.runGeneration != null ? { runGeneration: snapshot.runGeneration } : {}),

@@ -3390,7 +3390,9 @@ export function registerIpcHandlers(): void {
             console.error('[飞书 Session 镜像] 流式卡片初始化失败:', error)
           })
         }
-        await runAgent(input, event.sender)
+        // runGeneration 是主进程内部运行身份；renderer IPC 绝不能指定或复用它。
+        const { runGeneration: _ignoredRunGeneration, ...publicInput } = input as AgentSendInput & { runGeneration?: unknown }
+        await runAgent(publicInput, event.sender)
       } finally {
         releaseStart()
       }

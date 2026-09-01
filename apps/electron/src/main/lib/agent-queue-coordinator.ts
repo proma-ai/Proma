@@ -7,6 +7,8 @@ import type {
   AgentQueuedMessageStatus,
 } from '@proma/shared'
 
+type DispatchedQueueRunInput = AgentDeferredQueueMessageInput & { runGeneration: number }
+
 interface QueueEntry {
   input: AgentDeferredQueueMessageInput
   queuedAt: number
@@ -15,7 +17,7 @@ interface QueueEntry {
 export interface AgentQueueCoordinatorOptions {
   isActive: (sessionId: string) => boolean
   getWebContents: (sessionId: string) => WebContents | null
-  startRun: (input: AgentDeferredQueueMessageInput, webContents: WebContents) => Promise<void>
+  startRun: (input: DispatchedQueueRunInput, webContents: WebContents) => Promise<void>
   sendStarted: (webContents: WebContents, status: AgentQueuedMessageStatus) => void
   /** 运行身份由生命周期所有者分配，队列只负责调度。 */
   reserveRunGeneration: (sessionId: string) => number

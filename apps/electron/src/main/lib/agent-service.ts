@@ -253,6 +253,8 @@ export function setVisibleAgentSession(webContents: WebContents, sessionId: stri
 // ===== IPC 薄包装函数 =====
 
 /** 仅主进程内部使用的单次运行扩展，绝不经 IPC 序列化。 */
+type AgentRunInput = AgentSendInput & { runGeneration?: number }
+
 export interface AgentRunExtensions {
   piCustomTools?: ToolDefinition[]
 }
@@ -263,7 +265,7 @@ export interface AgentRunExtensions {
  * 注册 webContents 到 EventBus 映射，委托给 Orchestrator。
  */
 export async function runAgent(
-  input: AgentSendInput,
+  input: AgentRunInput,
   webContents: WebContents,
 ): Promise<void> {
   const route = registerWebContents(input.sessionId, webContents)
@@ -357,6 +359,8 @@ export async function runAgent(
       sendAgentStreamComplete(target, input, {
         messages: [],
         stoppedByUser: false,
+        startedAt: input.startedAt,
+        runGeneration: input.runGeneration,
       })
     }
     agentQueueCoordinator.onRunComplete(input.sessionId, queueMessageId, false, false)
@@ -394,8 +398,10 @@ export async function runAgentHeadless(
   // treat an omitted source as an interactive desktop-user run: custom tools may grant
   // local side effects that cannot be visibly supervised by an external sender.
   const inferredTriggeredBy = callbacks.source === 'delegation' ? 'delegation' : 'external'
-  const runInput: AgentSendInput = {
-    ...input,
+  // Headless callers are public service clients too; discard any forged runtime identity.
+  const { runGeneration: _ignoredRunGeneration, ...publicInput } = input as AgentSendInput & { runGeneration?: unknown }
+  const runInput: AgentRunInput = {
+    ...publicInput,
     ...(input.triggeredBy ? {} : { triggeredBy: inferredTriggeredBy }),
     ...(input.startedAt != null ? {} : { startedAt: Date.now() }),
   }
@@ -459,7 +465,7 @@ export async function runAgentHeadless(
           })
         }
       },
-      onRunStarted: ({ startedAt: persistedStartedAt }) => {
+      onRunStarted: ({ startedAt: persistedStartedAt, runGeneration }) => {
         const session = getAgentSessionMeta(runInput.sessionId)
         eventBus.emit(runInput.sessionId, {
           kind: 'proma_event',
@@ -471,6 +477,7 @@ export async function runAgentHeadless(
             workspaceId: session?.workspaceId ?? runInput.workspaceId,
             modelId: runInput.modelId,
             startedAt: persistedStartedAt,
+            runGeneration,
             ...(session ? { session } : {}),
           },
         })
@@ -494,6 +501,7 @@ export async function runAgentHeadless(
         messages: [],
         stoppedByUser: false,
         startedAt,
+        runGeneration: runInput.runGeneration,
       })
     }
     agentQueueCoordinator.onRunComplete(runInput.sessionId, undefined, false, false)

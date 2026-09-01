@@ -666,7 +666,7 @@ export function useGlobalAgentListeners(): void {
     const activateExternalAgentRun = (event: Extract<PromaEvent, { type: 'external_run_started' }>): void => {
       const applyActivation = (sessions: AgentSessionMeta[]): void => {
         const currentStreamState = store.get(agentStreamingStatesAtom).get(event.sessionId)
-        if (!shouldActivateExternalAgentRun(currentStreamState, event.startedAt)) {
+        if (!shouldActivateExternalAgentRun(currentStreamState, event.startedAt, event.runGeneration)) {
           return
         }
 
@@ -680,6 +680,7 @@ export function useGlobalAgentListeners(): void {
           workspaceId: event.workspaceId,
           modelId: event.modelId,
           startedAt: event.startedAt,
+          runGeneration: event.runGeneration,
           currentStreamState,
         })
 
@@ -1055,7 +1056,9 @@ export function useGlobalAgentListeners(): void {
           : null
         if (runStartedEvent) {
           const latestTerminal = latestTerminalRun.get(sessionId)
-          if (latestTerminal && !isSameOrNewerRun(latestTerminal, runStartedEvent)) {
+          if (latestTerminal) {
+            // 同一或更旧代际的迟到启动事件绝不能复活已结束的 run。
+            if (isSameOrNewerRun(latestTerminal, runStartedEvent)) return
             latestTerminalRun.delete(sessionId)
           }
           // 队列 run 会先通过独立 IPC 发送 started 投影，但该投影可能在窗口
@@ -1066,8 +1069,11 @@ export function useGlobalAgentListeners(): void {
             if (
               current?.runGeneration != null
               && runStartedEvent.runGeneration != null
-              && current.runGeneration > runStartedEvent.runGeneration
-            ) return prev
+            ) {
+              if (current.runGeneration > runStartedEvent.runGeneration) return prev
+              // 重复 start 保留已有 live 状态；已结束 run 更不能被重复 start 复活。
+              if (current.runGeneration === runStartedEvent.runGeneration) return prev
+            }
             // 旧协议事件没有代际，只能保留 startedAt 回退比较。
             if (runStartedEvent.runGeneration == null && current?.startedAt != null && (
               current.startedAt > runStartedEvent.startedAt

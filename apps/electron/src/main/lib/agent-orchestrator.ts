@@ -89,6 +89,8 @@ import { resolveRuntimeAdditionalDirectories } from './agent-orchestrator-vault-
  * 解耦 Electron webContents，使 Orchestrator 可独立测试。
  * agent-service.ts 负责将这些回调绑定到 webContents.send()。
  */
+type AgentRunInput = AgentSendInput & { runGeneration?: number }
+
 export interface SessionCallbacks {
   /** 发送流式错误 */
   onError: (error: string, opts?: { runGeneration?: number }) => void
@@ -690,7 +692,7 @@ export class AgentOrchestrator {
    * 通过 EventBus 分发 AgentEvent，通过 callbacks 发送控制信号。
    */
   async sendMessage(
-    input: AgentSendInput,
+    input: AgentRunInput,
     callbacks: SessionCallbacks,
     extensions: { piCustomTools?: ToolDefinition[] } = {},
   ): Promise<void> {

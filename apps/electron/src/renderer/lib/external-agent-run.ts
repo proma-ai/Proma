@@ -13,6 +13,7 @@ export interface ExternalAgentRunActivationInput {
   workspaceId?: string
   modelId?: string
   startedAt: number
+  runGeneration?: number
   currentStreamState?: AgentStreamState
 }
 
@@ -29,8 +30,16 @@ export interface ExternalAgentRunActivation {
 export function shouldActivateExternalAgentRun(
   currentStreamState: AgentStreamState | undefined,
   startedAt: number,
+  runGeneration?: number,
 ): boolean {
   if (!currentStreamState || currentStreamState.startedAt == null) return true
+  if (currentStreamState.runGeneration != null && runGeneration != null) {
+    if (currentStreamState.runGeneration > runGeneration) return false
+    if (currentStreamState.runGeneration === runGeneration) {
+      return currentStreamState.running && !currentStreamState.backgroundWaiting
+    }
+    return true
+  }
   if (currentStreamState.startedAt > startedAt) return false
   if (currentStreamState.startedAt === startedAt) {
     return currentStreamState.running && !currentStreamState.backgroundWaiting
@@ -72,6 +81,7 @@ export function buildExternalAgentRunActivation(
       running: true,
       model: input.modelId ?? input.currentStreamState?.model,
       startedAt: input.startedAt,
+      ...(input.runGeneration != null ? { runGeneration: input.runGeneration } : {}),
     },
   }
 }

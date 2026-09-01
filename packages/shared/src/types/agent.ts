@@ -629,7 +629,7 @@ export type PromaEvent =
   | { type: 'context_window'; contextWindow: number }
   | { type: 'permission_mode_changed'; mode: PromaPermissionMode }
   | { type: 'title_updated'; title: string }
-  | { type: 'external_run_started'; source: AgentExternalRunSource; sessionId: string; title?: string; workspaceId?: string; modelId?: string; startedAt: number; session?: AgentSessionMeta }
+  | { type: 'external_run_started'; source: AgentExternalRunSource; sessionId: string; title?: string; workspaceId?: string; modelId?: string; startedAt: number; runGeneration?: number; session?: AgentSessionMeta }
   /** 普通桌面会话已开始执行；startedAt 用于展示，runGeneration 是主进程单调递增的可靠代际。 */
   | { type: 'run_started'; startedAt: number; runGeneration?: number }
   | { type: 'run_resumed'; sessionId: string }
@@ -1257,8 +1257,6 @@ export interface AgentSendInput {
   mentionedCalendarEventIds?: string[]
   /** 渲染进程生成的流式开始时间戳，主进程原样回传到 STREAM_COMPLETE，确保竞态保护比较的是同一个值 */
   startedAt?: number
-  /** 主进程为同一会话分配的单调 run 代际，仅用于运行时事件关联。 */
-  runGeneration?: number
   /** 用户点击错误消息的重试时，指向本轮开始前应删除的错误 UUID。 */
   retryOfErrorUuid?: string
   /** 触发来源：用户手动、定时任务、父 Agent 委派或外部 Bridge（用于权限与 UI 区分）。 */
