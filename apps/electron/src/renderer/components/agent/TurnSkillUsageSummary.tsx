@@ -5,7 +5,7 @@ import { collectSkillActivations } from '@proma/shared'
 import type { SDKMessage, SDKUserMessage, SkillActivation, VaultFocusAttribution } from '@proma/shared'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { currentAgentSessionIdAtom, openWorkspaceComponentAtom, skillDetailNavigationAtomFamily } from '@/atoms/agent-atoms'
-import { focusedVaultFolderAtom, selectedVaultFileAtom } from '@/atoms/vault-atoms'
+import { focusedVaultFolderAtomFamily, getVaultSessionScope, selectedVaultFileAtomFamily } from '@/atoms/vault-atoms'
 import { ObsidianIcon } from '@/components/obsidian/obsidian-brand'
 import { cn } from '@/lib/utils'
 
@@ -38,8 +38,9 @@ function readVaultFocusAttribution(inputMessage?: SDKUserMessage): VaultFocusAtt
 function VaultFocusChip({ attribution }: { attribution: VaultFocusAttribution }): React.ReactElement {
   const sessionId = useAtomValue(currentAgentSessionIdAtom)
   const openWorkspaceComponent = useSetAtom(openWorkspaceComponentAtom)
-  const setSelectedFile = useSetAtom(selectedVaultFileAtom)
-  const setFocusedFolder = useSetAtom(focusedVaultFolderAtom)
+  const vaultSessionScope = getVaultSessionScope(sessionId ?? undefined)
+  const setSelectedFile = useSetAtom(selectedVaultFileAtomFamily(vaultSessionScope))
+  const setFocusedFolder = useSetAtom(focusedVaultFolderAtomFamily(vaultSessionScope))
   const { focus } = attribution
   const label = `${focus.relativePath.split('/').filter(Boolean).pop() || attribution.displayName}${focus.kind === 'folder' ? '/' : ''}`
   const handleOpenVault = React.useCallback(() => {

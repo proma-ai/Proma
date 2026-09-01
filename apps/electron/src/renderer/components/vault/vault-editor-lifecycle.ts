@@ -2,7 +2,3 @@
 export function getVaultEditorKey(relativePath: string, reopenVersion = 0): string {
   return `${relativePath}:${reopenVersion}`
 }
-
-export function shouldAdoptVaultReadContent(localDraft: string, previousReadContent: string): boolean {
-  return localDraft === previousReadContent
-}
