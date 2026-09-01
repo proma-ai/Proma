@@ -30,7 +30,6 @@ export interface SkillDetailViewProps {
   onUpdate: () => void
   onRequestDelete: () => void
   onOpenFolder: () => void
-  onChanged: () => void
 }
 
 export function SkillDetailView({
@@ -44,7 +43,6 @@ export function SkillDetailView({
   onUpdate,
   onRequestDelete,
   onOpenFolder,
-  onChanged,
 }: SkillDetailViewProps): React.ReactElement {
   const [content, setContent] = React.useState<string | null>(null)
   const [loadingContent, setLoadingContent] = React.useState(true)
@@ -63,12 +61,9 @@ export function SkillDetailView({
   const flushPendingRef = React.useRef(false)
   const failedSnapshotRef = React.useRef<{ name: string; description: string; body: string } | null>(null)
   const mountedRef = React.useRef(true)
-  const saveDraftRef = React.useRef<(force?: boolean) => void>(() => {})
-  const onChangedRef = React.useRef(onChanged)
+  const saveDraftRef = React.useRef<() => void>(() => {})
   const draftRef = React.useRef({ name: skill.name, description: skill.description ?? '', body: '' })
   const savedRef = React.useRef({ name: skill.name, description: skill.description ?? '', body: '' })
-
-  onChangedRef.current = onChanged
 
   const updateDraft = React.useCallback((next: Partial<typeof draftRef.current>) => {
     draftRef.current = { ...draftRef.current, ...next }
@@ -133,7 +128,7 @@ export function SkillDetailView({
       })
   }, [contentVersion, skill.slug, workspaceSlug, updateDraft])
 
-  const saveDraft = React.useCallback((force = false): void => {
+  const saveDraft = React.useCallback((): void => {
     const draft = draftRef.current
     const saved = savedRef.current
     const hasChanges = draft.name !== saved.name
@@ -143,7 +138,7 @@ export function SkillDetailView({
     const isKnownFailure = failed?.name === draft.name
       && failed.description === draft.description
       && failed.body === draft.body
-    if (!contentRef.current || !hasChanges || (!force && isKnownFailure)) return
+    if (!contentRef.current || !hasChanges || isKnownFailure) return
 
     if (saveInFlightRef.current) {
       flushPendingRef.current = true
@@ -169,7 +164,6 @@ export function SkillDetailView({
         failedSnapshotRef.current = null
         if (mountedRef.current) {
           setContent(nextContent)
-          onChangedRef.current()
         }
       })
       .catch((err) => {
@@ -183,7 +177,7 @@ export function SkillDetailView({
         if (mountedRef.current && saveRequestRef.current === requestId) setSaving(false)
         if (flushPendingRef.current) {
           flushPendingRef.current = false
-          saveDraftRef.current(true)
+          saveDraftRef.current()
         }
       })
   }, [workspaceSlug, skill.slug])
@@ -206,7 +200,7 @@ export function SkillDetailView({
     mountedRef.current = true
     return () => {
       mountedRef.current = false
-      saveDraftRef.current(true)
+      saveDraftRef.current()
     }
   }, [])
 
