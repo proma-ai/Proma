@@ -33,8 +33,8 @@ export function TerminalTabContent({ terminalId, sessionId, cwd, terminateOnUnmo
     const terminal = new Terminal({
       cursorBlink: true,
       convertEol: true,
-      // ConPTY 已经负责光标行的宽度重排；xterm.js 再自行重排会在 Windows
-      // 输入回车或跨行编辑时产生重复换行和光标上跳。
+      // ConPTY 已经负责终端行布局；固定保守 build 让 xterm.js 使用 Windows 的
+      // 兼容路径，避免 resize 或输入回车时与 ConPTY 重复重排而导致光标上跳。
       reflowCursorLine: false,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
       fontSize: 13,
