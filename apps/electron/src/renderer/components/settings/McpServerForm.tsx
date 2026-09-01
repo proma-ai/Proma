@@ -255,9 +255,10 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
   const doSaveEntryRef = React.useRef(doSaveEntry)
   React.useEffect(() => { doSaveEntryRef.current = doSaveEntry }, [doSaveEntry])
 
-  // 编辑模式下监听字段变化，防抖自动保存
+  // 编辑模式下监听配置字段变化，防抖自动保存。
+  // 测试结果只展示在当前表单，不能触发完整 mcp.json 保存；后者会重新验证其他已启用 MCP。
   React.useEffect(() => {
-    // 仅用户修改配置或主动测试后保存；不要让详情预览的挂载（含 Strict Mode 二次 effect）写回配置。
+    // 仅用户修改配置后保存；不要让详情预览的挂载（含 Strict Mode 二次 effect）写回配置。
     if (!isEdit || !hasUserEditedRef.current) return
     const serverName = name.trim()
     if (!serverName) return
@@ -286,7 +287,6 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
     headersText,
     timeoutStr,
     enabled,
-    testResult,
   ])
 
   // Strict Mode 会执行一次 setup → cleanup → setup；每次 setup 都恢复 mounted 状态。
@@ -322,14 +322,14 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
     try {
       const entry = buildEntry(false) // 测试时不包含旧的测试结果
       const result = await window.electronAPI.testMcpServer(workspaceSlug, serverName, entry)
-      markUserEdited()
+      // 连接测试是孤立诊断：不能被视为配置编辑而触发完整 mcp.json 保存。
+      // 否则 SAVE_MCP_CONFIG 会重新验证全部已启用条目，造成其他 MCP 重连。
       setTestResult({
         success: result.success,
         message: result.message,
         timestamp: Date.now(),
       })
     } catch (error) {
-      markUserEdited()
       setTestResult({
         success: false,
         message: error instanceof Error ? error.message : '测试失败',
