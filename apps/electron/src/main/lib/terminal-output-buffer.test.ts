@@ -17,6 +17,16 @@ describe('terminal output buffer', () => {
     expect(result.truncatedAfter).toBe(false)
   })
 
+  test('does not retain a partial DCS sequence at a truncated boundary', () => {
+    const buffer = appendTerminalOutput(
+      { output: '', sequence: 0, startOffset: 0, endOffset: 0 },
+      { terminalId: 'terminal-1', sequence: 1, data: '\u001BPabcdefgh\u001B\\tail' },
+      8,
+    )
+
+    expect(readTerminalOutput(buffer, { offset: buffer.startOffset, limit: 8 }).output).toBe('tail')
+  })
+
   test('removes zsh repaint controls without inventing extra output lines', () => {
     const buffer = appendTerminalOutput(
       { output: '', sequence: 0, startOffset: 0, endOffset: 0 },

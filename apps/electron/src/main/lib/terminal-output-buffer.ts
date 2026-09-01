@@ -88,7 +88,7 @@ function retainTerminalOutputTail(output: string, maxChars: number): string {
   const escapeStart = output.lastIndexOf('\u001B', requestedStart - 1)
   if (escapeStart < 0) return output.slice(requestedStart)
 
-  const sequence = output.slice(escapeStart).match(/^\u001B(?:\][\s\S]*?(?:\u0007|\u001B\\\\)|\[[0-?]*[ -/]*[@-~]|[()][0-?]*[ -/]*[@-~])/)
+  const sequence = output.slice(escapeStart).match(/^\u001B(?:\][\s\S]*?(?:\u0007|\u001B\\\\)|P[\s\S]*?\u001B\\|\[[0-?]*[ -/]*[@-~]|[()][0-?]*[ -/]*[@-~])/)
   const safeStart = sequence && escapeStart + sequence[0].length > requestedStart
     ? escapeStart + sequence[0].length
     : requestedStart
