@@ -581,11 +581,11 @@ function SoundLibrary({ sounds, disabled, onSoundChange }: SoundLibraryProps): R
           type="button"
           disabled={disabled}
           aria-pressed={currentId === 'none'}
-          onClick={() => onSoundChange(activeType, 'none')}
-          className="inline-flex min-h-8 items-center gap-1.5 px-3 text-xs text-muted-foreground transition-colors hover:bg-muted/45 hover:text-foreground"
+          onClick={() => onSoundChange(activeType, currentId === 'none' ? DEFAULT_NOTIFICATION_SOUNDS[activeType] : 'none')}
+          className="inline-flex min-h-8 items-center gap-1.5 px-3 text-xs text-muted-foreground transition-colors hover:bg-muted/45 hover:text-foreground active:scale-[0.96]"
         >
           <Volume2 className="size-3.5" />
-          {currentId === 'none' ? '已关闭此场景音效' : '关闭此场景音效'}
+          {currentId === 'none' ? '恢复默认音效' : '关闭此场景音效'}
         </button>
       </div>
     </div>
