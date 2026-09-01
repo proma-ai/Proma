@@ -98,14 +98,14 @@ describe('项目术语迁移', () => {
 })
 
 describe('Agent 工作区创建', () => {
-  test('Given 项目名称是 Windows 保留设备名 When 创建工作区 Then slug 避免直接使用保留名', () => {
-    const workspace = manager.createAgentWorkspace('CON')
+  test('Given 项目名称是 Windows 保留设备名 When 创建工作区 Then slug 避免直接使用保留名', async () => {
+    const workspace = await manager.createAgentWorkspace('CON')
 
     expect(workspace.slug).toBe('workspace-con')
     expect(existsSync(configPaths.getAgentWorkspacePath(workspace.slug))).toBe(true)
   })
 
-  test('Given 默认 Skill 包含 blocklist 目录 When 创建工作区 Then 初始化 Skills 时跳过高风险目录', () => {
+  test('Given 默认 Skill 包含 blocklist 目录 When 创建工作区 Then 初始化 Skills 时跳过高风险目录', async () => {
     const defaultSkillDir = join(configPaths.getDefaultSkillsDir(), 'sample-skill')
     mkdirSync(join(defaultSkillDir, '.git', 'objects'), { recursive: true })
     mkdirSync(join(defaultSkillDir, 'node_modules', 'pkg'), { recursive: true })
@@ -113,7 +113,7 @@ describe('Agent 工作区创建', () => {
     writeFileSync(join(defaultSkillDir, '.git', 'objects', 'locked'), 'skip', 'utf-8')
     writeFileSync(join(defaultSkillDir, 'node_modules', 'pkg', 'index.js'), 'skip', 'utf-8')
 
-    const workspace = manager.createAgentWorkspace('Filtered Copy')
+    const workspace = await manager.createAgentWorkspace('Filtered Copy')
     const copiedSkillDir = join(configPaths.getWorkspaceSkillsDir(workspace.slug), 'sample-skill')
 
     expect(existsSync(join(copiedSkillDir, 'SKILL.md'))).toBe(true)
@@ -263,8 +263,8 @@ describe('Agent 工作区 Skill 批量导入', () => {
 })
 
 describe('工作区 AGENTS.md 迁移', () => {
-  test('Given 旧工作区仅有 CLAUDE.md When 迁移 Then 原子改名为 AGENTS.md 且内容完整保留', () => {
-    const workspace = manager.createAgentWorkspace('Legacy Instruction')
+  test('Given 旧工作区仅有 CLAUDE.md When 迁移 Then 原子改名为 AGENTS.md 且内容完整保留', async () => {
+    const workspace = await manager.createAgentWorkspace('Legacy Instruction')
     const workspaceRoot = configPaths.getAgentWorkspacePath(workspace.slug)
     const legacyPath = join(workspaceRoot, 'CLAUDE.md')
     const agentsPath = join(workspaceRoot, 'AGENTS.md')
@@ -277,8 +277,8 @@ describe('工作区 AGENTS.md 迁移', () => {
     expect(manager.getWorkspaceMemorySummary(workspace.slug).agentsMd.path).toBe(agentsPath)
   })
 
-  test('Given 迁移已完成 When 重复执行 Then 不改变 AGENTS.md', () => {
-    const workspace = manager.createAgentWorkspace('Idempotent Instruction')
+  test('Given 迁移已完成 When 重复执行 Then 不改变 AGENTS.md', async () => {
+    const workspace = await manager.createAgentWorkspace('Idempotent Instruction')
     const agentsPath = join(configPaths.getAgentWorkspacePath(workspace.slug), 'AGENTS.md')
     writeFileSync(agentsPath, '# existing rules\n', 'utf-8')
 
@@ -288,8 +288,8 @@ describe('工作区 AGENTS.md 迁移', () => {
     expect(readFileSync(agentsPath, 'utf-8')).toBe('# existing rules\n')
   })
 
-  test('Given 双文件内容相同 When 迁移 Then 仅清理 legacy 副本', () => {
-    const workspace = manager.createAgentWorkspace('Duplicate Instruction')
+  test('Given 双文件内容相同 When 迁移 Then 仅清理 legacy 副本', async () => {
+    const workspace = await manager.createAgentWorkspace('Duplicate Instruction')
     const workspaceRoot = configPaths.getAgentWorkspacePath(workspace.slug)
     const legacyPath = join(workspaceRoot, 'CLAUDE.md')
     const agentsPath = join(workspaceRoot, 'AGENTS.md')
@@ -302,8 +302,8 @@ describe('工作区 AGENTS.md 迁移', () => {
     expect(readFileSync(agentsPath, 'utf-8')).toBe('# shared rules\n')
   })
 
-  test('Given 双文件内容冲突 When 迁移 Then 两份规则均保留', () => {
-    const workspace = manager.createAgentWorkspace('Conflicting Instruction')
+  test('Given 双文件内容冲突 When 迁移 Then 两份规则均保留', async () => {
+    const workspace = await manager.createAgentWorkspace('Conflicting Instruction')
     const workspaceRoot = configPaths.getAgentWorkspacePath(workspace.slug)
     const legacyPath = join(workspaceRoot, 'CLAUDE.md')
     const agentsPath = join(workspaceRoot, 'AGENTS.md')
@@ -322,8 +322,8 @@ describe('工作区 AGENTS.md 迁移', () => {
 })
 
 describe('工作区长期记忆迁移与授权', () => {
-  test('Given 仅有旧 .claude/memory When 启动迁移 Then 原子迁移为受管 memory 并保留内容', () => {
-    const workspace = manager.createAgentWorkspace('Legacy Memory')
+  test('Given 仅有旧 .claude/memory When 启动迁移 Then 原子迁移为受管 memory 并保留内容', async () => {
+    const workspace = await manager.createAgentWorkspace('Legacy Memory')
     const workspaceRoot = configPaths.getAgentWorkspacePath(workspace.slug)
     const legacyDir = join(workspaceRoot, '.claude', 'memory')
     const memoryDir = join(workspaceRoot, 'memory')
@@ -339,8 +339,8 @@ describe('工作区长期记忆迁移与授权', () => {
     expect(readFileSync(join(memoryDir, 'topics', 'profile.md'), 'utf-8')).toBe('# profile\n')
   })
 
-  test('Given 新旧 memory 同名内容 When 迁移 Then 不覆盖新内容并报告冲突', () => {
-    const workspace = manager.createAgentWorkspace('Conflicting Memory')
+  test('Given 新旧 memory 同名内容 When 迁移 Then 不覆盖新内容并报告冲突', async () => {
+    const workspace = await manager.createAgentWorkspace('Conflicting Memory')
     const workspaceRoot = configPaths.getAgentWorkspacePath(workspace.slug)
     const legacyDir = join(workspaceRoot, '.claude', 'memory')
     const memoryDir = join(workspaceRoot, 'memory')
@@ -361,8 +361,8 @@ describe('工作区长期记忆迁移与授权', () => {
     })
   })
 
-  test('Given legacy memory contains symlink When 迁移 Then 安全中止且不创建受管 memory', () => {
-    const workspace = manager.createAgentWorkspace('Symlink Memory')
+  test('Given legacy memory contains symlink When 迁移 Then 安全中止且不创建受管 memory', async () => {
+    const workspace = await manager.createAgentWorkspace('Symlink Memory')
     const workspaceRoot = configPaths.getAgentWorkspacePath(workspace.slug)
     const legacyDir = join(workspaceRoot, '.claude', 'memory')
     const memoryDir = join(workspaceRoot, 'memory')
@@ -381,8 +381,8 @@ describe('工作区长期记忆迁移与授权', () => {
     })
   })
 
-  test('Given no maintenance approval When explicitly approved Then config persists the opt-in', () => {
-    const workspace = manager.createAgentWorkspace('Knowledge Approval')
+  test('Given no maintenance approval When explicitly approved Then config persists the opt-in', async () => {
+    const workspace = await manager.createAgentWorkspace('Knowledge Approval')
 
     expect(manager.isWorkspaceProjectKnowledgeMaintenanceApproved(workspace.slug)).toBe(false)
     manager.approveWorkspaceProjectKnowledgeMaintenance(workspace.slug)

@@ -169,6 +169,20 @@ export function DiffPanelTabBar({
     return () => tabList.removeEventListener('scroll', syncScrollbarThumb)
   }, [syncScrollbarThumb])
 
+  // 右侧 Tab 栏只有横向溢出；让普通滚轮与 Shift + 滚轮都直接横向浏览标签。
+  React.useEffect(() => {
+    const tabList = tabListRef.current
+    if (!tabList) return
+
+    const handleWheel = (event: WheelEvent): void => {
+      event.preventDefault()
+      tabList.scrollLeft += event.deltaY || event.deltaX
+    }
+
+    tabList.addEventListener('wheel', handleWheel, { passive: false })
+    return () => tabList.removeEventListener('wheel', handleWheel)
+  }, [])
+
   const handleScrollbarThumbPointerDown = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const tabList = tabListRef.current
     const track = scrollbarTrackRef.current

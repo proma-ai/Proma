@@ -768,7 +768,7 @@ async function bootstrap(): Promise<void> {
   safeRun('upgradeDefaultSkillsInWorkspaces', upgradeDefaultSkillsInWorkspaces)
 
   // 旧 Flow 数据迁移（首次检测到 flow-projects.json 时自动执行）
-  migrateFlowSessions()
+  await safeAwait('migrateFlowSessions', migrateFlowSessions)
 
   // Create application menu
   const menu = createApplicationMenu()

@@ -22,9 +22,13 @@
  *   │   ├── latest-mac.yml
  *   │   ├── Proma-{version}-mac.zip(.blockmap)
  *   │   └── Proma-{version}-x64.dmg
- *   └── win-x64/
- *       ├── latest.yml
- *       └── Proma-{version}-setup.exe(.blockmap)
+ *   ├── win-x64/
+ *   │   ├── latest.yml
+ *   │   └── Proma-{version}-setup.exe(.blockmap)
+ *   └── linux-x64/
+ *       ├── latest-linux.yml
+ *       ├── Proma-{version}.AppImage(.blockmap)
+ *       └── proma_{version}_amd64.deb
  */
 
 import OSS from "ali-oss"
@@ -50,7 +54,7 @@ interface EnvConfig {
   bucket: string
 }
 
-type PlatformDir = "mac-arm64" | "mac-x64" | "win-x64"
+type PlatformDir = "mac-arm64" | "mac-x64" | "win-x64" | "linux-x64"
 
 interface FileConfig {
   /** 文件后缀匹配模式 */
@@ -59,6 +63,8 @@ interface FileConfig {
   platformDir: PlatformDir
   /** 对应的更新清单文件名 */
   ymlFile: string
+  /** Debian 工件用下划线分隔版本号，其他 Electron 工件用连字符。 */
+  versionSeparator?: "-" | "_"
 }
 
 interface UploadResult {
@@ -84,6 +90,10 @@ const FILE_CONFIGS: FileConfig[] = [
   // Windows x64（即使 differentialPackage: false，electron-updater 客户端仍会探测 .blockmap）
   { suffix: "-setup.exe", platformDir: "win-x64", ymlFile: "latest.yml" },
   { suffix: "-setup.exe.blockmap", platformDir: "win-x64", ymlFile: "latest.yml" },
+  // Linux x64：AppImage 供 electron-updater 自动更新；deb 供手动安装。
+  { suffix: ".AppImage", platformDir: "linux-x64", ymlFile: "latest-linux.yml" },
+  { suffix: ".AppImage.blockmap", platformDir: "linux-x64", ymlFile: "latest-linux.yml" },
+  { suffix: "_amd64.deb", platformDir: "linux-x64", ymlFile: "latest-linux.yml", versionSeparator: "_" },
 ]
 
 // ============================================
@@ -108,10 +118,10 @@ function getVersion(): string {
   return packageJson.version
 }
 
-function createVersionMatcher(version: string) {
+function createVersionMatcher(version: string, separator: "-" | "_" = "-") {
   const escaped = version.replace(/\./g, "\\.")
   return (suffix: string) =>
-    new RegExp(`^proma-${escaped}${suffix.replace(/\./g, "\\.")}$`, "i")
+    new RegExp(`^proma${separator}${escaped}${suffix.replace(/\./g, "\\.")}$`, "i")
 }
 
 function getOSSClient(envConfig: EnvConfig): OSS {
@@ -144,10 +154,9 @@ function findArtifacts(version: string): Array<{ file: string; config: FileConfi
 
   const files = fs.readdirSync(OUT_DIR)
   const artifacts: Array<{ file: string; config: FileConfig }> = []
-  const matchVersion = createVersionMatcher(version)
-
   for (const file of files) {
     for (const config of FILE_CONFIGS) {
+      const matchVersion = createVersionMatcher(version, config.versionSeparator)
       if (matchVersion(config.suffix).test(file)) {
         artifacts.push({ file, config })
         break
@@ -166,6 +175,8 @@ const MIME_TYPES: Record<string, string> = {
   ".exe": "application/octet-stream",
   ".dmg": "application/octet-stream",
   ".zip": "application/zip",
+  ".deb": "application/vnd.debian.binary-package",
+  ".AppImage": "application/octet-stream",
   ".yml": "text/yaml",
 }
 
@@ -283,7 +294,8 @@ async function main() {
     console.log(`   releases/`)
     console.log(`   ├── mac-arm64/ (latest-mac.yml + zip + dmg)`)
     console.log(`   ├── mac-x64/   (latest-mac.yml + zip + dmg)`)
-    console.log(`   └── win-x64/   (latest.yml + exe)`)
+    console.log(`   ├── win-x64/   (latest.yml + exe)`)
+    console.log(`   └── linux-x64/ (latest-linux.yml + AppImage + deb)`)
   } catch (error) {
     console.error(`\n❌ 错误: ${error}`)
     process.exit(1)

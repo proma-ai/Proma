@@ -192,7 +192,7 @@ function generateTitle(projectName: string, messages: FlowMessage[]): string {
  * 检测 ~/.proma/flow-projects.json 是否存在（且 .bak 不存在），
  * 存在则执行一次性迁移，完成后将原始文件重命名为 .bak。
  */
-export function migrateFlowSessions(): void {
+export async function migrateFlowSessions(): Promise<void> {
   const configDir = getConfigDir()
   const projectsPath = join(configDir, 'flow-projects.json')
   const projectsBakPath = join(configDir, 'flow-projects.json.bak')
@@ -219,7 +219,7 @@ export function migrateFlowSessions(): void {
     }
 
     // 2. 创建"旧系统迁移"工作区
-    const workspace = createAgentWorkspace('旧系统迁移')
+    const workspace = await createAgentWorkspace('旧系统迁移')
     console.log(`[迁移] 已创建工作区: ${workspace.name} (${workspace.id})`)
 
     // 3. 读取现有 agent-sessions 索引

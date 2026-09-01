@@ -1,6 +1,6 @@
 {
   "name": "@proma/electron",
-  "version": "0.19.13",
+  "version": "0.19.15",
   "description": "Proma，为专业用户设计的 Agent - Electron App",
   "main": "dist/main.cjs",
   "author": {
@@ -40,7 +40,7 @@
     "dist": "bun run build && bun run sync:runtime-deps && bun run rebuild:node-pty && bunx electron-builder@25.1.8",
     "dist:mac": "bun run build && bun run sync:runtime-deps && bun run rebuild:node-pty && bunx electron-builder@25.1.8 --mac",
     "dist:win": "bun run build && bun run sync:runtime-deps && bun run rebuild:node-pty && bunx electron-builder@25.1.8 --win",
-    "dist:linux": "bun run build && bun run sync:runtime-deps && bun run rebuild:node-pty && bunx electron-builder@25.1.8 --linux",
+    "dist:linux": "node -e \"if (process.platform !== 'linux' || process.arch !== 'x64') throw new Error('dist:linux must run on a Linux x64 host; use the Ubuntu 22.04 release workflow')\" && bun run build && bun run sync:runtime-deps && bun run rebuild:node-pty && bunx electron-builder@25.1.8 --linux",
     "dist:visual": "bun run scripts/dist.ts",
     "dist:fast": "bun run scripts/dist.ts --current-arch --dmg",
     "dist:debug": "bun run scripts/dist.ts --current-arch --verbose",
@@ -49,7 +49,8 @@
     "release:mac": "bun run dist:mac && bun run upload:release",
     "release:win": "bun run dist:win && bun run upload:release",
     "build:eventkit-native": "bun run scripts/build-eventkit-native.ts",
-    "build:native-helpers": "bun run build:agent-island-native && bun run build:eventkit-native"
+    "build:native-helpers": "bun run build:agent-island-native && bun run build:eventkit-native",
+    "release:linux": "bun run dist:linux && bun run upload:release"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.93.0",
@@ -139,7 +140,7 @@
     "cmdk": "^1.1.1",
     "concurrently": "^9.2.1",
     "dingtalk-stream-sdk-nodejs": "^2.0.4",
-    "electron": "^43.2.0",
+    "electron": "43.2.0",
     "electron-builder": "^25.1.8",
     "electron-updater": "^6.7.3",
     "electronmon": "^2.0.4",
@@ -193,5 +194,6 @@
   "build": {
     "extends": "electron-builder.yml"
   },
-  "proma": {}
+  "proma": {},
+  "homepage": "https://github.com/proma-ai/Proma"
 }

@@ -1,7 +1,7 @@
 # GitHub Actions: 自动打包并上传到阿里云 OSS
 #
 # 触发条件：推送 v* tag（如 v0.4.0）
-# 构建 macOS（arm64 + x64）和 Windows（x64）产物，上传到 OSS
+# 构建 macOS（arm64 + x64）、Windows（x64）与 Linux（x64）产物，上传到 OSS
 #
 # 所需 GitHub Secrets:
 #
@@ -242,6 +242,85 @@ jobs:
           retention-days: 1
           if-no-files-found: warn
 
+  build-linux-x64:
+    name: build (ubuntu-22.04, linux, x64, --x64)
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 缓存 Bun 依赖
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+
+      - name: 安装 Linux 构建依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3
+
+      - name: 安装依赖
+        run: bun install --frozen-lockfile
+
+      - name: 准备 OfficeCLI（Linux x64）
+        run: bun run --filter='@proma/electron' prepare:officecli
+
+      - name: 构建 Electron 应用
+        run: bun run electron:build
+
+      - name: 同步 Electron 运行时依赖
+        run: bun run sync:runtime-deps
+        working-directory: apps/electron
+
+      - name: 重建 Linux node-pty 原生依赖
+        run: bun run rebuild:node-pty
+        working-directory: apps/electron
+
+      - name: 打包（Linux x64）
+        run: bunx electron-builder@25.1.8 --linux --x64 --publish never
+        working-directory: apps/electron
+
+      # sync:runtime-deps 会清空 apps/electron/node_modules 以形成最小打包闭包；
+      # upload-release.ts 的 ali-oss 是发布工具依赖，上传前须恢复 workspace 依赖。
+      - name: 恢复 OSS 上传工具依赖
+        run: bun install --frozen-lockfile
+
+      - name: 上传到 OSS
+        env:
+          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+          OSS_REGION: ${{ secrets.OSS_REGION }}
+          OSS_RELEASES_BUCKET: ${{ secrets.OSS_RELEASES_BUCKET }}
+        run: bun run upload:release
+        working-directory: apps/electron
+
+      - name: 上传构建产物备份
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-x64
+          path: |
+            apps/electron/out/*.AppImage
+            apps/electron/out/*.deb
+            apps/electron/out/*.blockmap
+            apps/electron/out/latest-linux.yml
+          retention-days: 1
+          if-no-files-found: warn
+
   build-windows-x64:
     name: build (windows-latest, win, x64, --x64)
     runs-on: windows-latest
@@ -275,7 +354,6 @@ jobs:
       - name: 准备 OfficeCLI（Windows x64）
         run: bun run --filter='@proma/electron' prepare:officecli
 
-      # 构建应用
       - name: 构建 Electron 应用
         run: bun run electron:build
 

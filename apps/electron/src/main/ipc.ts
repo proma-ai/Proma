@@ -312,6 +312,7 @@ import { calculateStorageStats, cleanupStorage, cleanupTempFiles } from './lib/s
 import type { CleanupOptions } from './lib/storage-service'
 import {
   listAgentWorkspaces,
+  listAgentWorkspacesWithProjectRootStatus,
   createAgentWorkspace,
   updateAgentWorkspace,
   relinkAgentWorkspaceProjectRoot,
@@ -2743,7 +2744,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.LIST_WORKSPACES,
     async (): Promise<AgentWorkspace[]> => {
-      const workspaces = listAgentWorkspaces()
+      const workspaces = await listAgentWorkspacesWithProjectRootStatus()
       for (const workspace of workspaces) {
         if (workspace.projectRootPath) watchAttachedDirectory(workspace.projectRootPath)
         for (const filePath of getWorkspaceAttachedFiles(workspace.slug)) {
@@ -2758,7 +2759,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.CREATE_WORKSPACE,
     async (_, input: import('@proma/shared').CreateAgentWorkspaceInput): Promise<AgentWorkspace> => {
-      const workspace = createAgentWorkspace(input)
+      const workspace = await createAgentWorkspace(input)
       if (workspace.projectRootPath) watchAttachedDirectory(workspace.projectRootPath)
       return workspace
     }
@@ -2768,7 +2769,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.CREATE_PROJECT,
     async (_, input: import('@proma/shared').CreateAgentWorkspaceInput, channelId?: string, modelId?: string): Promise<import('@proma/shared').CreateAgentProjectResult> => {
-      const workspace = createAgentWorkspace(input)
+      const workspace = await createAgentWorkspace(input)
       if (workspace.projectRootPath) watchAttachedDirectory(workspace.projectRootPath)
 
       try {
@@ -2801,7 +2802,7 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.RELINK_WORKSPACE_PROJECT_ROOT,
     async (_, id: string, projectRootPath: string): Promise<AgentWorkspace> => {
       const previousRoot = getAgentWorkspace(id)?.projectRootPath
-      const updated = relinkAgentWorkspaceProjectRoot(id, projectRootPath)
+      const updated = await relinkAgentWorkspaceProjectRoot(id, projectRootPath)
       if (previousRoot && previousRoot !== updated.projectRootPath) {
         releaseDirectoryWatcherIfUnreferenced(previousRoot)
       }
@@ -2814,7 +2815,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.RESTORE_WORKSPACE_PROJECT_ROOT,
     async (_, id: string): Promise<AgentWorkspace> => {
-      const updated = restoreAgentWorkspaceProjectRoot(id)
+      const updated = await restoreAgentWorkspaceProjectRoot(id)
       if (updated.projectRootPath) watchAttachedDirectory(updated.projectRootPath)
       return updated
     }
