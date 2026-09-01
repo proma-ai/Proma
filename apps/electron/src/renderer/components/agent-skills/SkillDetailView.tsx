@@ -60,6 +60,10 @@ export function SkillDetailView({
   const loadRequestRef = React.useRef(0)
   const saveRequestRef = React.useRef(0)
   const saveInFlightRef = React.useRef(false)
+  const flushPendingRef = React.useRef(false)
+  const failedSnapshotRef = React.useRef<{ name: string; description: string; body: string } | null>(null)
+  const mountedRef = React.useRef(true)
+  const saveDraftRef = React.useRef<(force?: boolean) => void>(() => {})
   const onChangedRef = React.useRef(onChanged)
   const draftRef = React.useRef({ name: skill.name, description: skill.description ?? '', body: '' })
   const savedRef = React.useRef({ name: skill.name, description: skill.description ?? '', body: '' })
@@ -68,6 +72,7 @@ export function SkillDetailView({
 
   const updateDraft = React.useCallback((next: Partial<typeof draftRef.current>) => {
     draftRef.current = { ...draftRef.current, ...next }
+    failedSnapshotRef.current = null
     if (next.name !== undefined) setEditName(next.name)
     if (next.description !== undefined) setEditDescription(next.description)
     if (next.body !== undefined) setEditBody(next.body)
@@ -128,49 +133,82 @@ export function SkillDetailView({
       })
   }, [contentVersion, skill.slug, workspaceSlug, updateDraft])
 
+  const saveDraft = React.useCallback((force = false): void => {
+    const draft = draftRef.current
+    const saved = savedRef.current
+    const hasChanges = draft.name !== saved.name
+      || draft.description !== saved.description
+      || draft.body !== saved.body
+    const failed = failedSnapshotRef.current
+    const isKnownFailure = failed?.name === draft.name
+      && failed.description === draft.description
+      && failed.body === draft.body
+    if (!contentRef.current || !hasChanges || (!force && isKnownFailure)) return
+
+    if (saveInFlightRef.current) {
+      flushPendingRef.current = true
+      return
+    }
+
+    const requestId = ++saveRequestRef.current
+    const snapshot = { ...draft }
+    const currentContent = contentRef.current
+    const nextContent = rebuildSkillMd(
+      rebuildSkillMd(currentContent, { name: snapshot.name, description: snapshot.description }),
+      { body: snapshot.body },
+    )
+
+    // 串行化磁盘写入；离开详情页时也会 flush 最后的草稿，避免 700ms 内导航丢失编辑。
+    saveInFlightRef.current = true
+    if (mountedRef.current) setSaving(true)
+    void window.electronAPI.writeSkillContent(workspaceSlug, skill.slug, nextContent)
+      .then(() => {
+        if (saveRequestRef.current !== requestId) return
+        contentRef.current = nextContent
+        savedRef.current = snapshot
+        failedSnapshotRef.current = null
+        if (mountedRef.current) {
+          setContent(nextContent)
+          onChangedRef.current()
+        }
+      })
+      .catch((err) => {
+        if (saveRequestRef.current !== requestId) return
+        failedSnapshotRef.current = snapshot
+        console.error('[SkillDetail] 自动保存失败:', err)
+        if (mountedRef.current) toast.error('自动保存失败')
+      })
+      .finally(() => {
+        saveInFlightRef.current = false
+        if (mountedRef.current && saveRequestRef.current === requestId) setSaving(false)
+        if (flushPendingRef.current) {
+          flushPendingRef.current = false
+          saveDraftRef.current(true)
+        }
+      })
+  }, [workspaceSlug, skill.slug])
+
+  saveDraftRef.current = saveDraft
+
   React.useEffect(() => {
     const draft = draftRef.current
     const saved = savedRef.current
     const hasChanges = draft.name !== saved.name
       || draft.description !== saved.description
       || draft.body !== saved.body
-    if (!contentRef.current || !hasChanges || saveInFlightRef.current) return
+    if (!contentRef.current || !hasChanges) return
 
-    const timer = window.setTimeout(() => {
-      if (saveInFlightRef.current) return
-      const requestId = ++saveRequestRef.current
-      const snapshot = { ...draftRef.current }
-      const currentContent = contentRef.current
-      if (!currentContent) return
-      const nextContent = rebuildSkillMd(
-        rebuildSkillMd(currentContent, { name: snapshot.name, description: snapshot.description }),
-        { body: snapshot.body },
-      )
-
-      // 串行化磁盘写入，避免较早的异步写入在较晚草稿之后完成并回退文件内容。
-      saveInFlightRef.current = true
-      setSaving(true)
-      void window.electronAPI.writeSkillContent(workspaceSlug, skill.slug, nextContent)
-        .then(() => {
-          if (saveRequestRef.current !== requestId) return
-          contentRef.current = nextContent
-          savedRef.current = snapshot
-          setContent(nextContent)
-          onChangedRef.current()
-        })
-        .catch((err) => {
-          if (saveRequestRef.current !== requestId) return
-          console.error('[SkillDetail] 自动保存失败:', err)
-          toast.error('自动保存失败')
-        })
-        .finally(() => {
-          saveInFlightRef.current = false
-          if (saveRequestRef.current === requestId) setSaving(false)
-        })
-    }, 700)
-
+    const timer = window.setTimeout(() => saveDraft(), 700)
     return () => window.clearTimeout(timer)
-  }, [content, editName, editDescription, editBody, saving, skill.slug, workspaceSlug])
+  }, [content, editName, editDescription, editBody, saveDraft])
+
+  React.useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      saveDraftRef.current(true)
+    }
+  }, [])
 
   const sourceLabel = isBuiltin
     ? 'PROMA 内置'

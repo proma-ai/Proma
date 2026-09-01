@@ -461,7 +461,7 @@ export function AgentSkillsView({
     return (
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
         <SkillDetailView
-          key={selectedSkill.slug}
+          key={`${data.workspaceSlug}:${selectedSkill.slug}`}
           skill={selectedSkill}
           workspaceSlug={data.workspaceSlug}
           contentVersion={data.skillsRevision}
