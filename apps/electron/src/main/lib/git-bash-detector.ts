@@ -12,10 +12,10 @@
  * 3. 从注册表读取 Git for Windows 安装路径
  */
 
-import { execSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { GitBashStatus } from '@proma/shared'
+import { execFileAsync } from './async-command'
 import { getGitForWindowsInstallPath } from './windows-env'
 
 /**
@@ -60,23 +60,22 @@ function getCommonGitBashPaths(): string[] {
  * @param bashPath - bash.exe 可执行文件路径
  * @returns Bash 版本号，如果验证失败返回 null
  */
-function verifyBashPath(bashPath: string): string | null {
+async function verifyBashPath(bashPath: string): Promise<string | null> {
   try {
     if (!existsSync(bashPath)) return null
 
-    // 执行 bash --version 获取版本信息
-    const output = execSync(`"${bashPath}" --version`, {
+    // 使用参数数组执行，避免 shell 拼接；异步执行不能阻塞主进程。
+    const { stdout } = await execFileAsync(bashPath, ['--version'], {
       encoding: 'utf-8',
       timeout: 5000,
-      stdio: ['pipe', 'pipe', 'pipe'],
     })
+    const output = typeof stdout === 'string' ? stdout : stdout.toString('utf-8')
 
     // 解析版本号（示例输出："GNU bash, version 5.2.15(1)-release (x86_64-pc-msys)"）
     const versionMatch = output.match(/version\s+(\S+)/)
     if (versionMatch?.[1]) {
       // 提取主版本号（如 "5.2.15(1)-release" → "5.2.15"）
-      const cleanVersion = versionMatch[1]!.split('(')[0]!
-      return cleanVersion
+      return versionMatch[1].split('(')[0] ?? null
     }
 
     return null
@@ -90,13 +89,13 @@ function verifyBashPath(bashPath: string): string | null {
  *
  * @returns bash.exe 路径，失败返回 null
  */
-function findBashInPath(): string | null {
+async function findBashInPath(): Promise<string | null> {
   try {
-    const output = execSync('where bash', {
+    const { stdout } = await execFileAsync('where', ['bash'], {
       encoding: 'utf-8',
       timeout: 5000,
-      stdio: ['pipe', 'pipe', 'pipe'],
     })
+    const output = typeof stdout === 'string' ? stdout : stdout.toString('utf-8')
 
     // where 命令可能返回多个路径，取第一个
     const paths = output.trim().split('\n')
@@ -138,7 +137,7 @@ export async function detectGitBash(): Promise<GitBashStatus> {
 
   // 策略 1：检查常见安装路径
   for (const path of getCommonGitBashPaths()) {
-    const version = verifyBashPath(path)
+    const version = await verifyBashPath(path)
     if (version) {
       console.log(`[Git Bash 检测] 找到 Git Bash (常见路径): ${path} (${version})`)
       return {
@@ -151,7 +150,7 @@ export async function detectGitBash(): Promise<GitBashStatus> {
   }
 
   // 策略 2：从注册表读取安装路径
-  const gitInstallPath = getGitForWindowsInstallPath()
+  const gitInstallPath = await getGitForWindowsInstallPath()
   if (gitInstallPath) {
     const candidatePaths = [
       join(gitInstallPath, 'bin', 'bash.exe'),
@@ -159,7 +158,7 @@ export async function detectGitBash(): Promise<GitBashStatus> {
     ]
 
     for (const path of candidatePaths) {
-      const version = verifyBashPath(path)
+      const version = await verifyBashPath(path)
       if (version) {
         console.log(`[Git Bash 检测] 找到 Git Bash (注册表): ${path} (${version})`)
         return {
@@ -173,9 +172,9 @@ export async function detectGitBash(): Promise<GitBashStatus> {
   }
 
   // 策略 3：通过 where 命令查找
-  const pathBash = findBashInPath()
+  const pathBash = await findBashInPath()
   if (pathBash) {
-    const version = verifyBashPath(pathBash)
+    const version = await verifyBashPath(pathBash)
     if (version) {
       console.log(`[Git Bash 检测] 找到 Git Bash (PATH): ${pathBash} (${version})`)
       return {

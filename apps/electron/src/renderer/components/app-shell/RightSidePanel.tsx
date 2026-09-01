@@ -21,7 +21,7 @@ import {
 } from '@/atoms/agent-atoms'
 import type { AgentSidePanelTab } from '@/atoms/agent-atoms'
 import { SidePanel } from '@/components/agent/SidePanel'
-import { browserPanelOpenMapAtom, browserStateMapAtom } from '@/atoms/browser-atoms'
+import { browserFocusRequestMapAtom, browserPanelOpenMapAtom, browserStateMapAtom } from '@/atoms/browser-atoms'
 import { getPreviewFileId, previewFileMapAtom } from '@/atoms/preview-atoms'
 
 export function RightSidePanel({ width }: { width?: number }): React.ReactElement | null {
@@ -34,8 +34,11 @@ export function RightSidePanel({ width }: { width?: number }): React.ReactElemen
   const setSidePanelOpen = useSetAtom(currentSessionSidePanelOpenAtom)
   const browserOpenMap = useAtomValue(browserPanelOpenMapAtom)
   const browserStateMap = useAtomValue(browserStateMapAtom)
+  const browserFocusRequestMap = useAtomValue(browserFocusRequestMapAtom)
+  const setBrowserFocusRequestMap = useSetAtom(browserFocusRequestMapAtom)
   const browserOpen = currentSessionId ? browserOpenMap.get(currentSessionId) === true : false
   const browserState = currentSessionId ? browserStateMap.get(currentSessionId) ?? null : null
+  const browserFocusRequestTabId = currentSessionId ? browserFocusRequestMap.get(currentSessionId) ?? null : null
   const previewFileMap = useAtomValue(previewFileMapAtom)
   const currentPreviewFile = currentSessionId ? previewFileMap.get(currentSessionId) ?? null : null
   const previousBrowserStateRef = React.useRef<{ sessionId: string | null; open: boolean }>({ sessionId: null, open: false })
@@ -50,8 +53,8 @@ export function RightSidePanel({ width }: { width?: number }): React.ReactElemen
     })
   }, [currentSessionId, setDiffPanelTabMap])
 
-  // Agent 或回复链接在当前会话首次打开浏览器时，直接让右侧工作区承接它。
-  // 切换到一个已有浏览器的会话时不抢占用户当前视图，保留该会话上次的外层 Tab。
+  // 首次打开浏览器时承接到右侧工作区；Agent 回复链接还会显式携带目标标签，
+  // 即使当前浏览器已打开，也应切换到那个新网页而不是留在文件、Diff 或终端。
   React.useEffect(() => {
     const unsubscribeOpen = window.electronAPI.onAgentTerminalOpen((event) => {
       setTerminalTabsMap((previous) => {
@@ -98,16 +101,37 @@ export function RightSidePanel({ width }: { width?: number }): React.ReactElemen
     const openedInCurrentSession = previous.sessionId === currentSessionId && !previous.open && browserOpen
     previousBrowserStateRef.current = { sessionId: currentSessionId, open: browserOpen }
     if (openedInCurrentSession && currentSessionId) pendingBrowserActivationRef.current = currentSessionId
-    if (!currentSessionId || pendingBrowserActivationRef.current !== currentSessionId || !browserState?.activeTabId) return
+
+    if (!currentSessionId || !browserState) return
+    if (browserFocusRequestTabId && !browserState.tabs.some((tab) => tab.tabId === browserFocusRequestTabId)) {
+      setBrowserFocusRequestMap((previous) => {
+        if (!previous.has(currentSessionId)) return previous
+        const next = new Map(previous)
+        next.delete(currentSessionId)
+        return next
+      })
+      return
+    }
+    const targetTabId = browserFocusRequestTabId
+      ?? (pendingBrowserActivationRef.current === currentSessionId ? browserState.activeTabId : null)
+    if (!targetTabId) return
 
     setSidePanelOpen(true)
     setDiffPanelTabMap((prev) => {
       const next = new Map(prev)
-      next.set(currentSessionId, getBrowserSidePanelTab(browserState.activeTabId))
+      next.set(currentSessionId, getBrowserSidePanelTab(targetTabId))
       return next
     })
+    if (browserFocusRequestTabId) {
+      setBrowserFocusRequestMap((previous) => {
+        if (previous.get(currentSessionId) !== targetTabId) return previous
+        const next = new Map(previous)
+        next.delete(currentSessionId)
+        return next
+      })
+    }
     pendingBrowserActivationRef.current = null
-  }, [browserOpen, browserState?.activeTabId, currentSessionId, setDiffPanelTabMap, setSidePanelOpen])
+  }, [browserFocusRequestTabId, browserOpen, browserState?.activeTabId, browserState?.tabs, currentSessionId, setBrowserFocusRequestMap, setDiffPanelTabMap, setSidePanelOpen])
 
   if (appMode !== 'agent' || !currentSessionId) {
     return null

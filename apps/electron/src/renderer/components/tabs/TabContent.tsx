@@ -13,7 +13,7 @@ import { ChatView } from '@/components/chat'
 import { AgentView } from '@/components/agent'
 import { PreviewTabContent } from '@/components/diff/PreviewTabContent'
 import { MarkdownRichEditor } from '@/components/diff/MarkdownRichEditor'
-import { MarkdownToc } from '@/components/diff/MarkdownToc'
+import { MarkdownToc, MarkdownTocScrollTail } from '@/components/diff/MarkdownToc'
 import { TabErrorBoundary } from './TabErrorBoundary'
 
 export interface TabContentProps {
@@ -98,7 +98,7 @@ function TutorialTabContent(): React.ReactElement {
 
   return (
     <div className="relative flex h-full min-h-0 overflow-hidden">
-      <MarkdownToc containerRef={scrollRef as React.RefObject<HTMLElement>} contentKey={content.slice(0, 100)} enabled={tocOpen} />
+      {tocOpen && <MarkdownToc containerRef={scrollRef as React.RefObject<HTMLElement>} content={content} enabled={tocOpen} />}
       <div ref={scrollRef} className="flex-1 min-w-0 overflow-y-auto p-8">
         <MarkdownRichEditor
           value={content}
@@ -107,6 +107,7 @@ function TutorialTabContent(): React.ReactElement {
           onSave={() => {}}
           onCancel={() => {}}
         />
+        <MarkdownTocScrollTail containerRef={scrollRef as React.RefObject<HTMLElement>} enabled={tocOpen} />
       </div>
     </div>
   )

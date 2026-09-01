@@ -39,6 +39,105 @@ function escapeAttr(value: string): string {
     .replace(/\n/g, '&#10;')
 }
 
+export interface MarkdownHeading {
+  level: number
+  text: string
+  /** CodeMirror document offset for source-backed navigation. */
+  position: number
+}
+
+interface MarkdownSourceLine {
+  text: string
+  offset: number
+}
+
+/** 按 CodeMirror 的换行规范拆行：CRLF 和孤立 CR 都在 Text 文档中占一个 `\n`。 */
+function splitMarkdownSourceLines(markdown: string): MarkdownSourceLine[] {
+  const lines: MarkdownSourceLine[] = []
+  let sourceOffset = 0
+  let codeMirrorOffset = 0
+  while (sourceOffset < markdown.length) {
+    const lineStart = sourceOffset
+    while (sourceOffset < markdown.length && markdown[sourceOffset] !== '\n' && markdown[sourceOffset] !== '\r') sourceOffset += 1
+    const text = markdown.slice(lineStart, sourceOffset)
+    lines.push({ text, offset: codeMirrorOffset })
+    codeMirrorOffset += text.length
+    if (markdown[sourceOffset] === '\r' && markdown[sourceOffset + 1] === '\n') sourceOffset += 2
+    else if (sourceOffset < markdown.length) sourceOffset += 1
+    if (sourceOffset > lineStart + text.length) codeMirrorOffset += 1
+  }
+  if (markdown.length === 0 || /(?:\r\n|\r|\n)$/.test(markdown)) {
+    lines.push({ text: '', offset: codeMirrorOffset })
+  }
+  return lines
+}
+
+function isStandaloneHtmlMedia(line: string): boolean {
+  return STANDALONE_HTML_MEDIA_RE.test(line)
+}
+
+/**
+ * 将与 markdownToHtml 相同的“非 Markdown 区域”遮掉，再交给 markdown-it 解析。
+ * 每行保留原始数量和顺序，token.map 的行号即可映射回 CodeMirror 偏移。
+ */
+function prepareHeadingSource(markdown: string): MarkdownSourceLine[] {
+  const lines = splitMarkdownSourceLines(markdown)
+  const normalized = lines.map((line) => line.text)
+  const first = normalized[0] ?? ''
+  const opening = /^(?:\ufeff)?---[ \t]*$/.test(first)
+  let frontmatterEnd = -1
+  if (opening) {
+    let body = ''
+    for (let index = 1; index < normalized.length; index += 1) {
+      const line = normalized[index] ?? ''
+      if (/^(?:---|\.\.\.)[ \t]*$/.test(line)) {
+        if (/^[A-Za-z0-9_-]+\s*:/m.test(body)) frontmatterEnd = index
+        break
+      }
+      body += `${line}\n`
+    }
+  }
+
+  return lines.map((line, index) => {
+    let text = normalized[index] ?? ''
+    if (index <= frontmatterEnd || isStandaloneHtmlMedia(text)) {
+      text = ' '.repeat(text.length)
+    } else {
+      // preprocessMarkdown removes these prefixes before parsing, without changing
+      // the source line's start offset used for navigation.
+      text = text
+        .replace(/^[\u200b\ufeff]+(?=#{1,6}\s)/, '')
+        .replace(/^\u00a0{1,3}(?=#{1,6}\s)/, (spaces) => ' '.repeat(spaces.length))
+    }
+    return { ...line, text }
+  })
+}
+
+export function extractMarkdownHeadings(markdown: string): MarkdownHeading[] {
+  const headings: MarkdownHeading[] = []
+  const sourceLines = prepareHeadingSource(markdown)
+  const parserSource = sourceLines.map((line) => line.text).join('\n')
+  const tokens = markdownIt.parse(parserSource, {})
+
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index]
+    if (!token || token.type !== 'heading_open' || token.map?.[0] === undefined) continue
+    const level = Number(token.tag.slice(1))
+    if (!Number.isInteger(level) || level < 1 || level > 6) continue
+    const inline = tokens[index + 1]
+    const text = inline?.type === 'inline'
+      ? inline.children?.map((child) => {
+          if (child.type === 'image') return child.content
+          if (child.type === 'softbreak' || child.type === 'hardbreak') return ' '
+          return child.content
+        }).join('').trim() ?? ''
+      : ''
+    if (!text) continue
+    headings.push({ level, text, position: sourceLines[token.map[0]]?.offset ?? 0 })
+  }
+  return headings
+}
+
 export function parseImageWidth(value: unknown): number | null {
   if (typeof value === 'string' && !/^\d+$/.test(value)) return null
   const width = typeof value === 'number' || typeof value === 'string' ? Number(value) : NaN

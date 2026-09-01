@@ -8,6 +8,8 @@ export interface VaultConfig {
 
 /** Renderer-safe summary. The selected root path stays in the main process. */
 export interface VaultSummary {
+  /** Stable opaque identity for scoping renderer-local state to this Vault. */
+  vaultId: string
   displayName: string
   inboxPath: string
   allowAgentWrites: boolean

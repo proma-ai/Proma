@@ -1077,8 +1077,17 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
     if (result.disposition === 'injected') {
       appendLiveUserMessage(createUserSDKMessage(payload.rawText, message.id, Date.now()))
       setQueuedMessages((prev) => removeQueuedMessage(prev, message.id))
+      return
     }
-    // queued 的投影已在请求前建立，started 事件可安全地将其消费。
+    if (result.disposition === 'started') {
+      // 主进程在 IPC 返回前已发出 started 事件时，监听器可能已移除投影；
+      // 这里再幂等移除，避免反向时序下把已发送消息重新留在队列。
+      setQueuedMessages((prev) => removeQueuedMessage(prev, message.id))
+      return
+    }
+
+    // 主进程已接管消息但仍在等待；恢复/保留队列投影，等待 started 事件消费。
+    setQueuedMessages((prev) => prev.some((item) => item.id === message.id) ? prev : [...prev, message])
   }, [
     agentChannelId,
     agentModelId,
@@ -2056,19 +2065,26 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
         mentionedCalendarEventIds: payload.mentions.mentionedCalendarEventIds,
       }
       setQueuedMessages((prev) => [...prev, message])
-      void window.electronAPI.submitOrEnqueueAgentMessage(queuedInput).catch((error) => {
-        console.error('[AgentView] 主进程消息提交失败:', error)
-        setQueuedMessages((prev) => removeQueuedMessage(prev, message.id))
-        restoreQueuedAttachmentsToPending(message.attachments)
-        if (quotedSelection) {
-          setQuotedSelectionMap((prev) => {
-            const map = new Map(prev)
-            map.set(sessionId, quotedSelection)
-            return map
-          })
-        }
-        toast.error('消息加入队列失败', { description: String(error) })
-      })
+      void window.electronAPI.submitOrEnqueueAgentMessage(queuedInput)
+        .then((result) => {
+          if (result.disposition === 'started') {
+            // 主进程可在 IPC 返回前已发送 started；无论两者先后都幂等清除本地投影。
+            setQueuedMessages((prev) => removeQueuedMessage(prev, message.id))
+          }
+        })
+        .catch((error) => {
+          console.error('[AgentView] 主进程消息提交失败:', error)
+          setQueuedMessages((prev) => removeQueuedMessage(prev, message.id))
+          restoreQueuedAttachmentsToPending(message.attachments)
+          if (quotedSelection) {
+            setQuotedSelectionMap((prev) => {
+              const map = new Map(prev)
+              map.set(sessionId, quotedSelection)
+              return map
+            })
+          }
+          toast.error('消息加入队列失败', { description: String(error) })
+        })
       // 入队后消息会出现在队列 UI 中，用户可见；不再弹 toast 打扰。
       if (overrideText === undefined || fromEditor) {
         setInputContent('')

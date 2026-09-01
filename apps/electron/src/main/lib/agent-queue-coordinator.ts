@@ -2,19 +2,25 @@ import type { WebContents } from 'electron'
 import type {
   AgentDeferredQueueMessageInput,
   AgentMoveQueuedMessageInput,
+  AgentQueuedMessageSnapshot,
   AgentQueuedMessageControlInput,
   AgentQueuedMessageStatus,
 } from '@proma/shared'
 
+type DispatchedQueueRunInput = AgentDeferredQueueMessageInput & { runGeneration: number }
+
 interface QueueEntry {
   input: AgentDeferredQueueMessageInput
+  queuedAt: number
 }
 
 export interface AgentQueueCoordinatorOptions {
   isActive: (sessionId: string) => boolean
   getWebContents: (sessionId: string) => WebContents | null
-  startRun: (input: AgentDeferredQueueMessageInput, webContents: WebContents) => Promise<void>
+  startRun: (input: DispatchedQueueRunInput, webContents: WebContents) => Promise<void>
   sendStarted: (webContents: WebContents, status: AgentQueuedMessageStatus) => void
+  /** 运行身份由生命周期所有者分配，队列只负责调度。 */
+  reserveRunGeneration: (sessionId: string) => number
 }
 
 /** 主进程持有 deferred queue；renderer 只保留展示投影。 */
@@ -24,12 +30,18 @@ export class AgentQueueCoordinator {
 
   constructor(private readonly options: AgentQueueCoordinatorOptions) {}
 
-  enqueue(input: AgentDeferredQueueMessageInput): void {
+  enqueue(input: AgentDeferredQueueMessageInput): 'started' | 'queued' {
+    if (this.dispatching.get(input.sessionId) === input.queueMessageId) return 'started'
     const queue = this.queues.get(input.sessionId) ?? []
-    if (queue.some((entry) => entry.input.queueMessageId === input.queueMessageId)) return
-    queue.push({ input })
+    if (queue.some((entry) => entry.input.queueMessageId === input.queueMessageId)) {
+      const runStarted = this.dispatching.get(input.sessionId) === input.queueMessageId
+      return runStarted ? 'started' : 'queued'
+    }
+    queue.push({ input, queuedAt: Date.now() })
     this.queues.set(input.sessionId, queue)
     this.tryDispatch(input.sessionId)
+    const runStarted = this.dispatching.get(input.sessionId) === input.queueMessageId
+    return runStarted ? 'started' : 'queued'
   }
 
   cancel(input: AgentQueuedMessageControlInput): boolean {
@@ -73,6 +85,15 @@ export class AgentQueueCoordinator {
     this.tryDispatch(sessionId)
   }
 
+  /** Renderer/webContents 重新可用后唤醒等待中的队列。tryDispatch 自身负责去重 active/dispatching。 */
+  onTargetAvailable(sessionId: string): void {
+    this.tryDispatch(sessionId)
+  }
+
+  snapshot(sessionId: string): AgentQueuedMessageSnapshot[] {
+    return (this.queues.get(sessionId) ?? []).map((entry) => ({ input: { ...entry.input }, queuedAt: entry.queuedAt }))
+  }
+
   isDispatching(sessionId: string): boolean {
     return this.dispatching.has(sessionId)
   }
@@ -102,18 +123,37 @@ export class AgentQueueCoordinator {
       this.dispatching.delete(sessionId)
       return
     }
+    const runGeneration = this.options.reserveRunGeneration(sessionId)
     const startedAt = Date.now()
-    this.options.sendStarted(webContents, {
+    try {
+      this.options.sendStarted(webContents, {
         sessionId,
         messageId,
         status: 'started',
         userMessage: entry.input.userMessage,
         rawUserMessage: entry.input.rawUserMessage,
         startedAt,
+        runGeneration,
     })
-    void this.options.startRun({ ...entry.input, startedAt, userMessageUuid: messageId }, webContents)
-      .finally(() => {
-        if (this.dispatching.get(sessionId) === messageId) this.dispatching.delete(sessionId)
-      })
+    } catch {
+      // renderer 可能在检查 isDestroyed() 后立即销毁；发送失败时必须保留消息，等待下一次重试。
+      queue?.unshift(entry)
+      if (queue) this.queues.set(sessionId, queue)
+      this.dispatching.delete(sessionId)
+      return
+    }
+    void Promise.resolve()
+      .then(() => this.options.startRun({ ...entry.input, startedAt, runGeneration, userMessageUuid: messageId }, webContents))
+      .then(
+        () => this.finishDispatch(sessionId, messageId),
+        () => this.finishDispatch(sessionId, messageId),
+      )
+  }
+
+  private finishDispatch(sessionId: string, messageId: string): void {
+    if (this.dispatching.get(sessionId) === messageId) {
+      this.dispatching.delete(sessionId)
+      this.tryDispatch(sessionId)
+    }
   }
 }

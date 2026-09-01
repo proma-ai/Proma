@@ -4,11 +4,20 @@ import { Prec, RangeSetBuilder, StateEffect, StateField, type EditorState, type 
 import { Decoration, EditorView, ViewPlugin, keymap, type DecorationSet } from '@codemirror/view'
 import ink, { type Instance } from 'ink-mde'
 import { cn } from '@/lib/utils'
-import { createLiveMarkdownBlockPreview, type ResolveLiveMarkdownImageSrc, type SaveLiveMarkdownPastedImage } from './LiveMarkdownPreview'
+import { createLiveMarkdownBlockPreview, type ResolveLiveMarkdownImageSrc, type SaveLiveMarkdownPastedImage, type ChangeLiveMarkdownProperties } from './LiveMarkdownPreview'
+import {
+  shouldRebuildMarkdownHeadingDecorations,
+  shouldRebuildMarkdownSyntaxDecorations,
+} from './live-markdown-lifecycle'
+export type { ChangeLiveMarkdownProperties } from './LiveMarkdownPreview'
+export type { LiveMarkdownPropertyEntry } from './live-markdown-frontmatter'
+import type { LiveMarkdownPropertyEntry } from './live-markdown-frontmatter'
 
 export interface LiveMarkdownEditorHandle {
   focus: () => void
   insert: (text: string) => void
+  scrollToPosition: (position: number) => void
+  getPositionAtViewportY: (viewportY: number) => number | null
   getHost: () => HTMLDivElement | null
   getView: () => EditorView | null
 }
@@ -35,6 +44,10 @@ interface LiveMarkdownEditorProps {
   resolveImageSrc?: ResolveLiveMarkdownImageSrc
   /** 保存剪贴板图片并返回其可写入 Markdown 的相对来源。 */
   savePastedImage?: SaveLiveMarkdownPastedImage
+  /** Vault adapter callback for editing flat YAML Properties. */
+  onChangeProperties?: ChangeLiveMarkdownProperties
+  /** Vault-only opt-in for replacing flat YAML frontmatter with editable Properties. */
+  enableProperties?: boolean
   extensions?: readonly Extension[]
   className?: string
 }
@@ -94,6 +107,7 @@ function markdownHeadingDecorations(state: EditorState): DecorationSet {
         'data-markdown-heading': 'true',
         'data-toc-level': String(heading.level),
         'data-toc-text': heading.text,
+        'data-toc-position': String(heading.from),
       },
     }))
   }
@@ -102,7 +116,15 @@ function markdownHeadingDecorations(state: EditorState): DecorationSet {
 
 const markdownHeadingMarkers = StateField.define<DecorationSet>({
   create: markdownHeadingDecorations,
-  update: (value, transaction) => transaction.docChanged ? markdownHeadingDecorations(transaction.state) : value,
+  update: (value, transaction) => {
+    const syntaxTreeChanged = syntaxTree(transaction.startState) !== syntaxTree(transaction.state)
+    return shouldRebuildMarkdownHeadingDecorations({
+      documentChanged: transaction.docChanged,
+      syntaxTreeChanged,
+    })
+      ? markdownHeadingDecorations(transaction.state)
+      : value
+  },
   provide: (field) => EditorView.decorations.from(field),
 })
 
@@ -149,7 +171,13 @@ const markdownSyntaxVisibilityField = StateField.define<MarkdownSyntaxVisibility
     for (const effect of transaction.effects) {
       if (effect.is(markdownSyntaxFocusEffect)) focused = effect.value
     }
-    if (!transaction.docChanged && transaction.selection === undefined && focused === value.focused) return value
+    const syntaxTreeChanged = syntaxTree(transaction.startState) !== syntaxTree(transaction.state)
+    if (!shouldRebuildMarkdownSyntaxDecorations({
+      documentChanged: transaction.docChanged,
+      selectionChanged: transaction.selection !== undefined,
+      focusChanged: focused !== value.focused,
+      syntaxTreeChanged,
+    })) return value
     return { focused, decorations: markdownSyntaxDecorations(transaction.state, focused) }
   },
   provide: (field) => EditorView.decorations.from(field, (value) => value.decorations),
@@ -206,6 +234,8 @@ export const LiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, Liv
   readOnly = false,
   resolveImageSrc,
   savePastedImage,
+  onChangeProperties,
+  enableProperties = false,
   extensions = [],
   className,
 }, ref): React.ReactElement {
@@ -218,16 +248,37 @@ export const LiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, Liv
   const onCancelRef = React.useRef(onCancel)
   const onReadyRef = React.useRef(onReady)
   const onTextSelectionChangeRef = React.useRef(onTextSelectionChange)
+  const onChangePropertiesRef = React.useRef(onChangeProperties)
   valueRef.current = value
   onChangeRef.current = onChange
   onSaveRef.current = onSave
   onCancelRef.current = onCancel
   onReadyRef.current = onReady
   onTextSelectionChangeRef.current = onTextSelectionChange
+  onChangePropertiesRef.current = onChangeProperties
+
+  const onChangePropertiesProxy = React.useCallback((entries: LiveMarkdownPropertyEntry[], documentValue?: string): void => {
+    // The extension is retained for the editor lifetime. Forward its live
+    // CodeMirror snapshot so the Vault adapter never falls back to a stale
+    // controlled prop after a body edit.
+    onChangePropertiesRef.current?.(entries, documentValue)
+  }, [])
 
   React.useImperativeHandle(ref, () => ({
     focus: () => instanceRef.current?.focus(),
     insert: (text) => instanceRef.current?.insert(text),
+    scrollToPosition: (position) => {
+      const view = viewRef.current
+      if (!view) return
+      const safePosition = Math.max(0, Math.min(position, view.state.doc.length))
+      view.dispatch({ effects: EditorView.scrollIntoView(safePosition, { y: 'start', yMargin: 8 }) })
+    },
+    getPositionAtViewportY: (viewportY) => {
+      const view = viewRef.current
+      if (!view) return null
+      const documentHeight = Math.max(0, (viewportY - view.documentTop) / view.scaleY)
+      return view.lineBlockAtHeight(documentHeight).from
+    },
     getHost: () => hostRef.current,
     getView: () => viewRef.current,
   }), [])
@@ -314,7 +365,7 @@ export const LiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, Liv
           }
         }),
         ...markdownSyntaxVisibility,
-        createLiveMarkdownBlockPreview(resolveImageSrc, savePastedImage),
+        createLiveMarkdownBlockPreview(resolveImageSrc, savePastedImage, onChangePropertiesProxy, enableProperties),
         ...extensions,
       ].map((extension) => ({ type: 'default' as const, value: extension })),
       search: false,
@@ -353,7 +404,8 @@ export const LiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, Liv
       mount.remove()
     }
   // The editor owns its document state after initialization; external reloads use the effect below.
-  // `readOnly` is an ink-mde construction option, so changing it must recreate the instance.
+  // `readOnly` 是 ink-mde construction option；文件来源切换由调用方的 editor key 显式重建，
+  // 不要因 render callback 引用变化而意外销毁 CodeMirror，避免丢失选区与滚动状态。
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readOnly])
 

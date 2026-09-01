@@ -35,6 +35,7 @@ import {
 } from '@/components/ai-elements/conversation'
 import { ScrollMinimap } from '@/components/ai-elements/scroll-minimap'
 import type { MinimapItem } from '@/components/ai-elements/scroll-minimap'
+import type { SessionMessageSearch } from '@/lib/session-message-search'
 import { useStickToBottomContext } from 'use-stick-to-bottom'
 import { ContextDivider } from '@/components/ai-elements/context-divider'
 import {
@@ -86,19 +87,43 @@ function ScrollTopLoader({ hasMore, loading, onLoadMore }: ScrollTopLoaderProps)
       // 滚动到顶部 100px 以内时触发
       if (el.scrollTop < 100 && !triggeredRef.current) {
         triggeredRef.current = true
-        const prevHeight = el.scrollHeight
+        const interactionVersion = manualInteractionVersion
+        const anchor = el.querySelector<HTMLElement>('[data-message-id]')
+        const anchorId = anchor?.dataset.messageId
+        const anchorOffset = anchor ? anchor.getBoundingClientRect().top - el.getBoundingClientRect().top : 0
 
         onLoadMore().then(() => {
-          // 加载完成后恢复滚动位置：新内容插入顶部，保持用户视角不变
           requestAnimationFrame(() => {
-            el.scrollTop = el.scrollHeight - prevHeight
+            // 用户在异步补载期间主动滚动时，绝不覆盖其位置。
+            if (interactionVersion !== manualInteractionVersion || !anchorId) return
+            const restoredAnchor = el.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(anchorId)}"]`)
+            if (!restoredAnchor) return
+            const nextOffset = restoredAnchor.getBoundingClientRect().top - el.getBoundingClientRect().top
+            el.scrollTop += nextOffset - anchorOffset
           })
         })
       }
     }
 
+    let manualInteractionVersion = 0
+    const markManualInteraction = (): void => { manualInteractionVersion++ }
+    const markKeyboardScrollInteraction = (event: KeyboardEvent): void => {
+      if ([' ', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) {
+        markManualInteraction()
+      }
+    }
     el.addEventListener('scroll', handleScroll, { passive: true })
-    return () => el.removeEventListener('scroll', handleScroll)
+    el.addEventListener('wheel', markManualInteraction, { passive: true })
+    el.addEventListener('touchstart', markManualInteraction, { passive: true })
+    el.addEventListener('pointerdown', markManualInteraction, { passive: true })
+    el.addEventListener('keydown', markKeyboardScrollInteraction)
+    return () => {
+      el.removeEventListener('scroll', handleScroll)
+      el.removeEventListener('wheel', markManualInteraction)
+      el.removeEventListener('touchstart', markManualInteraction)
+      el.removeEventListener('pointerdown', markManualInteraction)
+      el.removeEventListener('keydown', markKeyboardScrollInteraction)
+    }
   }, [scrollRef, hasMore, onLoadMore])
 
   if (!hasMore) return null
@@ -155,6 +180,8 @@ interface ChatMessagesProps {
   onDeleteDivider?: (messageId: string) => void
   /** 加载更多历史消息回调 */
   onLoadMore?: () => Promise<void>
+  /** 加载搜索命中附近的有限消息窗口 */
+  onLoadMessagesAround?: (messageId: string) => Promise<boolean>
   /** 图片编辑完成回调 */
   onImageEditComplete?: (editedDataUrl: string) => void
 }
@@ -184,6 +211,7 @@ export function ChatMessages({
   inlineEditingMessageId,
   onDeleteDivider,
   onLoadMore,
+  onLoadMessagesAround,
   onImageEditComplete,
 }: ChatMessagesProps): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
@@ -312,6 +340,16 @@ export function ChatMessages({
   }, [parallelMode, hasMore, handleLoadMore])
 
   // 迷你地图数据（必须在所有条件分支之前调用，遵守 hooks 规则）
+  const searchMessages = React.useCallback<SessionMessageSearch>(
+    (query) => window.electronAPI.searchConversationSessionMessages(conversationId, query),
+    [conversationId],
+  )
+
+  const revealSearchResult = React.useCallback(async (messageId: string): Promise<boolean> => {
+    if (messages.some((message) => message.id === messageId)) return true
+    return await onLoadMessagesAround?.(messageId) ?? false
+  }, [messages, onLoadMessagesAround])
+
   const minimapItems: MinimapItem[] = React.useMemo(
     () => messages.map((m) => ({
       id: m.id,
@@ -444,7 +482,11 @@ export function ChatMessages({
           </>
         )}
       </ConversationContent>
-      <ScrollMinimap items={minimapItems} />
+      <ScrollMinimap
+        items={minimapItems}
+        searchMessages={searchMessages}
+        onRevealSearchResult={revealSearchResult}
+      />
       <ConversationScrollButton />
     </Conversation>
   )

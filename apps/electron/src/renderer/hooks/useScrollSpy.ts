@@ -1,47 +1,87 @@
 import * as React from 'react'
 import type { TocHeading } from './useTocHeadings'
 
+interface PositionAwareEditor {
+  getPositionAtViewportY: (viewportY: number) => number | null
+}
+
+/** 返回给定源码位置所在的最后一个章节。 */
+function headingAtPosition(headings: TocHeading[], position: number): TocHeading | null {
+  let current: TocHeading | null = null
+  for (const heading of headings) {
+    if (heading.position > position) break
+    current = heading
+  }
+  return current ?? headings[0] ?? null
+}
+
 /**
- * 滚动联动高亮：监听正文标题进入视口，返回当前所在章节的 id。
+ * 滚动联动高亮：返回预览正文当前所在章节的 id。
  *
- * 用 IntersectionObserver 以滚动容器为 root，`rootMargin` 把判定带压到容器
- * 顶部 ~30% 区域：标题滚到该带内即视为「当前」。多个标题同时命中时取最靠上
- * 的（DOM 顺序最小）。容器顶部尚无标题命中时，回退为最后一个已滚过顶部的标题。
- *
- * @param containerRef 预览滚动容器
- * @param headings     useTocHeadings 提取的标题树
+ * LiveMarkdown 使用 CodeMirror 虚拟化，远离 viewport 的标题没有 DOM 节点。
+ * 这条路径直接把滚动容器顶部坐标映射为源码位置，再从完整标题列表查找章节；
+ * IntersectionObserver 只作为普通、非虚拟化 Markdown DOM 的回退实现。
  */
 export function useScrollSpy(
   containerRef: React.RefObject<HTMLElement>,
   headings: TocHeading[],
+  editorRef?: React.RefObject<PositionAwareEditor | null>,
 ): string | null {
   const [activeId, setActiveId] = React.useState<string | null>(null)
+  const activeIdRef = React.useRef<string | null>(null)
+
+  const updateActiveId = React.useCallback((id: string | null) => {
+    activeIdRef.current = id
+    setActiveId((previous) => previous === id ? previous : id)
+  }, [])
 
   React.useEffect(() => {
     const container = containerRef.current
     if (!container || headings.length === 0) {
-      setActiveId(null)
+      updateActiveId(null)
       return
     }
 
     const visible = new Set<string>()
+    let frame = 0
 
     const recompute = (): void => {
-      // DOM 顺序中第一个可见标题即当前章节
-      const firstVisible = headings.find((h) => visible.has(h.id))
+      const editor = editorRef?.current
+      if (editor) {
+        const rect = container.getBoundingClientRect()
+        const position = editor.getPositionAtViewportY(rect.top + 10)
+        if (position != null) {
+          updateActiveId(headingAtPosition(headings, position)?.id ?? null)
+          return
+        }
+
+        // CodeMirror 正在换 viewport 时坐标映射可能短暂不可用。保留当前值，
+        // 但不阻止下一次 scroll/rAF 用真实源码位置重新计算。
+        if (activeIdRef.current && headings.some((heading) => heading.id === activeIdRef.current)) return
+      }
+
+      const firstVisible = headings.find((heading) => visible.has(heading.id))
       if (firstVisible) {
-        setActiveId(firstVisible.id)
+        updateActiveId(firstVisible.id)
         return
       }
-      // 无标题在判定带内：取最后一个顶端已滚过容器顶部的标题
+
       const containerTop = container.getBoundingClientRect().top
       let candidate: string | null = headings[0]?.id ?? null
-      for (const h of headings) {
-        if (h.el.getBoundingClientRect().top - containerTop <= 1) {
-          candidate = h.id
+      for (const heading of headings) {
+        if (heading.el && heading.el.getBoundingClientRect().top - containerTop <= 1) {
+          candidate = heading.id
         }
       }
-      setActiveId(candidate)
+      updateActiveId(candidate)
+    }
+
+    const scheduleRecompute = (): void => {
+      if (frame) return
+      frame = requestAnimationFrame(() => {
+        frame = 0
+        recompute()
+      })
     }
 
     const observer = new IntersectionObserver(
@@ -52,16 +92,31 @@ export function useScrollSpy(
           if (entry.isIntersecting) visible.add(id)
           else visible.delete(id)
         }
-        recompute()
+        scheduleRecompute()
       },
       { root: container, rootMargin: '0px 0px -70% 0px', threshold: 0 },
     )
 
-    for (const h of headings) observer.observe(h.el)
-    recompute()
+    for (const heading of headings) {
+      if (heading.el) observer.observe(heading.el)
+    }
 
-    return () => observer.disconnect()
-  }, [containerRef, headings])
+    const resizeObserver = new ResizeObserver(scheduleRecompute)
+    resizeObserver.observe(container)
+    container.addEventListener('scroll', scheduleRecompute, { passive: true })
+    window.addEventListener('resize', scheduleRecompute)
+
+    recompute()
+    scheduleRecompute()
+
+    return () => {
+      observer.disconnect()
+      resizeObserver.disconnect()
+      container.removeEventListener('scroll', scheduleRecompute)
+      window.removeEventListener('resize', scheduleRecompute)
+      if (frame) cancelAnimationFrame(frame)
+    }
+  }, [containerRef, editorRef, headings, updateActiveId])
 
   return activeId
 }

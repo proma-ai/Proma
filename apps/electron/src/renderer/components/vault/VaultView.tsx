@@ -11,7 +11,9 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } 
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { VaultLiveMarkdownEditor } from './VaultLiveMarkdownEditor'
-import type { LiveMarkdownTextSelection } from '@/components/markdown/LiveMarkdownEditor'
+import { useVaultScrollMemory } from './useVaultScrollMemory'
+import { getVaultScrollKey } from './vault-scroll-memory'
+import type { LiveMarkdownEditorHandle, LiveMarkdownTextSelection } from '@/components/markdown/LiveMarkdownEditor'
 import { SelectionActionPopover } from '@/components/selection/SelectionActionPopover'
 import { focusChatInput } from '@/components/chat/focus-chat-input'
 import { getOrCreateSideChat } from '@/lib/side-chat'
@@ -240,12 +242,15 @@ function VaultFileList({
 
 function VaultMarkdownEditor({
   readResult,
+  vaultId,
   sessionId,
   onSave,
   onRename,
   onOpenTutorial,
 }: {
   readResult: VaultReadResult
+  /** Stable renderer-safe identity of the currently authorized Vault. */
+  vaultId: string
   /** 嵌入 Agent 右侧工作区时，用于接入 Agent 引用与右侧问答。 */
   sessionId?: string
   onSave: (nextContent: string, options?: { silent?: boolean; expectedSha256?: string }) => Promise<void>
@@ -272,6 +277,14 @@ function VaultMarkdownEditor({
   const setSidePanelOpen = useSetAtom(agentSidePanelOpenAtomFamily(sessionId ?? 'standalone'))
   const setSidePanelTabMap = useSetAtom(agentDiffPanelTabAtom)
   const focusAgentSessionInput = useFocusAgentSessionInput()
+  // Keep the reading position per surface and per note, so switching the center
+  // view, a right-workspace tab, or the open note does not jump back to the top.
+  const editorHandleRef = React.useRef<LiveMarkdownEditorHandle | null>(null)
+  const getEditorView = React.useCallback(() => editorHandleRef.current?.getView() ?? null, [])
+  const { onEditorReady: handleEditorReady, takeOver: takeOverScrollRestore } = useVaultScrollMemory({
+    getView: getEditorView,
+    storageKey: getVaultScrollKey(vaultId, readResult.relativePath, sessionId),
+  })
 
   const clearSelection = React.useCallback(() => setSelection(null), [])
   const handleTextSelectionChange = React.useCallback((nextSelection: LiveMarkdownTextSelection | null) => {
@@ -384,6 +397,10 @@ function VaultMarkdownEditor({
     if ((event.target as HTMLElement).closest('.vault-ink-mde')) return
     const scroller = editorPageRef.current?.querySelector<HTMLElement>('.vault-ink-mde .cm-scroller')
     if (!scroller) return
+    // The wheel originated outside CodeMirror, so its scroller listener cannot
+    // observe it. Treat this forwarded scroll as explicit reader intent before
+    // moving the viewport, otherwise the bounded mount-time correction can undo it.
+    takeOverScrollRestore()
     scroller.scrollTop += event.deltaY
     scroller.scrollLeft += event.deltaX
   }
@@ -452,10 +469,12 @@ function VaultMarkdownEditor({
         </div>
         <div className="min-h-0 flex-1">
           <VaultLiveMarkdownEditor
+            ref={editorHandleRef}
             relativePath={readResult.relativePath}
             value={draft}
             onChange={setDraft}
             onSave={() => { void save() }}
+            onReady={handleEditorReady}
             onTextSelectionChange={handleTextSelectionChange}
           />
         </div>
@@ -474,6 +493,7 @@ function VaultMarkdownEditor({
 
 function VaultMarkdownPane({
   readResult,
+  vaultId,
   sessionId,
   loading,
   hasVault,
@@ -483,6 +503,7 @@ function VaultMarkdownPane({
   onOpenTutorial,
 }: {
   readResult: VaultReadResult | null
+  vaultId?: string
   sessionId?: string
   loading: boolean
   hasVault: boolean
@@ -491,7 +512,7 @@ function VaultMarkdownPane({
   onRename: (name: string) => Promise<void>
   onOpenTutorial: () => void
 }): React.ReactElement {
-  if (loading || !readResult) {
+  if (loading || !readResult || !vaultId) {
     return (
       <section className="flex min-w-0 flex-1 flex-col bg-muted/25">
         <div className="mx-auto flex h-full w-full max-w-5xl flex-col px-5 py-5">
@@ -513,6 +534,7 @@ function VaultMarkdownPane({
       <VaultMarkdownEditor
         key={getVaultEditorKey(readResult.relativePath, reopenVersion)}
         readResult={readResult}
+        vaultId={vaultId}
         sessionId={sessionId}
         onSave={onSave}
         onRename={onRename}
@@ -1011,6 +1033,7 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
           </aside>
           <VaultMarkdownPane
             readResult={readResult}
+            vaultId={config?.vaultId}
             sessionId={sessionId}
             loading={fileLoading}
             hasVault={config !== null}

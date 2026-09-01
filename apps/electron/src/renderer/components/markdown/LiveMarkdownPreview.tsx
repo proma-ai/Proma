@@ -13,12 +13,21 @@ import {
   findRawHtmlBlockEnd,
   getDisplayMathClosingDelimiter,
 } from './live-markdown-preview-syntax'
-import { shouldRenderLiveMarkdownBlockPreview } from './live-markdown-table'
+import {
+  isLiveMarkdownTableSeparator,
+  parseLiveMarkdownTable,
+  serializeLiveMarkdownTable,
+  type LiveMarkdownTable,
+} from './live-markdown-table'
+import { LiveMarkdownTableEditor } from './LiveMarkdownTableEditor'
+import { getLeadingFrontmatter, type LiveMarkdownPropertyEntry } from './live-markdown-frontmatter'
 
-type PreviewKind = 'code' | 'table' | 'mermaid' | 'thematic-break' | 'math' | 'raw-html'
+type PreviewKind = 'code' | 'table' | 'frontmatter' | 'mermaid' | 'thematic-break' | 'math' | 'raw-html'
 
 export type ResolveLiveMarkdownImageSrc = (src: string) => Promise<string | null>
 export type SaveLiveMarkdownPastedImage = (file: File) => Promise<string | null>
+export type { LiveMarkdownPropertyEntry } from './live-markdown-frontmatter'
+export type ChangeLiveMarkdownProperties = (entries: LiveMarkdownPropertyEntry[], documentValue?: string) => void
 
 interface PreviewBlock {
   kind: PreviewKind
@@ -35,7 +44,6 @@ interface FencedCodeBlock {
 }
 
 const shikiRefreshEffect = StateEffect.define<string>()
-const enterTableSourceEditEffect = StateEffect.define<number>()
 const shikiTokenCache = new Map<string, HighlightTokensResult>()
 const SHIKI_CACHE_LIMIT = 160
 
@@ -159,7 +167,6 @@ const liveMarkdownShikiHighlight: Extension = [
 interface PreviewState {
   activeLines: Set<number>
   blocks: PreviewBlock[]
-  editingTableFrom: number | null
   decorations: DecorationSet
 }
 
@@ -219,32 +226,180 @@ class CodeBlockWidget extends LiveMarkdownBlockWidget {
 }
 
 class TableWidget extends LiveMarkdownBlockWidget {
-  constructor(private readonly rows: string[][], private readonly from: number) { super() }
+  private root: Root | null = null
+
+  constructor(
+    private readonly table: LiveMarkdownTable,
+    private readonly from: number,
+    private readonly to: number,
+  ) { super() }
 
   override eq(other: TableWidget): boolean {
-    return this.from === other.from && JSON.stringify(this.rows) === JSON.stringify(other.rows)
+    return this.from === other.from && this.to === other.to && JSON.stringify(this.table) === JSON.stringify(other.table)
   }
+
+  override ignoreEvent(): boolean { return true }
 
   override toDOM(view: EditorView): HTMLElement {
     const wrapper = document.createElement('div')
-    wrapper.className = 'vault-markdown-table'
+    wrapper.className = 'live-markdown-table-editor-root'
     wrapper.dataset.liveMarkdownBlockFrom = String(this.from)
     wrapper.dataset.liveMarkdownBlockKind = 'table'
-    const table = document.createElement('table')
-    table.setAttribute('aria-label', 'Markdown 表格')
-    this.rows.forEach((row, rowIndex) => {
-      const tr = document.createElement('tr')
-      row.forEach((value) => {
-        const cell = document.createElement(rowIndex === 0 ? 'th' : 'td')
-        cell.textContent = value
-        tr.appendChild(cell)
-      })
-      table.appendChild(tr)
-    })
-    wrapper.appendChild(table)
+    this.root = createRoot(wrapper)
+    const onMeasure = () => view.requestMeasure()
+    this.root.render(
+      <LiveMarkdownTableEditor
+        table={this.table}
+        readOnly={view.state.readOnly}
+        onMeasure={onMeasure}
+        onCommit={(nextTable, focusCell) => {
+          if (view.state.readOnly) return
+          const nextSource = serializeLiveMarkdownTable(nextTable)
+          const currentBlock = buildBlocks(view.state).find((block) => block.kind === 'table' && block.from === this.from)
+          if (!currentBlock) return
+          view.dispatch({ changes: { from: currentBlock.from, to: currentBlock.to, insert: nextSource } })
+          if (focusCell) requestAnimationFrame(() => {
+            const target = view.dom.querySelector<HTMLButtonElement>(`[data-live-markdown-table-cell="${focusCell.row}:${focusCell.column}"]`)
+            target?.focus()
+            target?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+          })
+        }}
+      />,
+    )
     this.observeSize(wrapper, view)
     return wrapper
   }
+
+  override destroy(): void {
+    super.destroy()
+    unmountRootAfterRender(this.root)
+    this.root = null
+  }
+}
+
+class FrontmatterWidget extends LiveMarkdownBlockWidget {
+  constructor(
+    private readonly entries: LiveMarkdownPropertyEntry[],
+    private readonly from: number,
+    private readonly onChange?: ChangeLiveMarkdownProperties,
+  ) { super() }
+
+  override eq(other: FrontmatterWidget): boolean {
+    return this.from === other.from && JSON.stringify(this.entries) === JSON.stringify(other.entries)
+  }
+
+  override toDOM(view: EditorView): HTMLElement {
+    const wrapper = document.createElement('section')
+    wrapper.className = 'vault-properties'
+    wrapper.dataset.liveMarkdownBlockFrom = String(this.from)
+    wrapper.dataset.liveMarkdownBlockKind = 'frontmatter'
+    wrapper.setAttribute('aria-label', 'Properties')
+
+    const heading = document.createElement('div')
+    heading.className = 'vault-properties-heading'
+    const title = document.createElement('span')
+    title.textContent = 'Properties'
+    const count = document.createElement('span')
+    count.className = 'vault-properties-count'
+    count.textContent = `${this.entries.length} 个字段`
+    heading.append(title, count)
+    wrapper.appendChild(heading)
+
+    const list = document.createElement('div')
+    list.className = 'vault-properties-list'
+    this.entries.forEach((entry, index) => {
+      const dateValue = /^\d{4}-\d{2}-\d{2}(?:[T ][\d:.+-]+)?$/.test(entry.value)
+      const row = document.createElement('div')
+      row.className = 'vault-property-row'
+
+      const icon = document.createElement('span')
+      icon.className = `vault-property-icon ${dateValue ? 'vault-property-icon-date' : 'vault-property-icon-text'}`
+      icon.setAttribute('aria-hidden', 'true')
+
+      const key = document.createElement(this.onChange ? 'input' : 'span')
+      key.className = `vault-property-key${this.onChange ? ' vault-property-input' : ''}`
+      if (key instanceof HTMLInputElement) {
+        key.value = entry.key
+        key.setAttribute('aria-label', `Property ${entry.key} 名称`)
+        key.spellcheck = false
+      } else {
+        key.textContent = entry.key
+      }
+
+      const value = document.createElement(this.onChange ? 'input' : 'span')
+      value.className = `vault-property-value${this.onChange ? ' vault-property-input' : ''}${dateValue ? ' vault-property-value-date' : ''}`
+      if (value instanceof HTMLInputElement) {
+        value.value = entry.value
+        value.setAttribute('aria-label', `${entry.key} 属性值`)
+        value.spellcheck = false
+      } else {
+        value.textContent = entry.value || '未设置'
+      }
+
+      if (this.onChange && key instanceof HTMLInputElement && value instanceof HTMLInputElement) {
+        let pendingKey: string | null = null
+        let skipKeyBlurCommit = false
+        const commit = (): void => {
+          const nextKey = (pendingKey ?? key.value).trim()
+          if (!nextKey) return
+          this.onChange?.(this.entries.map((current, currentIndex) => currentIndex === index
+            ? { key: nextKey, value: value.value }
+            : current), view.state.doc.toString())
+        }
+        key.addEventListener('blur', () => {
+          if (skipKeyBlurCommit) {
+            skipKeyBlurCommit = false
+            return
+          }
+          commit()
+        })
+        value.addEventListener('blur', commit)
+        key.addEventListener('keydown', (event) => {
+          if (event.key === 'Tab' && !event.shiftKey) {
+            // Do not rebuild the widget between key and value editing. The
+            // pending key is persisted together with the value on its blur.
+            event.preventDefault()
+            pendingKey = key.value
+            skipKeyBlurCommit = true
+            value.focus()
+          } else if (event.key === 'Enter') {
+            event.preventDefault()
+            key.blur()
+          }
+        })
+        value.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter') { event.preventDefault(); value.blur() }
+        })
+
+        const remove = document.createElement('button')
+        remove.type = 'button'
+        remove.className = 'vault-property-remove'
+        remove.textContent = '×'
+        remove.setAttribute('aria-label', `删除属性 ${entry.key}`)
+        // Preserve field focus for pointer users. Native button click still
+        // handles mouse, Enter, and Space accessibly.
+        remove.addEventListener('mousedown', (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+        })
+        remove.addEventListener('click', (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          this.onChange?.(this.entries.filter((_, currentIndex) => currentIndex !== index), view.state.doc.toString())
+        })
+        row.append(icon, key, value, remove)
+      } else {
+        row.append(icon, key, value)
+      }
+
+      list.appendChild(row)
+    })
+    wrapper.appendChild(list)
+    this.observeSize(wrapper, view)
+    return wrapper
+  }
+
+  override ignoreEvent(): boolean { return true }
 }
 
 class HorizontalRuleWidget extends LiveMarkdownBlockWidget {
@@ -388,31 +543,22 @@ class AngleAutolinkWidget extends WidgetType {
   override ignoreEvent(): boolean { return false }
 }
 
-function splitTableRow(line: string): string[] {
-  const content = line.trim().replace(/^\|/, '').replace(/\|$/, '')
-  const cells: string[] = []
-  let cell = ''
-  let escaped = false
-  for (const character of content) {
-    if (escaped) { cell += character; escaped = false }
-    else if (character === '\\') escaped = true
-    else if (character === '|') { cells.push(cell.trim()); cell = '' }
-    else cell += character
-  }
-  if (escaped) cell += '\\'
-  cells.push(cell.trim())
-  return cells
-}
-
-function isTableSeparator(line: string): boolean {
-  const cells = splitTableRow(line)
-  return cells.length >= 2 && cells.every((cell) => /^:?-{3,}:?$/.test(cell))
-}
-
-function buildBlocks(state: EditorState): PreviewBlock[] {
+function buildBlocks(
+  state: EditorState,
+  onChangeProperties?: ChangeLiveMarkdownProperties,
+  enableProperties = false,
+): PreviewBlock[] {
   const blocks: PreviewBlock[] = []
   const lines = Array.from({ length: state.doc.lines }, (_, index) => state.doc.line(index + 1).text)
-  for (let number = 1; number <= lines.length; number += 1) {
+  const frontmatter = enableProperties ? getLeadingFrontmatter(lines) : null
+  if (frontmatter) {
+    const from = state.doc.line(1).from
+    const to = state.doc.line(frontmatter.endLine).to
+    blocks.push({ kind: 'frontmatter', from, to, decoration: Decoration.replace({ widget: new FrontmatterWidget(frontmatter.entries, from, onChangeProperties), block: true }) })
+  }
+  // Only hide the source when an editable flat mapping was recognized. Complex
+  // frontmatter remains in the normal editor, preserving the original YAML.
+  for (let number = frontmatter ? frontmatter.endLine + 1 : 1; number <= lines.length; number += 1) {
     const line = lines[number - 1] ?? ''
     const fence = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/)
     if (fence) {
@@ -460,16 +606,13 @@ function buildBlocks(state: EditorState): PreviewBlock[] {
       blocks.push({ kind: 'thematic-break', from, to: state.doc.line(number).to, decoration: Decoration.replace({ widget: new HorizontalRuleWidget(from), block: true }) })
       continue
     }
-    if (line.includes('|') && number < lines.length && isTableSeparator(lines[number] ?? '')) {
+    if (line.includes('|') && number < lines.length && isLiveMarkdownTableSeparator(lines[number] ?? '')) {
       let end = number + 1
       while (end < lines.length && (lines[end] ?? '').trim() && (lines[end] ?? '').includes('|')) end += 1
-      const header = splitTableRow(line)
-      const body = lines.slice(number + 1, end).map(splitTableRow)
-      const width = Math.max(header.length, ...body.map((row) => row.length))
-      const rows = [header, ...body].map((row) => Array.from({ length: width }, (_, index) => row[index] ?? ''))
       const from = state.doc.line(number).from
       const to = state.doc.line(end).to
-      blocks.push({ kind: 'table', from, to, decoration: Decoration.replace({ widget: new TableWidget(rows, from), block: true }) })
+      const table = parseLiveMarkdownTable(state.sliceDoc(from, to))
+      if (table) blocks.push({ kind: 'table', from, to, decoration: Decoration.replace({ widget: new TableWidget(table, from, to), block: true }) })
       number = end
     }
   }
@@ -480,7 +623,6 @@ function buildDecorations(
   state: EditorState,
   blocks: PreviewBlock[],
   lines: Set<number>,
-  editingTableFrom: number | null,
   resolveImageSrc?: ResolveLiveMarkdownImageSrc,
 ): DecorationSet {
   const entries: Array<{ from: number; to: number; decoration: Decoration }> = []
@@ -488,10 +630,8 @@ function buildDecorations(
   for (const block of blocks) {
     const first = state.doc.lineAt(block.from).number
     const last = state.doc.lineAt(block.to).number
-    // 表格仅在用户主动点击预览后进入源码，避免初始光标刚好落在首行时阅读态消失。
     const hasActiveSelectionInBlock = [...lines].some((line) => line >= first && line <= last)
-    const isExplicitlyEditingTable = block.kind === 'table' && editingTableFrom === block.from
-    if (shouldRenderLiveMarkdownBlockPreview(block.kind === 'table' ? 'table' : 'other', hasActiveSelectionInBlock, isExplicitlyEditingTable)) entries.push(block)
+    if (block.kind === 'table' || block.kind === 'frontmatter' || !hasActiveSelectionInBlock) entries.push(block)
   }
   for (let number = 1; number <= state.doc.lines; number += 1) {
     if (lines.has(number)) continue
@@ -518,36 +658,29 @@ function buildDecorations(
 export function createLiveMarkdownBlockPreview(
   resolveImageSrc?: ResolveLiveMarkdownImageSrc,
   savePastedImage?: SaveLiveMarkdownPastedImage,
+  onChangeProperties?: ChangeLiveMarkdownProperties,
+  enableProperties = false,
 ): Extension {
   return [
   liveMarkdownShikiHighlight,
   StateField.define<PreviewState>({
     create: (state) => {
       const lines = activeLines(state)
-      const blocks = buildBlocks(state)
+      const blocks = buildBlocks(state, onChangeProperties, enableProperties)
       return {
         activeLines: lines,
         blocks,
-        editingTableFrom: null,
-        decorations: buildDecorations(state, blocks, lines, null, resolveImageSrc),
+        decorations: buildDecorations(state, blocks, lines, resolveImageSrc),
       }
     },
     update: (value, transaction) => {
       const lines = activeLines(transaction.state)
-      const enterSourceEdit = transaction.effects.find((effect) => effect.is(enterTableSourceEditEffect))
-      let editingTableFrom = enterSourceEdit ? enterSourceEdit.value : value.editingTableFrom
-      const blocks = transaction.docChanged ? buildBlocks(transaction.state) : value.blocks
-      if (editingTableFrom !== null) {
-        const table = blocks.find((block) => block.kind === 'table' && block.from === editingTableFrom)
-        const selectionRemainsInTable = table && transaction.state.selection.ranges.every((range) => range.from >= table.from && range.to <= table.to)
-        if (!selectionRemainsInTable) editingTableFrom = null
-      }
-      if (!transaction.docChanged && sameLines(lines, value.activeLines) && editingTableFrom === value.editingTableFrom) return value
+      const blocks = transaction.docChanged ? buildBlocks(transaction.state, onChangeProperties, enableProperties) : value.blocks
+      if (!transaction.docChanged && sameLines(lines, value.activeLines)) return value
       return {
         activeLines: lines,
         blocks,
-        editingTableFrom,
-        decorations: buildDecorations(transaction.state, blocks, lines, editingTableFrom, resolveImageSrc),
+        decorations: buildDecorations(transaction.state, blocks, lines, resolveImageSrc),
       }
     },
     provide: (field) => EditorView.decorations.from(field, (value) => value.decorations),
@@ -571,6 +704,7 @@ export function createLiveMarkdownBlockPreview(
       const block = target?.closest<HTMLElement>('[data-live-markdown-block-from]')
       const inlineMath = target?.closest<HTMLElement>('[data-live-markdown-inline-from]')
       if (!block && !inlineMath) return false
+      if (block?.dataset.liveMarkdownBlockKind === 'table') return true
       // CodeBlock 的复制按钮必须在外层选区切换之前收到完整 click 序列。
       // 否则 mousedown 会把预览切回源码并卸载按钮，导致 click 永远无法触发。
       // `.cm-content` 本身就是 contenteditable；把它纳入排除条件会让所有
@@ -583,7 +717,6 @@ export function createLiveMarkdownBlockPreview(
       event.preventDefault()
       view.dispatch({
         selection: { anchor: from },
-        effects: block?.dataset.liveMarkdownBlockKind === 'table' ? enterTableSourceEditEffect.of(from) : undefined,
       })
       view.focus()
       return true

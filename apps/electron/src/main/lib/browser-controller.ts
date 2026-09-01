@@ -635,7 +635,8 @@ export class BrowserController {
       let popup: BrowserTabRecord | null = null
       return {
         action: 'allow',
-        outlivesOpener: false,
+        // Proma 将 window.open 呈现为同级浏览器 Tab；关闭来源页面不能级联关闭它。
+        outlivesOpener: true,
         createWindow: (options) => {
           popup = this.createTab(browserSession, false, false, {
             openedByPopup: true,
@@ -704,7 +705,6 @@ export class BrowserController {
     view.webContents.on('did-navigate-in-page', () => { tab.popupInitialNavigationPending = false; this.invalidateTabDocument(tab); this.updateNavigationState(browserSession, tab) })
     view.webContents.on('destroyed', () => {
       if (!browserSession.tabs.has(tab.tabId)) return
-      this.disposePopupChildren(browserSession, tab.tabId)
       browserSession.tabs.delete(tab.tabId)
       browserSession.lastLayoutRevisionByTab.delete(tab.tabId)
       this.removePresentation(browserSession.sessionId, tab.tabId)
@@ -1038,12 +1038,6 @@ export class BrowserController {
     this.emit(browserSession)
   }
 
-  private disposePopupChildren(browserSession: BrowserSessionRecord, openerTabId: string): void {
-    for (const child of [...browserSession.tabs.values()]) {
-      if (child.openerTabId === openerTabId) this.disposeTab(browserSession, child)
-    }
-  }
-
   private repairTabSelection(browserSession: BrowserSessionRecord, removedTabId: string): void {
     if (browserSession.activeTabId === removedTabId || !browserSession.tabs.has(browserSession.activeTabId)) {
       browserSession.activeTabId = browserSession.tabs.keys().next().value as string
@@ -1055,8 +1049,6 @@ export class BrowserController {
 
   private disposeTab(browserSession: BrowserSessionRecord, tab: BrowserTabRecord): void {
     if (!browserSession.tabs.has(tab.tabId)) return
-    // Child windows use Electron's opener lifetime and must not outlive a tab closed from Proma UI either.
-    this.disposePopupChildren(browserSession, tab.tabId)
     browserSession.tabs.delete(tab.tabId)
     browserSession.lastLayoutRevisionByTab.delete(tab.tabId)
     this.removePresentation(browserSession.sessionId, tab.tabId)

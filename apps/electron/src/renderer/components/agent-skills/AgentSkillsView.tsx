@@ -185,6 +185,7 @@ export function AgentSkillsView({
   const tab = embedded && componentTab ? componentTab : storedTab
   const [search, setSearch] = React.useState('')
   const [selectedSkillSlug, setSelectedSkillSlug] = React.useState<string | null>(null)
+  const [selectedSkillWorkspaceSlug, setSelectedSkillWorkspaceSlug] = React.useState<string | null>(null)
   const [selectedMcpName, setSelectedMcpName] = React.useState<string | null>(null)
   const [selectedBuiltinMcp, setSelectedBuiltinMcp] = React.useState<BuiltinMcpServerSummary | null>(null)
   const [showImport, setShowImport] = React.useState(false)
@@ -211,6 +212,14 @@ export function AgentSkillsView({
     setTab('enterprise')
   }, [embedded, enterpriseSkillsEnabled, onOpenEnterprise, setTab])
   const showEnterpriseLauncher = enterpriseSkillsEnabled && (!embedded || onOpenEnterprise !== undefined)
+  const selectSkill = React.useCallback((slug: string): void => {
+    setSelectedSkillSlug(slug)
+    setSelectedSkillWorkspaceSlug(data.workspaceSlug)
+  }, [data.workspaceSlug])
+  const closeSkill = React.useCallback((): void => {
+    setSelectedSkillSlug(null)
+    setSelectedSkillWorkspaceSlug(null)
+  }, [])
 
   const q = search.trim().toLowerCase()
 
@@ -283,7 +292,10 @@ export function AgentSkillsView({
   )
   const memoryCount = (data.capabilities?.memory.agentsMd.exists ? 1 : 0) + (data.capabilities?.memory.autoMemory.fileCount ?? 0)
 
-  const selectedSkill = data.skills.find((s) => s.slug === selectedSkillSlug) ?? null
+  const selectedSkill = selectedSkillWorkspaceSlug === data.workspaceSlug
+    && data.loadedWorkspaceSlug === data.workspaceSlug
+    ? data.skills.find((s) => s.slug === selectedSkillSlug) ?? null
+    : null
   const selectedIsBuiltin = selectedSkill ? data.defaultSkillSlugs.has(selectedSkill.slug) : false
   const selectedMcp = selectedMcpName ? data.mcpConfig.servers[selectedMcpName] ?? null : null
 
@@ -304,12 +316,16 @@ export function AgentSkillsView({
       setSkillDetailNavigation(null)
       return
     }
-    setSelectedSkillSlug(skillDetailNavigation.skillSlug)
+    selectSkill(skillDetailNavigation.skillSlug)
     setSkillDetailNavigation(null)
-  }, [data.loading, data.skills, data.workspaceSlug, setSkillDetailNavigation, skillDetailNavigation])
+  }, [data.loading, data.skills, data.workspaceSlug, selectSkill, setSkillDetailNavigation, skillDetailNavigation])
 
   const openSkillFolder = (slug: string): void => {
-    if (data.skillsDir) window.electronAPI.openFile(`${data.skillsDir}/${slug}`)
+    if (!data.workspaceSlug) return
+    void window.electronAPI.openWorkspaceSkillFolder(data.workspaceSlug, slug).catch((error) => {
+      console.error('[Agent 技能] 打开 Skill 目录失败:', error)
+      toast.error('打开 Skill 目录失败')
+    })
   }
 
   const configureBuiltinMcp = React.useCallback((serverId: string): void => {
@@ -496,7 +512,7 @@ export function AgentSkillsView({
         const ok = await data.deleteSkill(pendingDeleteSkill.slug, pendingDeleteSkill.name)
         setIsDeletingSkill(false)
         setPendingDeleteSkill(null)
-        if (ok) setSelectedSkillSlug(null)
+        if (ok) closeSkill()
       }}
     />
   )
@@ -519,17 +535,17 @@ export function AgentSkillsView({
     return (
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
         <SkillDetailView
-          key={selectedSkill.slug}
+          key={`${data.workspaceSlug}:${selectedSkill.slug}`}
           skill={selectedSkill}
           workspaceSlug={data.workspaceSlug}
+          contentVersion={data.skillsRevision}
           isBuiltin={selectedIsBuiltin}
           updating={data.updatingSkill === selectedSkill.slug}
-          onBack={() => setSelectedSkillSlug(null)}
+          onBack={closeSkill}
           onToggle={(enabled) => data.toggleSkill(selectedSkill.slug, enabled)}
           onUpdate={() => data.updateSkill(selectedSkill.slug)}
           onRequestDelete={() => setPendingDeleteSkill(selectedSkill)}
           onOpenFolder={() => openSkillFolder(selectedSkill.slug)}
-          onChanged={() => bumpCapabilities((v) => v + 1)}
         />
         {skillDeleteDialog}
       </div>
@@ -735,7 +751,7 @@ export function AgentSkillsView({
               updatingSkill={data.updatingSkill}
               canPublishToEnterprise={enterpriseCanPublish}
               isBuiltin={(slug) => data.defaultSkillSlugs.has(slug)}
-              onOpen={setSelectedSkillSlug}
+              onOpen={selectSkill}
               onToggle={data.toggleSkill}
               onUpdate={data.updateSkill}
               onPublishToEnterprise={setSkillToPublish}

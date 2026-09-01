@@ -7,6 +7,7 @@
  */
 
 import { readFileSync, writeFileSync, appendFileSync, existsSync, unlinkSync, createReadStream } from 'node:fs'
+import { stat } from 'node:fs/promises'
 import { createInterface } from 'node:readline'
 import { writeJsonFileAtomic, readJsonFileSafe } from './safe-file'
 import { randomUUID } from 'node:crypto'
@@ -16,8 +17,17 @@ import {
   getConversationMessagesPath,
 } from './config-paths'
 import { deleteConversationAttachments, deleteAttachment } from './attachment-service'
-import type { ConversationMeta, ChatMessage, RecentMessagesResult, MessageSearchResult } from '@proma/shared'
-import { findBestSearchMatch, insertTopSearchResult } from '@proma/shared'
+import type { ConversationMeta, ChatMessage, RecentMessagesResult, MessageSearchResult, SessionMessageSearchResponse } from '@proma/shared'
+import {
+  createSearchSnippet,
+  MAX_NORMALIZED_SEARCH_QUERY_LENGTH,
+  MAX_SEARCH_QUERY_SOURCE_LENGTH,
+  findBestSearchMatch,
+  findBestSearchMatchInNormalized,
+  insertTopSearchResult,
+  normalizeSearchText,
+  type NormalizedSearchText,
+} from '@proma/shared'
 
 /**
  * 对话索引文件格式
@@ -33,6 +43,28 @@ interface ConversationsIndex {
 const INDEX_VERSION = 1
 const MAX_SEARCH_SESSIONS = 100
 const MAX_SEARCH_HITS_PER_SESSION = 2
+const MAX_SESSION_SEARCH_RESULTS = 50
+const MAX_SESSION_SEARCH_INDEX_CHARACTERS = 250_000
+const MAX_CACHED_SESSION_SEARCHES = 8
+const MAX_CACHED_SESSION_SEARCH_CHARACTERS = 1_000_000
+
+interface IndexedConversationSearchHit {
+  messageId: string
+  role: Extract<ChatMessage['role'], 'user' | 'assistant'>
+  text: string
+  normalizedText: NormalizedSearchText
+}
+
+interface ConversationSearchIndex {
+  fileSize: number
+  modifiedAt: number
+  characterCount: number
+  truncated: boolean
+  hits: IndexedConversationSearchHit[]
+}
+
+/** 以文件版本为准的 LRU；避免搜索时将整份历史转移到 renderer。 */
+const conversationSearchIndexCache = new Map<string, ConversationSearchIndex>()
 
 /**
  * 读取对话索引文件
@@ -163,6 +195,58 @@ export function getRecentMessages(id: string, limit: number): RecentMessagesResu
     console.error(`[对话管理] 读取最近消息失败 (${id}):`, error)
     return { messages: [], total: 0, hasMore: false }
   }
+}
+
+/**
+ * 从指定消息附近读取有限窗口，供搜索定位避免把完整历史跨 IPC 传给 renderer。
+ */
+export async function getConversationMessagesAround(
+  id: string,
+  messageId: string,
+  maxWindowSize = 41,
+): Promise<ChatMessage[]> {
+  const filePath = getConversationMessagesPath(id)
+  if (!existsSync(filePath)) return []
+  const safeWindowSize = Math.max(3, Math.min(maxWindowSize, 50))
+  const beforeLimit = Math.floor((safeWindowSize - 1) / 2)
+  const afterLimit = safeWindowSize - beforeLimit - 1
+
+  const stream = createReadStream(filePath, { encoding: 'utf-8' })
+  const rl = createInterface({ input: stream, crlfDelay: Infinity })
+  const before: ChatMessage[] = []
+  const messages: ChatMessage[] = []
+  let found = false
+  let afterCount = 0
+
+  try {
+    for await (const line of rl) {
+      if (!line.trim()) continue
+      let message: ChatMessage
+      try {
+        message = JSON.parse(line) as ChatMessage
+      } catch {
+        continue
+      }
+      if (!found) {
+        if (message.id === messageId) {
+          found = true
+          messages.push(...before, message)
+        } else {
+          before.push(message)
+          if (before.length > beforeLimit) before.shift()
+        }
+        continue
+      }
+      messages.push(message)
+      afterCount++
+      if (afterCount >= afterLimit) break
+    }
+  } finally {
+    rl.close()
+    stream.destroy()
+  }
+
+  return messages
 }
 
 /**
@@ -402,6 +486,96 @@ export function autoArchiveConversations(daysThreshold: number): number {
  * 搜索对话消息内容。
  * 每个会话最多返回 2 个用户/助手正文命中，最多返回 100 个命中会话。
  */
+/**
+ * 搜索单个对话的完整持久化历史，返回轻量命中元数据。
+ * 不将完整 JSONL 复制到渲染进程，供当前会话的消息导航使用。
+ */
+export async function searchConversationSessionMessages(
+  conversationId: string,
+  query: string,
+): Promise<SessionMessageSearchResponse> {
+  if (query.length > MAX_SEARCH_QUERY_SOURCE_LENGTH) {
+    return { results: [], truncated: false, queryTooLong: true }
+  }
+  const normalizedQuery = normalizeSearchText(query)
+  if (normalizedQuery.chars.length < 2) return { results: [], truncated: false, queryTooLong: false }
+  if (normalizedQuery.chars.length > MAX_NORMALIZED_SEARCH_QUERY_LENGTH) {
+    return { results: [], truncated: false, queryTooLong: true }
+  }
+
+  const index = await getConversationSearchIndex(conversationId)
+  if (!index) return { results: [], truncated: false, queryTooLong: false }
+  return {
+    results: findMatchesInConversationSearchIndex(index, normalizedQuery, MAX_SESSION_SEARCH_RESULTS)
+      .map(({ score: _score, ...hit }) => hit),
+    truncated: index.truncated,
+    queryTooLong: false,
+  }
+}
+
+async function getConversationSearchIndex(conversationId: string): Promise<ConversationSearchIndex | null> {
+  const filePath = getConversationMessagesPath(conversationId)
+  let stats: Awaited<ReturnType<typeof stat>>
+  try {
+    stats = await stat(filePath)
+  } catch {
+    return null
+  }
+  const cached = conversationSearchIndexCache.get(conversationId)
+  if (cached && cached.fileSize === stats.size && cached.modifiedAt === stats.mtimeMs) {
+    // Map 的插入顺序即 LRU 顺序；命中时移到末尾。
+    conversationSearchIndexCache.delete(conversationId)
+    conversationSearchIndexCache.set(conversationId, cached)
+    return cached
+  }
+
+  const index = await buildConversationSearchIndex(filePath, stats.size, stats.mtimeMs)
+  // 单个异常大的会话也可搜索，但不常驻缓存以限制主进程 RSS。
+  if (index.characterCount <= MAX_CACHED_SESSION_SEARCH_CHARACTERS) {
+    cacheConversationSearchIndex(conversationId, index)
+  }
+  return index
+}
+
+function cacheConversationSearchIndex(conversationId: string, index: ConversationSearchIndex): void {
+  conversationSearchIndexCache.delete(conversationId)
+  conversationSearchIndexCache.set(conversationId, index)
+
+  let cachedCharacters = 0
+  for (const entry of conversationSearchIndexCache.values()) {
+    cachedCharacters += entry.characterCount
+  }
+  while (
+    conversationSearchIndexCache.size > MAX_CACHED_SESSION_SEARCHES
+    || cachedCharacters > MAX_CACHED_SESSION_SEARCH_CHARACTERS
+  ) {
+    const oldestConversationId = conversationSearchIndexCache.keys().next().value as string | undefined
+    if (!oldestConversationId) break
+    const oldest = conversationSearchIndexCache.get(oldestConversationId)
+    conversationSearchIndexCache.delete(oldestConversationId)
+    cachedCharacters -= oldest?.characterCount ?? 0
+  }
+}
+
+function findMatchesInConversationSearchIndex(
+  index: ConversationSearchIndex,
+  normalizedQuery: NormalizedSearchText,
+  maxResults: number,
+): Array<ConversationSearchHit & { score: number }> {
+  const results: Array<ConversationSearchHit & { score: number }> = []
+  for (const record of index.hits) {
+    const match = findBestSearchMatchInNormalized(record.normalizedText, normalizedQuery)
+    if (!match) continue
+    insertTopSearchResult(results, {
+      messageId: record.messageId,
+      role: record.role,
+      ...createSearchSnippet(record.text, match.matchStart, match.matchLength),
+      score: match.score,
+    }, maxResults)
+  }
+  return results
+}
+
 export async function searchConversationMessages(query: string): Promise<MessageSearchResult[]> {
   if (!query || query.length < 2) return []
 
@@ -416,7 +590,7 @@ export async function searchConversationMessages(query: string): Promise<Message
     const filePath = getConversationMessagesPath(conv.id)
     if (!existsSync(filePath)) continue
 
-    const hits = await findMatchesInJsonl(filePath, query)
+    const hits = await findMatchesInJsonl(filePath, query, MAX_SEARCH_HITS_PER_SESSION)
     if (hits.length === 0) continue
     matchedSessionCount++
 
@@ -447,12 +621,57 @@ interface ConversationSearchHit {
 }
 
 /**
+ * 解析一次 JSONL 并预计算规范化文本。索引只保存可见 user/assistant 正文。
+ */
+async function buildConversationSearchIndex(
+  filePath: string,
+  fileSize: number,
+  modifiedAt: number,
+): Promise<ConversationSearchIndex> {
+  const stream = createReadStream(filePath, { encoding: 'utf-8' })
+  const rl = createInterface({ input: stream, crlfDelay: Infinity })
+  const hits: IndexedConversationSearchHit[] = []
+  let characterCount = 0
+  let truncated = false
+
+  try {
+    for await (const line of rl) {
+      if (!line.trim()) continue
+      let msg: ChatMessage
+      try {
+        msg = JSON.parse(line) as ChatMessage
+      } catch {
+        continue
+      }
+      if ((msg.role !== 'user' && msg.role !== 'assistant') || !msg.content) continue
+      if (characterCount + msg.content.length > MAX_SESSION_SEARCH_INDEX_CHARACTERS) {
+        truncated = true
+        break
+      }
+      characterCount += msg.content.length
+      hits.push({
+        messageId: msg.id,
+        role: msg.role,
+        text: msg.content,
+        normalizedText: normalizeSearchText(msg.content),
+      })
+    }
+  } finally {
+    rl.close()
+    stream.destroy()
+  }
+
+  return { fileSize, modifiedAt, characterCount, truncated, hits }
+}
+
+/**
  * 在单个 Chat JSONL 中收集用户/助手正文命中。
  * 工具活动、工具参数和工具结果不属于 ChatMessage.content，不参与搜索。
  */
 async function findMatchesInJsonl(
   filePath: string,
   query: string,
+  maxResults: number,
 ): Promise<ConversationSearchHit[]> {
   const stream = createReadStream(filePath, { encoding: 'utf-8' })
   const rl = createInterface({ input: stream, crlfDelay: Infinity })
@@ -472,21 +691,13 @@ async function findMatchesInJsonl(
       const match = findBestSearchMatch(msg.content, query)
       if (!match) continue
 
-      const snippetStart = Math.max(0, match.matchStart - 40)
-      const snippetEnd = Math.min(msg.content.length, match.matchStart + match.matchLength + 40)
-      const snippet = (snippetStart > 0 ? '...' : '') +
-        msg.content.slice(snippetStart, snippetEnd) +
-        (snippetEnd < msg.content.length ? '...' : '')
-      const matchStart = match.matchStart - snippetStart + (snippetStart > 0 ? 3 : 0)
-
+      const snippet = createSearchSnippet(msg.content, match.matchStart, match.matchLength)
       insertTopSearchResult(hits, {
         messageId: msg.id,
         role: msg.role,
-        snippet,
-        matchStart,
-        matchLength: match.matchLength,
+        ...snippet,
         score: match.score,
-      }, MAX_SEARCH_HITS_PER_SESSION)
+      }, maxResults)
     }
   } finally {
     rl.close()

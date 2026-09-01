@@ -511,10 +511,17 @@ export function getVaultConfig(): VaultConfig | null {
   return parseVaultConfig(readJsonFileSafe<unknown>(getVaultConfigPath()))
 }
 
+function vaultId(rootPath: string): string {
+  // Renderer state needs to distinguish Vaults, but must not receive the
+  // user-authorized absolute path. The digest is stable for the canonical root.
+  return createHash('sha256').update(rootPath, 'utf-8').digest('hex')
+}
+
 export function getVaultSummary(): VaultSummary | null {
   const config = getVaultConfig()
   if (!config) return null
   return {
+    vaultId: vaultId(config.rootPath),
     displayName: config.displayName,
     inboxPath: config.inboxPath,
     allowAgentWrites: config.allowAgentWrites,
@@ -524,6 +531,7 @@ export function getVaultSummary(): VaultSummary | null {
 
 function vaultSummary(config: VaultConfig): VaultSummary {
   return {
+    vaultId: vaultId(config.rootPath),
     displayName: config.displayName,
     inboxPath: config.inboxPath,
     allowAgentWrites: config.allowAgentWrites,

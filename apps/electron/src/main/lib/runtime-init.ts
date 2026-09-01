@@ -90,8 +90,10 @@ export async function initializeRuntime(options: RuntimeInitOptions = {}): Promi
 
   if (process.platform === 'win32' && !options.skipShellDetection) {
     try {
-      const gitBashStatus = await detectGitBash()
-      const wslStatus = await detectWsl()
+      const [gitBashStatus, wslStatus] = await Promise.all([
+        detectGitBash(),
+        detectWsl(),
+      ])
 
       const recommended = selectWindowsShell({ gitBash: gitBashStatus, wsl: wslStatus })
 

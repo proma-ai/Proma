@@ -90,6 +90,10 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
   const [hasMoreMessages, setHasMoreMessages] = React.useState(false)
   const [messagesLoaded, setMessagesLoaded] = React.useState(false)
   const [inlineEditingMessageId, setInlineEditingMessageId] = React.useState<string | null>(null)
+  // 会话切换不会必然卸载当前组件；异步搜索补载必须验证归属后才可写入 state。
+  const activeConversationIdRef = React.useRef(conversationId)
+  activeConversationIdRef.current = conversationId
+  const searchWindowRequestRef = React.useRef(0)
   const store = useStore()
   const stopShortcutTarget = React.useMemo(() => ({ kind: 'chat' as const, sessionId: conversationId }), [conversationId])
   const markStopShortcutTarget = React.useCallback(() => {
@@ -621,6 +625,23 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
     setHasMoreMessages(false)
   }, [conversationId])
 
+  /** 搜索定位仅补载命中附近窗口，避免把完整历史跨 IPC 回传。 */
+  const handleLoadMessagesAround = React.useCallback(async (messageId: string): Promise<boolean> => {
+    const requestId = ++searchWindowRequestRef.current
+    const around = await window.electronAPI.getConversationMessagesAround(conversationId, messageId)
+    if (
+      around.length === 0
+      || activeConversationIdRef.current !== conversationId
+      || searchWindowRequestRef.current !== requestId
+    ) return false
+    setMessages((previous) => {
+      const byId = new Map(previous.map((message) => [message.id, message]))
+      for (const message of around) byId.set(message.id, message)
+      return [...byId.values()].sort((left, right) => left.createdAt - right.createdAt)
+    })
+    return true
+  }, [conversationId])
+
   /** 消息历史中的图片编辑完成 → 作为新附件加入输入框 */
   const handleImageEditComplete = React.useCallback((editedDataUrl: string): void => {
     const base64 = editedDataUrl.split(',')[1]
@@ -675,6 +696,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
             inlineEditingMessageId={inlineEditingMessageId}
             onDeleteDivider={handleDeleteDivider}
             onLoadMore={handleLoadMore}
+            onLoadMessagesAround={handleLoadMessagesAround}
             onImageEditComplete={handleImageEditComplete}
           />
 

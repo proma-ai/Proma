@@ -33,6 +33,7 @@ import type {
   PromaPermissionMode,
   AgentExternalRunSource,
   AgentActiveSessionSnapshot,
+  AgentQueuedMessageSnapshot,
   AgentMessage,
 } from '@proma/shared'
 import { PiAgentAdapter } from './adapters/pi-agent-adapter'
@@ -123,6 +124,7 @@ function rebindWebContents(sessionId: string, wc: WebContents) {
   if (previousWebContents && previousWebContents !== wc) streamForwarder.clear(sessionId)
   const route = streamRoutes.rebind(sessionId, wc)
   attachWebContentsCleanup(wc)
+  agentQueueCoordinator.onTargetAvailable(sessionId)
   return route
 }
 
@@ -176,6 +178,7 @@ const agentQueueCoordinator = new AgentQueueCoordinator({
   sendStarted: (webContents, status) => {
     if (!webContents.isDestroyed()) webContents.send(AGENT_IPC_CHANNELS.QUEUED_MESSAGE_STATUS, status)
   },
+  reserveRunGeneration: (sessionId) => orchestrator.reserveRunGeneration(sessionId),
 })
 
 /**
@@ -202,6 +205,7 @@ function publishRunStopped(
   sessionId: string,
   stoppedByUser: boolean | undefined,
   startedAt: number | undefined,
+  runGeneration: number | undefined,
 ): void {
   if (!stoppedByUser) return
   eventBus.emit(sessionId, {
@@ -209,6 +213,7 @@ function publishRunStopped(
     event: {
       type: 'run_stopped',
       ...(startedAt != null ? { startedAt } : {}),
+      ...(runGeneration != null ? { runGeneration } : {}),
     },
   })
 }
@@ -260,6 +265,8 @@ export function setVisibleAgentSession(webContents: WebContents, sessionId: stri
 // ===== IPC 薄包装函数 =====
 
 /** 仅主进程内部使用的单次运行扩展，绝不经 IPC 序列化。 */
+type AgentRunInput = AgentSendInput & { runGeneration?: number }
+
 /** Agent 官方渠道调用结束后通知所有窗口刷新余额。 */
 function broadcastBillingChanged(): void {
   invalidateBillingCache()
@@ -278,7 +285,7 @@ export interface AgentRunExtensions {
  * 注册 webContents 到 EventBus 映射，委托给 Orchestrator。
  */
 export async function runAgent(
-  input: AgentSendInput,
+  input: AgentRunInput,
   webContents: WebContents,
 ): Promise<void> {
   const route = registerWebContents(input.sessionId, webContents)
@@ -306,17 +313,18 @@ export async function runAgent(
   }
   try {
     await orchestrator.sendMessage(input, {
-      onError: (error) => {
+      onError: (error, opts) => {
         const target = streamRoutes.getTargetIfOwner(input.sessionId, route.ownerId)
         if (target) {
           target.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
             sessionId: input.sessionId,
             error,
+            ...(opts?.runGeneration != null ? { runGeneration: opts.runGeneration } : input.runGeneration != null ? { runGeneration: input.runGeneration } : {}),
           })
         }
       },
       onComplete: (messages, opts) => {
-        publishRunStopped(input.sessionId, opts?.stoppedByUser, opts?.startedAt)
+        publishRunStopped(input.sessionId, opts?.stoppedByUser, opts?.startedAt, opts?.runGeneration)
         if (getChannelById(input.channelId)?.provider === 'proma') broadcastBillingChanged()
         const target = streamRoutes.getTargetIfOwner(input.sessionId, route.ownerId)
         if (target) {
@@ -324,6 +332,7 @@ export async function runAgent(
             messages,
             stoppedByUser: opts?.stoppedByUser ?? false,
             startedAt: opts?.startedAt,
+            runGeneration: opts?.runGeneration,
             resultSubtype: opts?.resultSubtype,
             resultErrors: opts?.resultErrors,
             backgroundTasksPending: opts?.backgroundTasksPending,
@@ -338,10 +347,10 @@ export async function runAgent(
           opts?.stoppedByUser === true,
         )
       },
-      onRunStarted: ({ startedAt }) => {
+      onRunStarted: ({ startedAt, runGeneration }) => {
         eventBus.emit(input.sessionId, {
           kind: 'proma_event',
-          event: { type: 'run_started', startedAt },
+          event: { type: 'run_started', startedAt, runGeneration },
         })
       },
       onTitleUpdated: (title) => {
@@ -366,10 +375,13 @@ export async function runAgent(
       target.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
         sessionId: input.sessionId,
         error: errorMessage,
+        ...(input.runGeneration != null ? { runGeneration: input.runGeneration } : {}),
       })
       sendAgentStreamComplete(target, input, {
         messages: [],
         stoppedByUser: false,
+        startedAt: input.startedAt,
+        runGeneration: input.runGeneration,
       })
     }
     agentQueueCoordinator.onRunComplete(input.sessionId, queueMessageId, false, false)
@@ -407,8 +419,10 @@ export async function runAgentHeadless(
   // treat an omitted source as an interactive desktop-user run: custom tools may grant
   // local side effects that cannot be visibly supervised by an external sender.
   const inferredTriggeredBy = callbacks.source === 'delegation' ? 'delegation' : 'external'
-  const runInput: AgentSendInput = {
-    ...input,
+  // Headless callers are public service clients too; discard any forged runtime identity.
+  const { runGeneration: _ignoredRunGeneration, ...publicInput } = input as AgentSendInput & { runGeneration?: unknown }
+  const runInput: AgentRunInput = {
+    ...publicInput,
     ...(input.triggeredBy ? {} : { triggeredBy: inferredTriggeredBy }),
     ...(input.startedAt != null ? {} : { startedAt: Date.now() }),
   }
@@ -417,7 +431,7 @@ export async function runAgentHeadless(
 
   try {
     await orchestrator.sendMessage(runInput, {
-      onError: (error) => {
+      onError: (error, opts) => {
         callbacks.onError(error)
         const target = route
           ? streamRoutes.getTargetIfOwner(runInput.sessionId, route.ownerId)
@@ -426,12 +440,13 @@ export async function runAgentHeadless(
           target.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
             sessionId: runInput.sessionId,
             error,
+            ...(opts?.runGeneration != null ? { runGeneration: opts.runGeneration } : runInput.runGeneration != null ? { runGeneration: runInput.runGeneration } : {}),
           })
         }
       },
       onComplete: (messages, opts) => {
         callbacks.onComplete(messages)
-        publishRunStopped(runInput.sessionId, opts?.stoppedByUser, opts?.startedAt)
+        publishRunStopped(runInput.sessionId, opts?.stoppedByUser, opts?.startedAt, opts?.runGeneration)
         const target = route
           ? streamRoutes.getTargetIfOwner(runInput.sessionId, route.ownerId)
           : undefined
@@ -440,6 +455,7 @@ export async function runAgentHeadless(
             messages,
             stoppedByUser: opts?.stoppedByUser ?? false,
             startedAt: opts?.startedAt,
+            runGeneration: opts?.runGeneration,
             resultSubtype: opts?.resultSubtype,
             resultErrors: opts?.resultErrors,
             backgroundTasksPending: opts?.backgroundTasksPending,
@@ -470,7 +486,7 @@ export async function runAgentHeadless(
           })
         }
       },
-      onRunStarted: ({ startedAt: persistedStartedAt }) => {
+      onRunStarted: ({ startedAt: persistedStartedAt, runGeneration }) => {
         const session = getAgentSessionMeta(runInput.sessionId)
         eventBus.emit(runInput.sessionId, {
           kind: 'proma_event',
@@ -482,6 +498,7 @@ export async function runAgentHeadless(
             workspaceId: session?.workspaceId ?? runInput.workspaceId,
             modelId: runInput.modelId,
             startedAt: persistedStartedAt,
+            runGeneration,
             ...(session ? { session } : {}),
           },
         })
@@ -496,11 +513,16 @@ export async function runAgentHeadless(
       ? streamRoutes.getTargetIfOwner(runInput.sessionId, route.ownerId)
       : undefined
     if (target) {
-      target.send(AGENT_IPC_CHANNELS.STREAM_ERROR, { sessionId: runInput.sessionId, error: errorMessage })
+      target.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
+        sessionId: runInput.sessionId,
+        error: errorMessage,
+        ...(runInput.runGeneration != null ? { runGeneration: runInput.runGeneration } : {}),
+      })
       sendAgentStreamComplete(target, runInput, {
         messages: [],
         stoppedByUser: false,
         startedAt,
+        runGeneration: runInput.runGeneration,
       })
     }
     agentQueueCoordinator.onRunComplete(runInput.sessionId, undefined, false, false)
@@ -561,6 +583,10 @@ export function hasActiveAgentSessions(): boolean {
 
 export function listActiveAgentSessionSnapshots(): AgentActiveSessionSnapshot[] {
   return orchestrator.listActiveSessionSnapshots()
+}
+
+export function listQueuedAgentMessages(sessionId: string): AgentQueuedMessageSnapshot[] {
+  return agentQueueCoordinator.snapshot(sessionId)
 }
 
 /** 中止所有活跃的 Agent 会话（应用退出时调用） */
@@ -637,8 +663,8 @@ export async function submitOrEnqueueAgentMessage(
     }
   }
 
-  agentQueueCoordinator.enqueue(input)
-  return { disposition: 'queued' }
+  const disposition = agentQueueCoordinator.enqueue(input)
+  return { disposition: disposition === 'started' ? 'started' : 'queued' }
 }
 
 /** 兼容旧调用：仅将消息追加到主进程 deferred queue。 */

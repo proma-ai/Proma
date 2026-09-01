@@ -2625,25 +2625,100 @@ body {
   text-decoration: underline;
   text-underline-offset: 0.16em;
 }
-.vault-ink-mde .vault-markdown-table table {
+.vault-ink-mde .vault-markdown-table table,
+.live-markdown-table-editor table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
   font-size: 0.94em;
 }
 .vault-ink-mde .vault-markdown-table th,
-.vault-ink-mde .vault-markdown-table td {
+.vault-ink-mde .vault-markdown-table td,
+.live-markdown-table-editor th,
+.live-markdown-table-editor td {
   border-bottom: 1px solid hsl(var(--border) / 0.55);
   padding: 0.5rem 0.7rem;
   text-align: left;
   vertical-align: top;
 }
-.vault-ink-mde .vault-markdown-table th {
+.vault-ink-mde .vault-markdown-table th,
+.live-markdown-table-editor th {
   background: hsl(var(--muted) / 0.45);
   color: hsl(var(--foreground));
   font-weight: 700;
 }
-.vault-ink-mde .vault-markdown-table td {
+.vault-ink-mde .vault-markdown-table td,
+.live-markdown-table-editor td {
   color: hsl(var(--foreground) / 0.88);
+}
+.live-markdown-table-editor-root {
+  display: block;
+  max-width: 100%;
+}
+.live-markdown-table-editor {
+  overflow-x: auto;
+  border-radius: 0.5rem;
+}
+.live-markdown-table-cell-trigger {
+  display: block;
+  width: calc(100% + 1.4rem);
+  min-height: 1.35rem;
+  margin: -0.5rem -0.7rem;
+  padding: 0.5rem 0.7rem;
+  border: 0;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  text-align: inherit;
+  cursor: text;
+  transition: background-color 120ms ease;
+}
+.live-markdown-table-cell-trigger:hover {
+  background: hsl(var(--muted) / 0.58);
+}
+.live-markdown-table-cell-trigger:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: -2px;
+}
+.live-markdown-table-editor .is-editing {
+  padding: 0.2rem 0.25rem;
+  background: hsl(var(--muted) / 0.38);
+}
+.live-markdown-table-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-radius: 0.25rem;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  padding: 0.3rem 0.45rem;
+  font: inherit;
+  line-height: inherit;
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 0;
+}
+.live-markdown-table-value {
+  display: block;
+  min-height: 1.35rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.live-markdown-table-math {
+  display: inline-block;
+  vertical-align: baseline;
+  line-height: 1.2;
+}
+.live-markdown-table-math.is-display {
+  display: block;
+  overflow-x: auto;
+  padding-block: 0.15rem;
+}
+.live-markdown-table-editor .katex {
+  font-size: 1.06em;
+  line-height: 1.2;
 }
 
 .vault-ink-mde .vault-properties {
@@ -2654,12 +2729,23 @@ body {
   padding: 1.5rem 0 1.95rem;
 }
 .vault-ink-mde .vault-properties-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
   margin: 0 0 0.8rem;
   color: hsl(var(--foreground));
   font-size: 1.15rem;
   font-weight: 600;
   letter-spacing: 0;
   line-height: 1.35;
+}
+.vault-ink-mde .vault-properties-count {
+  color: hsl(var(--muted-foreground) / 0.78);
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 .vault-ink-mde .vault-properties-list {
   display: flex;

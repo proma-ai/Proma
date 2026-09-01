@@ -7,6 +7,7 @@
 import * as React from 'react'
 import { Box, ChevronRight, FolderSearch, Search, SquareTerminal, Undo2, X } from 'lucide-react'
 import { useAtomValue, useSetAtom } from 'jotai'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { FileTypeIcon } from '@/components/file-browser/FileTypeIcon'
@@ -610,7 +611,12 @@ function NonGitFileList({
                 <button
                   type="button"
                   aria-label="在文件夹中显示"
-                  onClick={() => window.electronAPI.showInFolder(change.path, { sessionId, unrestricted: true }).catch(console.error)}
+                  onClick={() => {
+                    void window.electronAPI.showInFolder(change.path, { sessionId, unrestricted: true }).catch((error) => {
+                      console.error('[DiffChangesList] 在文件夹中显示失败:', error)
+                      toast.error('无法在文件夹中显示该文件')
+                    })
+                  }}
                   className="mr-1 flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground"
                 >
                   <FolderSearch className="size-3.5" />
