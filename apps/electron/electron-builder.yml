@@ -4,6 +4,8 @@
 appId: com.proma.app
 productName: Proma
 copyright: Copyright © 2024-2026 Erlich Liu
+# 注意：deb/rpm（FPM）目标要求项目主页，须写在 apps/electron/package.json
+# 的 "homepage" 字段（electron-builder 顶层不支持 homepage 配置项）。
 
 # Electron 版本（CI 环境 bun workspace 下无法自动检测，需显式指定）
 electronVersion: 43.2.0
@@ -38,6 +40,9 @@ files:
   # 排除 build:resources 脚本拷到 dist/resources 的副本（electron-builder 已通过
   # buildResources 从 resources/ 直接使用 icon/plist，避免产物里重复打包一份）
   - "!dist/resources/**"
+  # Linux 主窗口图标运行时从 asar 内 dist/resources/icon.png 加载
+  # （getIconPath 在打包态解析到 asar 根下 dist/），单独保留该文件
+  - "dist/resources/icon.png"
   - package.json
   # Pi runtime 作为主进程 external 运行。打包前 sync:runtime-deps 会
   # 将 external 依赖闭包同步到 apps/electron/node_modules。
@@ -153,6 +158,48 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
+
+# ============================================
+# Linux 配置（Ubuntu/Debian）
+# ============================================
+# 构建目标：
+# - AppImage：便携运行，且支持 electron-updater 自动更新（latest-linux.yml feed）
+# - deb：Ubuntu 原生安装（dpkg/apt），适合桌面用户长期使用
+# 图标使用 1024x1024 的 icon.png（generate-icons.sh 产出），
+# electron-builder 自动派生各尺寸图标。
+linux:
+  icon: resources/icon.png
+  # 可执行文件名：默认会退化为 npm 包名 @proma/electron → "@promaelectron"，
+  # 显式指定为 proma（影响包内二进制、.desktop、图标文件名）
+  executableName: proma
+  # Ubuntu 24.04 的 AppArmor 限制非特权用户命名空间，Chromium 回退的
+  # SUID 沙箱在 deb/AppImage 场景下无法配置；桌面条目统一带 --no-sandbox
+  # （AppImage 目标默认如此，deb 目标需显式声明），从菜单启动开箱即用
+  executableArgs:
+    - --no-sandbox
+  # GNOME/mutter 对 StartupWMClass 做大小写敏感匹配。Electron 43 实测主窗口
+  # WM_CLASS 为小写 proma（可用 xprop WM_CLASS 验证），而默认值取 productName
+  # "Proma"，不匹配会导致任务栏/dash 无法关联窗口与 .desktop（图标错乱）。
+  desktop:
+    StartupWMClass: proma
+  category: Development
+  synopsis: 本地优先的 AI 桌面 Agent
+  description: Proma 把多模型 Chat、通用 Agent、工作区、Skills、MCP 与记忆能力放进同一个开源客户端，数据和配置默认留在本地（~/.proma/）。
+  maintainer: ErlichLiu <erlichliu@gmail.com>
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+
+# deb 专属配置
+deb:
+  # 包名（默认取 npm 包名 @proma/electron，带 scope 前缀不干净）
+  packageName: proma
+  # 产物文件名（默认 ${name} 宏展开为 npm 包名，含 @scope/ 路径分隔符）
+  artifactName: proma_${version}_${arch}.${ext}
 
 # ============================================
 # 发布配置
