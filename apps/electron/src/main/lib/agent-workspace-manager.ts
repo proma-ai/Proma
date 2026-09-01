@@ -1145,9 +1145,15 @@ function resolveSkillDir(workspaceSlug: string, skillSlug: string): string | nul
   return null
 }
 
-export function readWorkspaceSkillContent(workspaceSlug: string, skillSlug: string): string {
+/** 返回 Skill 的实际目录，避免 renderer 使用可能过期的 Skills 根路径。 */
+export function getWorkspaceSkillFolder(workspaceSlug: string, skillSlug: string): string {
   const dir = resolveSkillDir(workspaceSlug, skillSlug)
   if (!dir) throw new Error(`Skill 不存在: ${workspaceSlug}/${skillSlug}`)
+  return dir
+}
+
+export function readWorkspaceSkillContent(workspaceSlug: string, skillSlug: string): string {
+  const dir = getWorkspaceSkillFolder(workspaceSlug, skillSlug)
   const mdPath = join(dir, 'SKILL.md')
   if (!existsSync(mdPath)) throw new Error(`SKILL.md 不存在: ${mdPath}`)
   return readFileSync(mdPath, 'utf-8')

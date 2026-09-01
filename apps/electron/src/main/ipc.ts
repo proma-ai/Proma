@@ -327,6 +327,7 @@ import {
   importSkillFromWorkspace,
   batchImportSkillsFromWorkspaces,
   updateSkillFromSource,
+  getWorkspaceSkillFolder,
   readWorkspaceSkillContent,
   writeWorkspaceSkillContent,
   toggleWorkspaceSkill,
@@ -3108,6 +3109,15 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.GET_SKILLS_DIR,
     async (_, workspaceSlug: string): Promise<string> => {
       return getWorkspaceSkillsDir(workspaceSlug)
+    }
+  )
+
+  // 由主进程按 workspace + slug 重新定位目录，避免 renderer 的异步 Skills 根路径过期。
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.OPEN_SKILL_FOLDER,
+    async (_, workspaceSlug: string, skillSlug: string): Promise<void> => {
+      const error = await shell.openPath(getWorkspaceSkillFolder(workspaceSlug, skillSlug))
+      if (error) throw new Error(`无法打开 Skill 目录: ${error}`)
     }
   )
 

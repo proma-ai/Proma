@@ -21,6 +21,8 @@ import { extractSkillBody, rebuildSkillMd } from './skillMdUtils'
 export interface SkillDetailViewProps {
   skill: SkillMeta
   workspaceSlug: string
+  /** 外部能力变更后由数据层递增，用于重新读取 SKILL.md。 */
+  contentVersion: number
   isBuiltin: boolean
   updating: boolean
   onBack: () => void
@@ -34,6 +36,7 @@ export interface SkillDetailViewProps {
 export function SkillDetailView({
   skill,
   workspaceSlug,
+  contentVersion,
   isBuiltin,
   updating,
   onBack,
@@ -59,15 +62,16 @@ export function SkillDetailView({
     setLoadingContent(true)
     window.electronAPI.readSkillContent(workspaceSlug, skill.slug)
       .then((text) => {
+        // 保留用户尚未保存的正文草稿；未编辑状态则立即显示外部 Agent 写入的新内容。
+        if (editBody === body) setEditBody(extractSkillBody(text))
         setContent(text)
-        setEditBody(extractSkillBody(text))
       })
       .catch((err) => {
         console.error('[SkillDetail] 加载内容失败:', err)
         setContent(null)
       })
       .finally(() => setLoadingContent(false))
-  }, [skill.slug, workspaceSlug])
+  }, [contentVersion, skill.slug, workspaceSlug])
 
   const body = React.useMemo(() => extractSkillBody(content ?? ''), [content])
 

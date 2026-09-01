@@ -52,6 +52,8 @@ export interface AgentSkillsData {
   skillsDir: string
   mcpConfig: WorkspaceMcpConfig
   capabilities: WorkspaceCapabilities | null
+  /** 每次从磁盘重新读取 Skills 后递增，供详情页刷新 SKILL.md 正文。 */
+  skillsRevision: number
   builtinMcpServers: BuiltinMcpServerSummary[]
   cliIntegrationStatuses: CliIntegrationStatus[]
   cliIntegrationProbeState: CatalogCliProbeState
@@ -74,6 +76,7 @@ export interface AgentSkillsData {
 export function useAgentSkillsData(workspaceId?: string): AgentSkillsData {
   const workspaces = useAtomValue(agentWorkspacesAtom)
   const selectedWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
+  const capabilitiesVersion = useAtomValue(workspaceCapabilitiesVersionAtom)
   const bumpCapabilitiesVersion = useSetAtom(workspaceCapabilitiesVersionAtom)
 
   const currentWorkspace = workspaces.find((w) => w.id === (workspaceId ?? selectedWorkspaceId))
@@ -85,12 +88,14 @@ export function useAgentSkillsData(workspaceId?: string): AgentSkillsData {
   const [skillsDir, setSkillsDir] = React.useState('')
   const [mcpConfig, setMcpConfig] = React.useState<WorkspaceMcpConfig>({ servers: {} })
   const [capabilities, setCapabilities] = React.useState<WorkspaceCapabilities | null>(null)
+  const [skillsRevision, setSkillsRevision] = React.useState(0)
   const [builtinMcpServers, setBuiltinMcpServers] = React.useState<BuiltinMcpServerSummary[]>([])
   const [cliIntegrationStatuses, setCliIntegrationStatuses] = React.useState<CliIntegrationStatus[]>([])
   const [cliIntegrationProbeState, setCliIntegrationProbeState] = React.useState<CatalogCliProbeState>('loading')
   const [updatingSkill, setUpdatingSkill] = React.useState<string | null>(null)
   const loadRequestRef = React.useRef(0)
   const cliProbeRequestRef = React.useRef(0)
+  const observedCapabilitiesVersionRef = React.useRef(capabilitiesVersion)
 
   const loadData = React.useCallback(async () => {
     const requestId = ++loadRequestRef.current
@@ -120,6 +125,7 @@ export function useAgentSkillsData(workspaceId?: string): AgentSkillsData {
       setSkillsDir(dir)
       setDefaultSkillSlugs(new Set(defaultSlugs))
       setCapabilities(capabilities)
+      setSkillsRevision((version) => version + 1)
       setBuiltinMcpServers(capabilities.builtinMcpServers)
       const cachedCliStatuses = cliIntegrationStatusCache.get(workspaceSlug)
       const hasFreshCliCache = cachedCliStatuses && Date.now() - cachedCliStatuses.cachedAt < CLI_STATUS_CACHE_TTL_MS
@@ -148,13 +154,20 @@ export function useAgentSkillsData(workspaceId?: string): AgentSkillsData {
     }
   }, [workspaceSlug])
 
-  // 只在进入页面或切换工作区时读取。文件监听会在切换开关后异步推送能力变化，
-  // 这里刻意不订阅 capabilitiesVersion，防止扫描 active/inactive 目录后重排当前列表。
+  // 首次进入或切换工作区时展示加载态；普通文件监听刷新则保留当前视图，避免闪烁。
   React.useEffect(() => {
     setLoading(true)
     void loadData()
     return () => { ++cliProbeRequestRef.current }
   }, [loadData])
+
+  // 外部 Agent 或其他进程编辑 Skills 后，主进程 watcher 会以 300ms debounce 推送
+  // capabilitiesVersion。这里仅重新读取当前工作区的数据，不触发加载占位或 CLI 重探测。
+  React.useEffect(() => {
+    if (observedCapabilitiesVersionRef.current === capabilitiesVersion) return
+    observedCapabilitiesVersionRef.current = capabilitiesVersion
+    void loadData()
+  }, [capabilitiesVersion, loadData])
 
   const setCliIntegrationEnabled = React.useCallback(async (id: string, enabled: boolean): Promise<void> => {
     const cliProbeRequestId = ++cliProbeRequestRef.current
@@ -299,6 +312,7 @@ export function useAgentSkillsData(workspaceId?: string): AgentSkillsData {
     skillsDir,
     mcpConfig,
     capabilities,
+    skillsRevision,
     builtinMcpServers,
     cliIntegrationStatuses,
     cliIntegrationProbeState,

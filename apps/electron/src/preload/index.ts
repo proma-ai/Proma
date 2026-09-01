@@ -723,6 +723,9 @@ export interface ElectronAPI {
   /** 获取工作区 Skills 目录绝对路径 */
   getWorkspaceSkillsDir: (workspaceSlug: string) => Promise<string>
 
+  /** 用系统文件管理器打开指定 Skill 的实际目录 */
+  openWorkspaceSkillFolder: (workspaceSlug: string, skillSlug: string) => Promise<void>
+
   /** 删除工作区 Skill */
   deleteWorkspaceSkill: (workspaceSlug: string, skillSlug: string) => Promise<void>
 
@@ -2052,6 +2055,10 @@ const electronAPI: ElectronAPI = {
 
   getWorkspaceSkillsDir: (workspaceSlug: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_SKILLS_DIR, workspaceSlug)
+  },
+
+  openWorkspaceSkillFolder: (workspaceSlug: string, skillSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.OPEN_SKILL_FOLDER, workspaceSlug, skillSlug)
   },
 
   deleteWorkspaceSkill: (workspaceSlug: string, skillSlug: string) => {

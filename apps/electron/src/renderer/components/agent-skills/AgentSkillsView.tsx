@@ -257,7 +257,11 @@ export function AgentSkillsView({
   }, [data.loading, data.skills, data.workspaceSlug, setSkillDetailNavigation, skillDetailNavigation])
 
   const openSkillFolder = (slug: string): void => {
-    if (data.skillsDir) window.electronAPI.openFile(`${data.skillsDir}/${slug}`)
+    if (!data.workspaceSlug) return
+    void window.electronAPI.openWorkspaceSkillFolder(data.workspaceSlug, slug).catch((error) => {
+      console.error('[Agent 技能] 打开 Skill 目录失败:', error)
+      toast.error('打开 Skill 目录失败')
+    })
   }
 
   const guideManualMcp = React.useCallback((): void => {
@@ -460,6 +464,7 @@ export function AgentSkillsView({
           key={selectedSkill.slug}
           skill={selectedSkill}
           workspaceSlug={data.workspaceSlug}
+          contentVersion={data.skillsRevision}
           isBuiltin={selectedIsBuiltin}
           updating={data.updatingSkill === selectedSkill.slug}
           onBack={() => setSelectedSkillSlug(null)}
