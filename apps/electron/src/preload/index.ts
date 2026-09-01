@@ -37,6 +37,7 @@ import type {
   FileOrFolderDialogResult,
   RecentMessagesResult,
   MessageSearchResult,
+  SessionMessageSearchResponse,
   AgentSessionMeta,
   AgentActiveSessionSnapshot,
   SetAgentSessionActiveWorktreeInput,
@@ -355,6 +356,9 @@ export interface ElectronAPI {
   /** 获取对话最近 N 条消息（分页加载） */
   getRecentMessages: (id: string, limit: number) => Promise<RecentMessagesResult>
 
+  /** 获取指定消息附近的有限窗口，供搜索定位 */
+  getConversationMessagesAround: (id: string, messageId: string, radius?: number) => Promise<ChatMessage[]>
+
   /** 更新对话标题 */
   updateConversationTitle: (id: string, title: string) => Promise<ConversationMeta>
 
@@ -370,8 +374,11 @@ export interface ElectronAPI {
   /** 切换对话归档状态 */
   toggleArchiveConversation: (id: string) => Promise<ConversationMeta>
 
-  /** 搜索对话消息内容 */
+  /** 搜索全部对话消息内容 */
   searchConversationMessages: (query: string) => Promise<MessageSearchResult[]>
+
+  /** 搜索当前对话完整持久化历史（仅返回命中元数据） */
+  searchConversationSessionMessages: (conversationId: string, query: string) => Promise<SessionMessageSearchResponse>
 
   // ===== 教程 =====
 
@@ -1572,6 +1579,10 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(CHAT_IPC_CHANNELS.GET_RECENT_MESSAGES, id, limit)
   },
 
+  getConversationMessagesAround: (id: string, messageId: string, radius?: number) => {
+    return ipcRenderer.invoke(CHAT_IPC_CHANNELS.GET_MESSAGES_AROUND, id, messageId, radius)
+  },
+
   updateConversationTitle: (id: string, title: string) => {
     return ipcRenderer.invoke(CHAT_IPC_CHANNELS.UPDATE_TITLE, id, title)
   },
@@ -1594,6 +1605,10 @@ const electronAPI: ElectronAPI = {
 
   searchConversationMessages: (query: string) => {
     return ipcRenderer.invoke(CHAT_IPC_CHANNELS.SEARCH_MESSAGES, query)
+  },
+
+  searchConversationSessionMessages: (conversationId: string, query: string) => {
+    return ipcRenderer.invoke(CHAT_IPC_CHANNELS.SEARCH_SESSION_MESSAGES, conversationId, query)
   },
 
   // 教程

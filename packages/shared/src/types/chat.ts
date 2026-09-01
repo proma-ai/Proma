@@ -177,21 +177,33 @@ export interface ConversationMeta {
 /**
  * 消息搜索结果
  */
-export interface MessageSearchResult {
-  /** 对话 ID */
-  conversationId: string
-  /** 对话标题 */
-  conversationTitle: string
+export interface SessionMessageSearchResult {
   /** 消息 ID */
   messageId: string
   /** 消息角色 */
   role: MessageRole
-  /** 匹配上下文片段（约 80 字符） */
+  /** 匹配上下文片段，完整保留命中的查询文本 */
   snippet: string
   /** snippet 内匹配起始位置 */
   matchStart: number
   /** 匹配长度 */
   matchLength: number
+}
+
+export interface SessionMessageSearchResponse {
+  /** 当前查询返回的最佳命中 */
+  results: SessionMessageSearchResult[]
+  /** 为防止主进程资源耗尽，是否只检索了当前会话的可索引前缀 */
+  truncated: boolean
+  /** 查询文本过长，已拒绝模糊匹配以保护事件循环 */
+  queryTooLong: boolean
+}
+
+export interface MessageSearchResult extends SessionMessageSearchResult {
+  /** 对话 ID */
+  conversationId: string
+  /** 对话标题 */
+  conversationTitle: string
   /** 是否已归档 */
   archived?: boolean
 }
@@ -364,6 +376,8 @@ export const CHAT_IPC_CHANNELS = {
   GET_MESSAGES: 'chat:get-messages',
   /** 获取对话最近 N 条消息（分页加载） */
   GET_RECENT_MESSAGES: 'chat:get-recent-messages',
+  /** 获取指定消息附近的小窗口，供搜索定位避免回传完整历史 */
+  GET_MESSAGES_AROUND: 'chat:get-messages-around',
   /** 更新对话标题 */
   UPDATE_TITLE: 'chat:update-title',
   /** 删除对话 */
@@ -406,8 +420,10 @@ export const CHAT_IPC_CHANNELS = {
   TOGGLE_PIN: 'chat:toggle-pin',
   /** 切换对话归档状态 */
   TOGGLE_ARCHIVE: 'chat:toggle-archive',
-  /** 搜索对话消息内容 */
+  /** 搜索所有对话消息内容 */
   SEARCH_MESSAGES: 'chat:search-messages',
+  /** 搜索当前对话的完整消息历史（仅返回命中元数据） */
+  SEARCH_SESSION_MESSAGES: 'chat:search-session-messages',
 
   // 教程
   /** 获取教程内容 */

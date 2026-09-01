@@ -19,6 +19,9 @@ import { getModelLogo, resolveModelProvider } from '@/lib/model-logo'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import { useShortcut } from '@/hooks/useShortcut'
 import { cn } from '@/lib/utils'
+import { MAX_SEARCH_QUERY_SOURCE_LENGTH } from '@proma/shared'
+import type { SessionMessageSearchResponse, SessionMessageSearchResult } from '@proma/shared'
+import type { SessionMessageSearch } from '@/lib/session-message-search'
 
 export interface MinimapItem {
   id: string
@@ -29,7 +32,17 @@ export interface MinimapItem {
 }
 
 interface ScrollMinimapProps {
+  /** 用于显示位置与未搜索状态预览的轻量条目 */
   items: MinimapItem[]
+  /** 独立搜索数据源；Chat 可在主进程查完整 JSONL，Agent 可查结构化内存快照 */
+  searchMessages?: SessionMessageSearch
+  /** 搜索结果尚未渲染时，调用方可先补载历史 */
+  onRevealSearchResult?: (messageId: string) => Promise<boolean | void> | boolean | void
+}
+
+interface SearchListItem extends MinimapItem {
+  matchStart?: number
+  matchLength?: number
 }
 
 /** 最少消息数才显示迷你地图 */
@@ -74,7 +87,7 @@ function escapeRegExp(str: string): string {
 
 // ── 主组件 ──
 
-export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement | null {
+export function ScrollMinimap({ items, searchMessages, onRevealSearchResult }: ScrollMinimapProps): React.ReactElement | null {
   const { scrollRef, stopScroll, state: stickyState } = useStickToBottomContext()
   const [hovered, setHovered] = React.useState(false)
   const [isLeaving, setIsLeaving] = React.useState(false)
@@ -84,6 +97,10 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
   const [canScroll, setCanScroll] = React.useState(false)
   const [thumbHeightPct, setThumbHeightPct] = React.useState(100)
   const [searchQuery, setSearchQuery] = React.useState('')
+  const [searchResults, setSearchResults] = React.useState<SessionMessageSearchResult[]>([])
+  const [searchTruncated, setSearchTruncated] = React.useState(false)
+  const [searchQueryTooLong, setSearchQueryTooLong] = React.useState(false)
+  const [isSearching, setIsSearching] = React.useState(false)
   const [isDragging, setIsDragging] = React.useState(false)
   const closeTimerRef = React.useRef<ReturnType<typeof setTimeout>>()
   const fadeTimerRef = React.useRef<ReturnType<typeof setTimeout>>()
@@ -99,6 +116,7 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
   const canScrollRef = React.useRef(false)
   const thumbHeightPctRef = React.useRef(100)
   const thumbRef = React.useRef<HTMLDivElement>(null)
+  const searchRequestRef = React.useRef(0)
 
   // ── 组件卸载时清理计时器 ──
 
@@ -304,7 +322,7 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
     setHovered(true)
   }, [])
 
-  useShortcut('file-find', handleShortcutOpen, items.length >= MIN_ITEMS && canScroll)
+  useShortcut('file-find', handleShortcutOpen, items.length >= MIN_ITEMS)
 
   // ── 鼠标进出控制（仅迷你地图区域） ──
 
@@ -373,13 +391,83 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
     setHovered(false)
   }, [scrollRef, stopScroll, stickyState])
 
-  // ── 搜索过滤 ──
+  const scrollToMessageWhenRendered = React.useCallback((id: string): void => {
+    const container = scrollRef.current
+    if (!container) return
+    if (container.querySelector(`[data-message-id="${CSS.escape(id)}"]`)) {
+      scrollToMessage(id)
+      return
+    }
 
-  const filteredItems = React.useMemo(() => {
-    if (!searchQuery.trim()) return items
-    const q = searchQuery.toLowerCase()
-    return items.filter((item) => item.preview.toLowerCase().includes(q))
-  }, [items, searchQuery])
+    const observer = new MutationObserver(() => {
+      if (!container.querySelector(`[data-message-id="${CSS.escape(id)}"]`)) return
+      observer.disconnect()
+      window.clearTimeout(timeout)
+      scrollToMessage(id)
+    })
+    const timeout = window.setTimeout(() => observer.disconnect(), 1_000)
+    observer.observe(container, { childList: true, subtree: true })
+  }, [scrollRef, scrollToMessage])
+
+  // ── 搜索：延迟请求，按请求序号丢弃陈旧结果 ──
+
+  React.useEffect(() => {
+    const query = searchQuery.trim()
+    const requestId = ++searchRequestRef.current
+    if (!query || !searchMessages) {
+      setIsSearching(false)
+      setSearchResults([])
+      setSearchTruncated(false)
+      setSearchQueryTooLong(false)
+      return
+    }
+
+    setIsSearching(true)
+    const timer = window.setTimeout(() => {
+      void searchMessages(query)
+        .then((response: SessionMessageSearchResponse) => {
+          if (searchRequestRef.current === requestId) {
+            setSearchResults(response.results)
+            setSearchTruncated(response.truncated)
+            setSearchQueryTooLong(response.queryTooLong)
+          }
+        })
+        .catch((error: unknown) => {
+          if (searchRequestRef.current === requestId) {
+            console.warn('[消息导航] 搜索失败:', error)
+            setSearchResults([])
+            setSearchTruncated(false)
+            setSearchQueryTooLong(false)
+          }
+        })
+        .finally(() => {
+          if (searchRequestRef.current === requestId) setIsSearching(false)
+        })
+    }, 150)
+    return () => window.clearTimeout(timer)
+  }, [searchMessages, searchQuery])
+
+  const filteredItems = React.useMemo<SearchListItem[]>(() => {
+    const query = searchQuery.trim()
+    if (!query) return items
+    if (!searchMessages) {
+      const normalizedQuery = query.toLowerCase()
+      return items.filter((item) => item.preview.toLowerCase().includes(normalizedQuery))
+    }
+    const itemById = new Map(items.map((item) => [item.id, item]))
+    return searchResults.map((result) => {
+      const item = itemById.get(result.messageId)
+      return {
+        id: result.messageId,
+        role: result.role === 'system' ? 'status' : result.role,
+        preview: result.snippet,
+        avatar: item?.avatar,
+        model: item?.model,
+        matchStart: result.matchStart,
+        matchLength: result.matchLength,
+      }
+    })
+  }, [items, searchMessages, searchQuery, searchResults])
 
   /** 列表居中锚点：优先用主区视口中心对应的消息；该消息被搜索过滤掉时退回第一条可见消息 */
   const anchorId = React.useMemo(() => {
@@ -457,7 +545,7 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
     el.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' })
   }, [scrollRef, stopScroll, stickyState])
 
-  if (items.length < MIN_ITEMS || !canScroll) return null
+  if (items.length < MIN_ITEMS) return null
 
   // ── 迷你地图条纹 ──
 
@@ -496,6 +584,7 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
                   ref={searchInputRef}
                   placeholder="搜索消息..."
                   value={searchQuery}
+                  maxLength={MAX_SEARCH_QUERY_SOURCE_LENGTH}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   onFocus={() => {
                     if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
@@ -509,7 +598,19 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
 
             {/* 消息列表 */}
             <div ref={listRef} className="overflow-y-auto flex-1 p-1.5 space-y-0.5 scrollbar-thin">
-              {filteredItems.length === 0 ? (
+              {searchQueryTooLong && (
+                <div className="px-2 py-1 text-[11px] text-muted-foreground">
+                  查询过长，请缩短后重试。
+                </div>
+              )}
+              {searchTruncated && (
+                <div className="px-2 py-1 text-[11px] text-muted-foreground">
+                  历史过长，仅显示可索引范围内的结果；请缩小范围。
+                </div>
+              )}
+              {isSearching ? (
+                <div className="py-6 text-center text-xs text-muted-foreground">搜索中...</div>
+              ) : filteredItems.length === 0 ? (
                 <div className="py-6 text-center text-xs text-muted-foreground">
                   未找到匹配消息
                 </div>
@@ -523,11 +624,20 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
                       'flex items-start gap-2 w-full rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent',
                       visibleIds.has(item.id) && 'bg-accent/50'
                     )}
-                    onClick={() => scrollToMessage(item.id)}
+                    onClick={() => {
+                      void Promise.resolve(onRevealSearchResult?.(item.id)).then((revealed) => {
+                        if (revealed !== false) scrollToMessageWhenRendered(item.id)
+                      })
+                    }}
                   >
                     <ItemIcon item={item} />
                     <div className="flex-1 min-w-0">
-                      <HighlightedPreview text={item.preview} query={searchQuery} />
+                      <HighlightedPreview
+                        text={item.preview}
+                        query={searchQuery}
+                        matchStart={item.matchStart}
+                        matchLength={item.matchLength}
+                      />
                     </div>
                   </button>
                 ))
@@ -537,7 +647,7 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
         )}
 
         {/* ── 迷你地图横杠 —— 只有这里触发面板展开 ── */}
-        <div
+        {canScroll && <div
           className="relative mt-3 flex-shrink-0 pointer-events-auto"
           style={{ width: 24, height: barCount * MINIMAP_BAR_SPACING }}
           onMouseEnter={handleMouseEnter}
@@ -565,11 +675,11 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
               />
             )
           })}
-        </div>
+        </div>}
       </div>
 
       {/* ── 滚动进度条 ── */}
-      <div className="relative ml-[4px] py-4 flex-shrink-0 pointer-events-auto" style={{ width: SCROLL_PROGRESS_WIDTH }}>
+      {canScroll && <div className="relative ml-[4px] py-4 flex-shrink-0 pointer-events-auto" style={{ width: SCROLL_PROGRESS_WIDTH }}>
         <div
           ref={trackRef}
           className="relative h-full rounded-full cursor-pointer scroll-progress-track"
@@ -590,7 +700,7 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
             onMouseDown={handleThumbMouseDown}
           />
         </div>
-      </div>
+      </div>}
     </div>
   )
 }
@@ -618,9 +728,30 @@ function ItemIcon({ item }: { item: MinimapItem }): React.ReactElement {
 }
 
 /** Markdown 预览（无搜索时）或 纯文本+高亮（搜索时） */
-function HighlightedPreview({ text, query }: { text: string; query: string }): React.ReactElement {
+function HighlightedPreview({
+  text,
+  query,
+  matchStart,
+  matchLength,
+}: {
+  text: string
+  query: string
+  matchStart?: number
+  matchLength?: number
+}): React.ReactElement {
   if (!text) {
     return <span className="text-xs opacity-40">(空消息)</span>
+  }
+
+  if (query.trim() && matchStart !== undefined && matchLength !== undefined) {
+    const before = text.slice(0, matchStart)
+    const match = text.slice(matchStart, matchStart + matchLength)
+    const after = text.slice(matchStart + matchLength)
+    return (
+      <span className="text-xs text-popover-foreground/80 line-clamp-3">
+        {before}<mark className="bg-primary/20 text-primary rounded-sm px-0.5">{match}</mark>{after}
+      </span>
+    )
   }
 
   if (query.trim()) {

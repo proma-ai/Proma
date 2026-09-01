@@ -198,6 +198,7 @@ import {
   listConversations,
   createConversation,
   getConversationMessages,
+  getConversationMessagesAround,
   getRecentMessages,
   updateConversationMeta,
   deleteConversation,
@@ -206,6 +207,7 @@ import {
   updateContextDividers,
   autoArchiveConversations,
   searchConversationMessages,
+  searchConversationSessionMessages,
 } from './lib/conversation-manager'
 import { sendMessage, stopGeneration, generateTitle } from './lib/chat-service'
 import {
@@ -1772,6 +1774,14 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // 获取搜索命中附近的有限消息窗口
+  ipcMain.handle(
+    CHAT_IPC_CHANNELS.GET_MESSAGES_AROUND,
+    async (_, id: string, messageId: string, radius?: number): Promise<ChatMessage[]> => {
+      return getConversationMessagesAround(id, messageId, radius)
+    }
+  )
+
   // 更新对话标题
   ipcMain.handle(
     CHAT_IPC_CHANNELS.UPDATE_TITLE,
@@ -1830,11 +1840,19 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // 搜索对话消息内容
+  // 搜索所有对话消息内容
   ipcMain.handle(
     CHAT_IPC_CHANNELS.SEARCH_MESSAGES,
     async (_, query: string) => {
       return searchConversationMessages(query)
+    }
+  )
+
+  // 搜索当前对话的完整持久化历史（只返回命中元数据，避免传输整份 JSONL）
+  ipcMain.handle(
+    CHAT_IPC_CHANNELS.SEARCH_SESSION_MESSAGES,
+    async (_, conversationId: string, query: string) => {
+      return searchConversationSessionMessages(conversationId, query)
     }
   )
 
