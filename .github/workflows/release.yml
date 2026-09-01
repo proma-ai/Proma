@@ -1,7 +1,7 @@
 # GitHub Actions: 自动打包分发
 #
 # 触发条件：推送 v* tag（如 v0.4.0）
-# 构建 macOS 和 Windows 产物并发布到 GitHub Releases
+# 构建 macOS、Windows 和 Linux 产物并发布到 GitHub Releases
 #
 # 所需 GitHub Secrets（macOS 签名/公证，可选）:
 # - MAC_CERTS: Base64 编码的 macOS Developer ID Application 证书 (.p12)
@@ -308,6 +308,49 @@ jobs:
           echo "$UPLOAD_RESULT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'Uploaded: {d.get(\"name\")} ({d.get(\"size\")} bytes)')"
           echo "✅ latest-mac.yml merged and uploaded"
 
+  build-linux-x64:
+    name: build (ubuntu-22.04, linux, x64)
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 安装 Linux 构建依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3
+
+      - name: 安装依赖
+        run: bun install --frozen-lockfile
+
+      - name: 准备 OfficeCLI（Linux x64）
+        run: bun run --filter='@proma/electron' prepare:officecli
+
+      - name: 构建 Electron 应用
+        run: bun run electron:build
+
+      - name: 准备运行时依赖
+        run: |
+          bun run --filter='@proma/electron' sync:runtime-deps
+          bun run --filter='@proma/electron' rebuild:node-pty
+
+      - name: 打包并发布 (Linux x64)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --linux --x64 --publish always
+        working-directory: apps/electron
+
   build-windows-x64:
     name: build (windows-latest, win, x64, --x64)
     runs-on: windows-latest
@@ -333,7 +376,6 @@ jobs:
       - name: 准备 OfficeCLI（Windows x64）
         run: bun run --filter='@proma/electron' prepare:officecli
 
-      # 构建应用
       - name: 构建 Electron 应用
         run: bun run electron:build
         working-directory: .

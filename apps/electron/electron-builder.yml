@@ -35,9 +35,10 @@ npmRebuild: false
 # 通用文件配置
 files:
   - dist/**/*
-  # 排除 build:resources 脚本拷到 dist/resources 的副本（electron-builder 已通过
-  # buildResources 从 resources/ 直接使用 icon/plist，避免产物里重复打包一份）
+  # build:resources 会把 resources 拷到 dist/，但 electron-builder 已通过 buildResources
+  # 直接使用原始资源；仅保留 Linux runtime 需要的 icon.png，避免重复打包。
   - "!dist/resources/**"
+  - "dist/resources/icon.png"
   - package.json
   # Pi runtime 作为主进程 external 运行。打包前 sync:runtime-deps 会
   # 将 external 依赖闭包同步到 apps/electron/node_modules。
@@ -155,9 +156,57 @@ nsis:
   createStartMenuShortcut: true
 
 # ============================================
+# Linux 配置（Ubuntu/Debian x86_64）
+# ============================================
+linux:
+  icon: resources/icon.png
+  executableName: proma
+  desktop:
+    StartupWMClass: proma
+  category: Development
+  synopsis: 本地优先的 AI 桌面 Agent
+  description: Proma 把多模型 Chat、通用 Agent、工作区、Skills、MCP 与记忆能力放进同一个开源客户端，数据和配置默认留在本地（~/.proma/）。
+  maintainer: ErlichLiu <erlichliu@gmail.com>
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+
+# electron-builder 25 对 AppImage 默认使用 --no-sandbox，这是 AppImage
+# 挂载文件系统无法可靠提供 SUID sandbox 的已知限制。deb 不继承该参数，
+# 而是通过 afterInstall 尝试配置 /opt/Proma/chrome-sandbox。
+appImage:
+  executableArgs:
+    - --no-sandbox
+
+deb:
+  packageName: proma
+  afterInstall: resources/linux/deb-after-install.sh
+  # 以 Ubuntu 22.04 为首个支持目标；显式声明，避免 electron-builder 的历史默认
+  # 依赖（如已废弃的 gconf2/libappindicator1）进入新包。
+  depends:
+    - libasound2
+    - libatk-bridge2.0-0
+    - libatspi2.0-0
+    - libdrm2
+    - libgbm1
+    - libgtk-3-0
+    - libnss3
+    - libx11-xcb1
+    - libxcomposite1
+    - libxdamage1
+    - libxfixes3
+    - libxkbcommon0
+    - libxrandr2
+    - libxss1
+  artifactName: proma_${version}_${arch}.${ext}
+
+# ============================================
 # 发布配置
 # 每个平台的 build job 通过 --publish always 直接上传到 GitHub Release。
-# electron-builder 会自动创建/复用 Release，并在多架构并行上传时合并 latest-mac.yml。
 # ============================================
 publish:
   provider: github

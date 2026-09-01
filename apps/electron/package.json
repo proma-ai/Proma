@@ -1,6 +1,6 @@
 {
   "name": "@proma/electron",
-  "version": "0.19.14",
+  "version": "0.19.15",
   "description": "Proma，为专业用户设计的 Agent - Electron App",
   "main": "dist/main.cjs",
   "author": {
@@ -133,7 +133,7 @@
     "cmdk": "^1.1.1",
     "concurrently": "^9.2.1",
     "dingtalk-stream-sdk-nodejs": "^2.0.4",
-    "electron": "^43.2.0",
+    "electron": "43.2.0",
     "electron-builder": "^25.1.8",
     "electron-updater": "^6.7.3",
     "electronmon": "^2.0.4",
@@ -181,5 +181,6 @@
   "build": {
     "extends": "electron-builder.yml"
   },
-  "proma": {}
+  "proma": {},
+  "homepage": "https://github.com/proma-ai/Proma"
 }
