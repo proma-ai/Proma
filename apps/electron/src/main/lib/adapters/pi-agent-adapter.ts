@@ -146,6 +146,8 @@ export interface PiAgentQueryOptions extends AgentQueryInput {
   /** Proma 聚合的附加目录；Pi 内置工具 factory 不接收多 root 参数，编排层会把它们注入 systemPrompt。 */
   additionalDirectories?: string[]
   additionalSkillPaths?: string[]
+  /** Whitelisted Pi extension paths loaded by the managed Pi resource loader. */
+  additionalExtensionPaths?: string[]
   /** 当前用户输入显式引用的 Skill name（兼容历史 slug 已在编排层归一化） */
   skillMentions?: string[]
   /** Persisted user-message UUID for turn-scoped Skill attribution. */
@@ -1493,7 +1495,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         cwd,
         agentDir: input.piAgentDir,
         settingsManager,
-        ...createPromaManagedResourceLoaderOptions(),
+        ...createPromaManagedResourceLoaderOptions({ additionalExtensionPaths: input.additionalExtensionPaths }),
         agentsFilesOverride: createPromaProjectInstructionFilesOverride(input.projectInstructionFiles ?? []),
         additionalSkillPaths: input.additionalSkillPaths ?? [],
         skillsOverride: createPromaSkillsOverride(input.additionalSkillPaths),
