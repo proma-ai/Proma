@@ -4132,6 +4132,26 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // 批量检查文件是否仍存在（供渲染端清理已删除的会话文件变更记录）。
+  // 只做 statSync 不读内容；只接受绝对路径，防止借相对路径探测主进程 cwd。
+  ipcMain.handle(
+    'file:exists-batch',
+    async (_, filePaths: unknown, access?: FileAccessOptions | string[]): Promise<string[]> => {
+      if (!Array.isArray(filePaths)) return []
+      const options = normalizeFileAccessOptions(access)
+      const existing: string[] = []
+      for (const rawPath of filePaths.slice(0, 1000)) {
+        if (typeof rawPath !== 'string' || rawPath.length === 0 || !isAbsolute(rawPath)) continue
+        try {
+          if (statSync(rawPath).isFile() && isPathAllowed(rawPath, options)) existing.push(rawPath)
+        } catch {
+          // 不存在或不可读：视为已删除
+        }
+      }
+      return existing
+    },
+  )
+
   // 写入文本文件（供 Markdown 内联编辑使用）
   ipcMain.handle(
     'file:write-text',

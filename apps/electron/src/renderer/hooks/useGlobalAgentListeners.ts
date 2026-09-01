@@ -92,7 +92,7 @@ import {
 } from '@/lib/agent-completion-presence'
 import { getPlanModeChangeFromToolName, updatePlanModeSessionSet } from '@/lib/agent-plan-mode'
 import { detectIsWindows } from '@/lib/platform'
-import { getSessionFileChangeKind, getOwnedSessionWatcherPaths, upsertSessionFileChange } from '@/lib/session-file-changes'
+import { arePathsEqual, getSessionFileChangeKind, getOwnedSessionWatcherPaths, removeSessionFileChange, upsertSessionFileChange } from '@/lib/session-file-changes'
 import { doesWorkspaceChangeAffectPreview } from '@/components/diff/preview-open-path'
 import { removeQueuedMessage, createQueuedAgentStreamState, createAgentQueuedMessage } from '@/lib/agent-message-queue'
 import { createAgentStreamEventBatcher } from '@/lib/agent-stream-event-batcher'
@@ -963,7 +963,18 @@ export function useGlobalAgentListeners(): void {
           for (const changedPath of uniquelyMatchingPaths) {
             // watcher 现在也会携带删除/目录路径；这些不应进入会话的文件改动记录。
             const existingFile = await window.electronAPI.resolveAndReadFile(changedPath, { sessionId, unrestricted: true })
-            if (!existingFile) continue
+            if (!existingFile) {
+              // 文件已不存在：反向清理该会话的文件改动记录，避免「先创建再删除」的
+              // 残留条目一直留在改动面板中。
+              store.set(agentNonGitFileChangesAtom, (prev) => {
+                const current = prev.get(sessionId)
+                if (!current?.some((change) => arePathsEqual(change.path, changedPath, isWindows))) return prev
+                const map = new Map(prev)
+                map.set(sessionId, removeSessionFileChange(current, changedPath, isWindows))
+                return map
+              })
+              continue
+            }
             const previewFile = await buildWrittenFilePreviewInfo(sessionId, changedPath)
             if (previewFile.previewOnly) {
               store.set(agentNonGitFileChangesAtom, (prev) => {

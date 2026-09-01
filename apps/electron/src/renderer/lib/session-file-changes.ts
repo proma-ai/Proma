@@ -92,6 +92,14 @@ export function upsertSessionFileChange(
   );
 }
 
+export function removeSessionFileChange(
+  changes: readonly SessionFileChange[],
+  path: string,
+  caseInsensitive = false,
+): SessionFileChange[] {
+  return changes.filter((change) => !arePathsEqual(change.path, path, caseInsensitive));
+}
+
 export function groupSessionFileChanges(
   changes: readonly SessionFileChange[],
   currentRunId: string | undefined,

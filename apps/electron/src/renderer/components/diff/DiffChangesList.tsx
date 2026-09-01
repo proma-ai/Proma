@@ -11,10 +11,11 @@ import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { FileTypeIcon } from '@/components/file-browser/FileTypeIcon'
-import { agentDiffUnseenFilesAtom, agentDiffDataAtom, agentSelectedWorktreeAtom, agentSessionsAtom, workspaceGitDiffRefreshVersionAtom } from '@/atoms/agent-atoms'
+import { agentDiffUnseenFilesAtom, agentDiffDataAtom, agentNonGitFileChangesAtom, agentSelectedWorktreeAtom, agentSessionsAtom, workspaceGitDiffRefreshVersionAtom } from '@/atoms/agent-atoms'
 import type { ChangedFileEntry, ChangedFileStatus, ChangeSource, UntrackedFileEntry, WorktreeInfo } from '@proma/shared'
 import { WorktreeSelector } from './WorktreeSelector'
-import { groupSessionFileChanges } from '@/lib/session-file-changes'
+import { groupSessionFileChanges, arePathsEqual } from '@/lib/session-file-changes'
+import { detectIsWindows } from '@/lib/platform'
 import type { SessionFileChange } from '@/lib/session-file-changes'
 import { buildDiffFileTree } from './diff-file-tree'
 import type { DiffFileTreeNode } from './diff-file-tree'
@@ -531,7 +532,50 @@ function NonGitChangesList({
   sessionId: string
   onFileClick?: (filePath: string) => void
 }): React.ReactElement {
-  const { current, earlier } = groupSessionFileChanges(changes, currentRunId)
+  const { current, earlier } = React.useMemo(
+    () => groupSessionFileChanges(changes, currentRunId),
+    [changes, currentRunId],
+  )
+  const setNonGitFileChanges = useSetAtom(agentNonGitFileChangesAtom)
+  /** 已校验过存在性的路径；组件存活期内同一路径不重复发起 IPC。 */
+  const existenceCheckedRef = React.useRef<Set<string>>(new Set())
+
+  React.useEffect(() => {
+    // 文件变更记录是 append-only 的内存流水账：会话未运行期间被删除的文件
+    // watcher 清理不到，展示前对「更早」分组批量校验存在性并剔除。
+    const pending = earlier.filter((change) => !existenceCheckedRef.current.has(change.path))
+    if (pending.length === 0) return
+    for (const change of pending) existenceCheckedRef.current.add(change.path)
+    let cancelled = false
+    void window.electronAPI
+      .filterExistingFilePaths(pending.map((change) => change.path), { sessionId, unrestricted: true })
+      .then((existingPaths) => {
+        if (cancelled) return
+        const isWindows = detectIsWindows()
+        const missing = pending.filter(
+          (change) => !existingPaths.some((existingPath) => arePathsEqual(existingPath, change.path, isWindows)),
+        )
+        if (missing.length === 0) return
+        setNonGitFileChanges((prev) => {
+          const currentChanges = prev.get(sessionId)
+          if (!currentChanges) return prev
+          const next = currentChanges.filter(
+            (change) => !missing.some((m) => arePathsEqual(m.path, change.path, isWindows)),
+          )
+          if (next.length === currentChanges.length) return prev
+          const map = new Map(prev)
+          map.set(sessionId, next)
+          return map
+        })
+      })
+      .catch(() => {
+        // 校验失败不清记录，允许下次渲染重试。
+        for (const change of pending) existenceCheckedRef.current.delete(change.path)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [earlier, sessionId, setNonGitFileChanges])
   const hasEarlierChanges = earlier.length > 0
   const title = hasEarlierChanges
     ? `本会话文件变更 · ${changes.length}`
