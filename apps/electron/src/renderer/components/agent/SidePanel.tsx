@@ -101,6 +101,7 @@ import {
   previewPanelOpenMapAtom,
 } from '@/atoms/preview-atoms'
 import { PreviewPanel } from '@/components/diff/PreviewPanel'
+import { clearPreviewContentCacheForFile } from '@/lib/preview-content-cache'
 import { useOpenPreview } from '@/components/diff/preview-opener'
 import type { FileEntry, AgentPendingFile, AgentSessionMeta, SDKMessage, WorktreeInfo } from '@proma/shared'
 import { setFilePanelDragData, getMediaTypeFromFilename, dispatchInsertFileMention } from '@/lib/file-panel-drag'
@@ -915,6 +916,9 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   }, [agentStreamState?.running, agentStreamState?.startedAt, effectiveActiveTab, isOpen, latestMemoryChange, onTabChange, setIsOpen, setMemoryNavigationRequest, setWorkspaceComponentTabs, workspaceSlug])
 
   const handleClosePreviewTab = React.useCallback((previewId: string) => {
+    const closingFile = previewFiles.find((file) => getPreviewFileId(file) === previewId)
+    // 关闭代表结束这次预览生命周期；下次打开必须重新读盘，不能回落到旧 v0 缓存。
+    if (closingFile?.previewOnly) clearPreviewContentCacheForFile(sessionId, closingFile.filePath)
     const remaining = previewFiles.filter((file) => getPreviewFileId(file) !== previewId)
     setPreviewFilesMap((previous) => {
       const next = new Map(previous)
