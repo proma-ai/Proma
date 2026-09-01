@@ -236,8 +236,11 @@ export const LiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, Liv
   onTextSelectionChangeRef.current = onTextSelectionChange
   onChangePropertiesRef.current = onChangeProperties
 
-  const onChangePropertiesProxy = React.useCallback((entries: LiveMarkdownPropertyEntry[]): void => {
-    onChangePropertiesRef.current?.(entries)
+  const onChangePropertiesProxy = React.useCallback((entries: LiveMarkdownPropertyEntry[], documentValue?: string): void => {
+    // The extension is retained for the editor lifetime. Forward its live
+    // CodeMirror snapshot so the Vault adapter never falls back to a stale
+    // controlled prop after a body edit.
+    onChangePropertiesRef.current?.(entries, documentValue)
   }, [])
 
   React.useImperativeHandle(ref, () => ({
