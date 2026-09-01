@@ -223,7 +223,16 @@ export function SkillDetailView({
       : '当前项目'
 
   return (
-    <div className="flex h-full flex-col min-h-0">
+    <div
+      className="flex h-full flex-col min-h-0"
+      onKeyDownCapture={(event) => {
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+          event.preventDefault()
+          event.stopPropagation()
+          retrySave()
+        }
+      }}
+    >
       {/* 头部 */}
       <div className="shrink-0 border-b border-border/60 px-5 pb-4 pt-5">
         <div className="flex items-center gap-3">
