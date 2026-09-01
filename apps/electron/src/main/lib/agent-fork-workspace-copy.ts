@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, readdirSync } from 'node:fs'
+import { cp, mkdir, readdir } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 
 const FORK_WORKSPACE_COPY_BLOCKLIST = new Set([
@@ -31,8 +31,8 @@ export function shouldCopyForkWorkspacePath(src: string): boolean {
   return !FORK_WORKSPACE_COPY_BLOCKLIST.has(basename(src))
 }
 
-export function copyForkWorkspaceFiles(sourceDir: string, destDir: string): ForkWorkspaceCopyResult {
-  if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true })
+export async function copyForkWorkspaceFiles(sourceDir: string, destDir: string): Promise<ForkWorkspaceCopyResult> {
+  await mkdir(destDir, { recursive: true })
 
   const result: ForkWorkspaceCopyResult = {
     copiedCount: 0,
@@ -40,7 +40,7 @@ export function copyForkWorkspaceFiles(sourceDir: string, destDir: string): Fork
     failedCount: 0,
   }
 
-  const entries = readdirSync(sourceDir, { withFileTypes: true })
+  const entries = await readdir(sourceDir, { withFileTypes: true })
   for (const entry of entries) {
     const srcPath = join(sourceDir, entry.name)
     const destPath = join(destDir, entry.name)
@@ -51,7 +51,7 @@ export function copyForkWorkspaceFiles(sourceDir: string, destDir: string): Fork
     }
 
     try {
-      cpSync(srcPath, destPath, {
+      await cp(srcPath, destPath, {
         recursive: true,
         filter: shouldCopyForkWorkspacePath,
       })

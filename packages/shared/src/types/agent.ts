@@ -1839,6 +1839,8 @@ export const AGENT_IPC_CHANNELS = {
   GET_SKILLS: 'agent:get-skills',
   /** 获取工作区 Skills 目录绝对路径 */
   GET_SKILLS_DIR: 'agent:get-skills-dir',
+  /** 使用系统文件管理器打开指定工作区 Skill 的实际目录 */
+  OPEN_SKILL_FOLDER: 'agent:open-skill-folder',
   /** 删除工作区 Skill */
   DELETE_SKILL: 'agent:delete-skill',
   /** 切换工作区 Skill 启用/禁用 */

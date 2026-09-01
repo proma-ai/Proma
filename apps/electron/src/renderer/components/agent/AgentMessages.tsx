@@ -29,6 +29,14 @@ import { tabMinimapCacheAtom } from '@/atoms/tab-atoms'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import { ScrollPositionManager } from '@/hooks/useScrollPositionMemory'
 import { cn } from '@/lib/utils'
+import {
+  createLocalSearchRecords,
+  searchLocalSessionMessages,
+  type LocalSearchRecord,
+  type LocalSearchRecordInput,
+  type SessionMessageSearch,
+} from '@/lib/session-message-search'
+import { toTranscript } from '@proma/session-core'
 import { Spinner } from '@/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { groupIntoTurns, AssistantLogo, MessageGroupRenderer, getGroupId, getGroupPreview, extractUserText, buildTaskProgressDataForTurn, type MessageGroup } from './SDKMessageRenderer'
@@ -1097,6 +1105,24 @@ export const AgentMessages = React.memo(function AgentMessages({
   }
   const structuralGroups = structuralGroupsRef.current
 
+  // 搜索记录与迷你地图一样只依赖结构快照，流式 token 不触发全文重建。
+  const localSearchRecordInputs = React.useMemo<LocalSearchRecordInput[]>(
+    () => toTranscript(structuralGroups).map((turn, index) => ({
+      messageId: getGroupId(structuralGroups[index]!),
+      role: turn.role,
+      text: turn.text,
+    })),
+    [structuralGroups],
+  )
+  const localSearchRecords = React.useMemo<LocalSearchRecord[]>(
+    () => createLocalSearchRecords(localSearchRecordInputs),
+    [localSearchRecordInputs],
+  )
+  const searchMessages = React.useCallback<SessionMessageSearch>(
+    async (query) => searchLocalSessionMessages(localSearchRecords, query),
+    [localSearchRecords],
+  )
+
   // 迷你地图数据 — 只依赖结构快照，流式 token 不触发 getGroupPreview 正则
   const minimapItems: MinimapItem[] = React.useMemo(
     () => structuralGroups.map((group) => ({
@@ -1215,7 +1241,7 @@ export const AgentMessages = React.memo(function AgentMessages({
             </>
           )}
         </ConversationContent>
-        <ScrollMinimap items={minimapItems} />
+        <ScrollMinimap items={minimapItems} searchMessages={searchMessages} />
         <TaskProgressOverlay
           key={sessionId}
           activities={liveTaskActivities}

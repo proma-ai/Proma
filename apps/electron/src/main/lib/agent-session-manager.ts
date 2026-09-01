@@ -911,7 +911,7 @@ async function forkPiAgentSession(sourceMeta: AgentSessionMeta, input: ForkSessi
     newMeta.activeWorktree = sourceActiveWorktree
     Object.assign(newMeta, explorationMeta)
 
-    if (sourceWorkbenchDir && destWorkbenchDir) copyForkWorkspaceFiles(sourceWorkbenchDir, destWorkbenchDir)
+    if (sourceWorkbenchDir && destWorkbenchDir) await copyForkWorkspaceFiles(sourceWorkbenchDir, destWorkbenchDir)
     await copyForkStoredSDKMessages({
       sourceSessionId: sourceMeta.id,
       destSessionId: newMeta.id,

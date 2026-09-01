@@ -198,6 +198,7 @@ import {
   listConversations,
   createConversation,
   getConversationMessages,
+  getConversationMessagesAround,
   getRecentMessages,
   updateConversationMeta,
   deleteConversation,
@@ -206,6 +207,7 @@ import {
   updateContextDividers,
   autoArchiveConversations,
   searchConversationMessages,
+  searchConversationSessionMessages,
 } from './lib/conversation-manager'
 import { sendMessage, stopGeneration, generateTitle } from './lib/chat-service'
 import {
@@ -295,9 +297,11 @@ import {
   cleanupStaleAttachedPaths,
   searchAgentSessionMessages,
   searchAgentSessionReferences,
+  resolveAgentCwd,
 } from './lib/agent-session-manager'
 import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive, isAgentSessionBusy, listActiveAgentSessionSnapshots, reserveAgentSessionStart, queueAgentMessage, submitOrEnqueueAgentMessage, enqueueAgentQueuedMessage, cancelAgentQueuedMessage, moveAgentQueuedMessage, clearAgentQueuedMessages, updateAgentPermissionMode, rewindAgentSession, setVisibleAgentSession } from './lib/agent-service'
 import { permissionService } from './lib/agent-permission-service'
+import { resolvePathAgainstAgentCwd } from './lib/agent-file-path'
 import { askUserService } from './lib/agent-ask-user-service'
 import { exitPlanService } from './lib/agent-exit-plan-service'
 import { getAgentSessionWorkspacePath, getAgentWorkspacesDir, getConfigDir, getWorkspaceSkillsDir, getScratchPadPath } from './lib/config-paths'
@@ -327,6 +331,7 @@ import {
   importSkillFromWorkspace,
   batchImportSkillsFromWorkspaces,
   updateSkillFromSource,
+  getWorkspaceSkillFolder,
   readWorkspaceSkillContent,
   writeWorkspaceSkillContent,
   toggleWorkspaceSkill,
@@ -599,6 +604,15 @@ async function resolveFileAccessPath(filePath: string, options?: FileAccessOptio
     import('./lib/file-preview-service'),
   ])
   return resolveFilePath(filePath, getPreviewCandidateBasePaths(options)) ?? resolve(filePath)
+}
+
+/** 当前 Agent 的 Write/Edit 相对路径必须按实际运行 cwd 解析。 */
+function getAgentCwdForFileAccess(options?: FileAccessOptions): string | undefined {
+  if (!options?.sessionId) return undefined
+  const session = getAgentSessionMeta(options.sessionId)
+  if (!session?.workspaceId) return undefined
+  const workspace = getAgentWorkspace(session.workspaceId)
+  return resolveAgentCwd(workspace, session.id, session.agentCwdMode, session.activeWorktree)
 }
 
 async function getAccessRootMainRepo(root: string): Promise<string | null> {
@@ -1761,6 +1775,14 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // 获取搜索命中附近的有限消息窗口
+  ipcMain.handle(
+    CHAT_IPC_CHANNELS.GET_MESSAGES_AROUND,
+    async (_, id: string, messageId: string, radius?: number): Promise<ChatMessage[]> => {
+      return getConversationMessagesAround(id, messageId, radius)
+    }
+  )
+
   // 更新对话标题
   ipcMain.handle(
     CHAT_IPC_CHANNELS.UPDATE_TITLE,
@@ -1819,11 +1841,19 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // 搜索对话消息内容
+  // 搜索所有对话消息内容
   ipcMain.handle(
     CHAT_IPC_CHANNELS.SEARCH_MESSAGES,
     async (_, query: string) => {
       return searchConversationMessages(query)
+    }
+  )
+
+  // 搜索当前对话的完整持久化历史（只返回命中元数据，避免传输整份 JSONL）
+  ipcMain.handle(
+    CHAT_IPC_CHANNELS.SEARCH_SESSION_MESSAGES,
+    async (_, conversationId: string, query: string) => {
+      return searchConversationSessionMessages(conversationId, query)
     }
   )
 
@@ -3111,6 +3141,15 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // 由主进程按 workspace + slug 重新定位目录，避免 renderer 的异步 Skills 根路径过期。
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.OPEN_SKILL_FOLDER,
+    async (_, workspaceSlug: string, skillSlug: string): Promise<void> => {
+      const error = await shell.openPath(getWorkspaceSkillFolder(workspaceSlug, skillSlug))
+      if (error) throw new Error(`无法打开 Skill 目录: ${error}`)
+    }
+  )
+
   // 删除工作区 Skill
   ipcMain.handle(
     AGENT_IPC_CHANNELS.DELETE_SKILL,
@@ -4008,10 +4047,12 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.SHOW_IN_FOLDER,
     async (_, filePath: string, access?: FileAccessOptions): Promise<void> => {
-      const { resolve } = await import('node:path')
-
-      const safePath = resolve(filePath)
-      if (!isPathAllowed(safePath, normalizeFileAccessOptions(access))) {
+      const options = normalizeFileAccessOptions(access)
+      const safePath = resolvePathAgainstAgentCwd(filePath, getAgentCwdForFileAccess(options))
+      if (!existsSync(safePath)) {
+        throw new Error('文件不存在或已被移动')
+      }
+      if (!isPathAllowed(safePath, options)) {
         throw new Error('访问路径超出当前会话的授权范围')
       }
 

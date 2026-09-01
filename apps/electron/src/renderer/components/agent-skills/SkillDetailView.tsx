@@ -6,7 +6,7 @@
 
 import * as React from 'react'
 import { toast } from 'sonner'
-import { Sparkles, Pencil, Save, X, FolderOpen, RefreshCw, Trash2, ArrowLeft } from 'lucide-react'
+import { Sparkles, FolderOpen, RefreshCw, Trash2, ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -21,6 +21,8 @@ import { extractSkillBody, rebuildSkillMd } from './skillMdUtils'
 export interface SkillDetailViewProps {
   skill: SkillMeta
   workspaceSlug: string
+  /** 外部能力变更后由数据层递增，用于重新读取 SKILL.md。 */
+  contentVersion: number
   isBuiltin: boolean
   updating: boolean
   onBack: () => void
@@ -28,12 +30,12 @@ export interface SkillDetailViewProps {
   onUpdate: () => void
   onRequestDelete: () => void
   onOpenFolder: () => void
-  onChanged: () => void
 }
 
 export function SkillDetailView({
   skill,
   workspaceSlug,
+  contentVersion,
   isBuiltin,
   updating,
   onBack,
@@ -41,76 +43,178 @@ export function SkillDetailView({
   onUpdate,
   onRequestDelete,
   onOpenFolder,
-  onChanged,
 }: SkillDetailViewProps): React.ReactElement {
   const [content, setContent] = React.useState<string | null>(null)
   const [loadingContent, setLoadingContent] = React.useState(true)
-
-  const [isEditingMeta, setIsEditingMeta] = React.useState(false)
-  const [editName, setEditName] = React.useState('')
-  const [editDescription, setEditDescription] = React.useState('')
+  const [editName, setEditName] = React.useState(skill.name)
+  const [editDescription, setEditDescription] = React.useState(skill.description ?? '')
   const [editBody, setEditBody] = React.useState('')
   const [saving, setSaving] = React.useState(false)
+  const [saveFailed, setSaveFailed] = React.useState(false)
 
   const [detailTab, setDetailTab] = React.useState<'body' | 'files'>('body')
   const [fileCount, setFileCount] = React.useState<number | null>(null)
+  const contentRef = React.useRef<string | null>(null)
+  const skillSlugRef = React.useRef(skill.slug)
+  const loadRequestRef = React.useRef(0)
+  const saveRequestRef = React.useRef(0)
+  const saveInFlightRef = React.useRef(false)
+  const flushPendingRef = React.useRef(false)
+  const failedSnapshotRef = React.useRef<{ name: string; description: string; body: string } | null>(null)
+  const mountedRef = React.useRef(true)
+  const saveDraftRef = React.useRef<() => void>(() => {})
+  const draftRef = React.useRef({ name: skill.name, description: skill.description ?? '', body: '' })
+  const savedRef = React.useRef({ name: skill.name, description: skill.description ?? '', body: '' })
+
+  const updateDraft = React.useCallback((next: Partial<typeof draftRef.current>) => {
+    draftRef.current = { ...draftRef.current, ...next }
+    failedSnapshotRef.current = null
+    setSaveFailed(false)
+    if (next.name !== undefined) setEditName(next.name)
+    if (next.description !== undefined) setEditDescription(next.description)
+    if (next.body !== undefined) setEditBody(next.body)
+  }, [])
+
+  // 切换 Skill 或外部能力刷新时，只替换未修改的字段，避免覆盖本地的自动保存缓冲区。
+  React.useEffect(() => {
+    const isDifferentSkill = skillSlugRef.current !== skill.slug
+    if (isDifferentSkill) {
+      skillSlugRef.current = skill.slug
+      const next = { name: skill.name, description: skill.description ?? '', body: '' }
+      draftRef.current = next
+      savedRef.current = next
+      contentRef.current = null
+      setContent(null)
+      setEditName(next.name)
+      setEditDescription(next.description)
+      setEditBody(next.body)
+      setSaveFailed(false)
+      return
+    }
+
+    const next: Partial<typeof draftRef.current> = {}
+    if (draftRef.current.name === savedRef.current.name) {
+      savedRef.current.name = skill.name
+      next.name = skill.name
+    }
+    if (draftRef.current.description === savedRef.current.description) {
+      const description = skill.description ?? ''
+      savedRef.current.description = description
+      next.description = description
+    }
+    if (Object.keys(next).length > 0) updateDraft(next)
+  }, [skill.slug, skill.name, skill.description, updateDraft])
 
   React.useEffect(() => {
+    const requestId = ++loadRequestRef.current
     setLoadingContent(true)
     window.electronAPI.readSkillContent(workspaceSlug, skill.slug)
       .then((text) => {
+        if (loadRequestRef.current !== requestId) return
+        const externalBody = extractSkillBody(text)
+        contentRef.current = text
         setContent(text)
-        setEditBody(extractSkillBody(text))
+        // 只在该字段未被本地修改时接收外部内容，避免覆盖自动保存等待中的草稿。
+        if (draftRef.current.body === savedRef.current.body) {
+          savedRef.current.body = externalBody
+          updateDraft({ body: externalBody })
+        }
       })
       .catch((err) => {
+        if (loadRequestRef.current !== requestId) return
         console.error('[SkillDetail] 加载内容失败:', err)
+        contentRef.current = null
         setContent(null)
       })
-      .finally(() => setLoadingContent(false))
-  }, [skill.slug, workspaceSlug])
+      .finally(() => {
+        if (loadRequestRef.current === requestId) setLoadingContent(false)
+      })
+  }, [contentVersion, skill.slug, workspaceSlug, updateDraft])
 
-  const body = React.useMemo(() => extractSkillBody(content ?? ''), [content])
+  const saveDraft = React.useCallback((): void => {
+    const draft = draftRef.current
+    const saved = savedRef.current
+    const hasChanges = draft.name !== saved.name
+      || draft.description !== saved.description
+      || draft.body !== saved.body
+    const failed = failedSnapshotRef.current
+    const isKnownFailure = failed?.name === draft.name
+      && failed.description === draft.description
+      && failed.body === draft.body
+    if (!contentRef.current || !hasChanges || isKnownFailure) return
 
-  const startEditMeta = (): void => {
-    setEditName(skill.name)
-    setEditDescription(skill.description ?? '')
-    setIsEditingMeta(true)
-  }
-
-  const saveMeta = async (): Promise<void> => {
-    if (!content) return
-    setSaving(true)
-    try {
-      const newContent = rebuildSkillMd(content, { name: editName, description: editDescription })
-      await window.electronAPI.writeSkillContent(workspaceSlug, skill.slug, newContent)
-      setContent(newContent)
-      setIsEditingMeta(false)
-      onChanged()
-      toast.success('元数据已保存')
-    } catch (err) {
-      console.error('[SkillDetail] 保存元数据失败:', err)
-      toast.error('保存失败')
-    } finally {
-      setSaving(false)
+    if (saveInFlightRef.current) {
+      flushPendingRef.current = true
+      return
     }
-  }
 
-  const saveBody = async (): Promise<void> => {
-    if (!content) return
-    setSaving(true)
-    try {
-      const newContent = rebuildSkillMd(content, { body: editBody })
-      await window.electronAPI.writeSkillContent(workspaceSlug, skill.slug, newContent)
-      setContent(newContent)
-      onChanged()
-      toast.success('说明已保存')
-    } catch (err) {
-      console.error('[SkillDetail] 保存说明失败:', err)
-      toast.error('保存失败')
-    } finally {
-      setSaving(false)
+    const requestId = ++saveRequestRef.current
+    const snapshot = { ...draft }
+    const nextContent = rebuildSkillMd(
+      rebuildSkillMd(contentRef.current as string, { name: snapshot.name, description: snapshot.description }),
+      { body: snapshot.body },
+    )
+
+    // 700ms 防抖后串行写入，避免快速连续输入造成写入乱序。
+    saveInFlightRef.current = true
+    if (mountedRef.current) setSaving(true)
+    void window.electronAPI.writeSkillContent(workspaceSlug, skill.slug, nextContent)
+      .then(() => {
+        if (saveRequestRef.current !== requestId) return
+        contentRef.current = nextContent
+        savedRef.current = snapshot
+        failedSnapshotRef.current = null
+        if (mountedRef.current) {
+          setContent(nextContent)
+          setSaveFailed(false)
+        }
+      })
+      .catch((err) => {
+        if (saveRequestRef.current !== requestId) return
+        failedSnapshotRef.current = snapshot
+        console.error('[SkillDetail] 自动保存失败:', err)
+        if (mountedRef.current) {
+          setSaveFailed(true)
+          toast.error('自动保存失败')
+        }
+      })
+      .finally(() => {
+        saveInFlightRef.current = false
+        if (mountedRef.current && saveRequestRef.current === requestId) setSaving(false)
+        if (flushPendingRef.current) {
+          flushPendingRef.current = false
+          saveDraftRef.current()
+        }
+      })
+  }, [workspaceSlug, skill.slug])
+
+  saveDraftRef.current = saveDraft
+
+  const retrySave = React.useCallback(() => {
+    failedSnapshotRef.current = null
+    setSaveFailed(false)
+    saveDraft()
+  }, [saveDraft])
+
+  React.useEffect(() => {
+    const draft = draftRef.current
+    const saved = savedRef.current
+    const hasChanges = draft.name !== saved.name
+      || draft.description !== saved.description
+      || draft.body !== saved.body
+    if (!contentRef.current || !hasChanges) return
+
+    const timer = window.setTimeout(() => saveDraft(), 700)
+    return () => window.clearTimeout(timer)
+  }, [content, editName, editDescription, editBody, saveDraft])
+
+  React.useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      saveDraftRef.current()
     }
-  }
+  }, [])
 
   const sourceLabel = isBuiltin
     ? 'PROMA 内置'
@@ -119,7 +223,16 @@ export function SkillDetailView({
       : '当前项目'
 
   return (
-    <div className="flex h-full flex-col min-h-0">
+    <div
+      className="flex h-full flex-col min-h-0"
+      onKeyDownCapture={(event) => {
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+          event.preventDefault()
+          event.stopPropagation()
+          retrySave()
+        }
+      }}
+    >
       {/* 头部 */}
       <div className="shrink-0 border-b border-border/60 px-5 pb-4 pt-5">
         <div className="flex items-center gap-3">
@@ -194,42 +307,19 @@ export function SkillDetailView({
             <div className="space-y-2">
             <div className="flex items-center justify-between">
               <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">元数据</h4>
-              {!isEditingMeta ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={startEditMeta}
-                      className="flex items-center rounded p-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                    >
-                      <Pencil size={12} />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top">编辑</TooltipContent>
-                </Tooltip>
+              {saveFailed ? (
+                <Button size="sm" variant="outline" onClick={retrySave} disabled={saving}>
+                  重试保存
+                </Button>
               ) : (
-                <div className="flex items-center gap-2">
-                  <Button size="sm" variant="ghost" onClick={() => setIsEditingMeta(false)} disabled={saving}>
-                    <X size={14} /> 取消
-                  </Button>
-                  <Button size="sm" onClick={() => void saveMeta()} disabled={saving}>
-                    <Save size={14} /> {saving ? '保存中...' : '保存'}
-                  </Button>
-                </div>
+                <span className="text-xs text-muted-foreground" aria-live="polite">
+                  {saving ? '正在保存…' : '自动保存'}
+                </span>
               )}
             </div>
             <SettingsCard divided>
-              {isEditingMeta ? (
-                <>
-                  <MetaEditRow label="名称" value={editName} onChange={setEditName} />
-                  <MetaEditRow label="描述" value={editDescription} onChange={setEditDescription} multiline />
-                </>
-              ) : (
-                <>
-                  <MetaRow label="名称" value={skill.name} />
-                  <MetaRow label="描述" value={skill.description ?? '无描述'} />
-                </>
-              )}
+              <MetaEditRow label="名称" value={editName} onChange={(name) => updateDraft({ name })} />
+              <MetaEditRow label="描述" value={editDescription} onChange={(description) => updateDraft({ description })} multiline />
               <MetaRow label="数据源" value={sourceLabel} />
               <MetaRow label="位置" value={`skills/${skill.slug}`} />
             </SettingsCard>
@@ -251,22 +341,15 @@ export function SkillDetailView({
 
             <TabsContent value="body" className="mt-3">
               <div className="flex flex-col">
-                <div className="flex min-h-[28px] shrink-0 items-center justify-between px-1 pb-2">
+                <div className="flex min-h-[28px] shrink-0 items-center px-1 pb-2">
                   <div className="font-mono text-xs text-muted-foreground">SKILL.md</div>
-                  <Button
-                    size="sm"
-                    onClick={() => void saveBody()}
-                    disabled={saving || !content || editBody === body}
-                  >
-                    <Save size={14} /> {saving ? '保存中...' : '保存'}
-                  </Button>
                 </div>
                 <SettingsCard divided={false}>
                   <div className="p-4">
                     <LiveMarkdownEditor
                       value={editBody}
-                      onChange={setEditBody}
-                      onSave={() => { void saveBody() }}
+                      onChange={(body) => updateDraft({ body })}
+                      onSave={retrySave}
                       className="live-markdown-external-scroll skill-detail-live-markdown"
                     />
                   </div>

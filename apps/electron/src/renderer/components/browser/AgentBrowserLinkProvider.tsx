@@ -3,6 +3,7 @@ import { useSetAtom } from 'jotai'
 import type { BrowserStateChange, BrowserViewState } from '@proma/shared'
 import { BROWSER_RISK_DISCLAIMER_VERSION } from '@/types/settings'
 import {
+  browserFocusRequestMapAtom,
   browserPanelMinimizedMapAtom,
   browserPanelOpenMapAtom,
   browserPendingNavigationMapAtom,
@@ -34,6 +35,7 @@ export function AgentBrowserLinkProvider({
   const setBrowserOpenMap = useSetAtom(browserPanelOpenMapAtom)
   const setBrowserMinimizedMap = useSetAtom(browserPanelMinimizedMapAtom)
   const setBrowserStateMap = useSetAtom(browserStateMapAtom)
+  const setBrowserFocusRequestMap = useSetAtom(browserFocusRequestMapAtom)
   const setPendingNavigationMap = useSetAtom(browserPendingNavigationMapAtom)
 
   const publishBrowserState = React.useCallback((state: BrowserStateChange) => {
@@ -41,6 +43,7 @@ export function AgentBrowserLinkProvider({
       setBrowserOpenMap((previous) => { const next = new Map(previous); next.set(state.sessionId, false); return next })
       setBrowserMinimizedMap((previous) => { const next = new Map(previous); next.delete(state.sessionId); return next })
       setBrowserStateMap((previous) => { const next = new Map(previous); next.delete(state.sessionId); return next })
+      setBrowserFocusRequestMap((previous) => { const next = new Map(previous); next.delete(state.sessionId); return next })
       setPendingNavigationMap((previous) => { const next = new Map(previous); next.delete(state.sessionId); return next })
       return
     }
@@ -54,7 +57,15 @@ export function AgentBrowserLinkProvider({
       next.set(state.sessionId, true)
       return next
     })
-  }, [setBrowserOpenMap, setBrowserMinimizedMap, setBrowserStateMap, setPendingNavigationMap])
+  }, [setBrowserFocusRequestMap, setBrowserOpenMap, setBrowserMinimizedMap, setBrowserStateMap, setPendingNavigationMap])
+
+  const requestBrowserFocus = React.useCallback((state: BrowserViewState) => {
+    setBrowserFocusRequestMap((previous) => {
+      const next = new Map(previous)
+      next.set(state.sessionId, state.activeTabId)
+      return next
+    })
+  }, [setBrowserFocusRequestMap])
 
   const openLink = React.useCallback((url: string) => {
     const openBrowser = (window.electronAPI as Partial<typeof window.electronAPI>).openAgentBrowser
@@ -80,7 +91,9 @@ export function AgentBrowserLinkProvider({
 
           if (!riskAcknowledged) {
             // 风险告知尚未确认时，先打开空白浏览器展示确认弹窗，确认后再导航。
-            publishBrowserState(existingState ?? await openBrowser(sessionId))
+            const state = existingState ?? await openBrowser(sessionId)
+            publishBrowserState(state)
+            requestBrowserFocus(state)
             setPendingNavigationMap((previous) => {
               const next = new Map(previous)
               next.set(sessionId, url)
@@ -95,6 +108,7 @@ export function AgentBrowserLinkProvider({
             ? await window.electronAPI.navigateAgentBrowser({ sessionId, url })
             : await window.electronAPI.createAgentBrowserTab({ sessionId, url })
           publishBrowserState(nextState)
+          requestBrowserFocus(nextState)
         } catch (error) {
           console.error('[Agent 回复链接] 在受管浏览器中打开失败:', error)
         }
@@ -103,7 +117,7 @@ export function AgentBrowserLinkProvider({
     void nextNavigation.finally(() => {
       if (navigationQueues.get(sessionId) === nextNavigation) navigationQueues.delete(sessionId)
     })
-  }, [publishBrowserState, sessionId, setBrowserMinimizedMap, setPendingNavigationMap])
+  }, [publishBrowserState, requestBrowserFocus, sessionId, setBrowserMinimizedMap, setPendingNavigationMap])
 
   const value = React.useMemo(() => ({ openLink }), [openLink])
   return <AgentBrowserLinkContext.Provider value={value}>{children}</AgentBrowserLinkContext.Provider>
