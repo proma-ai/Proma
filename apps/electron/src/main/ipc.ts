@@ -295,9 +295,11 @@ import {
   cleanupStaleAttachedPaths,
   searchAgentSessionMessages,
   searchAgentSessionReferences,
+  resolveAgentCwd,
 } from './lib/agent-session-manager'
 import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive, isAgentSessionBusy, listActiveAgentSessionSnapshots, reserveAgentSessionStart, queueAgentMessage, submitOrEnqueueAgentMessage, enqueueAgentQueuedMessage, cancelAgentQueuedMessage, moveAgentQueuedMessage, clearAgentQueuedMessages, updateAgentPermissionMode, rewindAgentSession, setVisibleAgentSession } from './lib/agent-service'
 import { permissionService } from './lib/agent-permission-service'
+import { resolvePathAgainstAgentCwd } from './lib/agent-file-path'
 import { askUserService } from './lib/agent-ask-user-service'
 import { exitPlanService } from './lib/agent-exit-plan-service'
 import { getAgentSessionWorkspacePath, getAgentWorkspacesDir, getConfigDir, getWorkspaceSkillsDir, getScratchPadPath } from './lib/config-paths'
@@ -599,6 +601,15 @@ async function resolveFileAccessPath(filePath: string, options?: FileAccessOptio
     import('./lib/file-preview-service'),
   ])
   return resolveFilePath(filePath, getPreviewCandidateBasePaths(options)) ?? resolve(filePath)
+}
+
+/** 当前 Agent 的 Write/Edit 相对路径必须按实际运行 cwd 解析。 */
+function getAgentCwdForFileAccess(options?: FileAccessOptions): string | undefined {
+  if (!options?.sessionId) return undefined
+  const session = getAgentSessionMeta(options.sessionId)
+  if (!session?.workspaceId) return undefined
+  const workspace = getAgentWorkspace(session.workspaceId)
+  return resolveAgentCwd(workspace, session.id, session.agentCwdMode, session.activeWorktree)
 }
 
 async function getAccessRootMainRepo(root: string): Promise<string | null> {
@@ -4008,10 +4019,12 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.SHOW_IN_FOLDER,
     async (_, filePath: string, access?: FileAccessOptions): Promise<void> => {
-      const { resolve } = await import('node:path')
-
-      const safePath = resolve(filePath)
-      if (!isPathAllowed(safePath, normalizeFileAccessOptions(access))) {
+      const options = normalizeFileAccessOptions(access)
+      const safePath = resolvePathAgainstAgentCwd(filePath, getAgentCwdForFileAccess(options))
+      if (!existsSync(safePath)) {
+        throw new Error('文件不存在或已被移动')
+      }
+      if (!isPathAllowed(safePath, options)) {
         throw new Error('访问路径超出当前会话的授权范围')
       }
 
