@@ -436,7 +436,7 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
   const turnId = turnResult?._promaTurnId
   const [deductedPoints, setDeductedPoints] = React.useState<number | undefined>(turnResult?._promaDeductedPoints)
   const deductedPointsLabel = deductedPoints?.toLocaleString(undefined, {
-    maximumFractionDigits: 4,
+    maximumFractionDigits: 3,
   })
 
   // Billing happens after the upstream stream is terminal, so a completed Pi
