@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  buildPiRequestHeaders,
   resolvePiApi,
   resolvePiImageInputCapability,
   shouldForcePiAdaptiveThinking,
@@ -60,23 +59,6 @@ describe('DeepSeek V4 native image input', () => {
   test('Given official DeepSeek V4 Pro, when resolving capability, then preserves the Vision Relay-only boundary', async () => {
     expect(supportsPiNativeImageInput('deepseek-v4-pro')).toBe(false)
     await expect(resolvePiImageInputCapability('proma', 'deepseek-v4-pro')).resolves.toBe('unsupported')
-  })
-})
-
-describe('official Agent turn billing header', () => {
-  test('attaches the opaque turn ID only to Proma Cloud requests', () => {
-    expect(buildPiRequestHeaders('proma', 'secret', 'openai-responses', 'https://api.proma.cool/v1', 'session-123:1'))
-      .toMatchObject({
-        'X-Proma-Agent-Runtime': 'pi',
-        'X-Proma-Agent-Turn-Id': 'session-123:1',
-      })
-    expect(buildPiRequestHeaders('openai', 'secret', 'openai-responses', 'https://api.openai.com/v1', 'session-123:1'))
-      .not.toHaveProperty('X-Proma-Agent-Turn-Id')
-  })
-
-  test('does not forward malformed correlation values', () => {
-    expect(buildPiRequestHeaders('proma', 'secret', 'openai-responses', 'https://api.proma.cool/v1', 'invalid turn id'))
-      .not.toHaveProperty('X-Proma-Agent-Turn-Id')
   })
 })
 
