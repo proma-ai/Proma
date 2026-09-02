@@ -92,7 +92,7 @@ import {
 } from '@/lib/agent-completion-presence'
 import { getPlanModeChangeFromToolName, updatePlanModeSessionSet } from '@/lib/agent-plan-mode'
 import { detectIsWindows } from '@/lib/platform'
-import { arePathsEqual, getSessionFileChangeKind, getOwnedSessionWatcherPaths, removeSessionFileChange, upsertSessionFileChange } from '@/lib/session-file-changes'
+import { arePathsEqual, getInactiveSessionFileChangePaths, getSessionFileChangeKind, getOwnedSessionWatcherPaths, removeSessionFileChange, upsertSessionFileChange, type SessionFileChange } from '@/lib/session-file-changes'
 import { doesWorkspaceChangeAffectPreview } from '@/components/diff/preview-open-path'
 import { removeQueuedMessage, createQueuedAgentStreamState, createAgentQueuedMessage } from '@/lib/agent-message-queue'
 import { createAgentStreamEventBatcher } from '@/lib/agent-stream-event-batcher'
@@ -931,6 +931,41 @@ export function useGlobalAgentListeners(): void {
         const candidateIds = [...streamingStates.entries()]
           .filter(([, state]) => state.running)
           .map(([sessionId]) => sessionId)
+        const activeSessionIds = new Set(candidateIds)
+
+        // 停止会话不会进入下方的运行中归属流程。若 watcher 明确带回该会话
+        // 已记录路径的变化，则单独确认它是否已经删除，避免面板已打开时被
+        // `existenceCheckedRef` 缓存住的历史记录永久残留。
+        const inactiveChangedPaths = getInactiveSessionFileChangePaths(
+          store.get(agentNonGitFileChangesAtom),
+          filePaths,
+          activeSessionIds,
+          isWindows,
+        )
+        if (inactiveChangedPaths.length > 0) {
+          const existingPaths = await window.electronAPI.filterExistingFilePaths(
+            inactiveChangedPaths,
+            { unrestricted: true },
+          )
+          const deletedPaths = inactiveChangedPaths.filter(
+            (path) => !existingPaths.some((existingPath) => arePathsEqual(existingPath, path, isWindows)),
+          )
+          if (deletedPaths.length > 0) {
+            store.set(agentNonGitFileChangesAtom, (previous) => {
+              let next: Map<string, SessionFileChange[]> | undefined
+              for (const [sessionId, changes] of previous) {
+                if (activeSessionIds.has(sessionId)) continue
+                const filtered = changes.filter(
+                  (change) => !deletedPaths.some((path) => arePathsEqual(change.path, path, isWindows)),
+                )
+                if (filtered.length === changes.length) continue
+                if (!next) next = new Map(previous)
+                next.set(sessionId, filtered)
+              }
+              return next ?? previous
+            })
+          }
+        }
 
         const candidates = await Promise.all(candidateIds.map(async (sessionId) => {
           const session = store.get(agentSessionsAtom).find((item) => item.id === sessionId)
