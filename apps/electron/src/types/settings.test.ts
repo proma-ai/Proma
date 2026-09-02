@@ -1,5 +1,19 @@
 import { describe, expect, test } from 'bun:test'
-import { CURRENT_ONBOARDING_VERSION, hasCompletedCurrentOnboarding } from './settings'
+import { CURRENT_ONBOARDING_VERSION, hasCompletedCurrentOnboarding, isSidebarCreditIndicatorVisible } from './settings'
+
+describe('侧边栏余额常驻显示', () => {
+  test('Given a legacy installation without this preference When checking visibility Then the indicator remains visible', () => {
+    expect(isSidebarCreditIndicatorVisible({})).toBe(true)
+  })
+
+  test('Given a user has enabled the preference When checking visibility Then the indicator is visible', () => {
+    expect(isSidebarCreditIndicatorVisible({ sidebarCreditIndicatorVisible: true })).toBe(true)
+  })
+
+  test('Given a user has disabled the preference When checking visibility Then the indicator is hidden', () => {
+    expect(isSidebarCreditIndicatorVisible({ sidebarCreditIndicatorVisible: false })).toBe(false)
+  })
+})
 
 describe('Onboarding completion version', () => {
   test('Given an existing completed installation without a version When checking Then requires the new onboarding', () => {

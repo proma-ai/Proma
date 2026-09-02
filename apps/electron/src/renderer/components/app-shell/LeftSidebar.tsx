@@ -149,7 +149,7 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
 import type { ConversationMeta, AgentSessionMeta, AgentWorkspace, WorkspaceCapabilities } from '@proma/shared'
-import { CloudSidebarCreditTooltip } from './CloudSidebarExtension'
+import { CloudSidebarCreditIndicator, CloudSidebarCreditTooltip } from './CloudSidebarExtension'
 
 function formatAutomationCount(count: number): string {
   return count > 99 ? '99+' : String(count)
@@ -3752,7 +3752,10 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
         )}
       </div>
 
-      {/* 底部：用户资料 + 设置入口；Cloud 额度只在悬浮时以 Tooltip 显示。 */}
+      {/* Cloud 余额默认常驻显示，用户可在通用设置中关闭。 */}
+      <CloudSidebarCreditIndicator />
+
+      {/* 底部：用户资料 + 设置入口；悬浮时保留余额查看与设置提醒。 */}
       <CloudSidebarCreditTooltip>
         <div className="px-3 pb-3">
           <div className="flex items-center gap-2 rounded-[10px] px-3 py-2 text-foreground/70 transition-colors titlebar-no-drag hover:bg-foreground/[0.04] hover:text-foreground">
