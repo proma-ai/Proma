@@ -11,7 +11,7 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Star, Settings, Plus, CirclePlus, Trash2, Pencil, PanelLeft, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, FolderInput, FolderPlus, GripVertical, Clock, CalendarDays, ChevronRight, ChevronDown, ChevronUp, Blocks, Brain, ListTodo, GitBranch, Download, Loader2, RotateCw, Info } from 'lucide-react'
+import { Pin, PinOff, Star, Settings, Plus, CirclePlus, Trash2, Pencil, PanelLeft, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, FolderInput, FolderPlus, GripVertical, Clock, CalendarDays, ChevronRight, ChevronDown, ChevronUp, Blocks, Brain, ListTodo, GitBranch, Download, Loader2, RotateCw, Info, MessagesSquare } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
@@ -49,6 +49,9 @@ import {
   agentWorkspacesAtom,
   workspaceCapabilitiesVersionAtom,
   agentDiffPanelTabAtom,
+  agentSideSessionMapAtom,
+  getSideSessionTab,
+  currentSessionSidePanelOpenAtom,
   agentDiffRefreshVersionAtom,
   agentDiffUnseenChangesAtom,
   agentDiffUnseenFilesAtom,
@@ -4316,6 +4319,32 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
   // 菜单打开时关闭迷你地图预览，避免预览面板盖住菜单项导致点不动
   const preview = useSessionMiniMapHover(600, disableMiniMap || menuOpen)
 
+  // 进入分屏：把本会话作为 Chrome 式 Tab 打开到当前会话的右侧工作区并排查看
+  const currentAgentSessionId = useAtomValue(currentAgentSessionIdAtom)
+  const setSideSessionMap = useSetAtom(agentSideSessionMapAtom)
+  const setSidePanelOpen = useSetAtom(currentSessionSidePanelOpenAtom)
+  const setDiffPanelTabMap = useSetAtom(agentDiffPanelTabAtom)
+  const handleEnterSplit = React.useCallback((): void => {
+    if (!currentAgentSessionId || currentAgentSessionId === session.id) {
+      // 没有已打开的会话，或右键的就是当前会话：直接打开它，不分屏
+      onSelect(session.id, session.title)
+      return
+    }
+    setSideSessionMap((prev) => {
+      const openIds = prev.get(currentAgentSessionId) ?? []
+      if (openIds.includes(session.id)) return prev
+      const next = new Map(prev)
+      next.set(currentAgentSessionId, [...openIds, session.id])
+      return next
+    })
+    setSidePanelOpen(true)
+    setDiffPanelTabMap((prev) => {
+      const next = new Map(prev)
+      next.set(currentAgentSessionId, getSideSessionTab(session.id))
+      return next
+    })
+  }, [currentAgentSessionId, session.id, session.title, onSelect, setDiffPanelTabMap, setSidePanelOpen, setSideSessionMap])
+
   const startEdit = (): void => {
     setEditTitle(session.title)
     setEditing(true)
@@ -4437,6 +4466,10 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
       <MenuItem className="text-xs py-1 [&>svg]:size-3.5" onSelect={() => startEdit()}>
         <Pencil size={14} />
         重命名
+      </MenuItem>
+      <MenuItem className="text-xs py-1 [&>svg]:size-3.5" onSelect={() => handleEnterSplit()}>
+        <MessagesSquare size={14} />
+        进入分屏
       </MenuItem>
       <MenuItem className="text-xs py-1 [&>svg]:size-3.5" onSelect={() => onToggleArchive(session.id)}>
         {session.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}

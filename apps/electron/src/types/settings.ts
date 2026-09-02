@@ -436,6 +436,18 @@ export const SCRATCH_PAD_IPC_CHANNELS = {
   COPY_IMAGE: 'scratch-pad:copy-image',
 } as const
 
+/** Canvas 画布 IPC 通道（会话画布 + 导出簇） */
+export const CANVAS_IPC_CHANNELS = {
+  /** 导出选中簇为独立 .canvas + .md 文件 */
+  EXPORT: 'canvas:export-cluster',
+  /** 从磁盘加载 session 专属画布 */
+  LOAD_SESSION: 'canvas:load-session',
+  /** 保存 session 专属画布 */
+  SAVE_SESSION: 'canvas:save-session',
+  /** 同步保存 session 专属画布（beforeunload 场景） */
+  SAVE_SESSION_SYNC: 'canvas:save-session-sync',
+} as const
+
 /** 应用图标 IPC 通道 */
 export const APP_ICON_IPC_CHANNELS = {
   /** 设置应用图标（variant ID） */

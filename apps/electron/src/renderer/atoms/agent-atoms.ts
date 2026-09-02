@@ -651,9 +651,10 @@ export function pruneFileBrowserStateMap<T>(state: Map<string, T>, retainedSessi
 /**
  * 工作区级组件：内容归属项目而非单个会话，但在当前会话的右侧工作区中呈现。
  * 同一项目下的打开状态跨会话保留；关闭一个组件不会影响其他项目。
+ * canvas 为例外：内容是 session 专属画布而非项目数据，但复用同一套打开状态管理。
  */
-export type WorkspaceComponentTab = 'todos' | 'calendar' | 'automations' | 'skills' | 'mcp' | 'memory' | 'vault'
-export const WORKSPACE_COMPONENT_TABS: readonly WorkspaceComponentTab[] = ['todos', 'calendar', 'automations', 'skills', 'mcp', 'memory', 'vault']
+export type WorkspaceComponentTab = 'todos' | 'calendar' | 'automations' | 'skills' | 'mcp' | 'memory' | 'vault' | 'canvas'
+export const WORKSPACE_COMPONENT_TABS: readonly WorkspaceComponentTab[] = ['todos', 'calendar', 'automations', 'skills', 'mcp', 'memory', 'vault', 'canvas']
 
 export function isWorkspaceComponentTab(tab: AgentSidePanelTab | string): tab is WorkspaceComponentTab {
   return (WORKSPACE_COMPONENT_TABS as readonly string[]).includes(tab)
@@ -672,8 +673,8 @@ export function getDelegationTabLabel(title: string | null | undefined): string 
 }
 
 export type AgentSidePanelBaseTab = 'files' | 'changes' | 'chat' | 'temporary-agent' | 'delegation' | WorkspaceComponentTab
-/** 工作区组件、每个 Pi 探索分支、协作子 Agent、浏览器网页和文件预览都处于右侧工作区顶栏。 */
-export type AgentSidePanelTab = AgentSidePanelBaseTab | `exploration:${string}` | `browser:${string}` | `preview:${string}` | `terminal:${string}`
+/** 工作区组件、每个 Pi 探索分支、并排会话、协作子 Agent、浏览器网页和文件预览都处于右侧工作区顶栏。 */
+export type AgentSidePanelTab = AgentSidePanelBaseTab | `exploration:${string}` | `session:${string}` | `browser:${string}` | `preview:${string}` | `terminal:${string}`
 
 /** 用户主动进入这些项目级能力时，Agent 后续的改动提示不得抢走当前视图。 */
 export function isUserPriorityWorkspaceComponentTab(
@@ -700,6 +701,24 @@ export const agentSideTemporaryAgentMapAtom = atom<Map<string, AgentExplorationB
 
 export function getExplorationSidePanelTab(branchSessionId: string): AgentSidePanelTab {
   return `exploration:${branchSessionId}`
+}
+
+/**
+ * 右侧并排会话：key 为主线 Agent sessionId，value 为从左侧列表「进入分屏」打开的已有 session ID。
+ * 仅管理右侧展示；被并排的 session 本身是普通持久化会话，关闭 Tab 不会删除它。
+ */
+export const agentSideSessionMapAtom = atom<Map<string, string[]>>(new Map())
+
+export function getSideSessionTab(sideSessionId: string): AgentSidePanelTab {
+  return `session:${sideSessionId}`
+}
+
+export function getSideSessionIdFromSidePanelTab(tab: AgentSidePanelTab | 'session'): string | null {
+  return tab.startsWith('session:') ? tab.slice('session:'.length) : null
+}
+
+export function isSideSessionSidePanelTab(tab: AgentSidePanelTab | 'session'): tab is `session:${string}` {
+  return tab.startsWith('session:')
 }
 
 /** 右侧当前观察的协作子 Agent：key 为父会话 ID，value 为唯一子会话 ID。 */
