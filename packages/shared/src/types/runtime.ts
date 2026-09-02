@@ -429,6 +429,8 @@ export const IPC_CHANNELS = {
   WINDOW_CLOSE: 'window:close',
   /** 窗口是否最大化 */
   WINDOW_IS_MAXIMIZED: 'window:is-maximized',
+  /** 宿主 BrowserWindow 是否处于前台（包含焦点位于 WebContentsView 的情况） */
+  WINDOW_IS_FOCUSED: 'window:is-focused',
   /** 在系统剪贴板中写入纯文本 */
   WRITE_CLIPBOARD_TEXT: 'clipboard:write-text',
   /** 截图导出：将 HTML 渲染为 PNG 图片 */

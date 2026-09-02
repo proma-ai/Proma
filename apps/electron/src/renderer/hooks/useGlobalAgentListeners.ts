@@ -44,6 +44,7 @@ import {
   workspaceAttachedDirectoriesMapAtom,
   workspaceAttachedFilesMapAtom,
   unviewedCompletedSessionIdsAtom,
+  unviewedCompletedDelegatedSessionIdsAtom,
   agentSessionPathMapAtom,
   agentDiffRefreshVersionAtom,
   agentDiffPanelTabAtom,
@@ -53,6 +54,7 @@ import {
   agentSidePanelOpenAtomFamily,
   revealChangedWorkspaceComponentAtom,
   agentSideDelegationMapAtom,
+  agentSidePanelSplitMapAtom,
   getDelegationSidePanelTab,
   askUserDraftsAtom,
 } from '@/atoms/agent-atoms'
@@ -85,14 +87,18 @@ import {
   shouldActivateExternalAgentRun,
   shouldRevealDelegatedSession,
 } from '@/lib/external-agent-run'
-import { upsertAgentSession, mergeFetchedAgentSessions } from '@/lib/agent-session-list'
+import { upsertAgentSession, mergeFetchedAgentSessions, selectDelegatedSession } from '@/lib/agent-session-list'
 import {
   getAgentCompletionMarkers,
+  getDelegatedCompletionAttention,
+  markSessionCompletionUnviewed,
+  markSessionCompletionViewed,
   notifyAgentCompletion,
 } from '@/lib/agent-completion-presence'
 import { getPlanModeChangeFromToolName, updatePlanModeSessionSet } from '@/lib/agent-plan-mode'
 import { detectIsWindows } from '@/lib/platform'
-import { getSessionFileChangeKind, getOwnedSessionWatcherPaths, upsertSessionFileChange } from '@/lib/session-file-changes'
+import { arePathsEqual, getInactiveSessionFileChangePaths, getSessionFileChangeKind, getOwnedSessionWatcherPaths, removeSessionFileChange, upsertSessionFileChange, type SessionFileChange } from '@/lib/session-file-changes'
+import { rememberStopGenerationTarget } from '@/lib/stop-generation-target'
 import { doesWorkspaceChangeAffectPreview } from '@/components/diff/preview-open-path'
 import { removeQueuedMessage, createQueuedAgentStreamState, createAgentQueuedMessage } from '@/lib/agent-message-queue'
 import { createAgentStreamEventBatcher } from '@/lib/agent-stream-event-batcher'
@@ -576,6 +582,20 @@ export function useGlobalAgentListeners(): void {
   const store = useStore()
 
   useEffect(() => {
+    const clearCompletionAttention = (sessionId: string): void => {
+      store.set(unviewedCompletedSessionIdsAtom, (prev) => markSessionCompletionViewed(prev, sessionId))
+      store.set(unviewedCompletedDelegatedSessionIdsAtom, (prev) => markSessionCompletionViewed(prev, sessionId))
+    }
+
+    /** 新一轮启动时立即把 delegated child 提升到所属父会话的子列表首位。 */
+    const promoteDelegatedSessionForRunStart = (sessionId: string, startedAt: number): void => {
+      store.set(agentSessionsAtom, (prev) => {
+        const session = prev.find((item) => item.id === sessionId)
+        if (!session?.parentSessionId || !session.sourceDelegationId || session.updatedAt > startedAt) return prev
+        return upsertAgentSession(prev, { ...session, updatedAt: startedAt })
+      })
+    }
+
     /** 正在执行的写工具；写入前的文件存在性用于区分新建和编辑。 */
     const pendingWriteTools = new Map<string, {
       path: string
@@ -592,22 +612,25 @@ export function useGlobalAgentListeners(): void {
         // 主进程在启动 deferred run 前先发送 started 投影。这里必须先建立完整的
         // 当前 run 状态，否则首个 SDK/tool 事件到达前会被当成空闲；后续事件只能
         // 隐式创建一个没有 startedAt 的状态，导致续跑的运行计时和 run 边界丢失。
+        let acceptedRunStart = false
         store.set(agentStreamingStatesAtom, (prev) => {
           const current = prev.get(status.sessionId)
           if (
             current?.runGeneration != null
             && status.runGeneration != null
-            && current.runGeneration > status.runGeneration
+            && current.runGeneration >= status.runGeneration
           ) return prev
-          // 旧 IPC 事件降级为 startedAt 比较；不让迟到队列状态覆盖较新的 run。
-          if (status.runGeneration == null && current?.startedAt != null && current.startedAt > status.startedAt) return prev
+          // 旧 IPC 事件降级为 startedAt 比较；不让迟到或重复队列状态覆盖当前 run。
+          if (status.runGeneration == null && current?.startedAt != null && current.startedAt >= status.startedAt) return prev
           const map = new Map(prev)
           map.set(status.sessionId, {
             ...createQueuedAgentStreamState(current, status.startedAt),
             ...(status.runGeneration != null ? { runGeneration: status.runGeneration } : {}),
           })
+          acceptedRunStart = true
           return map
         })
+        if (acceptedRunStart) promoteDelegatedSessionForRunStart(status.sessionId, status.startedAt)
         store.set(agentSessionMessageQueueAtom, (prev) => {
           const current = prev.get(status.sessionId) ?? []
           const next = removeQueuedMessage(current, status.messageId)
@@ -706,7 +729,16 @@ export function useGlobalAgentListeners(): void {
           createdAt: event.startedAt,
           updatedAt: event.startedAt,
         }
-        store.set(agentSessionsAtom, (prev) => upsertAgentSession(prev, upserted))
+        const duplicateRunStart = currentStreamState?.runGeneration != null && event.runGeneration != null
+          ? currentStreamState.runGeneration === event.runGeneration
+          : currentStreamState?.startedAt === event.startedAt
+        const knownSession = store.get(agentSessionsAtom).some((item) => item.id === event.sessionId)
+        if (!duplicateRunStart || !knownSession) {
+          store.set(agentSessionsAtom, (prev) => upsertAgentSession(prev, knownSession
+            ? upserted
+            : { ...upserted, updatedAt: Math.max(upserted.updatedAt, event.startedAt) }))
+        }
+        if (!duplicateRunStart) promoteDelegatedSessionForRunStart(event.sessionId, event.startedAt)
         const activationModelId = activation.modelId
         if (activationModelId) {
           store.set(agentSessionModelMapAtom, (prev) => {
@@ -715,12 +747,7 @@ export function useGlobalAgentListeners(): void {
             return map
           })
         }
-        store.set(unviewedCompletedSessionIdsAtom, (prev) => {
-          if (!prev.has(event.sessionId)) return prev
-          const next = new Set(prev)
-          next.delete(event.sessionId)
-          return next
-        })
+        clearCompletionAttention(event.sessionId)
         store.set(agentStreamingStatesAtom, (prev) => {
           const map = new Map(prev)
           map.set(event.sessionId, activation.streamState)
@@ -734,19 +761,18 @@ export function useGlobalAgentListeners(): void {
           && upserted.parentSessionId
           && shouldRevealDelegatedSession(upserted.parentSessionId, store.get(activeSessionIdAtom))
         ) {
-          store.set(agentSideDelegationMapAtom, (previous) => {
-            const openChildIds = previous.get(upserted.parentSessionId!) ?? []
-            if (openChildIds.includes(upserted.id)) return previous
-            const next = new Map(previous)
-            next.set(upserted.parentSessionId!, [...openChildIds, upserted.id])
-            return next
-          })
+          store.set(agentSideDelegationMapAtom, (previous) => (
+            selectDelegatedSession(previous, upserted.parentSessionId!, upserted.id)
+          ))
           store.set(agentSidePanelOpenAtomFamily(upserted.parentSessionId), true)
           store.set(agentDiffPanelTabAtom, (previous) => {
             const next = new Map(previous)
-            next.set(upserted.parentSessionId!, getDelegationSidePanelTab(upserted.id))
+            next.set(upserted.parentSessionId!, getDelegationSidePanelTab())
             return next
           })
+          // The UI has actively replaced the right observation slot with this child. Keep the
+          // global stop shortcut aligned even though no AgentView pointer event has fired yet.
+          rememberStopGenerationTarget({ kind: 'agent', sessionId: upserted.id })
         }
       }
 
@@ -931,6 +957,41 @@ export function useGlobalAgentListeners(): void {
         const candidateIds = [...streamingStates.entries()]
           .filter(([, state]) => state.running)
           .map(([sessionId]) => sessionId)
+        const activeSessionIds = new Set(candidateIds)
+
+        // 停止会话不会进入下方的运行中归属流程。若 watcher 明确带回该会话
+        // 已记录路径的变化，则单独确认它是否已经删除，避免面板已打开时被
+        // `existenceCheckedRef` 缓存住的历史记录永久残留。
+        const inactiveChangedPaths = getInactiveSessionFileChangePaths(
+          store.get(agentNonGitFileChangesAtom),
+          filePaths,
+          activeSessionIds,
+          isWindows,
+        )
+        if (inactiveChangedPaths.length > 0) {
+          const existingPaths = await window.electronAPI.filterExistingFilePaths(
+            inactiveChangedPaths,
+            { unrestricted: true },
+          )
+          const deletedPaths = inactiveChangedPaths.filter(
+            (path) => !existingPaths.some((existingPath) => arePathsEqual(existingPath, path, isWindows)),
+          )
+          if (deletedPaths.length > 0) {
+            store.set(agentNonGitFileChangesAtom, (previous) => {
+              let next: Map<string, SessionFileChange[]> | undefined
+              for (const [sessionId, changes] of previous) {
+                if (activeSessionIds.has(sessionId)) continue
+                const filtered = changes.filter(
+                  (change) => !deletedPaths.some((path) => arePathsEqual(change.path, path, isWindows)),
+                )
+                if (filtered.length === changes.length) continue
+                if (!next) next = new Map(previous)
+                next.set(sessionId, filtered)
+              }
+              return next ?? previous
+            })
+          }
+        }
 
         const candidates = await Promise.all(candidateIds.map(async (sessionId) => {
           const session = store.get(agentSessionsAtom).find((item) => item.id === sessionId)
@@ -963,7 +1024,18 @@ export function useGlobalAgentListeners(): void {
           for (const changedPath of uniquelyMatchingPaths) {
             // watcher 现在也会携带删除/目录路径；这些不应进入会话的文件改动记录。
             const existingFile = await window.electronAPI.resolveAndReadFile(changedPath, { sessionId, unrestricted: true })
-            if (!existingFile) continue
+            if (!existingFile) {
+              // 文件已不存在：反向清理该会话的文件改动记录，避免「先创建再删除」的
+              // 残留条目一直留在改动面板中。
+              store.set(agentNonGitFileChangesAtom, (prev) => {
+                const current = prev.get(sessionId)
+                if (!current?.some((change) => arePathsEqual(change.path, changedPath, isWindows))) return prev
+                const map = new Map(prev)
+                map.set(sessionId, removeSessionFileChange(current, changedPath, isWindows))
+                return map
+              })
+              continue
+            }
             const previewFile = await buildWrittenFilePreviewInfo(sessionId, changedPath)
             if (previewFile.previewOnly) {
               store.set(agentNonGitFileChangesAtom, (prev) => {
@@ -1064,6 +1136,7 @@ export function useGlobalAgentListeners(): void {
           // 队列 run 会先通过独立 IPC 发送 started 投影，但该投影可能在窗口
           // 重载或跨 renderer 路由时丢失。run_started 是同一轮的第二个权威启动信号，
           // 必须在首个 SDK/tool 事件之前恢复 running、startedAt 和正常的 live UI。
+          let acceptedRunStart = false
           store.set(agentStreamingStatesAtom, (prev) => {
             const current = prev.get(sessionId)
             if (
@@ -1084,14 +1157,11 @@ export function useGlobalAgentListeners(): void {
               ...createQueuedAgentStreamState(current, runStartedEvent.startedAt),
               ...(runStartedEvent.runGeneration != null ? { runGeneration: runStartedEvent.runGeneration } : {}),
             })
+            acceptedRunStart = true
             return map
           })
-          store.set(unviewedCompletedSessionIdsAtom, (prev) => {
-            if (!prev.has(sessionId)) return prev
-            const next = new Set(prev)
-            next.delete(sessionId)
-            return next
-          })
+          if (acceptedRunStart) promoteDelegatedSessionForRunStart(sessionId, runStartedEvent.startedAt)
+          clearCompletionAttention(sessionId)
         }
 
         // 自动任务会话被用户接管（毕业）：向用户提示，后续定时运行将新建独立会话
@@ -1289,12 +1359,7 @@ export function useGlobalAgentListeners(): void {
           if (event.type !== 'prompt_suggestion') {
             const prevState = store.get(agentSessionStreamingStateAtomFamily(sessionId))
             if (!prevState || !prevState.running) {
-              store.set(unviewedCompletedSessionIdsAtom, (prev: Set<string>) => {
-                if (!prev.has(sessionId)) return prev
-                const next = new Set(prev)
-                next.delete(sessionId)
-                return next
-              })
+              clearCompletionAttention(sessionId)
             }
           }
 
@@ -1637,7 +1702,60 @@ export function useGlobalAgentListeners(): void {
           return map
         })
 
-        // 只有未激活会话才进入"未查看完成"，避免当前页面完成时出现额外未读提醒。
+        const completionParentSessionId = completionSession?.parentSessionId
+        if (data.triggeredBy === 'delegation' || completionSession?.sourceDelegationId) {
+          // Snapshot renderer layout before resolving native BrowserWindow focus asynchronously.
+          const completionPresence = {
+            activeSessionId: store.get(activeSessionIdAtom),
+            selectedDelegationSessionId: completionParentSessionId
+              ? store.get(agentSideDelegationMapAtom).get(completionParentSessionId) ?? null
+              : null,
+            activeSidePanelTab: completionParentSessionId
+              ? store.get(agentDiffPanelTabAtom).get(completionParentSessionId)
+              : undefined,
+            split: completionParentSessionId
+              ? store.get(agentSidePanelSplitMapAtom).get(completionParentSessionId) ?? null
+              : null,
+            sidePanelOpen: completionParentSessionId
+              ? store.get(agentSidePanelOpenAtomFamily(completionParentSessionId))
+              : false,
+          }
+          const updateDelegatedAttention = (windowHasFocus: boolean): void => {
+            // Do not let an old async completion overwrite a newer run's cleared state.
+            if (!isTerminalEventForCurrentRun(
+              store.get(agentSessionStreamingStateAtomFamily(data.sessionId)),
+              data,
+            )) return
+            const attention = getDelegatedCompletionAttention({
+              completion: data,
+              session: completionSession,
+              hasStreamError,
+              ...completionPresence,
+              windowHasFocus,
+            })
+            if (!attention) return
+            store.set(unviewedCompletedDelegatedSessionIdsAtom, (prev: Set<string>) => (
+              attention === 'unviewed'
+                ? markSessionCompletionUnviewed(prev, data.sessionId)
+                : markSessionCompletionViewed(prev, data.sessionId)
+            ))
+          }
+
+          if (document.hasFocus()) {
+            updateDelegatedAttention(true)
+          } else {
+            const getWindowIsFocused = (window.electronAPI as Partial<typeof window.electronAPI>).windowIsFocused
+            if (typeof getWindowIsFocused === 'function') {
+              void getWindowIsFocused()
+                .then(updateDelegatedAttention)
+                .catch(() => updateDelegatedAttention(false))
+            } else {
+              updateDelegatedAttention(false)
+            }
+          }
+        }
+
+        // 只有未激活的顶层会话才进入全局“未查看完成”；协作子会话使用独立集合，不计入 Dock。
         const currentSessionId = store.get(currentAgentSessionIdAtom)
         const completionMarkers = getAgentCompletionMarkers({
           tabs: store.get(tabsAtom),
@@ -1648,11 +1766,9 @@ export function useGlobalAgentListeners(): void {
           documentHasFocus: document.hasFocus(),
         })
         if (completionMarkers.markUnviewedCompleted && !backgroundTasksPending) {
-          store.set(unviewedCompletedSessionIdsAtom, (prev: Set<string>) => {
-            const next = new Set(prev)
-            next.add(data.sessionId)
-            return next
-          })
+          store.set(unviewedCompletedSessionIdsAtom, (prev: Set<string>) => (
+            markSessionCompletionUnviewed(prev, data.sessionId)
+          ))
         } else if (!backgroundTasksPending) {
           // 当前聚焦会话已在主应用可见；同步确认，避免灵动岛把这次完成继续当未读。
           void window.electronAPI.agentIsland.markSessionViewed(data.sessionId).catch(console.error)

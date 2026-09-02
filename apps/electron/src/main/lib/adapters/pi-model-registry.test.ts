@@ -15,15 +15,23 @@ describe('shouldForcePiAdaptiveThinking', () => {
     })).toBe(true)
   })
 
-  test('Given a missing flag or non-Anthropic catalog, when resolving compat, then does not inherit adaptive thinking', () => {
+  test('Given a missing flag, when resolving compat, then does not inherit adaptive thinking', () => {
     expect(shouldForcePiAdaptiveThinking('anthropic-messages', {
       api: 'anthropic-messages',
       compat: { supportsStrictTools: true },
     })).toBe(false)
+  })
+
+  test('Given an Anthropic runtime with a stale non-Anthropic catalog API, when the catalog requires adaptive thinking, then preserves the runtime-safe flag', () => {
     expect(shouldForcePiAdaptiveThinking('anthropic-messages', {
       api: 'openai-responses',
       compat: { forceAdaptiveThinking: true },
-    })).toBe(false)
+    })).toBe(true)
+  })
+
+  test('Given Fable 5.1 is missing from the bundled catalog, when its Anthropic runtime is resolved, then uses adaptive thinking', () => {
+    expect(shouldForcePiAdaptiveThinking('anthropic-messages', undefined, 'claude-fable-5-1')).toBe(true)
+    expect(shouldForcePromaOfficialClaudeAdaptiveThinking('claude-fable-5-1', 'anthropic-messages', undefined)).toBe(true)
   })
 
   test('Given an OpenAI runtime model, when a catalog entry contains the Claude flag, then does not leak it across protocols', () => {

@@ -29,6 +29,11 @@ export function clearStopGenerationTarget(target: StopGenerationTarget): void {
   }
 }
 
+interface DelegationSelectionLike {
+  type: string
+  sessionId: string
+}
+
 /**
  * Resolves a fallback target when the user has not yet focused or clicked a
  * conversation view in this window.
@@ -36,12 +41,14 @@ export function clearStopGenerationTarget(target: StopGenerationTarget): void {
 export function resolveStopGenerationTarget(
   activeTab: SessionTabLike | null,
   activeAgentSidePanelTab: string | undefined,
+  activeDelegation: DelegationSelectionLike | null = null,
 ): StopGenerationTarget | null {
   if (!activeTab) return null
 
   if (activeTab.type === 'agent') {
-    const delegatedChildSessionId = activeAgentSidePanelTab?.startsWith('delegation:')
-      ? activeAgentSidePanelTab.slice('delegation:'.length)
+    const delegatedChildSessionId = activeAgentSidePanelTab === 'delegation'
+      && activeDelegation?.type === 'agent'
+      ? activeDelegation.sessionId
       : null
 
     return {

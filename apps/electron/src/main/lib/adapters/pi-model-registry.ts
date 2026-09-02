@@ -128,13 +128,23 @@ function compilePiReasoningCapabilities(
  * only this protocol-safe catalog flag: current Claude models require adaptive
  * thinking, while copying the complete catalog compat object could leak unrelated
  * tool/sampling behaviour across provider protocols.
+ *
+ * Fable 5.1 is newer than the bundled Pi catalog entry (`claude-fable-5`), so its
+ * exact ID lookup can legitimately miss. Its official Anthropic Messages endpoint
+ * nevertheless rejects legacy `thinking: { type: 'enabled' }`; recognize the whole
+ * Fable 5 family here to keep the request on Pi's adaptive + effort path.
  */
 export function shouldForcePiAdaptiveThinking(
   api: Api,
   catalogModel: { api: Api, compat?: unknown } | undefined,
+  modelId?: string,
 ): boolean {
-  if (api !== 'anthropic-messages' || catalogModel?.api !== 'anthropic-messages') return false
-  return (catalogModel.compat as { forceAdaptiveThinking?: unknown } | undefined)?.forceAdaptiveThinking === true
+  if (api !== 'anthropic-messages') return false
+  if ((catalogModel?.compat as { forceAdaptiveThinking?: unknown } | undefined)?.forceAdaptiveThinking === true) {
+    return true
+  }
+  const claudeFamilyKey = modelId ? getClaudeFamilyKey(modelId, true) : undefined
+  return claudeFamilyKey === 'fable-5' || claudeFamilyKey?.startsWith('fable-5-') === true
 }
 
 /** Proma 官方渠道只为 Claude 家族启用 Anthropic adaptive thinking。 */
@@ -146,7 +156,7 @@ export function shouldForcePromaOfficialClaudeAdaptiveThinking(
   const normalized = stripLegacyAgentSdkContextSuffix(modelId)?.trim().toLowerCase()
   const leafModelId = normalized?.split('/').pop()
   return leafModelId?.startsWith('claude-') === true
-    && shouldForcePiAdaptiveThinking(api, catalogModel)
+    && shouldForcePiAdaptiveThinking(api, catalogModel, modelId)
 }
 
 const CODEX_56_THINKING_LEVEL_MAP = compilePiReasoningCapabilities('openai-responses', 'gpt-5.6')?.thinkingLevelMap
@@ -672,9 +682,10 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
   const inferredContextWindow = inferContextWindow(input.model) ?? DEFAULT_CONTEXT_WINDOW
   // 商业版官方渠道的需求仅限 Claude；GPT、Kimi 等官方模型即使共享 Anthropic
   // transport 或 catalog 标记，也不得继承 Claude 的 adaptive-thinking 请求形态。
+  // 同时传入 modelId，接收上游为 Pi catalog 暂未收录的 Fable 5.1 增加的 adaptive-thinking 兼容。
   const shouldForceAdaptiveThinking = input.provider === 'proma'
     ? shouldForcePromaOfficialClaudeAdaptiveThinking(input.model, api, catalogModel)
-    : shouldForcePiAdaptiveThinking(api, catalogModel)
+    : shouldForcePiAdaptiveThinking(api, catalogModel, input.model)
   return {
     api,
     reasoning: catalogModel?.reasoning ?? true,

@@ -671,9 +671,9 @@ export function getDelegationTabLabel(title: string | null | undefined): string 
   return title?.trim() || '委派任务'
 }
 
-export type AgentSidePanelBaseTab = 'files' | 'changes' | 'chat' | 'temporary-agent' | WorkspaceComponentTab
+export type AgentSidePanelBaseTab = 'files' | 'changes' | 'chat' | 'temporary-agent' | 'delegation' | WorkspaceComponentTab
 /** 工作区组件、每个 Pi 探索分支、协作子 Agent、浏览器网页和文件预览都处于右侧工作区顶栏。 */
-export type AgentSidePanelTab = AgentSidePanelBaseTab | `exploration:${string}` | `delegation:${string}` | `browser:${string}` | `preview:${string}` | `terminal:${string}`
+export type AgentSidePanelTab = AgentSidePanelBaseTab | `exploration:${string}` | `browser:${string}` | `preview:${string}` | `terminal:${string}`
 
 /** 用户主动进入这些项目级能力时，Agent 后续的改动提示不得抢走当前视图。 */
 export function isUserPriorityWorkspaceComponentTab(
@@ -702,19 +702,11 @@ export function getExplorationSidePanelTab(branchSessionId: string): AgentSidePa
   return `exploration:${branchSessionId}`
 }
 
-/** 已在右侧打开的协作子 Agent：key 为父会话 ID，value 为子会话 ID 列表。 */
-export const agentSideDelegationMapAtom = atom<Map<string, string[]>>(new Map())
+/** 右侧当前观察的协作子 Agent：key 为父会话 ID，value 为唯一子会话 ID。 */
+export const agentSideDelegationMapAtom = atom<Map<string, string>>(new Map())
 
-export function getDelegationSidePanelTab(childSessionId: string): AgentSidePanelTab {
-  return `delegation:${childSessionId}`
-}
-
-export function getDelegationSessionIdFromSidePanelTab(tab: AgentSidePanelTab | 'delegation'): string | null {
-  return tab.startsWith('delegation:') ? tab.slice('delegation:'.length) : null
-}
-
-export function isDelegationSidePanelTab(tab: AgentSidePanelTab | 'delegation'): tab is `delegation:${string}` {
-  return tab.startsWith('delegation:')
+export function getDelegationSidePanelTab(): AgentSidePanelTab {
+  return 'delegation'
 }
 
 export function getExplorationSessionIdFromSidePanelTab(tab: AgentSidePanelTab | 'exploration'): string | null {
@@ -1117,11 +1109,21 @@ export const agentRunningSessionIdsAtom = atom<Set<string>>((get) => {
 /** 侧边栏会话指示点状态 */
 export type SessionIndicatorStatus = 'idle' | 'running' | 'blocked' | 'completed'
 
-/** 已完成但用户尚未查看的会话 ID 集合 */
+/** 已完成但用户尚未查看的顶层会话 ID 集合。参与 Dock/Launcher 角标。 */
 export const unviewedCompletedSessionIdsAtom = atom<Set<string>>(new Set<string>())
+
+/** 刚完成但用户尚未查看的协作子会话 ID 集合。仅驱动父子会话状态颜色。 */
+export const unviewedCompletedDelegatedSessionIdsAtom = atom<Set<string>>(new Set<string>())
 
 let lastIndicatorSignature = ''
 let lastIndicatorMap = new Map<string, SessionIndicatorStatus>()
+
+/** Delegated child IDs only recompute when the session list changes, not on streaming hot paths. */
+const delegatedAgentSessionIdsAtom = atom<Set<string>>((get) => new Set(
+  get(agentSessionsAtom)
+    .filter((session) => !!session.sourceDelegationId)
+    .map((session) => session.id),
+))
 
 function getStableIndicatorMap(entries: Array<[string, SessionIndicatorStatus]>): Map<string, SessionIndicatorStatus> {
   entries.sort(([a], [b]) => a.localeCompare(b))
@@ -1148,10 +1150,12 @@ export const dockBadgeCountAtom = atom<number>((get) => {
  */
 export const agentSessionIndicatorMapAtom = atom<Map<string, SessionIndicatorStatus>>((get) => {
   const streamStates = get(agentStreamingStatesAtom)
+  const delegatedSessionIds = get(delegatedAgentSessionIdsAtom)
   const pendingPerms = get(allPendingPermissionRequestsAtom)
   const pendingAskUser = get(allPendingAskUserRequestsAtom)
   const pendingExitPlan = get(allPendingExitPlanRequestsAtom)
   const unviewedCompleted = get(unviewedCompletedSessionIdsAtom)
+  const unviewedDelegatedCompleted = get(unviewedCompletedDelegatedSessionIdsAtom)
 
   const map = new Map<string, SessionIndicatorStatus>()
 
@@ -1165,8 +1169,10 @@ export const agentSessionIndicatorMapAtom = atom<Map<string, SessionIndicatorSta
     } else if (
       state.contextCompaction?.status === 'running'
       && state.contextCompaction.afterCompletedTurn === true
+      && !delegatedSessionIds.has(id)
     ) {
-      // 主任务已经交付，后续仅在整理上下文时应呈现为可验收的完成态。
+      // 顶层主任务已经交付，后续仅在整理上下文时可呈现为完成态。
+      // 委派 child 的绿色严格保留给“成功完成且未查看”，不能由 compaction 绕过。
       map.set(id, 'completed')
     } else {
       map.set(id, 'running')
@@ -1174,6 +1180,11 @@ export const agentSessionIndicatorMapAtom = atom<Map<string, SessionIndicatorSta
   }
 
   for (const id of unviewedCompleted) {
+    if (!map.has(id)) {
+      map.set(id, 'completed')
+    }
+  }
+  for (const id of unviewedDelegatedCompleted) {
     if (!map.has(id)) {
       map.set(id, 'completed')
     }

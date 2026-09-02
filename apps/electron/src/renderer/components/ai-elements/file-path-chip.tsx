@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils'
 import { FileTypeIcon } from '@/components/file-browser/FileTypeIcon'
 import { useOpenPreview } from '@/components/diff/preview-opener'
 import { currentAgentSessionIdAtom } from '@/atoms/agent-atoms'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -20,79 +21,25 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
 } from '@/components/ui/context-menu'
+import {
+  getFileName,
+  getFilePathDisplayPath,
+  isAbsoluteFilePath,
+  isAsyncResultCurrent,
+  isImageFilePath,
+  isRelativeFilePath,
+  stripLineCol,
+} from './file-path-chip-utils'
+
+interface FileResolutionCacheEntry {
+  exists: boolean
+  resolvedPath?: string
+}
 
 /** 文件存在性缓存（模块级共享，避免重复 IPC）。key = filePath + basePaths */
-const fileExistsCache = new Map<string, boolean>()
+const fileExistsCache = new Map<string, FileResolutionCacheEntry>()
 function existsCacheKey(filePath: string, bases: string[]): string {
   return `${filePath}\0${bases.join('\0')}`
-}
-
-/** 图片扩展名 */
-const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'])
-/** 视频扩展名 */
-const VIDEO_EXTS = new Set(['mp4', 'webm', 'mov'])
-/**
- * 代码/结构化文本扩展名
- * 需与主进程 file-preview-service.ts 的 CODE_EXTENSIONS + MARKDOWN_EXTENSIONS 保持一致，
- * 否则消息中的相对路径无法被识别为可点击 chip。
- */
-const CODE_EXTS = new Set([
-  'md', 'markdown',
-  'json', 'jsonc', 'json5',
-  'xml', 'html', 'htm',
-  'txt', 'log', 'csv',
-  'yaml', 'yml', 'toml', 'ini', 'env', 'lock',
-  'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs',
-  'py', 'go', 'rs', 'java', 'kt', 'swift',
-  'c', 'h', 'cpp', 'hpp', 'cs',
-  'sh', 'bash', 'zsh', 'fish',
-  'css', 'scss', 'less',
-  'sql', 'rb', 'php',
-  'diff', 'patch',
-])
-/** 文档扩展名 */
-const DOC_EXTS = new Set(['pdf', 'docx'])
-
-/** 所有可预览的扩展名集合（用于相对路径检测） */
-const ALL_PREVIEWABLE_EXTS = new Set([...IMAGE_EXTS, ...VIDEO_EXTS, ...CODE_EXTS, ...DOC_EXTS])
-
-/** 路径分隔符正则（同时匹配 / 和 \） */
-const PATH_SEP_RE = /[\\/]/
-
-/** 末尾路径分隔符正则（用于剥除 base 末尾的斜杠） */
-const TRAILING_SEP_RE = /[\\/]+$/
-
-/** Windows 盘符绝对路径前缀（如 C:\ D:/ e:\） */
-const WIN_DRIVE_RE = /^[A-Za-z]:[\\/]/
-
-/** 判断路径是否指向可在内置预览中显示的图片。 */
-export function isImageFilePath(filePath: string): boolean {
-  return IMAGE_EXTS.has(getExtension(filePath.trim()))
-}
-
-/** 从路径提取文件名（同时支持 / 和 \） */
-function getFileName(filePath: string): string {
-  const parts = filePath.split(PATH_SEP_RE)
-  return parts[parts.length - 1] || filePath
-}
-
-/** 从文件名提取扩展名（小写，不含点） */
-function getExtension(filename: string): string {
-  const dot = filename.lastIndexOf('.')
-  if (dot === -1) return ''
-  return filename.slice(dot + 1).toLowerCase()
-}
-
-/**
- * 从路径中剥离末尾的行号/列号后缀（如 :42 或 :42:15）
- * Agent 模式下模型常输出 file_path:line_number 格式
- */
-function stripLineCol(filePath: string): { path: string; suffix: string } {
-  const m = filePath.match(/^(.+?)(:\d+(?::\d+)?)$/)
-  if (m && !m[1]!.endsWith(':')) {
-    return { path: m[1]!, suffix: m[2]! }
-  }
-  return { path: filePath, suffix: '' }
 }
 
 interface FilePathChipProps {
@@ -109,80 +56,101 @@ interface FilePathChipProps {
 export function FilePathChip({ filePath, basePath, basePaths, className }: FilePathChipProps): React.ReactElement {
   const trimmedPath = filePath.trim()
   const { path: cleanPath, suffix: lineColSuffix } = stripLineCol(trimmedPath)
-
   const filename = getFileName(cleanPath)
 
-  const isAbsolute = cleanPath.startsWith('/') || WIN_DRIVE_RE.test(cleanPath)
-
   const chipRef = React.useRef<HTMLButtonElement>(null)
+  const requestGenerationRef = React.useRef(0)
+  const resolutionRequestRef = React.useRef<{ key: string; promise: Promise<void> } | null>(null)
+  const mountedRef = React.useRef(true)
   const [fileStatus, setFileStatus] = React.useState<'idle' | 'resolved' | 'broken'>('idle')
+  const [resolvedPath, setResolvedPath] = React.useState<string | undefined>()
   const store = useStore()
   const openPreview = useOpenPreview()
 
-  // 候选基础目录列表：优先使用 basePaths；否则退化到 basePath 单值
   const candidateBases = React.useMemo<string[]>(() => {
     if (basePaths && basePaths.length > 0) return basePaths.filter(Boolean)
     if (basePath) return [basePath]
     return []
   }, [basePath, basePaths])
 
-  // 用于 title 提示：绝对路径直接展示；相对路径优先匹配首段对应的 base 目录
-  const displayPath = React.useMemo(() => {
-    if (isAbsolute) return trimmedPath
-    if (candidateBases.length > 0) {
-      // 同时支持 / 和 \ 路径分隔符（Windows 兼容）
-      const segments = cleanPath.split(PATH_SEP_RE)
-      const firstSegment = segments[0]
-      if (firstSegment) {
-        for (const base of candidateBases) {
-          // 剥除末尾分隔符后取最后一段作为目录名
-          const normalized = base.replace(TRAILING_SEP_RE, '')
-          const baseName = normalized.split(PATH_SEP_RE).pop()
-          if (baseName === firstSegment) {
-            // 剥除最后一段得到父目录
-            const lastSep = Math.max(normalized.lastIndexOf('/'), normalized.lastIndexOf('\\'))
-            const parentDir = lastSep >= 0 ? normalized.slice(0, lastSep) : ''
-            if (!normalized) return cleanPath
-            return parentDir ? `${parentDir}/${cleanPath}` : `/${cleanPath}`
-          }
-        }
-      }
-      const base = candidateBases[0]!
-      return TRAILING_SEP_RE.test(base) ? `${base}${cleanPath}` : `${base}/${cleanPath}`
-    }
-    return trimmedPath
-  }, [trimmedPath, cleanPath, isAbsolute, candidateBases])
+  const displayPath = React.useMemo(() => getFilePathDisplayPath({
+    originalPath: trimmedPath,
+    resolvedPath,
+    lineColSuffix: resolvedPath ? lineColSuffix : '',
+  }), [trimmedPath, resolvedPath, lineColSuffix])
 
-  // IntersectionObserver 懒检查文件是否存在
+  const resolveCurrentPath = React.useCallback((): Promise<void> => {
+    const key = existsCacheKey(cleanPath, candidateBases)
+    const inFlight = resolutionRequestRef.current
+    if (inFlight?.key === key) return inFlight.promise
+
+    const generation = ++requestGenerationRef.current
+    const bases = candidateBases.length > 0 ? candidateBases : undefined
+    const sessionId = store.get(currentAgentSessionIdAtom)
+    let promise: Promise<void>
+    promise = window.electronAPI.resolveFilePath(cleanPath, {
+      sessionId: sessionId ?? undefined,
+      candidateBasePaths: bases,
+    })
+      .then((resolved) => {
+        if (!isAsyncResultCurrent(generation, requestGenerationRef.current, mountedRef.current)) return
+        const entry: FileResolutionCacheEntry = {
+          exists: resolved !== null,
+          ...(resolved?.resolvedPath ? { resolvedPath: resolved.resolvedPath } : {}),
+        }
+        fileExistsCache.set(key, entry)
+        setFileStatus(entry.exists ? 'resolved' : 'broken')
+        setResolvedPath(entry.resolvedPath)
+      })
+      .catch(() => { /* IPC 失败时保留当前状态 */ })
+      .finally(() => {
+        if (resolutionRequestRef.current?.promise === promise) {
+          resolutionRequestRef.current = null
+        }
+      })
+    resolutionRequestRef.current = { key, promise }
+    return promise
+  }, [cleanPath, candidateBases, store])
+
+  // IntersectionObserver 首次懒检查可使用缓存；Tooltip 打开时会绕过缓存重新解析。
   React.useEffect(() => {
     const el = chipRef.current
-    if (!el) return
+    if (!el || typeof IntersectionObserver === 'undefined') return
 
+    requestGenerationRef.current += 1
+    mountedRef.current = true
+    setFileStatus('idle')
+    setResolvedPath(undefined)
     const key = existsCacheKey(cleanPath, candidateBases)
-    if (fileExistsCache.has(key)) {
-      setFileStatus(fileExistsCache.get(key) ? 'resolved' : 'broken')
-      return
+    const cached = fileExistsCache.get(key)
+    if (cached) {
+      setFileStatus(cached.exists ? 'resolved' : 'broken')
+      setResolvedPath(cached.resolvedPath)
+      return () => {
+        mountedRef.current = false
+        requestGenerationRef.current += 1
+      }
     }
 
     const observer = new IntersectionObserver(
       (entries) => {
         if (!entries[0]?.isIntersecting) return
         observer.disconnect()
-        const bases = candidateBases.length > 0 ? candidateBases : undefined
-        const sessionId = store.get(currentAgentSessionIdAtom)
-        window.electronAPI.resolveFilePath(cleanPath, { sessionId: sessionId ?? undefined, candidateBasePaths: bases })
-          .then((resolved) => {
-            const exists = resolved !== null
-            fileExistsCache.set(key, exists)
-            setFileStatus(exists ? 'resolved' : 'broken')
-          })
-          .catch(() => { /* IPC 失败不标记 */ })
+        void resolveCurrentPath()
       },
       { threshold: 0 },
     )
     observer.observe(el)
-    return () => observer.disconnect()
-  }, [cleanPath, candidateBases, store])
+    return () => {
+      mountedRef.current = false
+      requestGenerationRef.current += 1
+      observer.disconnect()
+    }
+  }, [cleanPath, candidateBases, resolveCurrentPath])
+
+  const handleTooltipOpenChange = React.useCallback((open: boolean) => {
+    if (open) void resolveCurrentPath()
+  }, [resolveCurrentPath])
 
   const handleClick = React.useCallback(() => {
     const sessionId = store.get(currentAgentSessionIdAtom)
@@ -204,26 +172,32 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
 
   return (
     <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <button
-          ref={chipRef}
-          type="button"
-          onClick={handleClick}
-          title={fileStatus === 'broken' ? `文件不存在: ${displayPath}` : displayPath}
-          className={cn(
-            'inline-flex items-center gap-[0.25em] rounded px-[0.35em] py-[0.15em] text-[0.875em] font-medium leading-none',
-            'cursor-pointer transition-colors duration-150',
-            'align-baseline not-prose',
-            fileStatus === 'broken'
-              ? 'opacity-50 border border-dashed border-muted-foreground/30 text-muted-foreground hover:opacity-70 hover:bg-muted/20'
-              : 'bg-primary/10 text-primary hover:bg-primary/20',
-            className
-          )}
-        >
-          <FileTypeIcon name={filename} isDirectory={false} size={12} />
-          <span className="truncate max-w-[240px] leading-none">{filename}{lineColSuffix}</span>
-        </button>
-      </ContextMenuTrigger>
+      <Tooltip onOpenChange={handleTooltipOpenChange}>
+        <ContextMenuTrigger asChild>
+          <TooltipTrigger asChild>
+            <button
+              ref={chipRef}
+              type="button"
+              onClick={handleClick}
+              className={cn(
+                'inline-flex items-center gap-[0.25em] rounded px-[0.35em] py-[0.15em] text-[0.875em] font-medium leading-none',
+                'cursor-pointer transition-colors duration-150',
+                'align-baseline not-prose',
+                fileStatus === 'broken'
+                  ? 'opacity-50 border border-dashed border-muted-foreground/30 text-muted-foreground hover:opacity-70 hover:bg-muted/20'
+                  : 'bg-primary/10 text-primary hover:bg-primary/20',
+                className,
+              )}
+            >
+              <FileTypeIcon name={filename} isDirectory={false} size={12} />
+              <span className="truncate max-w-[240px] leading-none">{filename}{lineColSuffix}</span>
+            </button>
+          </TooltipTrigger>
+        </ContextMenuTrigger>
+        <TooltipContent side="bottom" className="max-w-[400px] break-all font-mono text-[11px]">
+          {fileStatus === 'broken' ? `文件不存在: ${displayPath}` : displayPath}
+        </TooltipContent>
+      </Tooltip>
       <ContextMenuContent className="w-48 z-[9999]">
         <ContextMenuItem onClick={handleClick}>
           打开预览
@@ -237,59 +211,4 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
   )
 }
 
-/**
- * 检测文本是否为绝对文件路径
- *
- * 匹配规则：
- * - macOS/Linux: 以 / 开头，至少两级路径
- * - Windows: 以 C:\ 或 C:/ 等盘符开头（大小写盘符均支持，反斜杠和正斜杠均支持）
- */
-export function isAbsoluteFilePath(text: string): boolean {
-  const trimmed = text.trim()
-  if (trimmed.length < 2) return false
-
-  // 剥离末尾行号后缀再检测
-  const { path: clean } = stripLineCol(trimmed)
-
-  // macOS/Linux 绝对路径：以 / 开头，至少两级
-  if (clean.startsWith('/') && /^\/[^\n]+\/[^\n]+$/.test(clean)) {
-    // 排除常见的非路径模式（如 /regex/ 模式）
-    if (clean.endsWith('/') && !clean.includes('.')) return false
-    return true
-  }
-
-  // Windows 绝对路径（支持反斜杠和正斜杠、大小写盘符）
-  if (WIN_DRIVE_RE.test(clean)) return true
-
-  return false
-}
-
-/**
- * 检测文本是否为相对文件路径（需要 basePath 才有意义）
- *
- * 匹配规则：
- * - 含有可预览的文件扩展名
- * - 看起来像文件名或相对路径（不含空格、不含特殊字符）
- * - 排除常见的非路径 inline code（如命令、变量名等）
- * - 同时支持 / 和 \ 路径分隔符
- */
-export function isRelativeFilePath(text: string): boolean {
-  const trimmed = text.trim()
-  if (trimmed.length < 3) return false
-
-  // 剥离末尾行号后缀再检测
-  const { path: clean } = stripLineCol(trimmed)
-
-  // 提取扩展名
-  const ext = getExtension(clean)
-  if (!ext || !ALL_PREVIEWABLE_EXTS.has(ext)) return false
-
-  // 必须看起来像文件路径：允许 字母数字、点、横线、下划线、斜杠（含反斜杠）
-  // 排除含空格或特殊字符的（太可能是其他内容）
-  if (!/^[\w./@\\-]+$/.test(clean)) return false
-
-  // 排除以点开头的隐藏文件（如 .gitignore），但保留含子路径的相对路径（如 .context/file.md）
-  if (clean.startsWith('.') && !PATH_SEP_RE.test(clean)) return false
-
-  return true
-}
+export { isAbsoluteFilePath, isImageFilePath, isRelativeFilePath }

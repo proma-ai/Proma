@@ -25,8 +25,9 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { agentDiffUnseenChangesAtom, currentAgentSessionIdAtom } from '@/atoms/agent-atoms'
-import type { AgentSidePanelTab, WorkspaceComponentTab } from '@/atoms/agent-atoms'
+import type { AgentSidePanelTab, SessionIndicatorStatus, WorkspaceComponentTab } from '@/atoms/agent-atoms'
 import { groupRightWorkspaceTabs, type RightWorkspacePane } from '@/lib/right-workspace-split'
+import { getDelegationStatusIconClass } from '@/lib/agent-session-list'
 import type { ProductivityToolsSettings } from '@/types/settings'
 
 export interface RightWorkspaceTabDragState {
@@ -41,6 +42,7 @@ export interface WorkspacePanelTab {
   icon: React.ReactNode
   closable?: boolean
   activity?: boolean
+  status?: SessionIndicatorStatus
 }
 
 interface DiffPanelTabBarProps {
@@ -357,7 +359,12 @@ export function DiffPanelTabBar({
                   {tab.activity || (isChangesTab && unseenChanges && !selected) ? (
                     <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-label="有未查看更新" />
                   ) : (
-                    <span className={cn('shrink-0', selected ? 'text-foreground' : 'text-muted-foreground/80')}>{tab.icon}</span>
+                    <span className={cn(
+                      'shrink-0',
+                      tab.status
+                        ? getDelegationStatusIconClass(tab.status)
+                        : selected ? 'text-foreground' : 'text-muted-foreground/80',
+                    )}>{tab.icon}</span>
                   )}
                   <span className="truncate">{tab.label}</span>
                 </button>

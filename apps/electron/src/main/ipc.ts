@@ -7,7 +7,7 @@
 import { ipcMain, nativeTheme, shell, dialog, BrowserWindow, app, clipboard, nativeImage } from 'electron'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { existsSync, realpathSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs'
-import { writeFile } from 'node:fs/promises'
+import { realpath, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
 import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, AGENT_ISLAND_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, VAULT_IPC_CHANNELS, PLANNING_CONFLICT_ERROR, MAX_ATTACHMENT_SIZE, isPromaPermissionMode, normalizePathForCompare, TERMINAL_IPC_CHANNELS } from '@proma/shared'
@@ -537,6 +537,28 @@ function isPathAllowed(filePath: string, options?: FileAccessOptions): boolean {
   // 保留 realpath 校验以拒绝不存在的目标，但不再按会话附件重复收窄范围。
   if (options?.unrestricted) return true
   return getAuthorizedRoots(options).some((root) => isUnderRoot(resolved, root))
+}
+
+async function getResolvedAuthorizedRoots(options?: FileAccessOptions): Promise<string[]> {
+  const roots = getAuthorizedRoots(options)
+  return Promise.all(roots.map(async (root) => {
+    try {
+      return await realpath(resolve(root))
+    } catch {
+      return resolve(root)
+    }
+  }))
+}
+
+function isResolvedPathAllowed(resolvedPath: string, resolvedRoots: readonly string[]): boolean {
+  return resolvedRoots.some((root) => {
+    const relativePath = relative(root, resolvedPath)
+    return relativePath === '' || (
+      relativePath !== '..'
+      && !relativePath.startsWith(`..${sep}`)
+      && !isAbsolute(relativePath)
+    )
+  })
 }
 
 function normalizeFileAccessOptions(value?: FileAccessOptions | string[]): FileAccessOptions | undefined {
@@ -4148,6 +4170,41 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // 批量检查文件是否仍存在（供渲染端清理已删除的会话文件变更记录）。
+  // 只接受绝对路径；以有限并发异步执行，避免慢盘或网络路径阻塞 Electron 主进程。
+  ipcMain.handle(
+    'file:exists-batch',
+    async (_, filePaths: unknown, access?: FileAccessOptions | string[]): Promise<string[]> => {
+      if (!Array.isArray(filePaths)) return []
+      const options = normalizeFileAccessOptions(access)
+      const candidates = filePaths.slice(0, 1000).filter(
+        (rawPath): rawPath is string => typeof rawPath === 'string' && rawPath.length > 0 && isAbsolute(rawPath),
+      )
+      const resolvedRoots = options?.unrestricted ? [] : await getResolvedAuthorizedRoots(options)
+      const existing = new Array<boolean>(candidates.length).fill(false)
+      let nextIndex = 0
+      const checkNext = async (): Promise<void> => {
+        while (nextIndex < candidates.length) {
+          const index = nextIndex++
+          const filePath = candidates[index]!
+          try {
+            if (!(await stat(filePath)).isFile()) continue
+            if (options?.unrestricted) {
+              existing[index] = true
+              continue
+            }
+            const resolvedPath = await realpath(filePath)
+            existing[index] = isResolvedPathAllowed(resolvedPath, resolvedRoots)
+          } catch {
+            // 不存在、不可读或不在授权路径内：视为已删除。
+          }
+        }
+      }
+      await Promise.all(Array.from({ length: Math.min(candidates.length, 32) }, checkNext))
+      return candidates.filter((_, index) => existing[index])
+    },
+  )
+
   // 写入文本文件（供 Markdown 内联编辑使用）
   ipcMain.handle(
     'file:write-text',
@@ -4188,7 +4245,7 @@ export function registerIpcHandlers(): void {
   // 仅解析文件路径（供 PDF/图片等用 proma-file:// 加载）
   ipcMain.handle(
     'file:resolve-path',
-    async (_, filePath: string, access?: FileAccessOptions | string[]): Promise<ResolvedFileUrl | null> => {
+    async (_, filePath: string, access?: FileAccessOptions | string[]): Promise<(ResolvedFileUrl & { resolvedPath: string }) | null> => {
       const { resolveFilePath } = await import('./lib/file-preview-service')
       const options = normalizeFileAccessOptions(access)
       const result = resolveFilePath(filePath, getPreviewCandidateBasePaths(options))
@@ -4196,7 +4253,7 @@ export function registerIpcHandlers(): void {
       // registerPromaFilePath 对目录路径会抛「不是文件」。渲染端（如悬浮预览解析 markdown
       // 链接）可能传入目录路径，此处优雅降级为 null，而不是让异常冒泡成未捕获的 handler 错误。
       try {
-        return { url: registerPromaFilePath(result) }
+        return { url: registerPromaFilePath(result), resolvedPath: result }
       } catch (err) {
         console.warn('[IPC] file:resolve-path 无法注册为文件，跳过:', result, err instanceof Error ? err.message : err)
         return null
@@ -5540,6 +5597,14 @@ export function registerIpcHandlers(): void {
     async (event) => {
       const win = BrowserWindow.fromWebContents(event.sender)
       return win && !win.isDestroyed() ? win.isMaximized() : false
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.WINDOW_IS_FOCUSED,
+    async (event) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      return win && !win.isDestroyed() ? win.isFocused() : false
     }
   )
 

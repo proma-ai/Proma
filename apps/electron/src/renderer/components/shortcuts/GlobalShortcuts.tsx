@@ -36,6 +36,8 @@ import {
   agentWorkspacesAtom,
   agentAttachedFilesMapAtom,
   agentDiffPanelTabAtom,
+  agentSideDelegationMapAtom,
+  agentSidePanelSplitMapAtom,
   currentSessionSidePanelOpenAtom,
   isWorkspaceComponentTab,
 } from '@/atoms/agent-atoms'
@@ -56,6 +58,7 @@ import {
   updateShortcutOverrides,
 } from '@/lib/shortcut-registry'
 import { getFileParentPath } from '@/lib/file-utils'
+import { isDelegationObservationVisible } from '@/lib/agent-session-list'
 import { getLastInteractedStopTarget, resolveStopGenerationTarget } from '@/lib/stop-generation-target'
 import { CLOSE_ACTIVE_RIGHT_WORKSPACE_TAB_EVENT } from '@/lib/right-workspace-events'
 import {
@@ -86,7 +89,11 @@ export function GlobalShortcuts(): null {
   const activeTabId = useAtomValue(activeTabIdAtom)
   const activeTab = useAtomValue(activeTabAtom)
   const activeAgentSidePanelTab = useAtomValue(agentDiffPanelTabAtom).get(activeTab?.type === 'agent' ? activeTab.sessionId : '')
+  const activeAgentSessionId = activeTab?.type === 'agent' ? activeTab.sessionId : ''
+  const activeDelegationSessionId = useAtomValue(agentSideDelegationMapAtom).get(activeAgentSessionId) ?? null
+  const activeAgentSidePanelSplit = useAtomValue(agentSidePanelSplitMapAtom).get(activeAgentSessionId) ?? null
   const isActiveAgentSidePanelOpen = useAtomValue(currentSessionSidePanelOpenAtom)
+  const agentSessions = useAtomValue(agentSessionsAtom)
 
   // 统一关闭逻辑：与 TabBar.handleClose 共用
   // 含 Agent 子进程 stop + 流式中的确认对话框（修复 Issue #357）
@@ -137,7 +144,7 @@ export function GlobalShortcuts(): null {
       if (
         isActiveAgentSidePanelOpen
         && activeAgentSidePanelTab
-        && (isWorkspaceComponentTab(activeAgentSidePanelTab) || activeAgentSidePanelTab.startsWith('preview:') || activeAgentSidePanelTab.startsWith('browser:') || activeAgentSidePanelTab.startsWith('exploration:') || activeAgentSidePanelTab.startsWith('delegation:') || activeAgentSidePanelTab.startsWith('terminal:'))
+        && (isWorkspaceComponentTab(activeAgentSidePanelTab) || activeAgentSidePanelTab.startsWith('preview:') || activeAgentSidePanelTab.startsWith('browser:') || activeAgentSidePanelTab.startsWith('exploration:') || activeAgentSidePanelTab === 'delegation' || activeAgentSidePanelTab.startsWith('terminal:'))
       ) {
         window.dispatchEvent(new CustomEvent(CLOSE_ACTIVE_RIGHT_WORKSPACE_TAB_EVENT, {
           detail: { sessionId: activeTab.sessionId },
@@ -219,16 +226,33 @@ export function GlobalShortcuts(): null {
     }, []),
   )
 
-  // Cmd+Shift+Backspace → 停止光标所在、或最近点击过的 Chat / Agent。
-  // 父会话与右侧委派子会话可能同时挂载，因此事件必须带目标，不能广播给全部视图。
+  // Cmd+Shift+Backspace → 停止最近交互的会话。只有 delegated child 需要额外校验，
+  // 因为右侧观察槽会保留挂载状态并替换内容；其他会话沿用原有交互目标语义。
   useShortcut(
     'stop-generation',
     useCallback(() => {
-      const target = getLastInteractedStopTarget()
-        ?? resolveStopGenerationTarget(activeTab, activeAgentSidePanelTab)
-      if (!target) return
-      window.dispatchEvent(new CustomEvent('proma:stop-generation', { detail: target }))
-    }, [activeAgentSidePanelTab, activeTab]),
+      const lastTarget = getLastInteractedStopTarget()
+      const lastTargetIsDelegated = lastTarget?.kind === 'agent'
+        && agentSessions.some((session) => session.id === lastTarget.sessionId && !!session.sourceDelegationId)
+      const delegatedTargetVisible = lastTargetIsDelegated
+        && lastTarget.sessionId === activeDelegationSessionId
+        && activeTab?.type === 'agent'
+        && isDelegationObservationVisible(
+          isActiveAgentSidePanelOpen,
+          activeAgentSidePanelTab,
+          activeAgentSidePanelSplit,
+        )
+      const target = lastTarget && (!lastTargetIsDelegated || delegatedTargetVisible)
+        ? lastTarget
+        : resolveStopGenerationTarget(
+            activeTab,
+            isActiveAgentSidePanelOpen ? activeAgentSidePanelTab : undefined,
+            activeDelegationSessionId ? { type: 'agent', sessionId: activeDelegationSessionId } : null,
+          )
+      if (target) {
+        window.dispatchEvent(new CustomEvent('proma:stop-generation', { detail: target }))
+      }
+    }, [activeAgentSidePanelSplit, activeAgentSidePanelTab, activeDelegationSessionId, activeTab, agentSessions, isActiveAgentSidePanelOpen]),
   )
 
   // ===== 快速任务窗口 → 创建会话并自动发送 =====

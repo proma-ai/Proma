@@ -39,6 +39,7 @@ import {
   currentAgentSessionIdAtom,
   agentSessionIndicatorMapAtom,
   unviewedCompletedSessionIdsAtom,
+  unviewedCompletedDelegatedSessionIdsAtom,
   agentChannelIdAtom,
   agentModelIdAtom,
   agentSessionChannelMapAtom,
@@ -57,6 +58,7 @@ import {
   agentSidePanelOpenMapAtom,
   agentSidePanelOpenAtomFamily,
   agentSideDelegationMapAtom,
+  agentSidePanelSplitMapAtom,
   getDelegationSidePanelTab,
   openWorkspaceComponentAtom,
   agentStreamingStatesAtom,
@@ -115,13 +117,19 @@ import {
 import { detectIsMac } from '@/lib/platform'
 import { ShortcutKeycaps } from '@/components/shortcuts/ShortcutKeycaps'
 import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-registry'
+import { rememberStopGenerationTarget } from '@/lib/stop-generation-target'
+import { markSessionCompletionViewed } from '@/lib/agent-completion-presence'
 import {
   collectAgentSessionTreeIds,
   countSettledDelegatedChildren,
   getDelegatedChildSessionStatus,
+  getDelegationStatusIconClass,
   groupArchivedAgentSessionsByProject,
   isAgentSessionVisibleInTrees,
+  isDelegationObservationVisible,
+  removeDelegatedSessionSelection,
   replaceAgentSessionInFreshnessOrder,
+  selectDelegatedSession,
   sortAgentSessionsByUpdatedAtDesc,
 } from '@/lib/agent-session-list'
 import {
@@ -480,7 +488,20 @@ function isDelegatedChildSession(session: AgentSessionMeta): boolean {
   return !!session.parentSessionId && !!session.sourceDelegationId
 }
 
-function buildAgentSessionTrees(sessions: AgentSessionMeta[]): AgentSessionTreeItem[] {
+function sortDelegatedChildSessions(
+  sessions: readonly AgentSessionMeta[],
+  agentIndicatorMap?: ReadonlyMap<string, SessionIndicatorStatus>,
+): AgentSessionMeta[] {
+  const priority = (session: AgentSessionMeta): number => Number(
+    agentIndicatorMap && ACTIVE_SESSION_STATUSES.has(getDelegatedChildSessionStatus(session, agentIndicatorMap)),
+  )
+  return [...sessions].sort((a, b) => priority(b) - priority(a) || b.updatedAt - a.updatedAt)
+}
+
+function buildAgentSessionTrees(
+  sessions: AgentSessionMeta[],
+  agentIndicatorMap?: ReadonlyMap<string, SessionIndicatorStatus>,
+): AgentSessionTreeItem[] {
   const sessionIds = new Set(sessions.map((session) => session.id))
   const childrenByParentId = new Map<string, AgentSessionMeta[]>()
   const roots: AgentSessionMeta[] = []
@@ -502,7 +523,7 @@ function buildAgentSessionTrees(sessions: AgentSessionMeta[]): AgentSessionTreeI
 
   return roots.map((session) => ({
     session,
-    childSessions: childrenByParentId.get(session.id) ?? [],
+    childSessions: sortDelegatedChildSessions(childrenByParentId.get(session.id) ?? [], agentIndicatorMap),
   }))
 }
 
@@ -769,7 +790,24 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   const [agentSessions, setAgentSessions] = useAtom(agentSessionsAtom)
   const [archivedAgentSessionCount, setArchivedAgentSessionCount] = React.useState(0)
   const [currentAgentSessionId, setCurrentAgentSessionId] = useAtom(currentAgentSessionIdAtom)
-  const activeRightWorkspaceTab = useAtomValue(agentDiffPanelTabAtom).get(currentAgentSessionId ?? '')
+  const sideDelegationMap = useAtomValue(agentSideDelegationMapAtom)
+  const diffPanelTabMap = useAtomValue(agentDiffPanelTabAtom)
+  const sidePanelSplitMap = useAtomValue(agentSidePanelSplitMapAtom)
+  const sidePanelOpenMap = useAtomValue(agentSidePanelOpenMapAtom)
+  const activeParentSessionId = currentAgentSessionId ?? ''
+  const activeRightWorkspaceTab = diffPanelTabMap.get(activeParentSessionId)
+  const activeRightWorkspaceSplit = sidePanelSplitMap.get(activeParentSessionId) ?? null
+  const isActiveSidePanelOpen = activeParentSessionId
+    ? sidePanelOpenMap[activeParentSessionId] ?? true
+    : false
+  const isDelegationVisible = isDelegationObservationVisible(
+    isActiveSidePanelOpen,
+    activeRightWorkspaceTab,
+    activeRightWorkspaceSplit,
+  )
+  const activeDelegationSessionId = isDelegationVisible
+    ? sideDelegationMap.get(activeParentSessionId) ?? null
+    : null
   const isWorkspaceComponentActive = React.useCallback(
     (component: WorkspaceComponentTab): boolean => activeRightWorkspaceTab === component,
     [activeRightWorkspaceTab],
@@ -777,6 +815,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   const agentIndicatorMap = useAtomValue(agentSessionIndicatorMapAtom)
   const unviewedCompletedSessionIds = useAtomValue(unviewedCompletedSessionIdsAtom)
   const setUnviewedCompleted = useSetAtom(unviewedCompletedSessionIdsAtom)
+  const setUnviewedDelegatedCompleted = useSetAtom(unviewedCompletedDelegatedSessionIdsAtom)
   const agentChannelId = useAtomValue(agentChannelIdAtom)
   const agentModelId = useAtomValue(agentModelIdAtom)
   const setSessionChannelMap = useSetAtom(agentSessionChannelMapAtom)
@@ -942,19 +981,8 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       }
       return changed ? map : prev
     })
-    store.set(agentSideDelegationMapAtom, (prev) => {
-      let changed = false
-      const next = new Map(prev)
-      if (next.delete(id)) changed = true
-      for (const [parentSessionId, childSessionIds] of next) {
-        const remaining = childSessionIds.filter((childSessionId) => childSessionId !== id)
-        if (remaining.length === childSessionIds.length) continue
-        changed = true
-        if (remaining.length > 0) next.set(parentSessionId, remaining)
-        else next.delete(parentSessionId)
-      }
-      return changed ? next : prev
-    })
+    store.set(agentSideDelegationMapAtom, (prev) => removeDelegatedSessionSelection(prev, id))
+    setUnviewedDelegatedCompleted((prev) => markSessionCompletionViewed(prev, id))
     setDiffPanelTab(deleteKey)
     setDiffRefreshVersion(deleteKey)
     setDiffUnseen(deleteKey)
@@ -1067,14 +1095,17 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   const pinnedAgentSessionTrees = React.useMemo<AgentSessionTreeItem[]>(
     () => pinnedAgentSessions.map((session) => ({
       session,
-      childSessions: getDirectDelegatedChildren(agentSessions, session.id).filter((child) => (
-        !child.archived
-        && !child.isDraft
-        && !draftSessionIds.has(child.id)
-        && !isHiddenAutomationSession(child)
-      )),
+      childSessions: sortDelegatedChildSessions(
+        getDirectDelegatedChildren(agentSessions, session.id).filter((child) => (
+          !child.archived
+          && !child.isDraft
+          && !draftSessionIds.has(child.id)
+          && !isHiddenAutomationSession(child)
+        )),
+        agentIndicatorMap,
+      ),
     })),
-    [agentSessions, draftSessionIds, pinnedAgentSessions],
+    [agentIndicatorMap, agentSessions, draftSessionIds, pinnedAgentSessions],
   )
 
   /** 对话按日期分组（根据 viewMode 过滤归档状态，排除 draft） */
@@ -1828,18 +1859,23 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     if (selectedSession?.sourceDelegationId && selectedSession.parentSessionId) {
       const parentSession = agentSessions.find((session) => session.id === selectedSession.parentSessionId)
       if (parentSession) {
+        if (store.get(agentSidePanelSplitMapAtom).has(parentSession.id)) {
+          toast.info('请先退出并排模式，再切换子会话', {
+            id: 'split-delegation-sidebar-navigation',
+          })
+        }
         openSession('agent', parentSession.id, parentSession.title)
-        store.set(agentSideDelegationMapAtom, (previous) => {
-          const openChildIds = previous.get(parentSession.id) ?? []
-          if (openChildIds.includes(selectedSession.id)) return previous
-          const next = new Map(previous)
-          next.set(parentSession.id, [...openChildIds, selectedSession.id])
-          return next
-        })
+        store.set(agentSideDelegationMapAtom, (previous) => (
+          selectDelegatedSession(previous, parentSession.id, selectedSession.id)
+        ))
         store.set(agentSidePanelOpenAtomFamily(parentSession.id), true)
+        rememberStopGenerationTarget({ kind: 'agent', sessionId: selectedSession.id })
+        setUnviewedDelegatedCompleted((prev) => (
+          markSessionCompletionViewed(prev, selectedSession.id)
+        ))
         store.set(agentDiffPanelTabAtom, (previous) => {
           const next = new Map(previous)
-          next.set(parentSession.id, getDelegationSidePanelTab(selectedSession.id))
+          next.set(parentSession.id, getDelegationSidePanelTab())
           return next
         })
         setActiveView('conversations')
@@ -1862,7 +1898,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       next.delete(id)
       return next
     })
-  }, [agentSessions, openSession, setActiveView, setUnviewedCompleted, store])
+  }, [agentSessions, openSession, setActiveView, setUnviewedCompleted, setUnviewedDelegatedCompleted, store])
 
   const clearQuickSwitchHints = React.useCallback((): void => {
     for (const row of quickSwitchHintRowsRef.current) {
@@ -2855,15 +2891,19 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
           ),
         })
         if (expandedChildren) {
-          for (const childSession of item.childSessions) {
+          for (const [childIndex, childSession] of item.childSessions.entries()) {
             rows.push({
               id: `agent-archived-child-${childSession.id}`,
-              estimateSize: 34,
+              estimateSize: childIndex === 0 ? 36 : 34,
               content: (
-                <div className="ml-6 border-l border-foreground/10 pl-2 pr-3">
+                <div className={cn(
+                  'ml-6 border-l border-foreground/10 pl-2 pr-3',
+                  childIndex === 0 && 'pt-0.5',
+                )}>
                   <DelegatedChildSessionItem
                     session={childSession}
                     activeSessionId={activeSessionId}
+                    activeDelegationSessionId={activeDelegationSessionId}
                     agentIndicatorMap={agentIndicatorMap}
                     relativeTimeNow={relativeTimeNow}
                     workspaceName={childSession.workspaceId ? workspaceNameMap.get(childSession.workspaceId) : undefined}
@@ -2883,7 +2923,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       }
     }
     return rows
-  }, [activeSessionId, agentIndicatorMap, archivedAgentSessionProjectGroups, collapsedDelegationParentIds, currentWorkspaceId, expandedArchivedProjectIds, expandedDelegationParentIds, handleAgentRename, handleRequestDelete, handleRequestMove, handleSelectAgentSession, handleToggleArchiveAgent, handleToggleArchivedProject, handleToggleDelegationParent, handleTogglePinAgent, handleToggleStarAgent, relativeTimeNow, sessionHoverPreviewEnabled, workspaceNameMap])
+  }, [activeDelegationSessionId, activeSessionId, agentIndicatorMap, archivedAgentSessionProjectGroups, collapsedDelegationParentIds, currentWorkspaceId, expandedArchivedProjectIds, expandedDelegationParentIds, handleAgentRename, handleRequestDelete, handleRequestMove, handleSelectAgentSession, handleToggleArchiveAgent, handleToggleArchivedProject, handleToggleDelegationParent, handleTogglePinAgent, handleToggleStarAgent, relativeTimeNow, sessionHoverPreviewEnabled, workspaceNameMap])
 
   const agentActiveVirtualRows = React.useMemo<VirtualSidebarRow[]>(() => {
     if (viewMode !== 'active') return []
@@ -2943,13 +2983,16 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       })
 
       if (childCount > 0 && expandedChildren) {
-        for (const childSession of item.childSessions) {
+        for (const [childIndex, childSession] of item.childSessions.entries()) {
           rows.push({
             id: `agent-child-${childSession.id}`,
-            estimateSize: 34,
+            estimateSize: childIndex === 0 ? 36 : 34,
             content: (
               <div
-                className="ml-7 border-l border-foreground/10 pl-2"
+                className={cn(
+                  'ml-7 border-l border-foreground/10 pl-2',
+                  childIndex === 0 && 'pt-0.5',
+                )}
                 onDragOver={projectWorkspaceId ? (event) => handleProjectDragOver(event, projectWorkspaceId) : undefined}
                 onDragLeave={projectWorkspaceId ? handleProjectDragLeave : undefined}
                 onDrop={projectWorkspaceId ? (event) => handleProjectDrop(event, projectWorkspaceId) : undefined}
@@ -2957,6 +3000,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                 <DelegatedChildSessionItem
                   session={childSession}
                   activeSessionId={activeSessionId}
+                  activeDelegationSessionId={activeDelegationSessionId}
                   agentIndicatorMap={agentIndicatorMap}
                   relativeTimeNow={relativeTimeNow}
                   workspaceName={isAutomationGroup && childSession.workspaceId ? workspaceNameMapForRow?.get(childSession.workspaceId) : undefined}
@@ -3075,6 +3119,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
               extraCount={extraCount}
               collapsed={collapsed}
               activeSessionId={activeSessionId}
+              activeDelegationSessionId={activeDelegationSessionId}
               agentIndicatorMap={agentIndicatorMap}
               expandedDelegationParentIds={expandedDelegationParentIds}
               collapsedDelegationParentIds={collapsedDelegationParentIds}
@@ -3165,6 +3210,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
 
     return rows
   }, [
+    activeDelegationSessionId,
     activeSessionId,
     agentIndicatorMap,
     collapsedDelegationParentIds,
@@ -4230,13 +4276,6 @@ const SESSION_ACCENT_INDICATOR_CLASS: Record<SessionLeftAccent, string> = {
   green: 'bg-green-500',
 }
 
-const DELEGATION_STATUS_ICON_CLASS: Record<SessionIndicatorStatus, string> = {
-  idle: 'text-foreground/40',
-  running: 'text-blue-500',
-  blocked: 'text-orange-500',
-  completed: 'text-green-500',
-}
-
 function getSessionLeftAccent(status: SessionIndicatorStatus): SessionLeftAccent | undefined {
   if (status === 'blocked') return 'orange'
   if (status === 'running') return 'blue'
@@ -4443,7 +4482,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
                   <Clock size={11} className="flex-shrink-0 text-foreground/40" />
                 )}
                 {session.sourceDelegationId && (
-                  <GitBranch size={11} className={cn('flex-shrink-0', DELEGATION_STATUS_ICON_CLASS[indicatorStatus])} />
+                  <GitBranch size={11} className={cn('flex-shrink-0', getDelegationStatusIconClass(indicatorStatus))} />
                 )}
                 <span
                   className="truncate"
@@ -4571,6 +4610,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
 interface DelegatedChildSessionItemProps {
   session: AgentSessionMeta
   activeSessionId: string | null
+  activeDelegationSessionId: string | null
   agentIndicatorMap: Map<string, SessionIndicatorStatus>
   relativeTimeNow: number
   workspaceName?: string
@@ -4586,6 +4626,7 @@ interface DelegatedChildSessionItemProps {
 const DelegatedChildSessionItem = React.memo(function DelegatedChildSessionItem({
   session,
   activeSessionId,
+  activeDelegationSessionId,
   agentIndicatorMap,
   relativeTimeNow,
   workspaceName,
@@ -4599,11 +4640,13 @@ const DelegatedChildSessionItem = React.memo(function DelegatedChildSessionItem(
 }: DelegatedChildSessionItemProps): React.ReactElement {
   const sessionHoverPreviewEnabled = useAtomValue(sessionHoverPreviewEnabledAtom)
   const status = getDelegatedChildStatus(session, agentIndicatorMap)
+  const highlighted = session.id === activeSessionId
+    || (session.parentSessionId === activeSessionId && session.id === activeDelegationSessionId)
 
   return (
     <AgentSessionItem
       session={session}
-      active={session.id === activeSessionId}
+      active={highlighted}
       indicatorStatus={status}
       disableMiniMap={!sessionHoverPreviewEnabled}
       relativeTimeNow={relativeTimeNow}
@@ -4642,7 +4685,7 @@ function getVisibleAgentProjectSessions({
   previousActiveIds?: ReadonlySet<string>
 }): VisibleAgentProjectSessions {
   const recentCutoff = relativeTimeNow - PROJECT_SESSION_RECENT_WINDOW_MS
-  const treeItems = buildAgentSessionTrees(group.sessions)
+  const treeItems = buildAgentSessionTrees(group.sessions, agentIndicatorMap)
   const activeSessions = treeItems
     .filter((item) => (
       ACTIVE_SESSION_STATUSES.has(getSessionTreeStatus(item, agentIndicatorMap))
@@ -4692,6 +4735,7 @@ interface AgentProjectGroupItemProps {
   /** 用户已点击"显示更多"额外展开的会话数量（基于 collapsedSessions 之上累加） */
   extraCount: number
   activeSessionId: string | null
+  activeDelegationSessionId: string | null
   agentIndicatorMap: Map<string, SessionIndicatorStatus>
   expandedDelegationParentIds: Set<string>
   collapsedDelegationParentIds: Set<string>
@@ -4734,6 +4778,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
   collapsed,
   extraCount,
   activeSessionId,
+  activeDelegationSessionId,
   agentIndicatorMap,
   expandedDelegationParentIds,
   collapsedDelegationParentIds,
@@ -5061,6 +5106,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
                             key={childSession.id}
                             session={childSession}
                             activeSessionId={activeSessionId}
+                            activeDelegationSessionId={activeDelegationSessionId}
                             agentIndicatorMap={agentIndicatorMap}
                             relativeTimeNow={relativeTimeNow}
                             workspaceName={isAutomationGroup && childSession.workspaceId ? workspaceNameMap?.get(childSession.workspaceId) : undefined}

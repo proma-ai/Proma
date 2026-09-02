@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
-import { BookOpen, ChevronDown, ChevronRight, ChevronsUpDown, CircleHelp, Folder, FolderOpen, Loader2, Plus, Trash2 } from 'lucide-react'
+import { BookOpen, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, CircleHelp, Folder, FolderOpen, Loader2, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { VaultCandidate, VaultFileEntry, VaultFocus, VaultReadResult, VaultSummary } from '@proma/shared'
 import { Button } from '@/components/ui/button'
@@ -39,9 +39,11 @@ import {
   vaultRefreshTokenAtom,
 } from '@/atoms/vault-atoms'
 import { cn } from '@/lib/utils'
-import { getVaultEditorKey } from './vault-editor-lifecycle'
+import { VaultContentErrorBoundary } from './VaultContentErrorBoundary'
+import { getVaultEditorKey, shouldRemountVaultEditor } from './vault-editor-lifecycle'
 import { getVaultDocumentController } from './vault-document-controller'
 import { buildVaultTree, getInitialVaultExpandedFolders, getVaultFolderAncestors, hasSameVaultTreeEntries, type VaultFolderNode } from './vault-tree-model'
+import { getVaultSidebarDisplayWidth, getVaultSidebarToggleLabel } from './vault-sidebar-layout'
 
 const VAULT_NAME = 'Vault'
 const VAULT_SIDEBAR_MIN_WIDTH = 180
@@ -572,22 +574,25 @@ function VaultMarkdownPane({
 
   return (
     <section className="flex min-w-0 flex-1 flex-col bg-muted/25">
-      <VaultMarkdownEditor
-        key={getVaultEditorKey(readResult.relativePath, reopenVersion)}
-        readResult={readResult}
-        vaultId={vaultId}
-        sessionId={sessionId}
-        onSave={onSave}
-        onRename={onRename}
-        onReload={onReload}
-        onRegisterFlush={onRegisterFlush}
-        onOpenTutorial={onOpenTutorial}
-      />
+      <VaultContentErrorBoundary resetKey={getVaultEditorKey(readResult.relativePath, reopenVersion)}>
+        <VaultMarkdownEditor
+          key={getVaultEditorKey(readResult.relativePath, reopenVersion)}
+          readResult={readResult}
+          vaultId={vaultId}
+          sessionId={sessionId}
+          onSave={onSave}
+          onRename={onRename}
+          onReload={onReload}
+          onRegisterFlush={onRegisterFlush}
+          onOpenTutorial={onOpenTutorial}
+        />
+      </VaultContentErrorBoundary>
     </section>
   )
 }
 
 export function VaultView({ embedded = false, sessionId }: { embedded?: boolean; sessionId?: string }): React.ReactElement {
+  const vaultSidebarContentId = React.useId()
   const vaultSessionScope = getVaultSessionScope(sessionId)
   const [config, setConfig] = React.useState<VaultSummary | null>(null)
   const [candidates, setCandidates] = React.useState<VaultCandidate[]>([])
@@ -608,9 +613,13 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
   const [newFolderName, setNewFolderName] = React.useState('')
   const [creatingFolder, setCreatingFolder] = React.useState(false)
   const [vaultTreeAction, setVaultTreeAction] = React.useState<{ type: 'expand' | 'collapse'; version: number }>({ type: 'collapse', version: 0 })
+  const [vaultSidebarCollapsed, setVaultSidebarCollapsed] = React.useState(false)
   const [vaultSidebarWidth, setVaultSidebarWidth] = React.useState(embedded ? 200 : 280)
   const vaultSidebarWidthRef = React.useRef(vaultSidebarWidth)
   const vaultSidebarDragCleanupRef = React.useRef<(() => void) | null>(null)
+  const vaultSidebarCollapseButtonRef = React.useRef<HTMLButtonElement>(null)
+  const vaultSidebarExpandButtonRef = React.useRef<HTMLButtonElement>(null)
+  const vaultSidebarFocusTransferRequestedRef = React.useRef(false)
   const selectedFileRef = React.useRef(selectedFile)
   // Keep the ref in sync synchronously with user actions. Refreshes can start
   // before React commits the atom update (notably after rename), so relying on
@@ -637,6 +646,18 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
   React.useEffect(() => {
     vaultSidebarWidthRef.current = vaultSidebarWidth
   }, [vaultSidebarWidth])
+
+  React.useLayoutEffect(() => {
+    if (!vaultSidebarFocusTransferRequestedRef.current) return
+    vaultSidebarFocusTransferRequestedRef.current = false
+    const target = vaultSidebarCollapsed ? vaultSidebarExpandButtonRef : vaultSidebarCollapseButtonRef
+    target.current?.focus()
+  }, [vaultSidebarCollapsed])
+
+  const setVaultSidebarCollapsedWithFocus = React.useCallback((collapsed: boolean): void => {
+    vaultSidebarFocusTransferRequestedRef.current = true
+    setVaultSidebarCollapsed(collapsed)
+  }, [])
 
   React.useEffect(() => () => {
     vaultSidebarDragCleanupRef.current?.()
@@ -767,9 +788,12 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
     void refreshVaultCandidates()
   }, [refreshVaultCandidates])
 
-  const openFile = React.useCallback(async (relativePath: string, { discardLocalDraft = false }: { discardLocalDraft?: boolean } = {}): Promise<void> => {
+  const openFile = React.useCallback(async (
+    relativePath: string,
+    { discardLocalDraft = false, forceReopen = false }: { discardLocalDraft?: boolean; forceReopen?: boolean } = {},
+  ): Promise<void> => {
     if (!discardLocalDraft && !await flushCurrentEditor()) return
-    const reopenCurrentFile = selectedFileRef.current === relativePath
+    const remountEditor = shouldRemountVaultEditor(selectedFileRef.current, relativePath, forceReopen)
     const requestId = ++readRequestRef.current
     selectFile(relativePath)
     setFileLoading(true)
@@ -777,9 +801,9 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
       const result = await window.electronAPI.readVaultFile(relativePath)
       if (requestId === readRequestRef.current) {
         setReadResult(result)
-        // An explicit click on the selected note is the recovery path after an
-        // external-write conflict: discard the local draft and remount from disk.
-        if (reopenCurrentFile) setEditorReopenVersion((version) => version + 1)
+        // Only the explicit conflict-recovery action recreates the editor.
+        // Repeated ordinary clicks must preserve its CodeMirror instance.
+        if (remountEditor) setEditorReopenVersion((version) => version + 1)
       }
     } catch (error) {
       if (requestId === readRequestRef.current) {
@@ -972,14 +996,58 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
         {!embedded && <div className="relative z-10 h-[100px] shrink-0 border-b border-border/60 bg-muted/25" />}
         <div className="relative flex min-h-0 flex-1">
           <aside
-            className="relative flex shrink-0 flex-col border-r border-border/50 bg-muted/25"
-            style={{ width: vaultSidebarWidth }}
+            className={cn(
+              'relative flex shrink-0 flex-col overflow-hidden bg-muted/25',
+              !vaultSidebarCollapsed && 'border-r border-border/50',
+            )}
+            style={{ width: getVaultSidebarDisplayWidth(vaultSidebarWidth, vaultSidebarCollapsed) }}
           >
+            {vaultSidebarCollapsed && (
+              <header className={cn('flex h-14 shrink-0 items-center justify-center', embedded ? 'titlebar-no-drag' : 'titlebar-drag-region')}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      ref={vaultSidebarExpandButtonRef}
+                      type="button"
+                      aria-controls={vaultSidebarContentId}
+                      aria-expanded="false"
+                      aria-label={getVaultSidebarToggleLabel(true)}
+                      onClick={() => setVaultSidebarCollapsedWithFocus(false)}
+                      className="titlebar-no-drag flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                      <ChevronRight size={15} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{getVaultSidebarToggleLabel(true)}</TooltipContent>
+                </Tooltip>
+              </header>
+            )}
+            <div
+              id={vaultSidebarContentId}
+              aria-hidden={vaultSidebarCollapsed}
+              className={cn('min-h-0 flex-1 flex-col', vaultSidebarCollapsed ? 'hidden' : 'flex')}
+            >
               <header className={cn('flex h-14 items-center gap-2 px-3', embedded ? 'titlebar-no-drag' : 'titlebar-drag-region')}>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[13px] font-medium text-foreground">{config?.displayName ?? '选择 Vault'}</p>
                 </div>
                 <div className="flex items-center gap-0.5 titlebar-no-drag">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        ref={vaultSidebarCollapseButtonRef}
+                        type="button"
+                        aria-controls={vaultSidebarContentId}
+                        aria-expanded="true"
+                        aria-label={getVaultSidebarToggleLabel(false)}
+                        onClick={() => setVaultSidebarCollapsedWithFocus(true)}
+                        className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      >
+                        <ChevronLeft size={15} />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{getVaultSidebarToggleLabel(false)}</TooltipContent>
+                  </Tooltip>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -1081,11 +1149,14 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
                   </PopoverContent>
                 </Popover>
               </div>
-            <div
-              aria-hidden="true"
-              className="titlebar-no-drag absolute right-0 top-0 bottom-0 z-10 w-3 translate-x-1/2 cursor-col-resize"
-              onMouseDown={handleVaultSidebarResizeStart}
-            />
+            </div>
+            {!vaultSidebarCollapsed && (
+              <div
+                aria-hidden="true"
+                className="titlebar-no-drag absolute right-0 top-0 bottom-0 z-10 w-3 translate-x-1/2 cursor-col-resize"
+                onMouseDown={handleVaultSidebarResizeStart}
+              />
+            )}
           </aside>
           <VaultMarkdownPane
             readResult={readResult}
@@ -1096,7 +1167,7 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
             reopenVersion={editorReopenVersion}
             onSave={save}
             onRename={rename}
-            onReload={() => { if (readResult) void openFile(readResult.relativePath, { discardLocalDraft: true }) }}
+            onReload={() => { if (readResult) void openFile(readResult.relativePath, { discardLocalDraft: true, forceReopen: true }) }}
             onRegisterFlush={registerEditorFlush}
             onOpenTutorial={() => setVaultHelpOpen(true)}
           />
@@ -1155,7 +1226,7 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
             </section>
             <section>
               <p className="font-medium text-foreground">浏览与新建笔记</p>
-              <p>点击文件夹可展开或收起；左侧顶部按钮可一键展开或折叠全部文件夹，拖动中间分隔线可调整文件树宽度。右键点击文件夹可在该目录中新建笔记或文件夹。</p>
+              <p>点击文件夹可展开或收起；顶部左箭头可收起整个文件目录，收起后点击靠边的右箭头即可恢复。旁边按钮可一键展开或折叠全部文件夹，拖动中间分隔线可调整文件树宽度。右键点击文件夹可在该目录中新建笔记或文件夹。</p>
             </section>
             <section>
               <p className="font-medium text-foreground">编辑与自动保存</p>
