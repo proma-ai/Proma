@@ -11,7 +11,7 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Star, Settings, Plus, CirclePlus, Trash2, Pencil, PanelLeft, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, FolderInput, FolderPlus, GripVertical, Clock, CalendarDays, ChevronRight, ChevronDown, ChevronUp, Blocks, Brain, ListTodo, GitBranch, Download, Loader2, RotateCw } from 'lucide-react'
+import { Pin, PinOff, Star, Settings, Plus, CirclePlus, Trash2, Pencil, PanelLeft, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, FolderInput, FolderPlus, GripVertical, Clock, CalendarDays, ChevronRight, ChevronDown, ChevronUp, Blocks, Brain, ListTodo, GitBranch, Download, Loader2, RotateCw, Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
@@ -132,6 +132,7 @@ import {
   selectDelegatedSession,
   sortAgentSessionsByUpdatedAtDesc,
 } from '@/lib/agent-session-list'
+import { clearSessionReferenceDragState, insertSessionReferenceMention, setSessionReferenceDragData } from '@/lib/session-reference-drag'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -4333,6 +4334,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
   const [editTitle, setEditTitle] = React.useState('')
   const [menuOpen, setMenuOpen] = React.useState(false)
   const [rowHovered, setRowHovered] = React.useState(false)
+  const store = useStore()
   const inputRef = React.useRef<HTMLInputElement>(null)
   const justStartedEditing = React.useRef(false)
   // 菜单打开时关闭迷你地图预览，避免预览面板盖住菜单项导致点不动
@@ -4369,6 +4371,29 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
     }
   }
 
+  const handleReferenceSession = (): void => {
+    const targetSessionId = store.get(currentAgentSessionIdAtom)
+    if (!targetSessionId) {
+      toast.info('请先打开一个 Agent 会话', {
+        description: '会话引用会插入当前 Agent 输入框。',
+      })
+      return
+    }
+    if (targetSessionId === session.id) {
+      toast.warning('不能引用当前会话')
+      return
+    }
+    const inserted = insertSessionReferenceMention(targetSessionId, {
+      sessionId: session.id,
+      title: session.title,
+    })
+    if (!inserted) {
+      toast.warning('当前输入框不可编辑')
+      return
+    }
+    toast.success('已插入会话引用')
+  }
+
   const canMove = indicatorStatus === 'idle' || indicatorStatus === 'completed'
 
   const childCount = delegationSummary?.total ?? 0
@@ -4383,6 +4408,33 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
     MenuSeparator: typeof ContextMenuSeparator | typeof DropdownMenuSeparator,
   ) => (
     <>
+      <MenuItem
+        className="text-xs py-1 [&>svg]:size-3.5"
+        onSelect={handleReferenceSession}
+      >
+        <MessageSquare size={14} />
+        <span className="min-w-0 flex-1">引用此会话</span>
+        <Tooltip delayDuration={300}>
+          <TooltipTrigger asChild>
+            <span
+              role="img"
+              aria-label="引用此会话说明"
+              className="inline-flex size-5 items-center justify-center rounded text-foreground/40 hover:bg-foreground/[0.08] hover:text-foreground/70"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+              }}
+            >
+              <Info size={13} />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="right" className="max-w-64">
+            将此会话插入当前 Agent 输入框作为引用；也可以直接把会话拖到输入框中。
+          </TooltipContent>
+        </Tooltip>
+      </MenuItem>
+      <MenuSeparator className="my-0.5" />
       {hasChildren ? (
         <>
           <MenuItem className="text-xs py-1 [&>svg]:size-3.5" onSelect={() => onTogglePin(session.id, false)}>
@@ -4432,6 +4484,21 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
           data-session-switch-id={session.id}
           data-session-switch-title={session.title}
           data-session-switch-type="agent"
+          draggable={!editing}
+          onDragStart={(event) => {
+            const target = event.target as HTMLElement
+            if (target.closest('button, input')) {
+              event.preventDefault()
+              clearSessionReferenceDragState()
+              return
+            }
+            preview.closeNow()
+            setSessionReferenceDragData(event.dataTransfer, {
+              sessionId: session.id,
+              title: session.title,
+            })
+          }}
+          onDragEnd={clearSessionReferenceDragState}
           onClick={() => onSelect(session.id, session.title)}
           onMouseEnter={() => { setRowHovered(true); preview.handleMouseEnter() }}
           onMouseLeave={() => { setRowHovered(false); preview.handleMouseLeave() }}
@@ -4441,6 +4508,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
           }}
           className={cn(
             'session-quick-switch-row group relative w-full flex items-center gap-1.5 rounded-md py-1.5 pl-2.5 pr-1.5 transition-colors duration-100 titlebar-no-drag text-left',
+            !editing && 'cursor-grab active:cursor-grabbing group-hover:pl-6',
             active && 'agent-session-item-active',
             leftAccent
               ? SESSION_ACCENT_ROW_CLASS[leftAccent]
@@ -4457,6 +4525,25 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
                 leftAccent ? SESSION_ACCENT_INDICATOR_CLASS[leftAccent] : 'bg-primary',
               )}
             />
+          )}
+          {!editing && (
+            <Tooltip delayDuration={2000}>
+              <TooltipTrigger asChild>
+                <span
+                  aria-label="拖拽会话引用"
+                  className={cn(
+                    'absolute left-1 top-1/2 z-10 inline-flex size-4 -translate-y-1/2 items-center justify-center rounded text-foreground/35 opacity-0 transition-opacity duration-150 group-hover:opacity-100',
+                    leftAccent && 'left-1.5',
+                  )}
+                  onMouseEnter={preview.closeNow}
+                >
+                  <GripVertical size={12} />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="right" className="max-w-64">
+                支持直接拖拽会话到当前输入框，实现对会话的引用。
+              </TooltipContent>
+            </Tooltip>
           )}
           <div className="flex-1 min-w-0">
             {editing ? (
