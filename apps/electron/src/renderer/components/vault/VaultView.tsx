@@ -39,7 +39,8 @@ import {
   vaultRefreshTokenAtom,
 } from '@/atoms/vault-atoms'
 import { cn } from '@/lib/utils'
-import { getVaultEditorKey } from './vault-editor-lifecycle'
+import { VaultContentErrorBoundary } from './VaultContentErrorBoundary'
+import { getVaultEditorKey, shouldRemountVaultEditor } from './vault-editor-lifecycle'
 import { getVaultDocumentController } from './vault-document-controller'
 import { buildVaultTree, getInitialVaultExpandedFolders, getVaultFolderAncestors, hasSameVaultTreeEntries, type VaultFolderNode } from './vault-tree-model'
 
@@ -572,17 +573,19 @@ function VaultMarkdownPane({
 
   return (
     <section className="flex min-w-0 flex-1 flex-col bg-muted/25">
-      <VaultMarkdownEditor
-        key={getVaultEditorKey(readResult.relativePath, reopenVersion)}
-        readResult={readResult}
-        vaultId={vaultId}
-        sessionId={sessionId}
-        onSave={onSave}
-        onRename={onRename}
-        onReload={onReload}
-        onRegisterFlush={onRegisterFlush}
-        onOpenTutorial={onOpenTutorial}
-      />
+      <VaultContentErrorBoundary resetKey={getVaultEditorKey(readResult.relativePath, reopenVersion)}>
+        <VaultMarkdownEditor
+          key={getVaultEditorKey(readResult.relativePath, reopenVersion)}
+          readResult={readResult}
+          vaultId={vaultId}
+          sessionId={sessionId}
+          onSave={onSave}
+          onRename={onRename}
+          onReload={onReload}
+          onRegisterFlush={onRegisterFlush}
+          onOpenTutorial={onOpenTutorial}
+        />
+      </VaultContentErrorBoundary>
     </section>
   )
 }
@@ -767,9 +770,12 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
     void refreshVaultCandidates()
   }, [refreshVaultCandidates])
 
-  const openFile = React.useCallback(async (relativePath: string, { discardLocalDraft = false }: { discardLocalDraft?: boolean } = {}): Promise<void> => {
+  const openFile = React.useCallback(async (
+    relativePath: string,
+    { discardLocalDraft = false, forceReopen = false }: { discardLocalDraft?: boolean; forceReopen?: boolean } = {},
+  ): Promise<void> => {
     if (!discardLocalDraft && !await flushCurrentEditor()) return
-    const reopenCurrentFile = selectedFileRef.current === relativePath
+    const remountEditor = shouldRemountVaultEditor(selectedFileRef.current, relativePath, forceReopen)
     const requestId = ++readRequestRef.current
     selectFile(relativePath)
     setFileLoading(true)
@@ -777,9 +783,9 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
       const result = await window.electronAPI.readVaultFile(relativePath)
       if (requestId === readRequestRef.current) {
         setReadResult(result)
-        // An explicit click on the selected note is the recovery path after an
-        // external-write conflict: discard the local draft and remount from disk.
-        if (reopenCurrentFile) setEditorReopenVersion((version) => version + 1)
+        // Only the explicit conflict-recovery action recreates the editor.
+        // Repeated ordinary clicks must preserve its CodeMirror instance.
+        if (remountEditor) setEditorReopenVersion((version) => version + 1)
       }
     } catch (error) {
       if (requestId === readRequestRef.current) {
@@ -1096,7 +1102,7 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
             reopenVersion={editorReopenVersion}
             onSave={save}
             onRename={rename}
-            onReload={() => { if (readResult) void openFile(readResult.relativePath, { discardLocalDraft: true }) }}
+            onReload={() => { if (readResult) void openFile(readResult.relativePath, { discardLocalDraft: true, forceReopen: true }) }}
             onRegisterFlush={registerEditorFlush}
             onOpenTutorial={() => setVaultHelpOpen(true)}
           />
