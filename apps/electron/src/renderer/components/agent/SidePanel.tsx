@@ -7,7 +7,7 @@
 
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
-import { X, ExternalLink, ChevronRight, MoreHorizontal, FolderSearch, Pencil, FolderInput, GitBranch, GitMerge, MessageSquarePlus, FileDiff, FileText, FolderOpen, Globe, MessageCircle, Brain, Split, Blocks, CalendarDays, ListTodo, Clock, ServerCog, SquareTerminal, Terminal } from 'lucide-react'
+import { X, ExternalLink, ChevronRight, MoreHorizontal, FolderSearch, Pencil, FolderInput, GitBranch, GitMerge, MessageSquarePlus, FileDiff, FileText, FolderOpen, Globe, MessageCircle, Brain, Split, Blocks, CalendarDays, ListTodo, Clock, ServerCog, SquareTerminal, Terminal, Shapes } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -27,6 +27,7 @@ import { DiffChangesList } from '@/components/diff/DiffChangesList'
 import { ChatView } from '@/components/chat/ChatView'
 import { AgentView } from '@/components/agent/AgentView'
 import { VaultView } from '@/components/vault/VaultView'
+import { CanvasView } from '@/components/canvas/CanvasView'
 import { OBSIDIAN_NAME, ObsidianIcon } from '@/components/obsidian/obsidian-brand'
 import {
   currentSessionSidePanelOpenAtom,
@@ -902,7 +903,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     // `temporary-agent` 是旧的单分支内存状态；新状态使用 exploration:<sessionId>。
     : activeTab === 'temporary-agent' || (activeExplorationSessionId !== null && !activeExplorationBranch) || (activeTab === 'delegation' && !selectedDelegationSession) || (activeTerminalId !== null && !terminalTabs.some((terminal) => terminal.terminalId === activeTerminalId))
       ? 'files'
-      : isWorkspaceComponentTab(activeTab) && (!workspaceSlug || !workspaceComponentTabs.includes(activeTab) || !isWorkspaceComponentEnabled(activeTab))
+      : isWorkspaceComponentTab(activeTab) && ((activeTab !== 'canvas' && !workspaceSlug) || !workspaceComponentTabs.includes(activeTab) || !isWorkspaceComponentEnabled(activeTab))
         ? 'files'
         : activeTab
   const [splitMap, setSplitMap] = useAtom(agentSidePanelSplitMapAtom)
@@ -1288,6 +1289,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
         mcp: { label: 'MCP', icon: <ServerCog className="size-3.5" /> },
         memory: { label: '项目记忆', icon: <Brain className="size-3.5" /> },
         vault: { label: OBSIDIAN_NAME, icon: <ObsidianIcon className="size-3.5" /> },
+        canvas: { label: '画布', icon: <Shapes className="size-3.5" /> },
       }
       return { id: component, ...meta[component], closable: true }
     }),
@@ -1632,6 +1634,10 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
       )
     ) : paneTab === 'vault' ? (
       <div className="min-h-0 flex-1 overflow-hidden"><VaultView embedded sessionId={sessionId} /></div>
+    ) : paneTab === 'canvas' ? (
+      // 会话画布：内容归属当前 session，不依赖项目；key 按会话 remount 重建干净的
+      // nodes/history/refs/view，避免复用同一实例带旧会话遗留状态（切会话后双击建节点白屏）。
+      <CanvasView key={sessionId} sessionId={sessionId} onClose={() => handleCloseWorkspaceTab('canvas')} />
     ) : paneTab === 'changes' ? (
       sessionPath ? (
         <DiffChangesList

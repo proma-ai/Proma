@@ -7,7 +7,7 @@
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, VAULT_IPC_CHANNELS, AGENT_ISLAND_IPC_CHANNELS, TERMINAL_IPC_CHANNELS } from '@proma/shared'
-import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS } from '../types'
+import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, CANVAS_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS } from '../types'
 import type {
   RuntimeStatus,
   GitRepoStatus,
@@ -486,6 +486,25 @@ export interface ElectronAPI {
 
   /** 将图片 data URL 写入系统剪贴板 */
   copyImageToClipboard: (dataUrl: string) => Promise<{ success: boolean; message?: string }>
+
+  // ===== Canvas 画布（会话画布 + 导出簇） =====
+
+  /** 导出选中簇为独立 .canvas + .md 文件到 ~/.proma/canvas-exports/ */
+  exportCanvasCluster: (payload: { name: string; canvasJson: string; markdown: string }) => Promise<{
+    ok: boolean
+    canvasPath?: string
+    mdPath?: string
+    error?: string
+  }>
+
+  /** 从磁盘加载 session 专属画布（JSON Canvas 格式字符串） */
+  loadSessionCanvas: (sessionId: string) => Promise<string>
+
+  /** 异步保存 session 专属画布 */
+  saveSessionCanvas: (sessionId: string, content: string) => Promise<boolean>
+
+  /** 同步保存 session 专属画布（beforeunload 场景） */
+  saveSessionCanvasSync: (sessionId: string, content: string) => boolean
 
   // ===== 用户授权的 Markdown Vault =====
 
@@ -1763,6 +1782,23 @@ const electronAPI: ElectronAPI = {
 
   copyImageToClipboard: (dataUrl: string) => {
     return ipcRenderer.invoke(SCRATCH_PAD_IPC_CHANNELS.COPY_IMAGE, dataUrl)
+  },
+
+  // Canvas：会话画布持久化与选中簇导出
+  exportCanvasCluster: (payload: { name: string; canvasJson: string; markdown: string }) => {
+    return ipcRenderer.invoke(CANVAS_IPC_CHANNELS.EXPORT, payload)
+  },
+
+  loadSessionCanvas: (sessionId: string) => {
+    return ipcRenderer.invoke(CANVAS_IPC_CHANNELS.LOAD_SESSION, sessionId)
+  },
+
+  saveSessionCanvas: (sessionId: string, content: string) => {
+    return ipcRenderer.invoke(CANVAS_IPC_CHANNELS.SAVE_SESSION, sessionId, content)
+  },
+
+  saveSessionCanvasSync: (sessionId: string, content: string) => {
+    return ipcRenderer.sendSync(CANVAS_IPC_CHANNELS.SAVE_SESSION_SYNC, sessionId, content)
   },
 
   // 用户授权的 Markdown Vault

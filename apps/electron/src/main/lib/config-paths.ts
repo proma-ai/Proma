@@ -843,3 +843,19 @@ export function getAutomationsPath(): string {
 export function getPlanningDatabasePath(): string {
   return join(getConfigDir(), 'planning.db')
 }
+
+/**
+ * 获取指定会话的 canvas 文件路径（session-canvas.canvas，JSON Canvas 开源格式，
+ * 与 Obsidian Canvas 互通）。
+ */
+export function getSessionCanvasPath(workspaceSlug: string, sessionId: string): string {
+  const sessionDir = getAgentSessionWorkspacePath(workspaceSlug, sessionId)
+  return join(sessionDir, 'session-canvas.canvas')
+}
+
+/** 获取 Canvas 导出目录（与 session jsonl 同级，属于 Proma 备份范畴，不进 OB vault） */
+export function getCanvasExportsDir(): string {
+  const dir = join(getConfigDir(), 'canvas-exports')
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  return dir
+}

@@ -651,9 +651,10 @@ export function pruneFileBrowserStateMap<T>(state: Map<string, T>, retainedSessi
 /**
  * 工作区级组件：内容归属项目而非单个会话，但在当前会话的右侧工作区中呈现。
  * 同一项目下的打开状态跨会话保留；关闭一个组件不会影响其他项目。
+ * canvas 为例外：内容是 session 专属画布而非项目数据，但复用同一套打开状态管理。
  */
-export type WorkspaceComponentTab = 'todos' | 'calendar' | 'automations' | 'skills' | 'mcp' | 'memory' | 'vault'
-export const WORKSPACE_COMPONENT_TABS: readonly WorkspaceComponentTab[] = ['todos', 'calendar', 'automations', 'skills', 'mcp', 'memory', 'vault']
+export type WorkspaceComponentTab = 'todos' | 'calendar' | 'automations' | 'skills' | 'mcp' | 'memory' | 'vault' | 'canvas'
+export const WORKSPACE_COMPONENT_TABS: readonly WorkspaceComponentTab[] = ['todos', 'calendar', 'automations', 'skills', 'mcp', 'memory', 'vault', 'canvas']
 
 export function isWorkspaceComponentTab(tab: AgentSidePanelTab | string): tab is WorkspaceComponentTab {
   return (WORKSPACE_COMPONENT_TABS as readonly string[]).includes(tab)
