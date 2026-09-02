@@ -60,11 +60,13 @@ import {
   longTextPasteAsAttachmentEnabledAtom,
   richTextRenderingEnabledAtom,
   sessionHoverPreviewEnabledAtom,
+  sidebarCreditIndicatorVisibleAtom,
   productivityToolsAtom,
   updateProductivityTools,
   updateLongTextPasteAsAttachmentEnabled,
   updateRichTextRenderingEnabled,
   updateSessionHoverPreviewEnabled,
+  updateSidebarCreditIndicatorVisible,
 } from '@/atoms/ui-preferences'
 import { cn } from '@/lib/utils'
 import { detectIsMac, detectIsWindows } from '@/lib/platform'
@@ -93,6 +95,7 @@ export function GeneralSettings(): React.ReactElement {
   const [longTextPasteAsAttachmentEnabled, setLongTextPasteAsAttachmentEnabled] = useAtom(longTextPasteAsAttachmentEnabledAtom)
   const [richTextRenderingEnabled, setRichTextRenderingEnabled] = useAtom(richTextRenderingEnabledAtom)
   const [sessionHoverPreviewEnabled, setSessionHoverPreviewEnabled] = useAtom(sessionHoverPreviewEnabledAtom)
+  const [sidebarCreditIndicatorVisible, setSidebarCreditIndicatorVisible] = useAtom(sidebarCreditIndicatorVisibleAtom)
   const [productivityTools, setProductivityTools] = useAtom(productivityToolsAtom)
   const [isEditingName, setIsEditingName] = React.useState(false)
   const [showEmojiPicker, setShowEmojiPicker] = React.useState(false)
@@ -164,6 +167,17 @@ export function GeneralSettings(): React.ReactElement {
     } catch (error) {
       console.error('[通用设置] 更新 Agent 灵动岛失败:', error)
       setAgentIslandEnabled(!checked)
+    }
+  }
+
+  /** 更新左下角余额常驻显示；失败时回滚，避免界面和持久化设置不一致。 */
+  const handleSidebarCreditIndicatorVisibleChange = async (visible: boolean): Promise<void> => {
+    const previous = sidebarCreditIndicatorVisible
+    setSidebarCreditIndicatorVisible(visible)
+    try {
+      await updateSidebarCreditIndicatorVisible(visible)
+    } catch {
+      setSidebarCreditIndicatorVisible(previous)
     }
   }
 
@@ -543,6 +557,16 @@ export function GeneralSettings(): React.ReactElement {
               updateSessionHoverPreviewEnabled(checked)
             }}
           />
+          {isCloudMode() && isCloudAuthenticated && (
+            <SettingsToggle
+              label="左下角余额常驻显示"
+              description="在左侧栏底部持续显示账户余额；关闭后仍可悬停资料区查看余额"
+              checked={sidebarCreditIndicatorVisible}
+              onCheckedChange={(checked) => {
+                void handleSidebarCreditIndicatorVisibleChange(checked)
+              }}
+            />
+          )}
           {isMac && (
             <SettingsToggle
               label="Agent 灵动岛"

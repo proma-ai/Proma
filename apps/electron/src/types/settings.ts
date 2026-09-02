@@ -351,6 +351,8 @@ export interface AppSettings {
   shortcutOverrides?: ShortcutOverrides
   /** 左侧会话列表悬浮预览迷你地图（默认 false，需手动开启） */
   sessionHoverPreviewEnabled?: boolean
+  /** 左下角余额常驻指示器（默认 true；关闭后仍可悬浮资料区查看余额） */
+  sidebarCreditIndicatorVisible?: boolean
   /** 粘贴超过阈值的长文本时是否自动转为附件（默认 false） */
   longTextPasteAsAttachmentEnabled?: boolean
   /** 输入框是否渲染 Markdown 富文本格式（默认 false，关闭后为纯文本模式，仍保留 Mention 引用） */
@@ -385,6 +387,13 @@ export interface AppSettings {
   agentIsland?: AgentIslandSettings
   /** 主窗口状态（大小、位置、是否最大化） */
   mainWindowState?: MainWindowState
+}
+
+/** 兼容旧设置：未写入该偏好时仍默认显示左下角余额。 */
+export function isSidebarCreditIndicatorVisible(
+  settings: Pick<AppSettings, 'sidebarCreditIndicatorVisible'>,
+): boolean {
+  return settings.sidebarCreditIndicatorVisible ?? true
 }
 
 /** 当前发布的 Onboarding 内容版本。提升该值可让所有用户重新完成新版引导。 */

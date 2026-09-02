@@ -7,7 +7,7 @@
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { getSettingsPath } from './config-paths'
-import { DEFAULT_THEME_MODE, normalizeProductivityToolsSettings } from '../../types'
+import { DEFAULT_THEME_MODE, isSidebarCreditIndicatorVisible, normalizeProductivityToolsSettings } from '../../types'
 import type { AgentIslandSettings, AppSettings } from '../../types'
 import { getTerminalProfilesForPlatform, isTerminalProfile } from '@proma/shared'
 
@@ -39,6 +39,7 @@ export function getSettings(): AppSettings {
       notificationsEnabled: true,
       longTextPasteAsAttachmentEnabled: false,
       richTextRenderingEnabled: false,
+      sidebarCreditIndicatorVisible: true,
       feishuSessionMirror: { mode: 'off' },
       visionRelay: { enabled: false },
       windowsShellPreference: 'auto',
@@ -77,6 +78,7 @@ export function getSettings(): AppSettings {
       notificationsEnabled: data.notificationsEnabled ?? true,
       longTextPasteAsAttachmentEnabled: data.longTextPasteAsAttachmentEnabled ?? false,
       richTextRenderingEnabled: data.richTextRenderingEnabled ?? false,
+      sidebarCreditIndicatorVisible: isSidebarCreditIndicatorVisible(data),
       feishuSessionMirror: data.feishuSessionMirror ?? { mode: 'off' },
       visionRelay: data.visionRelay ?? { enabled: false },
       windowsShellPreference: settings.windowsShellPreference ?? 'auto',
@@ -100,6 +102,7 @@ export function getSettings(): AppSettings {
       notificationsEnabled: true,
       longTextPasteAsAttachmentEnabled: false,
       richTextRenderingEnabled: false,
+      sidebarCreditIndicatorVisible: true,
       feishuSessionMirror: { mode: 'off' },
       visionRelay: { enabled: false },
       windowsShellPreference: 'auto',
