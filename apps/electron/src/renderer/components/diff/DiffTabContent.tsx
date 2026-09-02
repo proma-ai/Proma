@@ -91,10 +91,6 @@ function getPreviewTargetPath(filePath: string, dirPath: string): string {
   return isAbsoluteFilePath(filePath) ? filePath : `${dirPath.replace(/[\\/]+$/, '')}/${filePath}`
 }
 
-function getParentFolderPath(filePath: string): string {
-  const separator = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'))
-  return separator > 0 ? filePath.slice(0, separator) : filePath
-}
 const FILE_FIND_SHORTCUT_OPTIONS = { exclusive: true }
 
 /**
@@ -1591,12 +1587,18 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   }, [filePath, fileAccess, isEditableText, markdownEditorCacheKey, readOnly, sessionId])
 
   const previewTargetPath = getPreviewTargetPath(filePath, dirPath)
-  const handleOpenCurrentFolder = React.useCallback(() => {
-    window.electronAPI.systemOpenFile(getParentFolderPath(previewTargetPath), undefined, fileAccess).catch((error) => {
-      console.error('[DiffTabContent] 打开当前文件夹失败:', error)
-      toast.error('无法打开当前文件夹')
-    })
-  }, [fileAccess, previewTargetPath])
+  const handleRevealInFolder = React.useCallback(() => {
+    // 必须沿用预览加载时的候选根目录解析相对路径；手工拼接 dirPath 会与实际
+    // 解析到的附件/外部目录脱节，导致预览正常而无法在 Finder/Explorer 中定位。
+    window.electronAPI.showItemInFolder(filePath, fileAccess.candidateBasePaths)
+      .then((found) => {
+        if (!found) toast.error('未找到文件，无法在文件夹中显示')
+      })
+      .catch((error) => {
+        console.error('[DiffTabContent] 在文件夹中显示失败:', error)
+        toast.error('无法在文件夹中显示')
+      })
+  }, [fileAccess.candidateBasePaths, filePath])
 
   return (
     <div className="flex flex-col h-full">
@@ -1616,14 +1618,14 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  onClick={handleOpenCurrentFolder}
+                  onClick={handleRevealInFolder}
                   className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-                  aria-label="打开当前文件夹"
+                  aria-label="在文件夹中显示"
                 >
                   <FolderOpen className="size-3.5" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="bottom">打开当前文件夹</TooltipContent>
+              <TooltipContent side="bottom">在文件夹中显示</TooltipContent>
             </Tooltip>
           </>
         )}
