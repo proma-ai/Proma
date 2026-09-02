@@ -16,6 +16,7 @@ import { Bot, Loader2, AlertTriangle, FileText, FileImage, Download, Split, Undo
 import { useAtomValue, useSetAtom } from 'jotai'
 import { cn } from '@/lib/utils'
 import { ImageLightbox, type LightboxImage } from '@/components/ui/image-lightbox'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ContentBlock } from './ContentBlock'
 import { TurnFileChangesSummary, buildTurnFileNameMap } from './TurnFileChangesSummary'
 import { TurnSkillUsageSummary } from './TurnSkillUsageSummary'
@@ -434,6 +435,9 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
   const turnResult = turn.turnMessages.findLast((message) => message.type === 'result') as SDKResultMessage | undefined
   const turnId = turnResult?._promaTurnId
   const [deductedPoints, setDeductedPoints] = React.useState<number | undefined>(turnResult?._promaDeductedPoints)
+  const deductedPointsLabel = deductedPoints?.toLocaleString(undefined, {
+    maximumFractionDigits: 4,
+  })
 
   // Billing happens after the upstream stream is terminal, so a completed Pi
   // turn can beat its ledger write by a few hundred milliseconds. Query the
@@ -632,11 +636,6 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
           <MessageActions className="pl-[46px] mt-0.5 min-h-[28px] justify-start">
             {hasDuration && <DurationBadge durationMs={durationMs!} usage={usage} />}
             {textContent && <CopyButton content={textContent} />}
-            {textContent && onCreateTodo && (
-              <MessageAction tooltip="标记为 Todo" onClick={() => onCreateTodo(textContent)}>
-                <ListTodo className="size-3.5" />
-              </MessageAction>
-            )}
             {onFork && lastUuid && (
               <MessageAction tooltip="从此处探索（保留主线，结论可带回）" onClick={() => onFork(lastUuid)}>
                 <Split className="size-3.5" />
@@ -652,14 +651,22 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
                 已被用户中断
               </Badge>
             )}
-            {deductedPoints != null && (
-              <span
-                className="ml-0.5 inline-flex items-center gap-1 text-[11px] text-muted-foreground/70 tabular-nums"
-                title="本轮实际扣除额度"
-              >
-                <CreditCard className="size-3" />
-                {deductedPoints.toLocaleString(undefined, { maximumFractionDigits: 4 })} 积分
-              </span>
+            {textContent && onCreateTodo && (
+              <MessageAction tooltip="标记为 Todo" onClick={() => onCreateTodo(textContent)}>
+                <ListTodo className="size-3.5" />
+              </MessageAction>
+            )}
+            {deductedPointsLabel && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="ml-0.5 inline-flex h-7 items-center text-[15px] font-light leading-none text-muted-foreground/70 tabular-nums">
+                    {deductedPointsLabel} 积分
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  本轮次消费积分 {deductedPointsLabel}
+                </TooltipContent>
+              </Tooltip>
             )}
           </MessageActions>
         )
