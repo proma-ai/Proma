@@ -10,6 +10,7 @@
  */
 
 import * as React from 'react'
+import { useSetAtom } from 'jotai'
 import { Loader2, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -23,6 +24,7 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { SettingsSection } from './primitives'
+import { settingsTabAtom } from '@/atoms/settings-tab'
 import type {
   DateFilter,
   UsageQueryParams,
@@ -467,11 +469,25 @@ function SpeechUsageTable({
 // ===== 主组件 =====
 
 export function UsageSettings(): React.ReactElement {
+  const setSettingsTab = useSetAtom(settingsTabAtom)
   const [dateFilter, setDateFilter] = React.useState<DateFilter>('today')
   const [activeTab, setActiveTab] = React.useState<UsageTab>('model')
 
   return (
-    <SettingsSection title="调用日志" description="查看各类 API 调用记录和用量统计">
+    <SettingsSection
+      title="调用日志"
+      description="查看各类 API 调用记录和用量统计"
+      leadingAction={(
+        <button
+          type="button"
+          onClick={() => setSettingsTab('billing')}
+          className="flex min-h-10 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-muted-foreground transition-[color,background-color,transform] hover:bg-muted/60 hover:text-foreground active:scale-[0.96]"
+        >
+          <ChevronLeft size={16} aria-hidden="true" />
+          返回购买额度
+        </button>
+      )}
+    >
       {/* 日期筛选 */}
       <div className="mb-4">
         <DateFilterGroup value={dateFilter} onChange={setDateFilter} />

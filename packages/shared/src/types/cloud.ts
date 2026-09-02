@@ -295,6 +295,7 @@ export const CLOUD_IPC_CHANNELS = {
   GET_TOOL_USAGE_LOGS: 'cloud:usage:get-tool',
   GET_SPEECH_USAGE_LOGS: 'cloud:usage:get-speech',
   GET_AGENT_USAGE_LOGS: 'cloud:usage:get-agent',
+  GET_AGENT_TOKEN_ACTIVITY: 'cloud:usage:get-agent-token-activity',
   GET_AGENT_TURN_USAGE: 'cloud:usage:get-agent-turn',
   GET_COMBINED_USAGE_LOGS: 'cloud:usage:get-combined',
   // 企业 Skills（远端请求与本地制品处理都由主进程负责）
@@ -440,6 +441,28 @@ export interface AgentUsageLogResponse {
   page: number
   pageSize: number
   stats: AgentUsageStats
+}
+
+/** Proma Agent / API Key 每日 Token 用量（不包含 Chat、工具和语音） */
+export interface AgentTokenActivityItem {
+  date: string
+  inputTokens: number
+  outputTokens: number
+  cacheCreationInputTokens: number
+  cacheReadInputTokens: number
+  totalTokens: number
+}
+
+export interface AgentTokenActivityResponse {
+  items: AgentTokenActivityItem[]
+  startDate: string
+  endDate: string
+}
+
+/** Inclusive Beijing-calendar date range for Agent Token activity. */
+export interface AgentTokenActivityQuery {
+  startDate?: string
+  endDate?: string
 }
 
 /** Authoritative current-user ledger aggregate for one official Agent turn. */

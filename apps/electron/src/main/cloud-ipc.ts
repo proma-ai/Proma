@@ -60,6 +60,7 @@ import {
   getToolUsageLogs,
   getSpeechUsageLogs,
   getAgentUsageLogs,
+  getAgentTokenActivity,
   getAgentTurnUsage,
   getCombinedUsageLogs,
 } from './lib/cloud-usage-service'
@@ -335,6 +336,11 @@ export async function registerCloudIpcHandlers(): Promise<void> {
     async (_, params?: UsageQueryParams) => {
       return getAgentUsageLogs(params)
     },
+  )
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.GET_AGENT_TOKEN_ACTIVITY,
+    async () => getAgentTokenActivity(),
   )
 
   ipcMain.handle(

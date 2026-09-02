@@ -175,10 +175,14 @@ async function cleanupCloudSessionRuntime(): Promise<void> {
   } catch {
     // 清理失败不应阻塞认证状态恢复
   }
-  // 清理健康数据缓存，避免下个账号复用前一账号的健康数据。
+  // 清理账号相关的 Cloud 数据缓存，避免下个账号复用前一账号的数据。
   try {
-    const { clearHealthCache } = await import('./cloud-health-service')
+    const [{ clearHealthCache }, { clearAgentTokenActivityCache }] = await Promise.all([
+      import('./cloud-health-service'),
+      import('./cloud-usage-service'),
+    ])
     clearHealthCache()
+    clearAgentTokenActivityCache()
   } catch {
     // 清理失败不应阻塞认证状态恢复
   }

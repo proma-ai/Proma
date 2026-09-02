@@ -659,7 +659,7 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
             {deductedPointsLabel && (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="ml-0.5 inline-flex h-7 items-center text-[15px] font-light leading-none text-muted-foreground/70 tabular-nums">
+                  <span className="ml-0.5 inline-flex h-7 items-center text-[15px] font-light leading-none text-muted-foreground/90 tabular-nums">
                     {deductedPointsLabel} 积分
                   </span>
                 </TooltipTrigger>
