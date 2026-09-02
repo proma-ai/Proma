@@ -116,6 +116,7 @@ import type {
   ToolUsageLogResponse,
   SpeechUsageLogResponse,
   AgentUsageLogResponse,
+  AgentTurnUsage,
   CombinedUsageLogResponse,
   EnterpriseSkill,
   EnterpriseSkillDetail,
@@ -1242,6 +1243,8 @@ export interface ElectronAPI {
     getSpeechUsageLogs: (params?: UsageQueryParams) => Promise<BillingIpcResponse<SpeechUsageLogResponse>>
     /** 获取 Agent API 调用日志 */
     getAgentUsageLogs: (params?: UsageQueryParams) => Promise<BillingIpcResponse<AgentUsageLogResponse>>
+    /** 获取官方 Agent 单个轮次的权威积分消耗 */
+    getAgentTurnUsage: (turnId: string) => Promise<BillingIpcResponse<AgentTurnUsage>>
   }
 
   // ===== 数据同步相关 =====
@@ -2920,6 +2923,9 @@ const electronAPI: ElectronAPI = {
     },
     getAgentUsageLogs: (params?: UsageQueryParams) => {
       return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_AGENT_USAGE_LOGS, params)
+    },
+    getAgentTurnUsage: (turnId: string) => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_AGENT_TURN_USAGE, turnId)
     },
   },
 

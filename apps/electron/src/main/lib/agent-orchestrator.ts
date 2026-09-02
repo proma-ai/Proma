@@ -22,6 +22,7 @@ import { app } from 'electron'
 import type { AgentSendInput, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, AgentSessionMeta, AgentActiveSessionSnapshot, CodexOAuthCredentials, XaiOAuthCredentials, TypedError, SDKMessage, SDKAssistantMessage, AgentStreamPayload, AgentAssistantDeltaPayload, RewindSessionResult, SkillActivation } from '@proma/shared'
 import {
   PROMA_DEFAULT_PERMISSION_MODE,
+  PROMA_OFFICIAL_CHANNEL_ID,
   PROMA_PERMISSION_MODE_CONFIG,
   THINKING_SIGNATURE_ERROR_CODE,
   THINKING_SIGNATURE_ERROR_MESSAGE,
@@ -1646,6 +1647,9 @@ export class AgentOrchestrator {
         })
       }
       const piCustomTools = [...piBuiltinTools, ...piMcpTools, ...(extensions.piCustomTools ?? [])]
+      // This is an opaque correlation key, not a credential. Official Cloud
+      // records it on every model-loop request to aggregate actual deductions.
+      const agentTurnId = channel.id === PROMA_OFFICIAL_CHANNEL_ID ? `${sessionId}:${runGeneration}` : undefined
       const queryOptions: PiAgentQueryOptions = {
         sessionId,
         prompt: finalPrompt,
@@ -1662,6 +1666,7 @@ export class AgentOrchestrator {
         ...(selectedOfficialAgentModel?.maxOutputTokens && { modelMaxOutputTokens: selectedOfficialAgentModel.maxOutputTokens }),
         channelId,
         channelName: channel.name,
+        ...(agentTurnId && { agentTurnId }),
         proxyUrl,
         runtimeEnv,
         ...(maxTurns != null && { maxTurns }),
@@ -2042,6 +2047,9 @@ export class AgentOrchestrator {
                 } else {
                   // 为结果消息注入渠道信息，确保持久化后能按模型上下文窗口计算压缩阈值
                   if (msg.type === 'result') {
+                    if (agentTurnId) {
+                      ;(msg as Record<string, unknown>)._promaTurnId = agentTurnId
+                    }
                     if (modelId) {
                       (msg as Record<string, unknown>)._channelModelId = modelId
                     }

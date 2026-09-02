@@ -11,6 +11,7 @@ import type {
   SpeechUsageLogResponse,
   ToolUsageLogResponse,
   AgentUsageLogResponse,
+  AgentTurnUsage,
   CombinedUsageLogResponse,
 } from '@proma/shared'
 
@@ -54,6 +55,12 @@ export function createUsageApi(client: CloudApiClient) {
     /** 获取 Agent API 调用日志 */
     getAgentUsage: async (params?: UsageQueryParams): Promise<AgentUsageLogResponse> => {
       const response = await client.get<AgentUsageLogResponse>(`/me/agent-usage${buildQueryString(params)}`)
+      return response.data
+    },
+
+    /** 获取一个官方 Agent 轮次的权威积分账本聚合。 */
+    getAgentTurnUsage: async (turnId: string): Promise<AgentTurnUsage> => {
+      const response = await client.get<AgentTurnUsage>(`/me/agent-turn-usage/${encodeURIComponent(turnId)}`)
       return response.data
     },
   }

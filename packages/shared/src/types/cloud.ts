@@ -295,6 +295,7 @@ export const CLOUD_IPC_CHANNELS = {
   GET_TOOL_USAGE_LOGS: 'cloud:usage:get-tool',
   GET_SPEECH_USAGE_LOGS: 'cloud:usage:get-speech',
   GET_AGENT_USAGE_LOGS: 'cloud:usage:get-agent',
+  GET_AGENT_TURN_USAGE: 'cloud:usage:get-agent-turn',
   GET_COMBINED_USAGE_LOGS: 'cloud:usage:get-combined',
   // 企业 Skills（远端请求与本地制品处理都由主进程负责）
   ENTERPRISE_SKILLS_LIST: 'cloud:enterprise-skills:list',
@@ -439,6 +440,14 @@ export interface AgentUsageLogResponse {
   page: number
   pageSize: number
   stats: AgentUsageStats
+}
+
+/** Authoritative current-user ledger aggregate for one official Agent turn. */
+export interface AgentTurnUsage {
+  turnId: string
+  found: boolean
+  requestCount: number
+  totalCost: number | string
 }
 
 /** 统一调用日志项：Proma 模型调用或 Agent API 调用 */

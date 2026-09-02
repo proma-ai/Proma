@@ -758,11 +758,17 @@ export function buildPiRequestHeaders(
   apiKey: string,
   api = normalizePiApi(provider),
   baseUrl?: string,
+  agentTurnId?: string,
 ): PiRequestHeaders | undefined {
   const headers: PiRequestHeaders = {}
   // 运行时埋点只发送给 Proma Cloud；第三方/用户自建渠道不应收到 Proma 专用头。
   if (isPromaCloudBaseUrl(baseUrl)) {
     headers['X-Proma-Agent-Runtime'] = 'pi'
+    // Opaque, bounded client correlation only for Proma Cloud. This lets the
+    // server aggregate the authoritative ledger across the Agent tool loop.
+    if (agentTurnId && /^[A-Za-z0-9][A-Za-z0-9:_-]{0,79}$/.test(agentTurnId)) {
+      headers['X-Proma-Agent-Turn-Id'] = agentTurnId
+    }
   }
   if (api !== 'anthropic-messages') {
     return Object.keys(headers).length > 0 ? headers : undefined
@@ -933,7 +939,7 @@ export async function buildModel(sdk: PiSdk, input: PiAgentQueryOptions) {
   if (!baseUrl) {
     throw new Error(`渠道 ${input.channelName ?? input.provider} 缺少 Base URL`)
   }
-  const headers = buildPiRequestHeaders(input.provider, resolvedApiKey, api, baseUrl)
+  const headers = buildPiRequestHeaders(input.provider, resolvedApiKey, api, baseUrl, input.agentTurnId)
   const compat = {
     ...modelDefaults.compat,
     ...(supportsPiDeveloperRole(input.provider) ? {} : { supportsDeveloperRole: false }),

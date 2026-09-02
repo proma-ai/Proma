@@ -306,6 +306,10 @@ export interface SDKResultMessage {
   _channelModelId?: string
   /** 渠道 provider，用于按 Agent SDK 实际运行窗口计算压缩阈值 */
   _channelProvider?: ProviderType
+  /** 官方渠道本轮的 opaque billing correlation ID。 */
+  _promaTurnId?: string
+  /** 已确认的本轮实际扣除积分（来自服务端账本，非 SDK USD 估算）。 */
+  _promaDeductedPoints?: number
 }
 
 /** SDK system 消息（init / compact_boundary / permission_denied / task_started / task_progress / task_notification） */

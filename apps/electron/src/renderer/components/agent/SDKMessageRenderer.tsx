@@ -431,6 +431,32 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
 
   // 从 turnMessages 中提取 result 消息的耗时和用量
   const { durationMs, usage } = extractTurnUsage(turn.turnMessages)
+  const turnResult = turn.turnMessages.findLast((message) => message.type === 'result') as SDKResultMessage | undefined
+  const turnId = turnResult?._promaTurnId
+  const [deductedPoints, setDeductedPoints] = React.useState<number | undefined>(turnResult?._promaDeductedPoints)
+
+  // Billing happens after the upstream stream is terminal, so a completed Pi
+  // turn can beat its ledger write by a few hundred milliseconds. Query the
+  // user-scoped authoritative aggregate with bounded retries; third-party
+  // channels never receive a turnId and therefore never make this request.
+  React.useEffect(() => {
+    setDeductedPoints(turnResult?._promaDeductedPoints)
+    if (!turnId || turnResult?._promaDeductedPoints != null) return
+    let cancelled = false
+    const load = async (): Promise<void> => {
+      for (const delay of [0, 250, 600, 1_200]) {
+        if (delay) await new Promise<void>((resolve) => setTimeout(resolve, delay))
+        if (cancelled) return
+        const response = await window.electronAPI.cloudUsage.getAgentTurnUsage(turnId).catch(() => undefined)
+        if (cancelled || !response?.success || !response.data?.found) continue
+        const value = Number(response.data.totalCost)
+        if (Number.isFinite(value)) setDeductedPoints(value)
+        return
+      }
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [turnId, turnResult?._promaDeductedPoints])
 
   // 只在用户点击停止时显示中断徽章。
   // aborted_streaming / aborted_tools 是流式追加消息时的软中断，语义是继续补充信息。
@@ -625,6 +651,15 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
               <Badge variant="outline" className="text-xs text-muted-foreground/70 border-muted-foreground/30 shrink-0">
                 已被用户中断
               </Badge>
+            )}
+            {deductedPoints != null && (
+              <span
+                className="ml-0.5 inline-flex items-center gap-1 text-[11px] text-muted-foreground/70 tabular-nums"
+                title="本轮实际扣除额度"
+              >
+                <CreditCard className="size-3" />
+                {deductedPoints.toLocaleString(undefined, { maximumFractionDigits: 4 })} 积分
+              </span>
             )}
           </MessageActions>
         )

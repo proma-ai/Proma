@@ -13,6 +13,7 @@ import type {
   ToolUsageLogResponse,
   SpeechUsageLogResponse,
   AgentUsageLogResponse,
+  AgentTurnUsage,
   CombinedUsageLogResponse,
   BillingIpcResponse,
 } from '@proma/shared'
@@ -82,6 +83,16 @@ export async function getSpeechUsageLogs(params?: UsageQueryParams): Promise<Bil
 export async function getAgentUsageLogs(params?: UsageQueryParams): Promise<BillingIpcResponse<AgentUsageLogResponse>> {
   try {
     const data = await getUsageApi().getAgentUsage(params)
+    return { success: true, data }
+  } catch (error) {
+    return { success: false, error: wrapError(error) }
+  }
+}
+
+/** 获取一条官方 Agent 回复关联轮次的权威积分消耗。 */
+export async function getAgentTurnUsage(turnId: string): Promise<BillingIpcResponse<AgentTurnUsage>> {
+  try {
+    const data = await getUsageApi().getAgentTurnUsage(turnId)
     return { success: true, data }
   } catch (error) {
     return { success: false, error: wrapError(error) }

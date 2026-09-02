@@ -60,6 +60,7 @@ import {
   getToolUsageLogs,
   getSpeechUsageLogs,
   getAgentUsageLogs,
+  getAgentTurnUsage,
   getCombinedUsageLogs,
 } from './lib/cloud-usage-service'
 import {
@@ -334,6 +335,11 @@ export async function registerCloudIpcHandlers(): Promise<void> {
     async (_, params?: UsageQueryParams) => {
       return getAgentUsageLogs(params)
     },
+  )
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.GET_AGENT_TURN_USAGE,
+    async (_, turnId: string) => getAgentTurnUsage(turnId),
   )
 
   // ===== 企业 Skills =====
