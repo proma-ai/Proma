@@ -32,6 +32,8 @@ interface SubscriptionTabProps {
   hideHeading?: boolean
   /** onboarding 弹窗模式：不展示个人订单记录，避免打断首次购买引导 */
   hideOrderHistory?: boolean
+  /** 插入当前订阅与购买套餐之间的额度使用洞察区块。 */
+  activity?: React.ReactNode
 }
 
 interface WechatPayState {
@@ -160,6 +162,7 @@ export function SubscriptionTab({
   hideWhyProma = false,
   hideHeading = false,
   hideOrderHistory = false,
+  activity,
 }: SubscriptionTabProps): React.ReactElement {
   const tiers = useAtomValue(subscriptionTiersAtom)
   const [subStatus, setSubStatus] = useAtom(subscriptionStatusAtom)
@@ -330,6 +333,9 @@ export function SubscriptionTab({
       })()}
 
       {!hideOrderHistory && <SubscriptionOrderHistory />}
+
+      {/* Token 活跃地图等用量洞察置于当前订阅和购买套餐之间。 */}
+      {activity}
 
       {/* 订阅计划卡片 */}
       <div className="space-y-4">

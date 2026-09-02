@@ -10,6 +10,8 @@ import type {
   UsageLogResponse,
   SpeechUsageLogResponse,
   ToolUsageLogResponse,
+  AgentTokenActivityResponse,
+  AgentTokenActivityQuery,
   AgentUsageLogResponse,
   AgentTurnUsage,
   CombinedUsageLogResponse,
@@ -55,6 +57,18 @@ export function createUsageApi(client: CloudApiClient) {
     /** 获取 Agent API 调用日志 */
     getAgentUsage: async (params?: UsageQueryParams): Promise<AgentUsageLogResponse> => {
       const response = await client.get<AgentUsageLogResponse>(`/me/agent-usage${buildQueryString(params)}`)
+      return response.data
+    },
+
+    /** 获取 Proma Agent 的每日 Token 活跃度（不含 Chat、工具和语音）。 */
+    getAgentTokenActivity: async (
+      params?: AgentTokenActivityQuery,
+    ): Promise<AgentTokenActivityResponse> => {
+      const search = new URLSearchParams()
+      if (params?.startDate) search.set('start_date', params.startDate)
+      if (params?.endDate) search.set('end_date', params.endDate)
+      const query = search.size > 0 ? `?${search.toString()}` : ''
+      const response = await client.get<AgentTokenActivityResponse>(`/me/agent-token-activity${query}`)
       return response.data
     },
 

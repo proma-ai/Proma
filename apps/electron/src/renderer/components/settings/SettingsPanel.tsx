@@ -28,7 +28,7 @@ import {
   HardDrive,
 } from "lucide-react";
 // Cloud 模式专属图标
-import { CreditCard, KeyRound, ScrollText } from "lucide-react";
+import { CreditCard, KeyRound } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ShortcutKeycaps } from "@/components/shortcuts/ShortcutKeycaps";
 import {
@@ -105,13 +105,6 @@ const API_TAB: TabItem = {
   id: "api",
   label: "开放 API",
   icon: <KeyRound size={16} />,
-};
-
-/** Cloud 模式专属 Tab - 用量日志 */
-const USAGE_TAB: TabItem = {
-  id: "usage",
-  label: "用量日志",
-  icon: <ScrollText size={16} />,
 };
 
 const TOOLS_TAB: TabItem = {
@@ -313,7 +306,6 @@ export function SettingsPanel({
     if (isCloudMode()) {
       result.push(BILLING_TAB);
       result.push(API_TAB);
-      result.push(USAGE_TAB);
     }
     result.push(...BASE_TABS);
     result.push(TOOLS_TAB);

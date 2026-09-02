@@ -115,6 +115,7 @@ import type {
   UsageLogResponse,
   ToolUsageLogResponse,
   SpeechUsageLogResponse,
+  AgentTokenActivityResponse,
   AgentUsageLogResponse,
   AgentTurnUsage,
   CombinedUsageLogResponse,
@@ -1243,6 +1244,8 @@ export interface ElectronAPI {
     getSpeechUsageLogs: (params?: UsageQueryParams) => Promise<BillingIpcResponse<SpeechUsageLogResponse>>
     /** 获取 Agent API 调用日志 */
     getAgentUsageLogs: (params?: UsageQueryParams) => Promise<BillingIpcResponse<AgentUsageLogResponse>>
+    /** 获取 Proma Agent 每日 Token 活跃度。 */
+    getAgentTokenActivity: () => Promise<BillingIpcResponse<AgentTokenActivityResponse>>
     /** 获取官方 Agent 单个轮次的权威积分消耗 */
     getAgentTurnUsage: (turnId: string) => Promise<BillingIpcResponse<AgentTurnUsage>>
   }
@@ -2923,6 +2926,9 @@ const electronAPI: ElectronAPI = {
     },
     getAgentUsageLogs: (params?: UsageQueryParams) => {
       return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_AGENT_USAGE_LOGS, params)
+    },
+    getAgentTokenActivity: () => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_AGENT_TOKEN_ACTIVITY)
     },
     getAgentTurnUsage: (turnId: string) => {
       return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_AGENT_TURN_USAGE, turnId)

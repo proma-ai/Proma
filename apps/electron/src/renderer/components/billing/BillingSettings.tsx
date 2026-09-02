@@ -9,6 +9,7 @@ import * as React from 'react'
 import { useSetAtom, useAtomValue } from 'jotai'
 import { Loader2 } from 'lucide-react'
 import { BalanceCard } from './BalanceCard'
+import { AgentTokenActivity } from './AgentTokenActivity'
 import { SubscriptionTab } from './SubscriptionTab'
 import { WhyPromaOfficial, BillingNotes } from './WhyPromaOfficial'
 import {
@@ -75,16 +76,17 @@ export function BillingSettings({ onboarding = false }: BillingSettingsProps): R
       {/* 余额卡片（onboarding 弹窗面向新用户，隐藏账户余额） */}
       {!onboarding && <BalanceCard />}
 
-      {/* 为什么选择 Proma 官方的 AI 渠道：设置页置顶展示；onboarding 弹窗由外层统一展示 */}
-      {!onboarding && <WhyPromaOfficial />}
-
-      {/* 订阅计划（底部 WhyProma 已上移，两种模式统一隐藏避免重复） */}
+      {/* 当前订阅 → Agent Token 活跃地图 → 商业版额度购买 */}
       <SubscriptionTab
         onSubscriptionComplete={refreshAll}
         hideWhyProma
         hideHeading={onboarding}
         hideOrderHistory={onboarding}
+        activity={!onboarding ? <AgentTokenActivity /> : undefined}
       />
+
+      {/* 购买决策说明置于套餐卡之后 */}
+      {!onboarding && <WhyPromaOfficial />}
 
       {/* 计费说明固定在最底部 */}
       <BillingNotes />

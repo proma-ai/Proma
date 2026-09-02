@@ -556,7 +556,7 @@ export function DurationBadge({ durationMs, usage }: { durationMs: number; usage
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="text-[15px] tabular-nums font-light cursor-default">
+        <span className="text-[15px] tabular-nums font-light text-muted-foreground/90 cursor-default">
           {formatDuration(durationMs)}
         </span>
       </TooltipTrigger>

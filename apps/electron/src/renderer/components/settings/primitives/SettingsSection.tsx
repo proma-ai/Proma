@@ -13,6 +13,8 @@ interface SettingsSectionProps {
   title: React.ReactNode
   /** 区块描述（可选） */
   description?: string
+  /** 标题左上方操作按钮插槽（可选） */
+  leadingAction?: React.ReactNode
   /** 右侧操作按钮插槽（可选） */
   action?: React.ReactNode
   /** 子内容 */
@@ -22,6 +24,7 @@ interface SettingsSectionProps {
 export function SettingsSection({
   title,
   description,
+  leadingAction,
   action,
   children,
 }: SettingsSectionProps): React.ReactElement {
@@ -30,6 +33,7 @@ export function SettingsSection({
       {/* 区块头部 */}
       <div className="flex items-start justify-between">
         <div>
+          {leadingAction && <div className="mb-2">{leadingAction}</div>}
           <h4 className={SECTION_TITLE_CLASS}>{title}</h4>
           {description && <p className={SECTION_DESCRIPTION_CLASS}>{description}</p>}
         </div>
