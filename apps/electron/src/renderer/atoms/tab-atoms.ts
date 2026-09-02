@@ -107,6 +107,12 @@ export interface TabMinimapItem {
 }
 export const tabMinimapCacheAtom = atom<Map<string, TabMinimapItem[]>>(new Map())
 
+/** Per-session canvas 内容缓存：sessionId → JSON Canvas 字符串；
+ * 画布作为右侧工作区 Tab 渲染，内容由 CanvasView 组件负责加载与持久化。 */
+export const sessionCanvasContentsAtom = atom<Map<string, string>>(new Map())
+/** Per-session canvas 是否已加载：sessionId → boolean */
+export const sessionCanvasLoadedAtom = atom<Map<string, boolean>>(new Map())
+
 // ===== 派生 Atoms =====
 
 /** 当前活跃标签 */

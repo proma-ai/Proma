@@ -11,7 +11,7 @@ import { realpath, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
 import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, AGENT_ISLAND_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, VAULT_IPC_CHANNELS, PLANNING_CONFLICT_ERROR, MAX_ATTACHMENT_SIZE, isPromaPermissionMode, normalizePathForCompare, TERMINAL_IPC_CHANNELS } from '@proma/shared'
-import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS, WINDOWS_AGENT_ISLAND_IPC_CHANNELS, TRAY_IPC_CHANNELS } from '../types'
+import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, CANVAS_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS, WINDOWS_AGENT_ISLAND_IPC_CHANNELS, TRAY_IPC_CHANNELS } from '../types'
 import type {
   QuickTaskSubmitInput,
   VoiceDictationAudioChunkInput,
@@ -304,7 +304,7 @@ import { permissionService } from './lib/agent-permission-service'
 import { resolvePathAgainstAgentCwd } from './lib/agent-file-path'
 import { askUserService } from './lib/agent-ask-user-service'
 import { exitPlanService } from './lib/agent-exit-plan-service'
-import { getAgentSessionWorkspacePath, getAgentWorkspacesDir, getConfigDir, getWorkspaceSkillsDir, getScratchPadPath } from './lib/config-paths'
+import { getAgentSessionWorkspacePath, getAgentWorkspacesDir, getConfigDir, getWorkspaceSkillsDir, getScratchPadPath, getCanvasExportsDir, getSessionCanvasPath } from './lib/config-paths'
 import { getCachedDefaultAppInfo, saveCachedDefaultAppInfo } from './lib/default-app-cache'
 import { calculateStorageStats, cleanupStorage, cleanupTempFiles } from './lib/storage-service'
 import type { CleanupOptions } from './lib/storage-service'
@@ -2265,6 +2265,96 @@ export function registerIpcHandlers(): void {
       } catch (err) {
         console.error('[ScratchPad] 复制图片到剪贴板失败:', err)
         return { success: false, message: '复制失败' }
+      }
+    }
+  )
+
+
+  // ===== Canvas 画布：会话画布持久化与选中簇导出 =====
+
+  // 导出选中簇：写 {name}.canvas + {name}.md 到 ~/.proma/canvas-exports/，重名自动加序号
+  ipcMain.handle(
+    CANVAS_IPC_CHANNELS.EXPORT,
+    async (
+      _,
+      payload: { name: string; canvasJson: string; markdown: string },
+    ): Promise<{ ok: boolean; canvasPath?: string; mdPath?: string; error?: string }> => {
+      try {
+        const dir = getCanvasExportsDir()
+        // 清理非法文件名字符
+        const safeBase = (payload.name || 'canvas').replace(/[/\\:*?"<>|]/g, '_').trim() || 'canvas'
+        let base = safeBase
+        let n = 1
+        while (existsSync(join(dir, `${base}.canvas`)) || existsSync(join(dir, `${base}.md`))) {
+          base = `${safeBase}-${n++}`
+        }
+        const canvasPath = join(dir, `${base}.canvas`)
+        const mdPath = join(dir, `${base}.md`)
+        await writeFile(canvasPath, payload.canvasJson, 'utf-8')
+        await writeFile(mdPath, payload.markdown, 'utf-8')
+        return { ok: true, canvasPath, mdPath }
+      } catch (err) {
+        console.error('[Canvas] 导出失败:', err)
+        return { ok: false, error: String(err) }
+      }
+    }
+  )
+
+  // ===== Session Canvas 画布持久化 =====
+
+  // 从磁盘加载 session 专属画布
+  ipcMain.handle(
+    CANVAS_IPC_CHANNELS.LOAD_SESSION,
+    async (_, sessionId: string): Promise<string> => {
+      try {
+        const meta = getAgentSessionMeta(sessionId)
+        if (!meta?.workspaceId) return ''
+        const workspace = getAgentWorkspace(meta.workspaceId)
+        if (!workspace) return ''
+        const path = getSessionCanvasPath(workspace.slug, sessionId)
+        if (!existsSync(path)) return ''
+        return readFileSync(path, 'utf-8')
+      } catch (err) {
+        console.error('[Canvas] 加载 session 画布失败:', err)
+        return ''
+      }
+    }
+  )
+
+  // 异步保存 session 专属画布
+  ipcMain.handle(
+    CANVAS_IPC_CHANNELS.SAVE_SESSION,
+    async (_, sessionId: string, content: string): Promise<boolean> => {
+      try {
+        const meta = getAgentSessionMeta(sessionId)
+        if (!meta?.workspaceId) return false
+        const workspace = getAgentWorkspace(meta.workspaceId)
+        if (!workspace) return false
+        const path = getSessionCanvasPath(workspace.slug, sessionId)
+        await writeFile(path, content, 'utf-8')
+        return true
+      } catch (err) {
+        console.error('[Canvas] 保存 session 画布失败:', err)
+        return false
+      }
+    }
+  )
+
+  // 同步保存 session 专属画布（beforeunload 场景）
+  ipcMain.on(
+    CANVAS_IPC_CHANNELS.SAVE_SESSION_SYNC,
+    (event, sessionId: string, content: string) => {
+      try {
+        const meta = getAgentSessionMeta(sessionId)
+        if (!meta?.workspaceId) return
+        const workspace = getAgentWorkspace(meta.workspaceId)
+        if (!workspace) return
+        const path = getSessionCanvasPath(workspace.slug, sessionId)
+        writeFileSync(path, content, 'utf-8')
+        event.returnValue = true
+      } catch (err) {
+        console.error('[Canvas] 同步保存 session 画布失败:', err)
+        event.returnValue = false
       }
     }
   )
