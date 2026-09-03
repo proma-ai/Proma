@@ -52,7 +52,7 @@ import { getEffectiveProxyUrl } from './proxy-settings-service'
 import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, removeSDKErrorMessage, updateSDKUserMessageSkillActivations, rewindPiAgentSession, resolveAgentCwd, getActiveWorktreePath, getAgentCwdMode, getSessionWorkbenchLayout } from './agent-session-manager'
 import { getAgentWorkspace, getProjectFilesPath, getWorkspaceMcpConfig, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles, getWorkspaceAgentsMdPath, readWorkspaceAgentsMd, getWorkspaceMemoryGuidance, isWorkspaceProjectKnowledgeMaintenanceApproved } from './agent-workspace-manager'
 import { getLocalProjectRootStatus } from './project-root-health'
-import { getMcpOAuthHeaders } from './mcp-oauth-service'
+import { getMcpApiKeyEnvironment, getMcpOAuthHeaders } from './mcp-oauth-service'
 import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getSdkConfigDir, getWorkspaceSkillsDir } from './config-paths'
 import { getRuntimeStatus } from './runtime-init'
 import { getSettings } from './settings-service'
@@ -263,16 +263,18 @@ export class AgentOrchestrator {
       const type = normalizeMcpTransportType((entry as { type?: unknown }).type)
 
       if (type === 'stdio' && entry.command) {
+        const credentialEnv = getMcpApiKeyEnvironment(workspaceSlug, name)
         const mergedEnv: Record<string, string> = {
           ...(process.env.PATH && { PATH: process.env.PATH }),
           ...entry.env,
+          ...credentialEnv,
         }
         mcpServers[name] = {
           type: 'stdio',
           command: entry.command,
           ...(entry.args && entry.args.length > 0 && { args: entry.args }),
           ...(Object.keys(mergedEnv).length > 0 && { env: mergedEnv }),
-          required: false,
+          required: true,
           startup_timeout_sec: entry.timeout ?? 30,
         }
       } else if ((type === 'http' || type === 'sse') && entry.url) {
@@ -289,7 +291,7 @@ export class AgentOrchestrator {
           url: entry.url,
           ...(Object.keys(headers).length > 0 && { headers }),
           ...(proxyUrl && { proxyUrl }),
-          required: false,
+          required: true,
         }
       } else {
         console.warn(`[Agent 编排] MCP 服务器 "${name}" 配置不完整，已跳过（type=${entry.type}, command=${entry.command ?? '无'}, url=${entry.url ?? '无'}）`)

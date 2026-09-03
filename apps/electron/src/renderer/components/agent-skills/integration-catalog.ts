@@ -11,9 +11,9 @@ interface CatalogIntegrationBase {
   iconSlug: string
   setupUrl: string
   kind: CatalogIntegrationKind
-  /** Prefer this card within its existing connection-status group. */
+  /** Legacy presentation hint; explicit priority controls directory order. */
   featured?: boolean
-  /** Explicit directory order. Lower values always appear first. */
+  /** Fixed catalog order; connection state never affects placement. */
   priority?: number
   placement?: 'bottom'
 }
@@ -53,6 +53,12 @@ export interface CatalogCredentialIntegration extends CatalogIntegrationBase {
     acquisitionUrl: string
     acquisitionLabel: string
     headerName: string
+    /** 需要附加到 API Key 前的认证前缀（例如 Bearer）。 */
+    valuePrefix?: string
+    /** stdio MCP 的 API Key 通过此环境变量注入，远程 MCP 留空。 */
+    envName?: string
+    /** 凭据安全存储绑定的稳定服务 URL；stdio MCP 不会写入 mcp.json。 */
+    credentialStorageUrl: string
   }
 }
 
@@ -70,7 +76,7 @@ export function getCatalogMcpStatusRank(status: CatalogMcpConnectionStatus): num
   return 1
 }
 
-/** Explicit directory priority wins; remaining cards retain connection-state ordering. */
+/** Directory order is stable: priority, featured placement, then explicit bottom placement. Connection state never moves a card. */
 export function compareCatalogConnectionCards(
   left: { placement?: 'bottom'; featured?: boolean; priority?: number; statusRank: number },
   right: { placement?: 'bottom'; featured?: boolean; priority?: number; statusRank: number },
@@ -78,12 +84,6 @@ export function compareCatalogConnectionCards(
   const leftPriority = left.priority ?? Number.POSITIVE_INFINITY
   const rightPriority = right.priority ?? Number.POSITIVE_INFINITY
   if (leftPriority !== rightPriority) return leftPriority - rightPriority
-
-  if (left.statusRank !== right.statusRank) return right.statusRank - left.statusRank
-
-  const leftFeatured = Number(Boolean(left.featured))
-  const rightFeatured = Number(Boolean(right.featured))
-  if (leftFeatured !== rightFeatured) return rightFeatured - leftFeatured
 
   const leftBottom = Number(left.placement === 'bottom')
   const rightBottom = Number(right.placement === 'bottom')
@@ -145,6 +145,7 @@ export function getCatalogCliStatusRank(status: CatalogCliConnectionStatus): num
 }
 
 const remoteMcp = (url: string): McpServerEntry => ({ type: 'http', url, enabled: false })
+const stdioMcp = (command: string, args: string[]): McpServerEntry => ({ type: 'stdio', command, args, enabled: false })
 
 const MCP_CONNECTION_ACCEPTANCE_INSTRUCTION = `
 最终完成形态：只有当该 MCP 已写入当前 Proma workspace 的 MCP 配置、处于启用状态，并完成真实 SDK handshake 与 listTools 验证成功后，才能显示为「已连接」或称可用；届时才可以通过 # 调用。仅在当前会话环境、OpenClaw/mcporter、临时 shell 中可用，或只安装了 Skill，都不等于 Proma MCP 已连接，必须如实说明未完成的条件。`
@@ -279,7 +280,7 @@ export const MCP_INTEGRATION_CATALOG: CatalogIntegration[] = [
     entry: remoteMcp('https://mcp.stripe.com'),
   },
   {
-    id: 'tongdaxin-mcp', name: '通达信 MCP', iconSlug: 'asset:tongdaxin', kind: 'guided', authType: 'provider-login', featured: true,
+    id: 'tongdaxin-mcp', name: '通达信 MCP', iconSlug: 'asset:tongdaxin', kind: 'guided', authType: 'provider-login',
     description: '金融行情和投研能力需要先核验通达信的正式 MCP 契约与账户授权方式。',
     capabilities: ['行情与金融数据', '账户授权核验', '官方契约调研'],
     setupUrl: 'https://vip.tdx.com.cn/site/app/pc-mall/main.html#/page_product_mcp',
@@ -300,7 +301,43 @@ export const MCP_INTEGRATION_CATALOG: CatalogIntegration[] = [
     agentPrompt: cliSetupPrompt('钉钉 CLI', 'https://open.dingtalk.com/document/development/dingtalk-cli-performing-tasks-within', '设置 → 远程连接 → 配置钉钉 CLI'),
   },
   {
-    id: 'tencent-docs-mcp', name: '腾讯文档', iconSlug: 'asset:tencent-docs', kind: 'credential', priority: 4, placement: 'bottom',
+    id: 'brave-search-mcp', name: 'Brave Search', iconSlug: 'asset:brave', kind: 'credential', priority: 5,
+    description: '接入 Brave 官方搜索 MCP，提供网页、新闻、图片、视频、本地和地点搜索。',
+    capabilities: ['网页与新闻搜索', '图片与视频搜索', '地点与本地搜索'],
+    setupUrl: 'https://api-dashboard.search.brave.com/app/keys',
+    serverName: 'brave-search',
+    entry: stdioMcp('npx', ['-y', '@brave/brave-search-mcp-server', '--transport', 'stdio']),
+    credential: {
+      label: 'Brave Search API Key',
+      placeholder: '粘贴 Brave Search API Key',
+      helpText: '仅需填写 API Key。Proma 会加密保存到系统 Keychain，并仅在启动 Brave MCP 时作为 BRAVE_API_KEY 注入。',
+      acquisitionUrl: 'https://api-dashboard.search.brave.com/app/keys',
+      acquisitionLabel: '打开 Brave Search API Console',
+      headerName: '',
+      envName: 'BRAVE_API_KEY',
+      credentialStorageUrl: 'https://api.search.brave.com/',
+    },
+  },
+  {
+    id: 'tavily-search-mcp', name: 'Tavily Search', iconSlug: 'asset:tavily', kind: 'credential', priority: 4,
+    description: '接入 Tavily 官方远程 MCP，为 Agent 提供面向 AI 的网页搜索、提取和研究能力。',
+    capabilities: ['网页搜索', '页面提取', '深度研究'],
+    setupUrl: 'https://app.tavily.com/home',
+    serverName: 'tavily-search',
+    entry: remoteMcp('https://mcp.tavily.com/mcp'),
+    credential: {
+      label: 'Tavily API Key',
+      placeholder: '粘贴 Tavily API Key',
+      helpText: '仅需填写 API Key。Proma 会加密保存到系统 Keychain，并通过 Authorization 请求头连接 Tavily 官方远程 MCP。',
+      acquisitionUrl: 'https://app.tavily.com/home',
+      acquisitionLabel: '打开 Tavily API Console',
+      headerName: 'Authorization',
+      valuePrefix: 'Bearer ',
+      credentialStorageUrl: 'https://mcp.tavily.com/mcp',
+    },
+  },
+  {
+    id: 'tencent-docs-mcp', name: '腾讯文档', iconSlug: 'asset:tencent-docs', kind: 'credential', priority: 10, placement: 'bottom',
     description: '使用当前腾讯文档空间的 MCP Token，安全连接文档、表格和空间工具。',
     capabilities: ['文档与表格', '空间 MCP Token', '真实连接验证'],
     setupUrl: 'https://docs.qq.com/open/document/mcp/get-token',
@@ -313,10 +350,11 @@ export const MCP_INTEGRATION_CATALOG: CatalogIntegration[] = [
       acquisitionUrl: 'https://docs.qq.com/open/document/mcp/get-token',
       acquisitionLabel: '打开腾讯文档官方 Token 获取说明',
       headerName: 'Authorization',
+      credentialStorageUrl: 'https://docs.qq.com/openapi/mcp',
     },
   },
   {
-    id: 'ctrip-wendao', name: '携程问道', iconSlug: 'asset:ctrip', kind: 'guided', authType: 'api-key', priority: 5,
+    id: 'ctrip-wendao', name: '携程问道', iconSlug: 'asset:ctrip', kind: 'guided', authType: 'api-key', priority: 11,
     description: '携程问道 Token 可提供机酒火车、景点推荐和行程规划；官方当前以 Skill 封装接入。',
     capabilities: ['机酒火车查询', '景点与行程规划', 'API Token + Skill'],
     setupUrl: 'https://ctrip.com/wendao/openclaw',
@@ -331,7 +369,7 @@ export const MCP_INTEGRATION_CATALOG: CatalogIntegration[] = [
     agentPrompt: providerSetupPrompt('百度网盘', 'https://pan.baidu.com/union/doc/mcp-server/%E4%BD%BF%E7%94%A8%E6%A6%82%E8%BF%B0/', '百度网盘 OAuth Access Token；SSE 模式不支持上传，上传需官方本地 stdio 方案'),
   },
   {
-    id: 'qichacha-mcp', name: '企查查', iconSlug: 'asset:qichacha', kind: 'guided', authType: 'api-key', featured: true,
+    id: 'qichacha-mcp', name: '企查查', iconSlug: 'asset:qichacha', kind: 'guided', authType: 'api-key',
     description: '企业工商、风险和关联信息需通过企查查开放平台的业务授权或 API Key 获取。',
     capabilities: ['工商与股权信息', '风险与关联查询', '开放平台 API Key'],
     setupUrl: 'https://agent.qcc.com/',

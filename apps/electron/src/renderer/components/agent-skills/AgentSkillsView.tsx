@@ -359,9 +359,10 @@ export function AgentSkillsView({
       await window.electronAPI.saveMcpApiKey({
         workspaceSlug: data.workspaceSlug,
         serverName: integration.serverName,
-        serverUrl: integration.entry.url!,
+        serverUrl: integration.credential.credentialStorageUrl,
         headerName: integration.credential.headerName,
-        value,
+        ...(integration.credential.envName ? { envName: integration.credential.envName } : {}),
+        value: `${integration.credential.valuePrefix ?? ''}${value}`,
       })
       const verification = await data.toggleMcp(integration.serverName, true)
       if (!verification.success) {
