@@ -781,7 +781,7 @@ export function OnboardingView({ onComplete, initialStep = 'welcome' }: Onboardi
               欢迎使用 Proma
             </h1>
             <p className="mt-3 text-base leading-relaxed text-neutral-500 md:text-lg">
-              为专业的用户打造的通用 Agent
+              为专业用户打造的通用 Agent
             </p>
 
             {/* 主操作 */}
