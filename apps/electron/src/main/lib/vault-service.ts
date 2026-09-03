@@ -34,6 +34,7 @@ import { isValidImageBytes } from './image-content-validation'
 
 const MAX_VAULT_FILE_BYTES = 2 * 1024 * 1024
 const MAX_VAULT_FILES = 5_000
+const MAX_VAULT_FOLDERS = 1_000
 const MAX_VAULT_DEPTH = 16
 const HIDDEN_DIRECTORY_PREFIX = '.'
 const MAX_VAULT_PASTED_IMAGE_BYTES = 10 * 1024 * 1024
@@ -254,10 +255,13 @@ export function createVaultFileSystem(rootPath: string): VaultFileSystem {
 
   const listFiles = (): VaultTreeEntry[] => {
     const entries: VaultTreeEntry[] = []
-    let entryCount = 0
+    // Folders and Markdown files have independent quotas: a Vault full of folders
+    // must never push existing notes out of the sidebar (or vice versa).
+    let fileCount = 0
+    let folderCount = 0
 
     const walk = (currentDir: string, depth: number): void => {
-      if (depth > MAX_VAULT_DEPTH || entryCount >= MAX_VAULT_FILES) return
+      if (depth > MAX_VAULT_DEPTH) return
       let dirEntries: import('node:fs').Dirent[]
       try {
         dirEntries = readdirSync(currentDir, { withFileTypes: true })
@@ -266,19 +270,22 @@ export function createVaultFileSystem(rootPath: string): VaultFileSystem {
       }
 
       for (const entry of dirEntries) {
-        if (entryCount >= MAX_VAULT_FILES || entry.name.startsWith(HIDDEN_DIRECTORY_PREFIX) || entry.isSymbolicLink()) continue
+        if (entry.name.startsWith(HIDDEN_DIRECTORY_PREFIX) || entry.isSymbolicLink()) continue
         const absolutePath = join(currentDir, entry.name)
         if (entry.isDirectory()) {
+          // Never emit a folder at the boundary depth: its children would not be
+          // enumerated, leaving a node that looks expandable but stays empty.
+          if (depth >= MAX_VAULT_DEPTH || folderCount >= MAX_VAULT_FOLDERS) continue
           entries.push({
             kind: 'folder',
             relativePath: toRelativePath(root, absolutePath),
             name: entry.name,
           })
-          entryCount += 1
+          folderCount += 1
           walk(absolutePath, depth + 1)
           continue
         }
-        if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.md')) continue
+        if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.md') || fileCount >= MAX_VAULT_FILES) continue
         try {
           const stats = statSync(absolutePath)
           entries.push({
@@ -288,7 +295,7 @@ export function createVaultFileSystem(rootPath: string): VaultFileSystem {
             size: stats.size,
             modifiedAt: stats.mtimeMs,
           })
-          entryCount += 1
+          fileCount += 1
         } catch {
           // 遍历期间文件可能消失或暂时不可访问，跳过后继续处理其他条目。
         }

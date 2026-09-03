@@ -53,17 +53,52 @@ describe('Vault 文件树', () => {
     ])
   })
 
-  test('Given folder creation races with another creator When both target the same path Then exactly one succeeds', async () => {
+  test('Given 文件夹数量达到文件上限 When 枚举 Vault Then 目录不占用文件配额', () => {
+    const root = createVault()
+    mkdirSync(join(root, 'Notes'))
+    for (let index = 0; index < 5_000; index += 1) {
+      writeFileSync(join(root, 'Notes', `note-${String(index).padStart(4, '0')}.md`), '', 'utf-8')
+    }
+    mkdirSync(join(root, 'Empty'))
+
+    const entries = createVaultFileSystem(root).listFiles()
+
+    expect(entries.filter((entry) => entry.kind === 'file')).toHaveLength(5_000)
+    expect(entries.filter((entry) => entry.kind === 'folder')).toEqual([
+      { kind: 'folder', relativePath: 'Empty', name: 'Empty' },
+      { kind: 'folder', relativePath: 'Notes', name: 'Notes' },
+    ])
+  }, 30_000)
+
+  test('Given 目录嵌套达到深度边界 When 枚举 Vault Then 不返回无法展开的超限文件夹', () => {
+    const root = createVault()
+    const segments = Array.from({ length: 18 }, (_, index) => `d${index + 1}`)
+    let current = root
+    for (const segment of segments) {
+      current = join(current, segment)
+      mkdirSync(current)
+    }
+    const level16 = segments.slice(0, 16).join('/')
+    const level17 = segments.slice(0, 17).join('/')
+    writeFileSync(join(root, level16, 'visible.md'), '# visible\n', 'utf-8')
+    writeFileSync(join(root, level17, 'hidden.md'), '# hidden\n', 'utf-8')
+
+    const entries = createVaultFileSystem(root).listFiles()
+    const folders = entries.filter((entry) => entry.kind === 'folder').map((entry) => entry.relativePath)
+
+    expect(folders).toHaveLength(16)
+    expect(folders.at(-1)).toBe(level16)
+    expect(entries.some((entry) => entry.kind === 'file' && entry.relativePath === `${level16}/visible.md`)).toBe(true)
+    expect(entries.some((entry) => entry.relativePath === level17)).toBe(false)
+    expect(entries.some((entry) => entry.relativePath === `${level17}/hidden.md`)).toBe(false)
+  })
+
+  test('Given 目标路径已被其他创建者创建 When 重复创建同名文件夹 Then 返回稳定的同名错误且只保留一个目录', () => {
     const root = createVault()
     const vault = createVaultFileSystem(root)
+    vault.createFolder('Concurrent')
 
-    const results = await Promise.allSettled([
-      Promise.resolve().then(() => vault.createFolder('Concurrent')),
-      Promise.resolve().then(() => vault.createFolder('Concurrent')),
-    ])
-
-    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
-    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1)
+    expect(() => vault.createFolder('Concurrent')).toThrow('同名文件或文件夹已存在')
     expect(vault.listFiles()).toEqual([
       { kind: 'folder', relativePath: 'Concurrent', name: 'Concurrent' },
     ])
