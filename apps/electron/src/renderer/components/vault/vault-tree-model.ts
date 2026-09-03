@@ -1,4 +1,4 @@
-import type { VaultFileEntry } from '@proma/shared'
+import type { VaultFileEntry, VaultTreeEntry } from '@proma/shared'
 
 /** A fresh file tree intentionally reveals no nested folders. */
 export function getInitialVaultExpandedFolders(): ReadonlySet<string> {
@@ -12,39 +12,49 @@ export interface VaultFolderNode {
   files: VaultFileEntry[]
 }
 
-/** Builds the data model once per file-list change; rendering remains demand-driven. */
-export function buildVaultTree(files: VaultFileEntry[]): VaultFolderNode {
+/** Builds the data model once per tree-entry change; rendering remains demand-driven. */
+export function buildVaultTree(entries: VaultTreeEntry[]): VaultFolderNode {
   const root: VaultFolderNode = { name: '', relativePath: '', folders: new Map(), files: [] }
 
-  for (const file of files) {
-    const segments = file.relativePath.split('/')
-    const filename = segments.pop()
-    if (!filename) continue
-
+  const getOrCreateFolder = (relativePath: string): VaultFolderNode => {
     let parent = root
-    for (const folderName of segments) {
-      const relativePath = parent.relativePath ? `${parent.relativePath}/${folderName}` : folderName
+    let currentPath = ''
+    for (const folderName of relativePath.split('/').filter(Boolean)) {
+      currentPath = currentPath ? `${currentPath}/${folderName}` : folderName
       let folder = parent.folders.get(folderName)
       if (!folder) {
-        folder = { name: folderName, relativePath, folders: new Map(), files: [] }
+        folder = { name: folderName, relativePath: currentPath, folders: new Map(), files: [] }
         parent.folders.set(folderName, folder)
       }
       parent = folder
     }
-    parent.files.push(file)
+    return parent
+  }
+
+  for (const entry of entries) {
+    if (entry.kind === 'folder') {
+      getOrCreateFolder(entry.relativePath)
+      continue
+    }
+
+    const separatorIndex = entry.relativePath.lastIndexOf('/')
+    const parent = separatorIndex < 0 ? root : getOrCreateFolder(entry.relativePath.slice(0, separatorIndex))
+    parent.files.push(entry)
   }
 
   return root
 }
 
-/** Returns only the folders needed to reveal a user-selected note. */
-/**
- * File sizes and timestamps do not change the visible tree. Reuse the existing
- * model for saves or refreshes that leave every path and label intact.
+/** File contents, sizes, and timestamps do not change the visible tree. Reuse the existing
+ * model for saves or refreshes that leave every entry kind, path, and label intact.
  */
-export function hasSameVaultTreeEntries(current: VaultFileEntry[], next: VaultFileEntry[]): boolean {
+export function hasSameVaultTreeEntries(current: VaultTreeEntry[], next: VaultTreeEntry[]): boolean {
   return current.length === next.length
-    && current.every((entry, index) => entry.relativePath === next[index]?.relativePath && entry.name === next[index]?.name)
+    && current.every((entry, index) => (
+      entry.kind === next[index]?.kind
+      && entry.relativePath === next[index]?.relativePath
+      && entry.name === next[index]?.name
+    ))
 }
 
 export function getVaultFolderAncestors(relativePath: string): string[] {

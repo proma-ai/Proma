@@ -120,7 +120,7 @@ import type {
   PendingRequestsSnapshot,
   VaultCandidate,
   VaultDeleteInput,
-  VaultFileEntry,
+  VaultTreeEntry,
   VaultFocus,
   VaultReadResult,
   VaultRenameInput,
@@ -494,7 +494,7 @@ export interface ElectronAPI {
   listVaultCandidates: () => Promise<VaultCandidate[]>
   selectVault: (options?: { inboxPath?: string; allowAgentWrites?: boolean }) => Promise<VaultSummary | null>
   authorizeDiscoveredVault: (rootPath: string, options?: { inboxPath?: string; allowAgentWrites?: boolean }) => Promise<VaultSummary>
-  listVaultFiles: () => Promise<VaultFileEntry[]>
+  listVaultFiles: () => Promise<VaultTreeEntry[]>
   readVaultFile: (relativePath: string) => Promise<VaultReadResult>
   resolveVaultMedia: (noteRelativePath: string, src: string) => Promise<import('@proma/shared').ResolvedFileUrl | null>
   saveVaultPastedImage: (input: VaultSavePastedImageInput) => Promise<{ src: string } | null>

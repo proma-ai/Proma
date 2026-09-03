@@ -19,7 +19,7 @@ import type {
   VaultCandidate,
   VaultConfig,
   VaultDeleteInput,
-  VaultFileEntry,
+  VaultTreeEntry,
   VaultFocus,
   VaultReadResult,
   VaultRenameInput,
@@ -236,7 +236,7 @@ export function getVaultUserContext(sessionId: string): VaultUserContextSnapshot
 }
 
 export interface VaultFileSystem {
-  listFiles(): VaultFileEntry[]
+  listFiles(): VaultTreeEntry[]
   readFile(relativePath: string): VaultReadResult
   resolveMedia(noteRelativePath: string, src: string): string | null
   savePastedImage(input: VaultSavePastedImageInput): { src: string } | null
@@ -252,11 +252,12 @@ export interface VaultFileSystem {
 export function createVaultFileSystem(rootPath: string): VaultFileSystem {
   const root = assertVaultRoot(rootPath)
 
-  const listFiles = (): VaultFileEntry[] => {
-    const entries: VaultFileEntry[] = []
+  const listFiles = (): VaultTreeEntry[] => {
+    const entries: VaultTreeEntry[] = []
+    let entryCount = 0
 
     const walk = (currentDir: string, depth: number): void => {
-      if (depth > MAX_VAULT_DEPTH || entries.length >= MAX_VAULT_FILES) return
+      if (depth > MAX_VAULT_DEPTH || entryCount >= MAX_VAULT_FILES) return
       let dirEntries: import('node:fs').Dirent[]
       try {
         dirEntries = readdirSync(currentDir, { withFileTypes: true })
@@ -265,9 +266,15 @@ export function createVaultFileSystem(rootPath: string): VaultFileSystem {
       }
 
       for (const entry of dirEntries) {
-        if (entries.length >= MAX_VAULT_FILES || entry.name.startsWith(HIDDEN_DIRECTORY_PREFIX) || entry.isSymbolicLink()) continue
+        if (entryCount >= MAX_VAULT_FILES || entry.name.startsWith(HIDDEN_DIRECTORY_PREFIX) || entry.isSymbolicLink()) continue
         const absolutePath = join(currentDir, entry.name)
         if (entry.isDirectory()) {
+          entries.push({
+            kind: 'folder',
+            relativePath: toRelativePath(root, absolutePath),
+            name: entry.name,
+          })
+          entryCount += 1
           walk(absolutePath, depth + 1)
           continue
         }
@@ -275,11 +282,13 @@ export function createVaultFileSystem(rootPath: string): VaultFileSystem {
         try {
           const stats = statSync(absolutePath)
           entries.push({
+            kind: 'file',
             relativePath: toRelativePath(root, absolutePath),
             name: entry.name,
             size: stats.size,
             modifiedAt: stats.mtimeMs,
           })
+          entryCount += 1
         } catch {
           // 遍历期间文件可能消失或暂时不可访问，跳过后继续处理其他条目。
         }
@@ -431,7 +440,14 @@ export function createVaultFileSystem(rootPath: string): VaultFileSystem {
       throw new Error('目标 Vault 父文件夹不存在')
     }
     const revalidated = getSafeVaultFolderTarget(root, target.relativePath)
-    mkdirSync(revalidated.absolutePath)
+    try {
+      mkdirSync(revalidated.absolutePath)
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST') {
+        throw new Error('同名文件或文件夹已存在')
+      }
+      throw error
+    }
   }
 
   const renameFile = (input: VaultRenameInput): VaultReadResult => {
