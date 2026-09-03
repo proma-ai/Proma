@@ -1,5 +1,16 @@
-import { getChannelById } from './channel-manager'
+import { getChannelById, listChannels } from './channel-manager'
 import type { ProviderType } from '@proma/shared'
+import {
+  listEnabledAgentModelsGroupedFromChannels,
+  resolveDelegationModelTargetFromChannels,
+  type ResolvedAgentModelTarget,
+} from './agent-model-target'
+
+export {
+  listEnabledAgentModelsGroupedFromChannels,
+  resolveDelegationModelTargetFromChannels,
+  type ResolvedAgentModelTarget,
+} from './agent-model-target'
 
 export interface AvailableAgentModel {
   id: string
@@ -67,4 +78,22 @@ export function listEnabledAgentModelsForChannel(
         source: model.source,
       })),
   }
+}
+
+/** 读取全部已启用渠道，解析协作委派的目标模型（支持跨渠道） */
+export function resolveDelegationModelTarget(input: {
+  channelId?: string
+  modelId?: string
+  fallbackChannelId?: string
+  fallbackModelId?: string
+  purpose: string
+}): ResolvedAgentModelTarget {
+  return resolveDelegationModelTargetFromChannels(input, listChannels())
+}
+
+/** 全渠道分组视图：列出所有已启用渠道及其可用模型（供跨渠道委派选择） */
+export function listEnabledAgentModelsGrouped(): {
+  channels: AvailableAgentModelsForChannel[]
+} {
+  return listEnabledAgentModelsGroupedFromChannels(listChannels())
 }
