@@ -97,6 +97,7 @@ import {
 
 import { redactSensitiveLogText, redactSensitiveLogValue } from './bridge-log-redaction'
 import { getFeishuApiBaseUrl, normalizeFeishuDomain } from './feishu-domain'
+import { restorePersistedFeishuBinding } from './feishu/binding-restore'
 
 // ===== 类型定义 =====
 
@@ -372,25 +373,19 @@ class FeishuBridge {
       const raw = readFileSync(bindingsPath, 'utf-8')
       const bindings = JSON.parse(raw) as FeishuChatBinding[]
       const appSettings = getSettings()
+      const routeFallback = {
+        channelId: this.botConfig.defaultChannelId ?? appSettings.agentChannelId,
+        modelId: this.botConfig.defaultModelId ?? appSettings.agentModelId,
+      }
 
       for (const b of bindings) {
         // 验证对应会话仍然存在
         const session = getAgentSessionMeta(b.sessionId)
         if (session) {
-          if (b.source === 'session-mirror' && session.archived) {
-            b.archived = true
-            b.archivedAt ??= session.updatedAt
-          }
-          // 同步最新的渠道和模型设置（用户可能已更改）
-          if (appSettings.agentChannelId) {
-            b.channelId = appSettings.agentChannelId
-          }
-          if (appSettings.agentModelId) {
-            b.modelId = appSettings.agentModelId
-          }
-          this.chatBindings.set(b.chatId, b)
-          if (!b.archived) {
-            this.sessionToChat.set(b.sessionId, b.chatId)
+          const restoredBinding = restorePersistedFeishuBinding(b, session, routeFallback)
+          this.chatBindings.set(restoredBinding.chatId, restoredBinding)
+          if (!restoredBinding.archived) {
+            this.sessionToChat.set(restoredBinding.sessionId, restoredBinding.chatId)
           }
         }
       }
