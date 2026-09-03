@@ -36,7 +36,7 @@
     },
     "apps/electron": {
       "name": "@proma/electron",
-      "version": "0.19.24",
+      "version": "0.19.25",
       "dependencies": {
         "@codemirror/language": "^6.12.4",
         "@codemirror/state": "^6.7.1",

@@ -869,39 +869,42 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
 
   // 获取当前 session 的工作路径（文件浏览器需要）
   React.useEffect(() => {
+    let disposed = false
+
     if (!currentWorkspaceId) {
       setSessionPathMap((prev) => {
+        if (!prev.has(sessionId)) return prev
         const map = new Map(prev)
         map.delete(sessionId)
         return map
       })
-      return
+      return () => { disposed = true }
     }
 
+    // IPC 请求不可取消，用 effect 生命周期阻止旧工作区请求覆盖当前路径。
+    // 不在请求开始时清空已有路径，避免正常挂载时文件面板出现空窗。
     window.electronAPI
       .getAgentSessionPath(currentWorkspaceId, sessionId)
       .then((path) => {
-        if (path) {
-          setSessionPathMap((prev) => {
-            const map = new Map(prev)
-            map.set(sessionId, path)
-            return map
-          })
-        } else {
-          setSessionPathMap((prev) => {
-            const map = new Map(prev)
-            map.delete(sessionId)
-            return map
-          })
-        }
+        if (disposed) return
+        setSessionPathMap((prev) => {
+          const map = new Map(prev)
+          if (path) map.set(sessionId, path)
+          else map.delete(sessionId)
+          return map
+        })
       })
       .catch(() => {
+        if (disposed) return
         setSessionPathMap((prev) => {
+          if (!prev.has(sessionId)) return prev
           const map = new Map(prev)
           map.delete(sessionId)
           return map
         })
       })
+
+    return () => { disposed = true }
   }, [sessionId, currentWorkspaceId, setSessionPathMap])
 
   // 获取工作区共享文件目录路径（@ 引用时需要搜索）
