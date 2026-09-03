@@ -5,6 +5,13 @@ appId: cool.proma.app
 productName: Proma
 copyright: Copyright © 2024-2026 Erlich Liu
 
+# Linux/macOS/Windows 的外部 OAuth 回调协议。Linux 构建会据此生成
+# x-scheme-handler/proma，浏览器才能将 proma:// 回调交给 Proma。
+protocols:
+  - name: Proma OAuth
+    schemes:
+      - proma
+
 # Electron 版本（CI 环境 bun workspace 下无法自动检测，需显式指定）
 electronVersion: 43.2.0
 

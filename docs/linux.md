@@ -22,6 +22,19 @@ chmod +x ./Proma-<版本>.AppImage
 
 `.deb` 安装后可以从应用菜单启动 Proma。AppImage 建议放在用户有写权限的本地目录；从只读目录、网络盘或部分企业挂载目录运行时，应用内更新可能不可用。
 
+## Google 登录与 `proma://` 回调
+
+`.deb` 会在安装时把 Proma 注册为 `proma://` 协议处理器。AppImage 第一次使用前，请先从终端或文件管理器**手动启动一次** Proma；应用会在用户级 XDG applications 目录写入 `proma-appimage.desktop`，并将 `proma://` 关联到该 AppImage。之后 Google 登录完成即可从浏览器回到 Proma。
+
+如果移动、重命名或替换了 AppImage，请再手动启动一次，让桌面入口更新到新路径。可通过以下命令检查关联：
+
+```bash
+xdg-mime query default x-scheme-handler/proma
+# AppImage 预期输出：proma-appimage.desktop
+```
+
+若桌面环境没有 `xdg-mime`，或浏览器仍提示 “No Apps available”，请优先安装 `.deb` 版本，或安装/修复系统的 `xdg-utils` 后重新手动启动 AppImage。
+
 ## 系统范围
 
 | 系统 | 第一版状态 |

@@ -271,7 +271,7 @@ jobs:
       - name: 安装 Linux 构建依赖
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential python3
+          sudo apt-get install -y build-essential desktop-file-utils python3
 
       - name: 安装依赖
         run: bun install --frozen-lockfile
@@ -293,6 +293,37 @@ jobs:
       - name: 打包（Linux x64）
         run: bunx electron-builder@25.1.8 --linux --x64 --publish never
         working-directory: apps/electron
+
+      - name: 验证 Linux OAuth deep-link 元数据
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="apps/electron/out"
+          deb="$(find "$artifact_dir" -maxdepth 1 -type f -name '*.deb' -print -quit)"
+          appimage="$(find "$artifact_dir" -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+          test -n "$deb"
+          test -n "$appimage"
+          appimage="$(readlink -f "$appimage")"
+
+          tmpdir="$(mktemp -d)"
+          trap 'rm -rf "$tmpdir"' EXIT
+          deb_desktop="$tmpdir/proma.deb.desktop"
+          dpkg-deb --fsys-tarfile "$deb" | tar -xOf - ./usr/share/applications/proma.desktop > "$deb_desktop"
+
+          appimage_dir="$tmpdir/appimage"
+          mkdir "$appimage_dir"
+          (
+            cd "$appimage_dir"
+            "$appimage" --appimage-extract >/dev/null
+          )
+          appimage_desktop="$(find "$appimage_dir/squashfs-root" -type f -name '*.desktop' -print -quit)"
+          test -n "$appimage_desktop"
+
+          for desktop in "$deb_desktop" "$appimage_desktop"; do
+            desktop-file-validate "$desktop"
+            grep -Fq 'x-scheme-handler/proma;' "$desktop"
+            grep -Eq '^Exec=.*%U$' "$desktop"
+          done
 
       # sync:runtime-deps 会清空 apps/electron/node_modules 以形成最小打包闭包；
       # upload-release.ts 的 ali-oss 是发布工具依赖，上传前须恢复 workspace 依赖。

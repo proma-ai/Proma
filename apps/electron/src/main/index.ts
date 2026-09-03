@@ -2,6 +2,15 @@ import { app, BrowserWindow, dialog, Menu, nativeTheme, protocol, screen, shell 
 import { join } from 'path'
 import { pathToFileURL } from 'url'
 import { existsSync } from 'fs'
+import {
+  createDeferredDeepLinkHandler,
+  extractPromaDeepLink,
+  PROTOCOL_NAME,
+} from './lib/deep-link-startup'
+import { installLinuxAppImageProtocolHandler } from './lib/linux-appimage-integration'
+
+// Cloud 认证初始化完成前，先把系统传入的回调保存在内存中；token 不写入日志或磁盘。
+const deferredDeepLinkHandler = createDeferredDeepLinkHandler(handleDeepLink)
 
 // Dev 与正式版使用独立的 userData 目录，避免共享 Chromium SingletonLock 导致 dev 启动被静默退出
 // 必须在任何会读取 userData 路径的模块加载之前执行
@@ -37,18 +46,29 @@ function registerProtocolsAndHandlers(): void {
     { scheme: 'proma-file', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
   ])
 
+  // Linux / Windows 首次由协议链接启动时，URL 会出现在初始进程 argv 中。
+  const initialDeepLink = extractPromaDeepLink(process.argv)
+  if (initialDeepLink) deferredDeepLinkHandler.receive(initialDeepLink)
+
+  // macOS 可能在 ready 前派发 open-url，因此必须在启动最早阶段监听并延迟分发。
+  app.on('open-url', (event, url) => {
+    event.preventDefault()
+    const deepLink = extractPromaDeepLink([url])
+    if (deepLink) deferredDeepLinkHandler.receive(deepLink)
+  })
+
   // Windows: 禁用 LCD 次像素抗锯齿（ClearType），改用灰度 AA。
   // ClearType 是为浅色背景+深色文字设计的，在深色代码块背景下会产生彩色边缘，导致文字模糊。
   if (process.platform === 'win32') {
     app.commandLine.appendSwitch('disable-lcd-text')
   }
 
-  // Windows 等平台通过 second-instance 唤起已有主窗口。
+  // Linux / Windows 已运行实例通过 second-instance 收到协议 URL。
   app.on('second-instance', (_event, argv) => {
     // OAuth 回调含有令牌，必须优先交给 Cloud 登录链路处理。
-    const url = argv.find((arg) => arg.startsWith(`${PROTOCOL_NAME}://`))
+    const url = extractPromaDeepLink(argv)
     if (url) {
-      handleDeepLink(url)
+      deferredDeepLinkHandler.receive(url)
       return
     }
 
@@ -147,8 +167,6 @@ import { registerGlobalShortcut, unregisterAllGlobalShortcuts } from './lib/glob
 import { setPromaVersion } from '@proma/core'
 import { canRecoverRenderer, RENDERER_RECOVERY_WINDOW_MS } from './lib/renderer-process-recovery'
 import { TRAY_IPC_CHANNELS, WINDOWS_AGENT_ISLAND_IPC_CHANNELS } from '../types'
-
-const PROTOCOL_NAME = 'proma'
 
 /** macOS 26+ 使用 Swift/AppKit NSPanel；其他平台不创建 Agent Island surface。 */
 function startAgentIslandSurface(): void {
@@ -675,9 +693,10 @@ function createWindow(): void {
 }
 
 // ===== proma:// 协议注册（Google OAuth deep-link 回调） =====
-// 仅打包模式注册，dev 模式下 electronmon 会干扰协议注册
+// 仅打包模式注册，dev 模式下 electronmon 会干扰协议注册。
+// AppImage 没有安装到宿主应用数据库，改由启动后的 XDG 集成路径处理。
 
-if (app.isPackaged) {
+if (app.isPackaged && !(process.platform === 'linux' && process.env.APPIMAGE)) {
   app.setAsDefaultProtocolClient(PROTOCOL_NAME)
 }
 
@@ -712,12 +731,6 @@ function handleDeepLink(url: string): void {
   }
 }
 
-// macOS: open-url 事件（app 已运行时，系统会发此事件而非启动新实例）
-app.on('open-url', (event, url) => {
-  event.preventDefault()
-  handleDeepLink(url)
-})
-
 function sendToMainWindow(channel: string, data?: unknown): void {
   showAndFocusMainWindow()
 
@@ -749,6 +762,14 @@ async function bootstrap(): Promise<void> {
 
   // 先显示不依赖 Renderer 的静态启动页；运行时检测耗时不会再变成用户可见的空白。
   createStartupSplashWindow()
+
+  // AppImage 直接运行不会自动将内嵌 desktop entry 安装到宿主；首次启动时补齐
+  // 用户级 x-scheme-handler/proma 关联，后续系统浏览器 OAuth 回调才可唤起 Proma。
+  if (app.isPackaged && process.platform === 'linux' && process.env.APPIMAGE) {
+    await safeAwait('installLinuxAppImageProtocolHandler', () =>
+      installLinuxAppImageProtocolHandler({ appImagePath: process.env.APPIMAGE }),
+    )
+  }
 
   // 注册自定义协议 proma-file:// 用于内联预览本地文件。
   // 协议只接受主进程签发的 opaque token，不解析 renderer 提供的绝对路径。
@@ -803,6 +824,9 @@ async function bootstrap(): Promise<void> {
 
   // Create main window (will be shown when ready)
   createWindow()
+
+  // Cloud 认证状态已完成恢复，窗口也已存在；现在再投递冷启动时缓存的 OAuth 回调。
+  deferredDeepLinkHandler.activate()
 
   // Create system tray icon
   const hoverWin = process.platform === 'win32' ? getAgentStatusHoverWindow() : null
@@ -972,6 +996,7 @@ function handleBootstrapFailure(err: unknown): void {
   try {
     registerIpcHandlers()
     createWindow()
+    deferredDeepLinkHandler.activate()
   } catch (fallbackErr) {
     console.error('[启动] 降级窗口创建也失败:', fallbackErr)
   }
