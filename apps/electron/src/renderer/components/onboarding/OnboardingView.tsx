@@ -37,7 +37,7 @@ import { FAQ_GROUPS } from './faq-content'
 type OnboardingStep = 'welcome' | 'guide' | 'files' | 'project' | 'automation' | 'memory' | 'sideanswer' | 'subagent' | 'faq'
 
 interface OnboardingViewProps {
-  onComplete: (openTutorial?: boolean) => void
+  onComplete: () => void
   /** 从设置重放时可跳过欢迎页。 */
   initialStep?: OnboardingStep
 }
@@ -670,12 +670,12 @@ export function OnboardingView({ onComplete, initialStep = 'welcome' }: Onboardi
   const [flash, setFlash] = useState(false)
   const [fading, setFading] = useState(false)
   const [faqBackStep, setFaqBackStep] = useState<'subagent' | 'sideanswer'>('sideanswer')
-  const handleFinish = async (openTutorial?: boolean) => {
+  const handleFinish = async () => {
     await window.electronAPI.updateSettings({
       onboardingCompleted: true,
       onboardingVersion: CURRENT_ONBOARDING_VERSION,
     })
-    onComplete(openTutorial)
+    onComplete()
   }
 
   /**
