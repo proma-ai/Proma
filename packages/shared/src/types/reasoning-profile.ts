@@ -391,6 +391,13 @@ export function normalizeReasoningCapabilityLevel(
   const requested = level ?? capability.defaultLevel
   if (capability.levels.includes(requested)) return requested
 
+  // Some models (for example Fable 5.1) always reason and do not expose an off
+  // mode. Preserve the product's "disabled" legacy setting as a safe, explicit
+  // high-effort request instead of silently downgrading it to minimal.
+  if (requested === 'off') {
+    return capability.levels.includes('high') ? 'high' : capability.defaultLevel
+  }
+
   const requestedIndex = PI_EXTENDED_THINKING_LEVELS.indexOf(requested)
   if (requestedIndex === -1) return capability.levels[0]
   for (let index = requestedIndex; index < PI_EXTENDED_THINKING_LEVELS.length; index += 1) {

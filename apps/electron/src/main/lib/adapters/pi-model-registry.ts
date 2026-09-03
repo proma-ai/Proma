@@ -440,8 +440,17 @@ function getClaudeFamilyKey(modelRef: string, allowMajorOnly = false): string | 
 function findClaudeCatalogModel(models: readonly PiCatalogModel[], modelId: string): PiCatalogModel | undefined {
   const familyKey = getClaudeFamilyKey(modelId)
   if (!familyKey) return undefined
-  return models.find((model) =>
+  const catalogModel = models.find((model) =>
     getClaudeFamilyKey(model.id, true) === familyKey || getClaudeFamilyKey(model.name, true) === familyKey)
+  if (catalogModel) return catalogModel
+
+  // Fable 5.x models can precede the catalog's major-version entry. Reuse only
+  // the matching Fable major family; other Claude families require an exact
+  // major/minor match to avoid inheriting the wrong thinking or protocol flags.
+  const fableMajorKey = familyKey.match(/^fable-(\d+)-\d+$/)?.[0].replace(/-\d+$/, '')
+  if (!fableMajorKey) return undefined
+  return models.find((model) =>
+    getClaudeFamilyKey(model.id, true) === fableMajorKey || getClaudeFamilyKey(model.name, true) === fableMajorKey)
 }
 
 async function getCatalogModels(provider: KnownProvider): Promise<readonly PiCatalogModel[]> {
