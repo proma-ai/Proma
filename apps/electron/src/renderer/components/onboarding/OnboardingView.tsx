@@ -747,7 +747,7 @@ export function OnboardingView({ onComplete, initialStep = 'welcome' }: Onboardi
               让协作自然发生，让想法流动成形。
             </p>
             <p className="mt-2 text-[11px] uppercase tracking-[0.3em] text-white/70 md:text-xs">
-              Local-first AI Agent
+              FOR PROFESSIONALS
             </p>
           </div>
 
@@ -781,7 +781,7 @@ export function OnboardingView({ onComplete, initialStep = 'welcome' }: Onboardi
               欢迎使用 Proma
             </h1>
             <p className="mt-3 text-base leading-relaxed text-neutral-500 md:text-lg">
-              下一代桌面 AI 软件，让通用 Agent 触手可及
+              为专业的用户打造的通用 Agent
             </p>
 
             {/* 主操作 */}
