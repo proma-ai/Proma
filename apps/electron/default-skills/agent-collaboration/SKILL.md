@@ -2,7 +2,7 @@
 name: agent-collaboration
 description: Proma 协作子 Agent Skill。当需要并行探索多个方向（多样性探索）、对抗性审查验证已有方案、或多个长耗时独立任务需要真实可见的子会话时触发。用于判断是否以及如何调用 Proma 内置 collaboration 工具创建协作子会话。简单搜索、短调研、单文件修改、一次性代码审查由父会话直接使用普通工具完成。
 group: proma
-version: "1.1.1"
+version: "1.2.0"
 ---
 
 # Proma Agent Collaboration
@@ -14,12 +14,13 @@ Proma 已提供内置 `collaboration` MCP 工具。你必须通过这些工具�
 可用工具：
 
 - `collaboration.list_available_agent_models`：查看父会话当前渠道下可用于协作子 Agent 的模型。
-- `collaboration.delegate_agent`：创建单个真实子会话；**返回只代表启动成功，不代表子任务完成**。记下返回的 `delegationId`，后续凡是需要该子任务结果才能回复、决策或交付，都必须调用 `collaboration.wait_for_delegations` 收敛；只有完全独立的主线可以先继续。
-- `collaboration.delegate_agents`：批量创建真实子会话，适合已经明确分片的大型并行任务；**批量创建成功也不等于批次完成**。保存返回的全部 `delegationIds`，需要完整批次结果时必须用 `wait_for_delegations(mode=all)`。
+- `collaboration.delegate_agent`：创建单个真实子会话；可选传入 `thinkingLevel`（`off/minimal/low/medium/high/xhigh/max`）为子会话设置思考强度。**返回只代表启动成功，不代表子任务完成**。记下返回的 `delegationId`，后续凡是需要该子任务结果才能回复、决策或交付，都必须调用 `collaboration.wait_for_delegations` 收敛；只有完全独立的主线可以先继续。
+- `collaboration.delegate_agents`：批量创建真实子会话，适合已经明确分片的大型并行任务；每个 `items[]` 可独立指定 `thinkingLevel`。**批量创建成功也不等于批次完成**。保存返回的全部 `delegationIds`，需要完整批次结果时必须用 `wait_for_delegations(mode=all)`。
 - `collaboration.wait_for_delegations`：父会话的结果收敛屏障。只要当前回复、下一步判断或交付依赖已委派任务，父会话必须在回复前调用；不能仅凭 delegate 工具返回就结束本轮或声称任务完成。`mode=any` 只用于明确接受部分结果的场景，完整交付使用 `mode=all`。
 
 - `collaboration.list_delegations`：查看当前父会话创建的子会话状态。
 - `collaboration.get_delegation_results`：按委派 ID 读取一个或多个子会话结果摘要。
+- `collaboration.set_delegation_thinking_level`：父 Agent 按委派 ID 修改自己创建的子会话思考强度。当前已经运行的 turn 不会中途切换，新强度从下一轮或续跑开始生效。
 - `collaboration.stop_delegation` / `collaboration.stop_delegations`：停止一个或一批子会话。
 
 ## 先判断用哪种能力
@@ -69,6 +70,8 @@ Proma 已提供内置 `collaboration` MCP 工具。你必须通过这些工具�
 - 每个子任务必须独立、自包含、可完成。
 - 委派说明里写清楚目标、范围、禁止事项、预期输出。
 - 如需让不同子会话使用同一渠道下的不同模型，先调用 `list_available_agent_models` 查看可用模型，再为 `delegate_agent` 或 `delegate_agents.items[]` 传 `modelId`；不传则继承父会话当前模型。
+- 如需控制计算成本或任务深度，为 `delegate_agent` 或每个 `delegate_agents.items[]` 传 `thinkingLevel`。不传时保持 Proma 新会话默认值；模型不支持请求档位时，运行时会归一化为该模型可用的最近档位。
+- 修改已存在子会话的强度时调用 `set_delegation_thinking_level`。该操作只影响下一轮/续跑，不会重启或篡改正在执行的当前 turn。
 - 权限模式不要高于父会话；高风险修改优先让子会话只调研或审查。
 - 子会话不能继续创建子会话。
 

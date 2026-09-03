@@ -50,7 +50,6 @@ export function TabBar(): React.ReactElement {
   const indicatorMap = useAtomValue(tabIndicatorMapAtom)
 
   // Tab 切换时同步 sidebar 状态
-  const appMode = useAtomValue(appModeAtom)
   const setAppMode = useSetAtom(appModeAtom)
   const setCurrentConversationId = useSetAtom(currentConversationIdAtom)
   const setCurrentAgentSessionId = useSetAtom(currentAgentSessionIdAtom)
@@ -141,13 +140,8 @@ export function TabBar(): React.ReactElement {
           agentWorkspaceId: session.workspaceId,
         }).catch(console.error)
       }
-    } else if (tab.type === 'tutorial') {
-      setCurrentConversationId(null)
-      if (appMode !== 'agent') {
-        setCurrentAgentSessionId(null)
-      }
     }
-  }, [setActiveTabId, setAutomationForm, tabs, agentSessions, appMode, setAppMode, setCurrentConversationId, setCurrentAgentSessionId, setCurrentAgentWorkspaceId, setUnviewedCompleted])
+  }, [setActiveTabId, setAutomationForm, tabs, agentSessions, setAppMode, setCurrentConversationId, setCurrentAgentSessionId, setCurrentAgentWorkspaceId, setUnviewedCompleted])
 
   const handleDragStart = React.useCallback((tabId: string, e: React.PointerEvent) => {
     if (e.button !== 0) return // 只处理左键

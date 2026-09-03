@@ -2,7 +2,6 @@ import * as React from 'react'
 import { useAtom, useStore } from 'jotai'
 import { AppShell } from './components/app-shell/AppShell'
 import { OnboardingView } from './components/onboarding/OnboardingView'
-import { TutorialBanner } from './components/tutorial/TutorialBanner'
 import { EnvironmentCheckDialog } from './components/environment/EnvironmentCheckDialog'
 import { TooltipProvider } from './components/ui/tooltip'
 import { ShortcutGuideDialog } from './components/shortcuts/ShortcutGuideDialog'
@@ -12,11 +11,9 @@ import { detectIsWindows } from './lib/platform'
 import { getWindowTitlebarContentInsetClass } from './lib/window-titlebar-layout'
 import { cn } from './lib/utils'
 import { PlanningReminderRail } from './components/planning/PlanningReminderRail'
-import { conversationsAtom } from './atoms/chat-atoms'
 import { environmentCheckDialogOpenAtom } from './atoms/environment'
 import { onboardingReplayRequestedAtom } from './atoms/onboarding'
 import { settingsOpenAtom, settingsTabAtom } from './atoms/settings-tab'
-import { tabsAtom, activeTabIdAtom, openTab, TUTORIAL_TAB_ID } from './atoms/tab-atoms'
 import { hasCompletedCurrentOnboarding } from '../types'
 import hopperSeasideWhiteHouse from './assets/onboarding/hopper-seaside-white-house.png'
 import promaMarkWhite from './assets/onboarding/proma-mark-white.svg'
@@ -60,8 +57,8 @@ export default function App(): React.ReactElement {
     setOnboardingReplayRequested(false)
   }, [isLoading, onboardingReplayRequested, setOnboardingReplayRequested])
 
-  // 完成 onboarding 回调：创建欢迎对话，可选打开教程 Tab
-  const handleOnboardingComplete = async (openTutorial?: boolean) => {
+  // 完成 onboarding 回调：重放时回到设置页，首次完成直接进入主界面
+  const handleOnboardingComplete = () => {
     const replayingOnboarding = isReplayingOnboarding
     setShowOnboarding(false)
     setIsReplayingOnboarding(false)
@@ -69,34 +66,6 @@ export default function App(): React.ReactElement {
     if (replayingOnboarding) {
       store.set(settingsTabAtom, 'onboarding')
       store.set(settingsOpenAtom, true)
-      return
-    }
-
-    if (openTutorial) {
-      const tabs = store.get(tabsAtom)
-      const result = openTab(tabs, { type: 'tutorial', sessionId: TUTORIAL_TAB_ID, title: 'Proma 使用教程' })
-      store.set(tabsAtom, result.tabs)
-      store.set(activeTabIdAtom, result.activeTabId)
-      return
-    }
-
-    try {
-      const meta = await window.electronAPI.createWelcomeConversation()
-      if (meta) {
-        const conversations = store.get(conversationsAtom)
-        store.set(conversationsAtom, [meta, ...conversations])
-
-        const tabs = store.get(tabsAtom)
-        const result = openTab(tabs, {
-          type: 'chat',
-          sessionId: meta.id,
-          title: meta.title,
-        })
-        store.set(tabsAtom, result.tabs)
-        store.set(activeTabIdAtom, result.activeTabId)
-      }
-    } catch (error) {
-      console.error('[App] 创建欢迎对话失败:', error)
     }
   }
 
@@ -127,7 +96,6 @@ export default function App(): React.ReactElement {
       <PlanningReminderRail />
       <ShortcutGuideDialog />
       <FaqDialog />
-      <TutorialBanner />
       <GlobalEnvironmentCheckDialog />
     </TooltipProvider>
   )

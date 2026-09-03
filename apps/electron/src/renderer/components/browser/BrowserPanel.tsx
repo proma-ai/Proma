@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import type { BrowserViewState } from '@proma/shared'
-import { ChevronLeft, ChevronRight, LoaderCircle, RotateCw, ShieldAlert, Square } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Globe, LoaderCircle, RotateCw, ShieldAlert, Square } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils'
 import { browserPendingNavigationMapAtom } from '@/atoms/browser-atoms'
 import { BrowserSlot } from './BrowserSlot'
 import { shouldReuseInitialBrowserTab } from './agent-browser-link-utils'
+import { resolveExternalBrowserUrl } from './browser-external-url'
 
 /** 加号菜单最多 7 项；为原生 WebContentsView 预留完整菜单及安全间距。 */
 const ADD_TAB_MENU_CLEARANCE_PX = 256
@@ -60,6 +61,14 @@ export function BrowserPanel({ sessionId, tabId, state, isAddTabMenuOpen = false
     if (!value || typeof navigateBrowser !== 'function') return
     try { await navigateBrowser({ sessionId, tabId, url: value }) } catch (error) { console.error('[受管浏览器] 导航失败:', error) }
   }, [sessionId, tabId, url])
+
+  const openInDefaultBrowser = React.useCallback(() => {
+    const externalUrl = resolveExternalBrowserUrl(url)
+    if (!externalUrl) return
+    void window.electronAPI.openExternal(externalUrl).catch((error) => {
+      console.error('[受管浏览器] 在默认浏览器中打开失败:', error)
+    })
+  }, [url])
 
   const closeBrowser = React.useCallback(async () => {
     try {
@@ -116,6 +125,7 @@ export function BrowserPanel({ sessionId, tabId, state, isAddTabMenuOpen = false
   // 外层右侧 Tab 会先更新 UI，再异步激活 controller 中的原生标签；激活完成前禁用
   // 依赖 controller.activeTabId 的历史操作，导航则始终显式携带当前 tabId。
   const isControllerTabActive = state?.activeTabId === tabId
+  const externalBrowserUrl = resolveExternalBrowserUrl(url)
   const isBackgroundRun = state?.executionSource === 'automation' || state?.executionSource === 'delegation'
   return (
     <div className="flex h-full min-w-0 flex-col overflow-hidden border-l border-border/80 bg-content-area titlebar-no-drag">
@@ -126,6 +136,22 @@ export function BrowserPanel({ sessionId, tabId, state, isAddTabMenuOpen = false
         <form className="flex-1 min-w-0" onSubmit={(event) => { event.preventDefault(); if (!riskBlocked) void navigate() }}>
           <Input disabled={riskBlocked || !isControllerTabActive} value={url} onChange={(event) => setUrl(event.target.value)} placeholder="输入网址或搜索内容" className="h-7 bg-background/70 text-xs text-muted-foreground/70" aria-label="浏览器地址" />
         </form>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-8 shrink-0 rounded-lg text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground"
+              disabled={riskBlocked || !isControllerTabActive || !externalBrowserUrl}
+              onClick={openInDefaultBrowser}
+              aria-label="通过默认浏览器打开"
+            >
+              <Globe className="size-[18px]" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>通过默认浏览器打开</TooltipContent>
+        </Tooltip>
         {state?.loading && <LoaderCircle className="size-3.5 text-muted-foreground animate-spin" />}
         {isBackgroundRun && (
           <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-7 text-amber-600 hover:text-amber-700" onClick={() => void stopBackgroundRun()} aria-label="停止当前后台 Agent"><Square className="size-3.5 fill-current" /></Button></TooltipTrigger><TooltipContent>停止当前{state?.executionSource === 'automation' ? '自动任务' : '委派'}运行</TooltipContent></Tooltip>

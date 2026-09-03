@@ -337,8 +337,6 @@ export interface AppSettings {
   agentMaxBudgetUsd?: number
   /** Agent 最大轮次（0 或 undefined = SDK 默认） */
   agentMaxTurns?: number
-  /** 教程推荐横幅是否已关闭 */
-  tutorialBannerDismissed?: boolean
   /** 自动归档天数（0 = 禁用，默认 7） */
   archiveAfterDays?: number
   /** 发送消息快捷键模式：true = Cmd/Ctrl+Enter 发送，false(默认) = Enter 发送 */

@@ -425,12 +425,6 @@ export const CHAT_IPC_CHANNELS = {
   /** 搜索当前对话的完整消息历史（仅返回命中元数据） */
   SEARCH_SESSION_MESSAGES: 'chat:search-session-messages',
 
-  // 教程
-  /** 获取教程内容 */
-  GET_TUTORIAL_CONTENT: 'chat:get-tutorial-content',
-  /** 创建欢迎对话（含教程附件） */
-  CREATE_WELCOME_CONVERSATION: 'chat:create-welcome-conversation',
-
   // 流式事件（主进程 → 渲染进程推送）
   /** 内容片段 */
   STREAM_CHUNK: 'chat:stream:chunk',

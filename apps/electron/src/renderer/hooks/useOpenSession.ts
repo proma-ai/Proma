@@ -102,7 +102,7 @@ export function useOpenSession(): OpenSessionFn {
           }).catch(console.error)
         }
       } else {
-        // 教程等非会话 Tab 不创建或选择任何草稿视图。
+        // 非会话 Tab（如预览）不创建或选择任何草稿视图。
         setCurrentConversationId(null)
         setCurrentAgentSessionId(null)
       }
