@@ -47,15 +47,6 @@ export function CredentialDialog({ integration, onOpenChange, onSave }: Credenti
               </DialogDescription>
             </DialogHeader>
 
-            <button
-              type="button"
-              onClick={() => { void window.electronAPI.openExternal(integration.credential.acquisitionUrl) }}
-              className="mt-5 inline-flex w-fit items-center gap-2 rounded-md bg-muted px-3 py-2 text-sm font-medium text-primary transition-colors hover:bg-accent"
-            >
-              <span>{integration.credential.acquisitionLabel}</span>
-              <ExternalLink size={16} />
-            </button>
-
             <div className="mt-7">
               <label htmlFor="catalog-credential" className="text-sm font-medium text-foreground">
                 {integration.credential.label} <span className="text-destructive">*</span>
@@ -71,6 +62,17 @@ export function CredentialDialog({ integration, onOpenChange, onSave }: Credenti
                   if (event.key === 'Enter') void handleSave()
                 }}
               />
+              <a
+                href={integration.credential.acquisitionUrl}
+                onClick={(event) => {
+                  event.preventDefault()
+                  void window.electronAPI.openExternal(integration.credential.acquisitionUrl)
+                }}
+                className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80 hover:underline"
+              >
+                <span>{integration.credential.acquisitionLabel}</span>
+                <ExternalLink size={12} />
+              </a>
               <p className="mt-2 text-xs leading-5 text-muted-foreground">{integration.credential.helpText}</p>
             </div>
 

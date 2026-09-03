@@ -1061,6 +1061,10 @@ export interface SaveMcpApiKeyInput {
   serverUrl: string
   headerName: string
   value: string
+  /** stdio MCP 环境变量凭据；远程 HTTP/SSE 凭据留空。 */
+  envName?: string
+  /** stdio MCP 凭据绑定的启动命令；注入前与当前配置比对，防止同名配置被改后泄露密钥。 */
+  stdioBinding?: { command: string; args: string[] }
 }
 
 /** Non-sensitive status for a CLI integration. Secret values are never returned to the renderer. */

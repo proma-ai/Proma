@@ -1,5 +1,8 @@
 import * as React from 'react'
 import { ChartCandlestick, Check, CircleDashed, Cloud, FileText, Mail, Orbit, Plane, Search, Terminal, TrendingUp, Unplug } from 'lucide-react'
+import { Switch } from '@/components/ui/switch'
+import tavilyIcon from '@/assets/integrations/tavily.png'
+import braveIcon from '@/assets/integrations/brave.svg'
 import tongdaxinIcon from '@/assets/integrations/tongdaxin.png'
 import qichachaIcon from '@/assets/integrations/qichacha.png'
 import tencentDocsIcon from '@/assets/integrations/tencent-docs.png'
@@ -44,10 +47,10 @@ const embeddedCatalogContainerQuery = `
 `
 
 type CatalogCard =
-  | { integration: CatalogMcpIntegration; status: string; statusTone: 'success' | 'muted'; statusRank: number; actionLabel: string; commandLine: false; onAction: () => void; onDisconnect?: () => void }
-  | { integration: CatalogCliIntegration; status: string; statusTone: 'success' | 'muted'; statusRank: number; actionLabel: string; commandLine: true; onAction: () => void; onDisconnect?: () => void }
-  | { integration: CatalogGuidedIntegration; status: string; statusTone: 'success' | 'muted'; statusRank: number; actionLabel: string; commandLine: false; onAction: () => void; onDisconnect?: () => void }
-  | { integration: CatalogCredentialIntegration; status: string; statusTone: 'success' | 'muted'; statusRank: number; actionLabel: string; commandLine: false; onAction: () => void; onDisconnect?: () => void }
+  | { integration: CatalogMcpIntegration; status: string; statusTone: 'success' | 'muted'; statusRank: number; actionLabel: string; commandLine: false; enabled: boolean; onAction: () => void; onToggle?: (enabled: boolean) => void; onDisconnect?: () => void }
+  | { integration: CatalogCliIntegration; status: string; statusTone: 'success' | 'muted'; statusRank: number; actionLabel: string; commandLine: true; enabled?: boolean; onAction: () => void; onToggle?: (enabled: boolean) => void; onDisconnect?: () => void }
+  | { integration: CatalogGuidedIntegration; status: string; statusTone: 'success' | 'muted'; statusRank: number; actionLabel: string; commandLine: false; enabled?: boolean; onAction: () => void; onToggle?: (enabled: boolean) => void; onDisconnect?: () => void }
+  | { integration: CatalogCredentialIntegration; status: string; statusTone: 'success' | 'muted'; statusRank: number; actionLabel: string; primaryActionLabel: string; commandLine: false; enabled: boolean; onAction: () => void; onToggle?: (enabled: boolean) => void; onDisconnect?: () => void }
 
 export function IntegrationCatalog({ mcps, clis, guided, credentials, embedded, installedMcpNames, enabledMcpNames, verifiedMcpNames, activeSkillSlugs, connectedCliIds, cliIntegrationProbeState, installingMcpId, onInstallMcp, onGuideCli, onDisconnectCli, onGuide, onRequestCredential, onToggleMcp }: IntegrationCatalogProps): React.ReactElement {
   const cards: CatalogCard[] = [
@@ -60,8 +63,9 @@ export function IntegrationCatalog({ mcps, clis, guided, credentials, embedded, 
         statusRank: getCatalogMcpStatusRank(status),
         actionLabel: status === 'connected' ? `查看 ${integration.name}` : status === 'pending' ? `继续配置 ${integration.name}` : `连接 ${integration.name}`,
         commandLine: false as const,
+        enabled: enabledMcpNames.has(integration.serverName),
         onAction: () => onInstallMcp(integration),
-        onDisconnect: status === 'connected' ? () => onToggleMcp(integration.serverName, false) : undefined,
+        onToggle: status !== 'unconfigured' ? (enabled: boolean) => onToggleMcp(integration.serverName, enabled) : undefined,
       }
     }),
     ...guided.map((integration) => {
@@ -78,8 +82,9 @@ export function IntegrationCatalog({ mcps, clis, guided, credentials, embedded, 
           : getCatalogMcpStatusRank(status === 'pending' ? 'pending' : 'unconfigured'),
         actionLabel: skillAvailable ? `查看/使用 ${integration.name}` : connected ? `查看 ${integration.name}` : status === 'pending' ? `继续配置 ${integration.name}` : `开始配置 ${integration.name}`,
         commandLine: false as const,
+        enabled: Boolean(serverName && enabledMcpNames.has(serverName)),
         onAction: () => onGuide(integration),
-        onDisconnect: connected && serverName ? () => onToggleMcp(serverName, false) : undefined,
+        onToggle: connected && serverName ? (enabled: boolean) => onToggleMcp(serverName, enabled) : undefined,
       }
     }),
     ...credentials.map((integration) => {
@@ -89,10 +94,12 @@ export function IntegrationCatalog({ mcps, clis, guided, credentials, embedded, 
         status: status === 'connected' ? '已连接' : status === 'pending' ? '待授权' : '未配置',
         statusTone: status === 'connected' ? 'success' as const : 'muted' as const,
         statusRank: getCatalogMcpStatusRank(status),
-        actionLabel: status === 'connected' ? `查看 ${integration.name}` : status === 'pending' ? `更新 ${integration.name} Token` : `连接 ${integration.name}`,
+        actionLabel: `配置 ${integration.name}`,
+        primaryActionLabel: '配置',
         commandLine: false as const,
+        enabled: enabledMcpNames.has(integration.serverName),
         onAction: () => onRequestCredential(integration),
-        onDisconnect: status === 'connected' ? () => onToggleMcp(integration.serverName, false) : undefined,
+        onToggle: status !== 'unconfigured' ? (enabled: boolean) => onToggleMcp(integration.serverName, enabled) : undefined,
       }
     }),
     ...clis.map((integration) => {
@@ -137,9 +144,12 @@ export function IntegrationCatalog({ mcps, clis, guided, credentials, embedded, 
             status={card.status}
             statusTone={card.statusTone}
             actionLabel={card.actionLabel}
+            primaryActionLabel={'primaryActionLabel' in card ? card.primaryActionLabel : undefined}
             installing={'serverName' in card.integration && installingMcpId === card.integration.id}
             commandLine={card.commandLine}
             onAction={card.onAction}
+            onToggle={card.onToggle}
+            enabled={card.enabled}
             onDisconnect={card.onDisconnect}
           />
         ))}
@@ -156,15 +166,18 @@ interface IntegrationCardProps {
   status: string
   statusTone: 'success' | 'muted'
   actionLabel: string
+  primaryActionLabel?: string
   installing: boolean
   commandLine: boolean
   onAction: () => void
+  enabled?: boolean
+  onToggle?: (enabled: boolean) => void
   onDisconnect?: () => void
 }
 
-function IntegrationCard({ name, description, capabilities, iconSlug, status, statusTone, actionLabel, installing, commandLine, onAction, onDisconnect }: IntegrationCardProps): React.ReactElement {
+function IntegrationCard({ name, description, capabilities, iconSlug, status, statusTone, actionLabel, primaryActionLabel, installing, commandLine, onAction, enabled, onToggle, onDisconnect }: IntegrationCardProps): React.ReactElement {
   const [iconFailed, setIconFailed] = React.useState(false)
-  const actionText = status === '待授权'
+  const actionText = primaryActionLabel ?? (status === '待授权'
     ? '继续配置'
     : status === '未配置'
       ? (commandLine ? '配置' : '连接')
@@ -174,7 +187,7 @@ function IntegrationCard({ name, description, capabilities, iconSlug, status, st
           ? '重试'
           : status === 'Skill 已安装'
             ? '使用'
-            : '查看'
+            : '查看')
   const DomainIcon = {
     'lucide-orbit': Orbit,
     'lucide-plane': Plane,
@@ -187,6 +200,8 @@ function IntegrationCard({ name, description, capabilities, iconSlug, status, st
   }[iconSlug]
 
   const localIcon = {
+    'asset:brave': braveIcon,
+    'asset:tavily': tavilyIcon,
     'asset:tongdaxin': tongdaxinIcon,
     'asset:baidu-netdisk': baiduNetdiskIcon,
     'asset:tencent-docs': tencentDocsIcon,
@@ -231,7 +246,19 @@ function IntegrationCard({ name, description, capabilities, iconSlug, status, st
           {statusTone === 'success' ? <Check size={12} strokeWidth={2.5} /> : <CircleDashed size={12} />}
           <span className="truncate">{status}</span>
         </span>
-        <div className="ml-auto flex items-center gap-0.5">
+        <div className="ml-auto flex items-center gap-2">
+          {onToggle && enabled !== undefined && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground">启用</span>
+              <Switch
+                checked={enabled}
+                disabled={installing}
+                onCheckedChange={onToggle}
+                aria-label={`启用 ${name}`}
+                className="scale-90"
+              />
+            </div>
+          )}
           {statusTone === 'success' && onDisconnect && (
             <button
               type="button"

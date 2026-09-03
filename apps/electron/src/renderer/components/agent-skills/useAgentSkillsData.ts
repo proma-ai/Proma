@@ -101,6 +101,11 @@ export function useAgentSkillsData(workspaceId?: string): AgentSkillsData {
   const loadRequestRef = React.useRef(0)
   const cliProbeRequestRef = React.useRef(0)
   const skillUpdateRequestRef = React.useRef(0)
+  /** 用户最近一次开关意图覆盖验证期间写入磁盘的临时 disabled 状态。 */
+  const mcpToggleIntentsRef = React.useRef(new Map<string, boolean>())
+  /** 使验证期间已发起的 watcher 重读不能在完成后写回旧快照。 */
+  const mcpConfigMutationRevisionRef = React.useRef(0)
+  const mcpToggleRequestRef = React.useRef(new Map<string, number>())
   // A layout effect commits the workspace identity before passive effects or promise
   // continuations can write state, without mutating refs from a render that React abandons.
   const activeWorkspaceSlugRef = React.useRef(workspaceSlug)
@@ -110,6 +115,10 @@ export function useAgentSkillsData(workspaceId?: string): AgentSkillsData {
     if (activeWorkspaceSlugRef.current === workspaceSlug) return
     activeWorkspaceSlugRef.current = workspaceSlug
     ++workspaceEpochRef.current
+    // MCP 的乐观开关状态只对发起它的工作区有效；避免同名 MCP 在新工作区被旧请求污染。
+    mcpToggleIntentsRef.current.clear()
+    mcpConfigMutationRevisionRef.current += 1
+    mcpToggleRequestRef.current.clear()
     setUpdatingSkill(null)
   }, [workspaceSlug])
   const isCurrentWorkspace = React.useCallback((slug: string, epoch: number): boolean => (
@@ -118,6 +127,7 @@ export function useAgentSkillsData(workspaceId?: string): AgentSkillsData {
 
   const loadData = React.useCallback(async () => {
     const requestId = ++loadRequestRef.current
+    const mcpConfigMutationRevision = mcpConfigMutationRevisionRef.current
     const workspaceEpoch = workspaceEpochRef.current
     const isCurrentRequest = (): boolean => (
       loadRequestRef.current === requestId && isCurrentWorkspace(workspaceSlug, workspaceEpoch)
@@ -151,7 +161,17 @@ export function useAgentSkillsData(workspaceId?: string): AgentSkillsData {
         : { updates: [] }
       if (!isCurrentRequest()) return
       const updateBySkillId = new Map(updateResponse.updates.map((update) => [update.skillId, update.available]))
-      setMcpConfig(config)
+      setMcpConfig((current) => {
+        // 启用时主进程会短暂地把 mcp.json 写成 disabled，等待握手成功后再回写；
+        // watcher 在这个窗口读到的中间态不能让乐观开关“打开→关闭→打开”。
+        if (mcpConfigMutationRevisionRef.current !== mcpConfigMutationRevision) return current
+        const servers = { ...config.servers }
+        for (const [name, enabled] of mcpToggleIntentsRef.current) {
+          const entry = servers[name]
+          if (entry) servers[name] = { ...entry, enabled }
+        }
+        return { servers }
+      })
       setSkills(skillList.map((skill) => skill.enterpriseSource
         ? { ...skill, hasUpdate: updateBySkillId.get(skill.enterpriseSource.skillId) ?? false }
         : skill))
@@ -302,28 +322,80 @@ export function useAgentSkillsData(workspaceId?: string): AgentSkillsData {
 
   const refreshMcpConfig = React.useCallback(async () => {
     if (!workspaceSlug) return
+    const workspaceEpoch = workspaceEpochRef.current
+    const mcpConfigMutationRevision = mcpConfigMutationRevisionRef.current
     try {
       const config = await window.electronAPI.getWorkspaceMcpConfig(workspaceSlug)
-      setMcpConfig(config)
+      if (!isCurrentWorkspace(workspaceSlug, workspaceEpoch)) return
+      setMcpConfig((current) => {
+        if (mcpConfigMutationRevisionRef.current !== mcpConfigMutationRevision) return current
+        const servers = { ...config.servers }
+        for (const [name, enabled] of mcpToggleIntentsRef.current) {
+          const entry = servers[name]
+          if (entry) servers[name] = { ...entry, enabled }
+        }
+        return { servers }
+      })
     } catch (error) {
+      if (!isCurrentWorkspace(workspaceSlug, workspaceEpoch)) return
       console.error('[Agent 技能] 刷新 MCP 配置失败:', error)
     }
-  }, [workspaceSlug])
+  }, [isCurrentWorkspace, workspaceSlug])
 
   const toggleMcp = React.useCallback(async (name: string, enabled: boolean): Promise<{ success: boolean; message: string }> => {
+    const workspaceEpoch = workspaceEpochRef.current
+    const isCurrentRequest = (): boolean => isCurrentWorkspace(workspaceSlug, workspaceEpoch)
+    const requestId = (mcpToggleRequestRef.current.get(name) ?? 0) + 1
+    mcpToggleRequestRef.current.set(name, requestId)
+    mcpToggleIntentsRef.current.set(name, enabled)
+
+    // 乐观更新：开关先响应用户操作；启用时主进程仍会在后台完成握手验证，
+    // 失败后再由真实结果把状态回滚。快速连续切换时只接受最后一次请求的结果。
+    setMcpConfig((current) => {
+      const entry = current.servers[name]
+      if (!entry) return current
+      return { ...current, servers: { ...current.servers, [name]: { ...entry, enabled } } }
+    })
+
     try {
-      // Main owns the save → validation → conditional writeback lifecycle, so a
-      // slow handshake cannot restore this renderer's stale configuration.
       const result = await window.electronAPI.setMcpEnabledAndValidate(workspaceSlug, name, enabled)
-      setMcpConfig(result.config)
+      if (!isCurrentRequest() || mcpToggleRequestRef.current.get(name) !== requestId) return result.verification
+
+      mcpConfigMutationRevisionRef.current += 1
+      mcpToggleIntentsRef.current.delete(name)
+      // 只合并目标服务器，避免后台验证返回的旧快照覆盖其他卡片的最新编辑。
+      const nextEntry = result.config.servers[name]
+      if (nextEntry) {
+        setMcpConfig((current) => ({
+          ...current,
+          servers: { ...current.servers, [name]: nextEntry },
+        }))
+      }
       bumpCapabilitiesVersion((v) => v + 1)
+      if (!result.verification.success && enabled) {
+        setMcpConfig((current) => {
+          const entry = current.servers[name]
+          if (!entry) return current
+          return { ...current, servers: { ...current.servers, [name]: { ...entry, enabled: false } } }
+        })
+        toast.error(`${name} 启用失败`, { description: result.verification.message })
+      }
       return result.verification
     } catch (error) {
-      console.error('[Agent 技能] 切换 MCP 服务器状态失败:', error)
-      toast.error('切换 MCP 状态失败')
+      if (isCurrentRequest() && mcpToggleRequestRef.current.get(name) === requestId) {
+        mcpConfigMutationRevisionRef.current += 1
+        mcpToggleIntentsRef.current.delete(name)
+        setMcpConfig((current) => {
+          const entry = current.servers[name]
+          if (!entry) return current
+          return { ...current, servers: { ...current.servers, [name]: { ...entry, enabled: !enabled } } }
+        })
+        toast.error('切换 MCP 状态失败')
+      }
+      if (isCurrentRequest()) console.error('[Agent 技能] 切换 MCP 服务器状态失败:', error)
       return { success: false, message: error instanceof Error ? error.message : '切换 MCP 状态失败' }
     }
-  }, [workspaceSlug, bumpCapabilitiesVersion])
+  }, [workspaceSlug, bumpCapabilitiesVersion, isCurrentWorkspace])
 
   const installMcp = React.useCallback(async (name: string, entry: McpServerEntry): Promise<boolean> => {
     try {

@@ -12,6 +12,7 @@ import type {
   AgentMessage,
   AgentSessionMeta,
   AgentStreamPayload,
+  AgentThinkingLevel,
   AskUserRequest,
   PermissionRequest,
   PromaPermissionMode,
@@ -60,6 +61,7 @@ interface DelegationRecord {
   channelId: string
   modelId?: string
   title: string
+  thinkingLevel?: AgentThinkingLevel
   role: AgentDelegationRole
   goal: string
   permissionMode: PromaPermissionMode
@@ -233,23 +235,46 @@ interface DelegateAgentArgs {
   expectedOutput?: string
   permissionMode?: PromaPermissionMode
   modelId?: string
+  /** 子会话的目标思考强度；未传入时保持新会话默认值。 */
+  thinkingLevel?: AgentThinkingLevel
 }
 
 interface StartDelegationResult {
   record: DelegationRecord
   effectivePermissionMode: PromaPermissionMode
   effectiveModelId?: string
+  configuredThinkingLevel: AgentThinkingLevel
 }
 
 interface PiDelegationToolResult {
   delegationId: string
   effectivePermissionMode: PromaPermissionMode
   effectiveModelId?: string
+  configuredThinkingLevel: AgentThinkingLevel
 }
 
 interface PiBatchDelegationResult {
   created: PiDelegationToolResult[]
   failures: Array<{ index: number; title?: string; error: string }>
+}
+
+const VALID_THINKING_LEVELS: readonly AgentThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+
+function assertThinkingLevel(value: AgentThinkingLevel | undefined): AgentThinkingLevel | undefined {
+  if (value === undefined) return undefined
+  if (!VALID_THINKING_LEVELS.includes(value)) {
+    throw new Error(`无效的子会话思考强度: ${String(value)}`)
+  }
+  return value
+}
+
+const THINKING_LEVEL_SEMANTICS = 'configured/requested'
+
+function getThinkingLevelSummary(level: AgentThinkingLevel | undefined): Record<string, unknown> {
+  return {
+    thinkingLevel: level,
+    thinkingLevelSemantics: THINKING_LEVEL_SEMANTICS,
+  }
 }
 
 function getRunningDelegationCount(parentSessionId: string): number {
@@ -351,6 +376,7 @@ function getDelegationSummary(record: DelegationRecord): Record<string, unknown>
     childSessionId: record.childSessionId,
     channelId: record.channelId,
     modelId: record.modelId,
+    ...getThinkingLevelSummary(getAgentSessionMeta(record.childSessionId)?.reasoningLevel ?? record.thinkingLevel),
     title: record.title,
     role: record.role,
     goal: record.goal,
@@ -378,6 +404,7 @@ function listKnownDelegations(parentSessionId: string): Array<Record<string, unk
       childSessionId: session.id,
       channelId: session.channelId,
       modelId: session.modelId,
+      ...getThinkingLevelSummary(session.reasoningLevel),
       title: session.title,
       role: session.delegationRole,
       goal: session.delegationGoal,
@@ -414,6 +441,7 @@ function getDelegationResult(parentSessionId: string, delegationId: string): Rec
     childSessionId: session.id,
     channelId: session.channelId,
     modelId: session.modelId,
+    ...getThinkingLevelSummary(session.reasoningLevel),
     title: session.title,
     role: session.delegationRole,
     goal: session.delegationGoal,
@@ -425,20 +453,52 @@ function getDelegationResult(parentSessionId: string, delegationId: string): Rec
   }
 }
 
+function setDelegationThinkingLevel(
+  parentSessionId: string,
+  delegationId: string,
+  requestedLevel: AgentThinkingLevel,
+): Record<string, unknown> {
+  const thinkingLevel = assertThinkingLevel(requestedLevel)!
+  const session = getPersistedDelegationSession(parentSessionId, delegationId, { allowMissingParentId: false })
+  if (!session) {
+    throw new Error(`未找到当前会话下的委派: ${delegationId}`)
+  }
+
+  const updated = updateAgentSessionMeta(session.id, { reasoningLevel: thinkingLevel })
+  const live = delegations.get(delegationId)
+  if (live) live.thinkingLevel = thinkingLevel
+
+  return {
+    delegationId,
+    childSessionId: session.id,
+    modelId: session.modelId,
+    status: live?.status ?? session.delegationStatus,
+    ...getThinkingLevelSummary(updated.reasoningLevel),
+    effectiveTiming: 'next_turn',
+    note: live?.status === 'running'
+      ? '子会话当前 turn 已按启动时的思考强度运行；新强度从下一轮或续跑开始生效。'
+      : '新强度将在该子会话下一次续跑时生效。',
+  }
+}
+
 function findPersistedDelegationSessions(delegationId: string): AgentSessionMeta[] {
   return listAgentSessions()
     .filter((item) => item.sourceDelegationId === delegationId)
 }
 
-function getPersistedDelegationSession(parentSessionId: string, delegationId: string): AgentSessionMeta | undefined {
+function getPersistedDelegationSession(
+  parentSessionId: string,
+  delegationId: string,
+  options: { allowMissingParentId?: boolean } = {},
+): AgentSessionMeta | undefined {
   const sessions = findPersistedDelegationSessions(delegationId)
   const scoped = sessions.find((item) => item.parentSessionId === parentSessionId)
   if (scoped) return scoped
 
   // 应用重启、恢复或旧数据修复后，父会话上下文可能暂时不完整。
   // delegationId 本身是 UUID；当全局只有唯一命中时，允许用它恢复，避免误报“当前会话下未找到”。
-  // 但只有该会话未记录父会话、或父会话与当前一致时才接受，避免凭 UUID 跨父会话误恢复他人的委派。
-  if (sessions.length !== 1) return undefined
+  // 写操作必须显式关闭该兼容回退，严格要求持久化 parentSessionId 与当前父会话一致。
+  if (options.allowMissingParentId === false || sessions.length !== 1) return undefined
   const unique = sessions[0]
   if (!unique) return undefined
   if (unique.parentSessionId == null || unique.parentSessionId === parentSessionId) {
@@ -468,6 +528,7 @@ function recoverDelegationRecordFromSession(
     ...state,
     channelId: session.channelId ?? fallbackChannelId,
     modelId: session.modelId ?? fallbackModelId,
+    thinkingLevel: session.reasoningLevel,
     ...completionHandle,
   }
   if (record.status !== 'running') {
@@ -634,6 +695,7 @@ function startDelegation(
     parentPermissionMode,
     args.permissionMode,
   )
+  const thinkingLevel = assertThinkingLevel(args.thinkingLevel)
   const effectiveModelId = args.modelId !== undefined
     ? assertEnabledModelForChannel({
         channelId: ctx.channelId,
@@ -645,6 +707,7 @@ function startDelegation(
   const { completion, resolveCompletion } = createDelegationCompletion()
 
   const child = createAgentSession(title, ctx.channelId, ctx.workspaceId, effectiveModelId)
+  const childThinkingLevel: AgentThinkingLevel = thinkingLevel ?? child.reasoningLevel ?? 'high'
   const rootSessionId = parent?.rootSessionId ?? parent?.id ?? ctx.sessionId
   updateAgentSessionMeta(child.id, {
     parentSessionId: ctx.sessionId,
@@ -656,6 +719,7 @@ function startDelegation(
     delegationDepth: (parent?.delegationDepth ?? 0) + 1,
     delegationGoal: goal,
     permissionMode,
+    ...(thinkingLevel ? { reasoningLevel: thinkingLevel } : {}),
   })
 
   const record: DelegationRecord = {
@@ -664,6 +728,7 @@ function startDelegation(
     childSessionId: child.id,
     channelId: ctx.channelId,
     modelId: effectiveModelId,
+    thinkingLevel: childThinkingLevel,
     title,
     role,
     goal,
@@ -716,7 +781,12 @@ function startDelegation(
     })
   })
 
-  return { record, effectivePermissionMode: permissionMode, effectiveModelId }
+  return {
+    record,
+    effectivePermissionMode: permissionMode,
+    effectiveModelId,
+    configuredThinkingLevel: childThinkingLevel,
+  }
 }
 
 // ===== Pi Runtime 桥接 =====
@@ -740,12 +810,23 @@ export function buildPiCollaborationTools(
     Type.Literal('custom'),
   ], { description: '子任务角色' }))
 
+  const thinkingLevelType = Type.Optional(Type.Union([
+    Type.Literal('off'),
+    Type.Literal('minimal'),
+    Type.Literal('low'),
+    Type.Literal('medium'),
+    Type.Literal('high'),
+    Type.Literal('xhigh'),
+    Type.Literal('max'),
+  ], { description: '子会话思考强度；未传则使用新会话默认值' }))
+
   const delegateItemType = Type.Object({
     title: Type.Optional(Type.String({ description: '子会话标题' })),
     role: roleType,
     task: Type.String({ description: '发送给子 Agent 的完整任务说明' }),
     expectedOutput: Type.Optional(Type.String({ description: '希望子 Agent 最终返回的格式或要点' })),
     modelId: Type.Optional(Type.String({ description: '可选目标模型 ID' })),
+    thinkingLevel: thinkingLevelType,
   })
 
   function piJsonResult(payload: unknown): { content: Array<{ type: 'text'; text: string }>; details: unknown } {
@@ -768,13 +849,14 @@ export function buildPiCollaborationTools(
     sdk.defineTool({
       name: 'mcp__collaboration__delegate_agent',
       label: '委派子 Agent',
-      description: '创建一个真实可见的 Proma 协作子 Agent 会话来并行处理独立子任务。只用于长耗时、可并行、需要追踪的任务。委派只表示子会话已启动，不表示任务完成或结果已回传：若本轮回复、下一步决策或交付依赖该子任务，主会话必须在回复前用返回的 delegationId 调用 wait_for_delegations 收敛结果；只有仍有完全独立的工作时才可先继续推进。',
+      description: '创建一个真实可见的 Proma 协作子 Agent 会话来并行处理独立子任务。可选 thinkingLevel 指定子会话首轮思考强度；模型不支持时运行时会安全归一化。返回中的 configuredThinkingLevel/thinkingLevel 表示配置/请求值，不代表模型 capability normalization 后的实际运行档位。委派只表示子会话已启动。',
       parameters: Type.Object({
         title: Type.Optional(Type.String({ description: '子会话标题' })),
         role: roleType,
         task: Type.String({ description: '发送给子 Agent 的完整任务说明，必须自包含必要上下文' }),
         expectedOutput: Type.Optional(Type.String({ description: '希望子 Agent 最终返回的格式或要点' })),
         modelId: Type.Optional(Type.String({ description: '可选目标模型 ID' })),
+        thinkingLevel: thinkingLevelType,
       }),
       async execute(toolCallId: string, params: unknown) {
         const args = params as DelegateAgentArgs
@@ -785,12 +867,14 @@ export function buildPiCollaborationTools(
             delegationId: created.record.delegationId,
             effectivePermissionMode: created.effectivePermissionMode,
             effectiveModelId: created.effectiveModelId,
+            configuredThinkingLevel: created.configuredThinkingLevel,
           }
         })
         return piJsonResult({
           delegation: getDelegationResult(ctx.sessionId, result.delegationId),
           effectivePermissionMode: result.effectivePermissionMode,
           effectiveModelId: result.effectiveModelId,
+          configuredThinkingLevel: result.configuredThinkingLevel,
           note: '子会话已启动，尚未完成或回传结果。记录 delegationId；如果本轮回复、决策或交付依赖它，必须在回复前调用 wait_for_delegations 收敛。仅在父会话还有完全独立的工作时才继续推进。',
         })
       },
@@ -798,7 +882,7 @@ export function buildPiCollaborationTools(
     sdk.defineTool({
       name: 'mcp__collaboration__delegate_agents',
       label: '批量委派子 Agent',
-      description: '批量创建多个真实可见的 Proma 协作子 Agent 会话。适合把同一大任务拆成多片并行处理。创建成功只表示各子会话已启动，不表示批次已完成：若本轮需要基于任一或全部子任务交付、判断或回复，主会话必须在回复前用返回的 delegationIds 调用 wait_for_delegations（需要完整结论时用 mode=all）；仅可在等待前推进完全独立的主线。',
+      description: '批量创建多个真实可见的 Proma 协作子 Agent 会话。每个 item 可独立指定首轮 thinkingLevel；模型不支持时运行时会安全归一化。返回中的 configuredThinkingLevels/delegations[].thinkingLevel 表示各项配置/请求值，不代表模型 capability normalization 后的实际运行档位。',
       parameters: Type.Object({
         sharedContext: Type.Optional(Type.String({ description: '批量子任务共用背景' })),
         items: Type.Array(delegateItemType, { description: '要创建的子会话列表，最多 50 个' }),
@@ -807,6 +891,8 @@ export function buildPiCollaborationTools(
         const args = params as { sharedContext?: string; items: DelegateAgentArgs[] }
         const batch = piDelegateAgentsCalls.getOrCreate(ctx.sessionId, toolCallId, () => {
           const parent = assertCanCreateDelegation(ctx, args.items.length)
+          // thinkingLevel 是整批的结构性输入；必须先完整校验，避免后续非法项导致前置子会话已创建。
+          args.items.forEach((item) => assertThinkingLevel(item.thinkingLevel))
           const created: PiDelegationToolResult[] = []
           const failures: Array<{ index: number; title?: string; error: string }> = []
           args.items.forEach((item, index) => {
@@ -822,6 +908,7 @@ export function buildPiCollaborationTools(
                 delegationId: started.record.delegationId,
                 effectivePermissionMode: started.effectivePermissionMode,
                 effectiveModelId: started.effectiveModelId,
+                configuredThinkingLevel: started.configuredThinkingLevel,
               })
             } catch (error) {
               failures.push({
@@ -842,6 +929,10 @@ export function buildPiCollaborationTools(
           effectiveModels: batch.created.map((item) => ({
             delegationId: item.delegationId,
             modelId: item.effectiveModelId,
+          })),
+          configuredThinkingLevels: batch.created.map((item) => ({
+            delegationId: item.delegationId,
+            thinkingLevel: item.configuredThinkingLevel,
           })),
           failures: batch.failures,
           createdCount: batch.created.length,
@@ -896,7 +987,7 @@ export function buildPiCollaborationTools(
     sdk.defineTool({
       name: 'mcp__collaboration__list_delegations',
       label: '列出协作子会话',
-      description: '列出当前父会话创建的 Proma 协作子会话及状态。',
+      description: '列出当前父会话创建的 Proma 协作子会话及状态。返回中的 thinkingLevel 表示配置/请求值，不代表模型 capability normalization 后的实际运行档位。',
       parameters: Type.Object({
         includeCompleted: Type.Optional(Type.Boolean({ description: '是否包含已完成委派，默认 true' })),
       }),
@@ -916,7 +1007,7 @@ export function buildPiCollaborationTools(
     sdk.defineTool({
       name: 'mcp__collaboration__get_delegation_results',
       label: '读取子会话结果',
-      description: '按委派 ID 读取一个或多个 Proma 协作子会话的结果摘要。',
+      description: '按委派 ID 读取一个或多个 Proma 协作子会话的结果摘要。返回中的 thinkingLevel 表示配置/请求值，不代表模型 capability normalization 后的实际运行档位。',
       parameters: Type.Object({
         delegationIds: Type.Array(Type.String(), { description: '要读取结果的委派 ID 列表' }),
       }),
@@ -925,6 +1016,27 @@ export function buildPiCollaborationTools(
         return piJsonResult({
           delegations: args.delegationIds.map((delegationId) => getDelegationResult(ctx.sessionId, delegationId)),
         })
+      },
+    }),
+    sdk.defineTool({
+      name: 'mcp__collaboration__set_delegation_thinking_level',
+      label: '设置子会话思考强度',
+      description: '父 Agent 修改自己创建的协作子会话思考强度。当前已运行的 turn 不会中途切换，新强度从下一轮或续跑开始生效。',
+      parameters: Type.Object({
+        delegationId: Type.String({ description: '要修改的委派 ID' }),
+        thinkingLevel: Type.Union([
+          Type.Literal('off'),
+          Type.Literal('minimal'),
+          Type.Literal('low'),
+          Type.Literal('medium'),
+          Type.Literal('high'),
+          Type.Literal('xhigh'),
+          Type.Literal('max'),
+        ], { description: '新的子会话思考强度' }),
+      }),
+      async execute(_toolCallId: string, params: unknown) {
+        const args = params as { delegationId: string; thinkingLevel: AgentThinkingLevel }
+        return piJsonResult(setDelegationThinkingLevel(ctx.sessionId, args.delegationId, args.thinkingLevel))
       },
     }),
     sdk.defineTool({

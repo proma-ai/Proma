@@ -22,11 +22,7 @@ import type { PreviewFile } from './preview-atoms'
 // ===== 类型定义 =====
 
 /** 标签页类型（Settings 不作为 Tab，保留独立视图） */
-export type TabType = 'chat' | 'agent' | 'preview' | 'tutorial'
-
-/** 教程 Tab 固定 ID */
-export const TUTORIAL_TAB_ID = '__tutorial__'
-export const TUTORIAL_TAB_TITLE = 'Proma 使用教程'
+export type TabType = 'chat' | 'agent' | 'preview'
 
 /** 会话预览 Tab 的 ID 前缀：运行时临时入口，不参与持久化 */
 const PREVIEW_TAB_PREFIX = '__preview__:'
@@ -219,19 +215,6 @@ export function openTab(
   item: { type: TabType; sessionId: string; title: string },
   restore?: OpenTabRestore,
 ): { tabs: TabItem[]; activeTabId: string } {
-  if (item.type === 'tutorial') {
-    const tutorialTab: TabItem = tabs.find((t) => t.id === TUTORIAL_TAB_ID) ?? {
-      id: TUTORIAL_TAB_ID,
-      type: 'tutorial',
-      sessionId: TUTORIAL_TAB_ID,
-      title: TUTORIAL_TAB_TITLE,
-    }
-    return {
-      tabs: [tutorialTab],
-      activeTabId: TUTORIAL_TAB_ID,
-    }
-  }
-
   if (item.type === 'preview') {
     const ownerAgentTab = tabs.find((t) => t.type === 'agent' && t.sessionId === item.sessionId) ?? {
       id: item.sessionId,

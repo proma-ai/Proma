@@ -42,7 +42,6 @@ import { canCompleteOnboardingAccount } from './onboarding-account-readiness'
 type OnboardingStep = 'welcome' | 'guide' | 'files' | 'project' | 'automation' | 'memory' | 'sideanswer' | 'subagent' | 'faq' | 'account'
 
 interface OnboardingCompletionOptions {
-  openTutorial?: boolean
   openBilling?: boolean
 }
 
@@ -1083,7 +1082,7 @@ export function OnboardingView({ onComplete, initialStep = 'welcome' }: Onboardi
 
       {step !== 'welcome' && step !== 'account' && <ProgressMap current={step} />}
 
-      {completionError && (
+      {completionError && step !== 'account' && (
         <div className="absolute bottom-5 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-md bg-destructive px-4 py-2 text-sm text-destructive-foreground shadow-lg">
           <span>{completionError}</span>
           <button type="button" className="font-medium underline" onClick={() => { void handleFinish({ openBilling: true }).catch(() => undefined) }}>

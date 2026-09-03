@@ -14,7 +14,7 @@ import { atom } from 'jotai'
 import type { TabType } from './tab-atoms'
 
 export type SettingsTab =
-  | 'general' | 'channels' | 'vision-relay' | 'proxy' | 'appearance' | 'about' | 'onboarding' | 'prompts' | 'tools' | 'bots' | 'tutorial' | 'shortcuts' | 'voice-input' | 'migration' | 'storage'
+  | 'general' | 'channels' | 'vision-relay' | 'proxy' | 'appearance' | 'about' | 'onboarding' | 'prompts' | 'tools' | 'bots' | 'shortcuts' | 'voice-input' | 'migration' | 'storage'
   // Cloud 模式专属标签页
   | 'billing' | 'api' | 'usage'
 export type ToolSettingsFocus = 'web-search' | 'nano-banana' | 'custom-tools'

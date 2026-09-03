@@ -2,7 +2,6 @@ import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
 import { AppShell } from './components/app-shell/AppShell'
 import { OnboardingView } from './components/onboarding/OnboardingView'
-import { TutorialBanner } from './components/tutorial/TutorialBanner'
 import { EnvironmentCheckDialog } from './components/environment/EnvironmentCheckDialog'
 import { ThirdPartyChannelRemovedDialog } from './components/channels/ThirdPartyChannelRemovedDialog'
 import { TooltipProvider } from './components/ui/tooltip'
@@ -22,7 +21,7 @@ import { PlanningReminderRail } from './components/planning/PlanningReminderRail
 import { environmentCheckDialogOpenAtom } from './atoms/environment'
 import { onboardingReplayRequestedAtom } from './atoms/onboarding'
 import { settingsOpenAtom, settingsTabAtom } from './atoms/settings-tab'
-import { tabsAtom, activeTabIdAtom, openTab, TUTORIAL_TAB_ID } from './atoms/tab-atoms'
+import { tabsAtom, activeTabIdAtom, openTab } from './atoms/tab-atoms'
 import { CURRENT_ONBOARDING_VERSION, hasCompletedCurrentOnboarding } from '../types'
 import hopperSeasideWhiteHouse from './assets/onboarding/hopper-seaside-white-house.png'
 import promaMarkWhite from './assets/onboarding/proma-mark-white.svg'
@@ -72,8 +71,8 @@ export default function App(): React.ReactElement {
     setOnboardingReplayRequested(false)
   }, [isLoading, onboardingReplayRequested, setOnboardingReplayRequested])
 
-  // 完成 onboarding 回调：创建引用模式的 Agent 欢迎会话，可选打开教程或购买额度设置。
-  const handleOnboardingComplete = async (options?: { openTutorial?: boolean; openBilling?: boolean }): Promise<void> => {
+  // 完成 onboarding 回调：创建引用模式的 Agent 欢迎会话，并可提示购买额度。
+  const handleOnboardingComplete = async (options?: { openBilling?: boolean }): Promise<void> => {
     const replayingOnboarding = isReplayingOnboarding
     let onboardingMarkedComplete = false
 
@@ -87,11 +86,6 @@ export default function App(): React.ReactElement {
       if (replayingOnboarding) {
         store.set(settingsTabAtom, 'onboarding')
         store.set(settingsOpenAtom, true)
-      } else if (options?.openTutorial) {
-        const tabs = store.get(tabsAtom)
-        const result = openTab(tabs, { type: 'tutorial', sessionId: TUTORIAL_TAB_ID, title: 'Proma 使用教程' })
-        store.set(tabsAtom, result.tabs)
-        store.set(activeTabIdAtom, result.activeTabId)
       } else {
         const meta = await window.electronAPI.createAgentSession(
           '开始使用 Proma',
@@ -176,7 +170,6 @@ export default function App(): React.ReactElement {
       </CloudAuthGate>
       <ShortcutGuideDialog />
       <FaqDialog />
-      <TutorialBanner />
       <GlobalEnvironmentCheckDialog />
       <GlobalThirdPartyChannelRemovedDialog />
     </TooltipProvider>
