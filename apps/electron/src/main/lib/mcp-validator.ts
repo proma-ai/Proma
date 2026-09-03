@@ -80,7 +80,7 @@ export async function validateMcpServer(
       : undefined
 
     if (type === 'stdio') {
-      const credentialEnv = workspaceSlug ? getMcpApiKeyEnvironment(workspaceSlug, name) : undefined
+      const credentialEnv = workspaceSlug ? getMcpApiKeyEnvironment(workspaceSlug, name, entry) : undefined
       const env = {
         ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
         ...(entry.env ?? {}),

@@ -19,6 +19,8 @@ interface SessionServerOptions {
   expireReplacementOnInitialized?: boolean
   failToolAfterFirstWithStatus?: number
   onSessionRejected?: () => void
+  /** 指定监听端口（默认随机）；用于在同一端口上模拟服务从挂起恢复。 */
+  port?: number
 }
 
 interface SessionTestServer {
@@ -138,7 +140,7 @@ async function startSessionTestServer(options: SessionServerOptions): Promise<Se
     }
   })
 
-  await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve))
+  await new Promise<void>((resolve) => httpServer.listen(options.port ?? 0, '127.0.0.1', resolve))
   const address = httpServer.address()
   if (!address || typeof address === 'string') throw new Error('无法获取测试服务器端口')
 
@@ -163,6 +165,29 @@ async function buildPingTool(serverName: string, url: string): Promise<ToolDefin
   const ping = tools.find((tool) => tool.name === `mcp__${serverName}__ping`)
   if (!ping) throw new Error(`未找到 ${serverName} 的 ping 工具`)
   return ping
+}
+
+interface HangingTestServer {
+  url: string
+  port: number
+  close: () => Promise<void>
+}
+
+/** 接受 TCP 连接但永不响应，模拟握手卡死的 MCP 服务器。 */
+async function startHangingServer(port?: number): Promise<HangingTestServer> {
+  const server = createServer(() => undefined)
+  await new Promise<void>((resolve) => server.listen(port ?? 0, '127.0.0.1', resolve))
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('无法获取测试服务器端口')
+
+  const close = async (): Promise<void> => {
+    server.closeAllConnections()
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve())
+    })
+  }
+  cleanups.push(close)
+  return { url: `http://127.0.0.1:${address.port}/mcp`, port: address.port, close }
 }
 
 // MCP 桥接工具不会读取 ExtensionContext；测试只验证其公开 execute 行为。
@@ -280,4 +305,47 @@ describe('Pi MCP Streamable HTTP Session 恢复', () => {
       toolCalls: 1,
     })
   })
+})
+
+describe('required MCP 失败冷却', () => {
+  test('required 服务器握手超时失败后，冷却期内下一轮按可选服务器快速跳过', async () => {
+    const hanging = await startHangingServer()
+    const config = { type: 'http', url: hanging.url, required: true, startup_timeout_sec: 2 }
+
+    const firstStartedAt = Date.now()
+    const firstTools = await buildPiMcpTools({ cooldown_timeout: config })
+    const firstDuration = Date.now() - firstStartedAt
+    expect(firstTools).toEqual([])
+    // 首次必须真实等待握手超时（required 语义：宁缺毋滥，等待上限即用户可感知延迟）
+    expect(firstDuration).toBeGreaterThanOrEqual(1_800)
+
+    const secondStartedAt = Date.now()
+    const secondTools = await buildPiMcpTools({ cooldown_timeout: config })
+    const secondDuration = Date.now() - secondStartedAt
+    expect(secondTools).toEqual([])
+    // 冷却期内回落到 500ms bootstrap 竞态：失效服务器不能反复阻塞每轮消息
+    expect(secondDuration).toBeLessThan(1_000)
+  }, 20_000)
+
+  test('冷却期内后台重连成功则当回合返回工具并退出冷却', async () => {
+    const hanging = await startHangingServer()
+    const config = { type: 'http', url: hanging.url, required: true, startup_timeout_sec: 1 }
+
+    const failedTools = await buildPiMcpTools({ cooldown_recovery: config })
+    expect(failedTools).toEqual([])
+
+    // 同一端口换成健康服务器，模拟服务恢复。
+    await hanging.close()
+    const recovered = await startSessionTestServer({ expiredStatus: 404, port: hanging.port })
+
+    const recoveredTools = await buildPiMcpTools({ cooldown_recovery: config })
+    expect(recoveredTools.map((tool) => tool.name)).toEqual(['mcp__cooldown_recovery__ping'])
+
+    // 冷却已退出：下一轮回到 required 直取并命中缓存，不产生第二次握手。
+    const startedAt = Date.now()
+    const cachedTools = await buildPiMcpTools({ cooldown_recovery: config })
+    expect(Date.now() - startedAt).toBeLessThan(1_000)
+    expect(cachedTools.map((tool) => tool.name)).toEqual(['mcp__cooldown_recovery__ping'])
+    expect(recovered.stats.sessionsCreated).toBe(1)
+  }, 20_000)
 })

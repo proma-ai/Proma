@@ -263,7 +263,7 @@ export class AgentOrchestrator {
       const type = normalizeMcpTransportType((entry as { type?: unknown }).type)
 
       if (type === 'stdio' && entry.command) {
-        const credentialEnv = getMcpApiKeyEnvironment(workspaceSlug, name)
+        const credentialEnv = getMcpApiKeyEnvironment(workspaceSlug, name, entry)
         const mergedEnv: Record<string, string> = {
           ...(process.env.PATH && { PATH: process.env.PATH }),
           ...entry.env,

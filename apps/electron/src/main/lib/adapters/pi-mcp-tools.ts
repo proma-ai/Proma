@@ -23,8 +23,27 @@ import { sanitizeToolResultImageContent } from '../image-content-validation'
 const DEFAULT_MCP_REQUEST_TIMEOUT_MS = 60_000
 const DEFAULT_MCP_STARTUP_TIMEOUT_MS = 30_000
 const OPTIONAL_MCP_BOOTSTRAP_TIMEOUT_MS = 500
+/**
+ * required MCP 连接失败后的冷却窗口。冷却期内按可选服务器处理（本回合最多等
+ * bootstrap 窗口，后台继续重连），避免失效服务器让每轮 Agent 请求都阻塞完整的
+ * 握手超时（默认 30s connect + 60s listTools）。
+ */
+const REQUIRED_MCP_FAILURE_COOLDOWN_MS = 2 * 60_000
+/** 失败冷却表的防御性上限；超出时淘汰最旧记录，避免配置频繁变更导致无限增长。 */
+const REQUIRED_MCP_FAILURE_CACHE_LIMIT = 64
 const HTTP_SESSION_REJECTION_PATTERN = /missing session id|no valid session id provided|mcp-session-id header is required/i
 const transportProxyFetches = new WeakMap<Transport, ManagedProxyFetch>()
+
+/** required MCP 最近一次工具发现失败的时间（key: serverName + 配置摘要）。 */
+const requiredMcpFailureTimestamps = new Map<string, number>()
+
+function markRequiredMcpFailure(key: string): void {
+  if (requiredMcpFailureTimestamps.size >= REQUIRED_MCP_FAILURE_CACHE_LIMIT) {
+    const oldestKey = requiredMcpFailureTimestamps.keys().next().value
+    if (oldestKey !== undefined) requiredMcpFailureTimestamps.delete(oldestKey)
+  }
+  requiredMcpFailureTimestamps.set(key, Date.now())
+}
 
 interface PiMcpServerConfig {
   type?: unknown
@@ -260,6 +279,38 @@ async function listOptionalMcpTools(
   }
 }
 
+/**
+ * Required MCP 需要等待真实握手结果，保证刚连接/刚变更配置的服务器在本回合即可用。
+ * 但一旦最近一次工具发现失败过，冷却期内回落到 optional 竞态（后台继续重连），
+ * 避免断网、失效凭据或异常服务器反复阻塞后续每一轮消息。冷却期内的后台重连一旦
+ * 成功，立即退出冷却并恢复 required 语义。
+ */
+async function listRequiredMcpTools(
+  manager: PiMcpClientManager,
+  serverName: string,
+  config: PiMcpServerConfig,
+): Promise<McpToolInfo[] | undefined> {
+  const failureKey = `${serverName}:${configHash(config)}`
+  const failedAt = requiredMcpFailureTimestamps.get(failureKey)
+  if (failedAt !== undefined && Date.now() - failedAt < REQUIRED_MCP_FAILURE_COOLDOWN_MS) {
+    const tools = await listOptionalMcpTools(manager, serverName, config)
+    if (tools) requiredMcpFailureTimestamps.delete(failureKey)
+    return tools
+  }
+  try {
+    const tools = await manager.listTools(serverName, config)
+    requiredMcpFailureTimestamps.delete(failureKey)
+    return tools
+  } catch (error) {
+    markRequiredMcpFailure(failureKey)
+    console.warn(
+      `[Pi MCP] required MCP 服务器 ${serverName} 连接失败，${REQUIRED_MCP_FAILURE_COOLDOWN_MS / 1000}s 冷却期内将按可选服务器处理`,
+      error,
+    )
+    throw error
+  }
+}
+
 class PiMcpClientManager {
   private readonly connections = new Map<string, McpConnectionEntry>()
   private lifecycleGeneration = 0
@@ -272,6 +323,7 @@ class PiMcpClientManager {
     this.lifecycleGeneration += 1
     const entries = [...this.connections.values()]
     this.connections.clear()
+    requiredMcpFailureTimestamps.clear()
     await Promise.allSettled(
       entries.map(async (entry) => {
         try {
@@ -522,7 +574,7 @@ export async function buildPiMcpTools(mcpServers: PiMcpServers, proxyUrl?: strin
       const config = rawConfig as PiMcpServerConfig
       const mcpTools = config.required === false
         ? await listOptionalMcpTools(manager, serverName, config)
-        : await manager.listTools(serverName, config)
+        : await listRequiredMcpTools(manager, serverName, config)
       if (!mcpTools) {
         console.info(`[Pi MCP] 可选 MCP 服务器 ${serverName} 尚在后台启动，本回合跳过`)
         return { serverName, config, mcpTools: [] }

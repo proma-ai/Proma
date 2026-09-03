@@ -356,13 +356,23 @@ export function AgentSkillsView({
         const installed = await data.installMcp(integration.serverName, integration.entry)
         if (!installed) throw new Error('无法创建连接配置')
       }
+      const rawValue = value.trim()
+      const valuePrefix = integration.credential.valuePrefix ?? ''
+      // 用户可能从控制台直接复制了带前缀的完整头部值（如 "Bearer abc"）；
+      // 保存前剥离已知前缀，避免拼出 "Bearer Bearer ..." 导致 401 且凭据已写入 Keychain。
+      const bareValue = valuePrefix && rawValue.toLowerCase().startsWith(valuePrefix.trim().toLowerCase())
+        ? rawValue.slice(valuePrefix.trim().length).trimStart()
+        : rawValue
       await window.electronAPI.saveMcpApiKey({
         workspaceSlug: data.workspaceSlug,
         serverName: integration.serverName,
         serverUrl: integration.credential.credentialStorageUrl,
         headerName: integration.credential.headerName,
         ...(integration.credential.envName ? { envName: integration.credential.envName } : {}),
-        value: `${integration.credential.valuePrefix ?? ''}${value}`,
+        ...(integration.entry.command
+          ? { stdioBinding: { command: integration.entry.command, args: integration.entry.args ?? [] } }
+          : {}),
+        value: `${valuePrefix}${bareValue}`,
       })
       const verification = await data.toggleMcp(integration.serverName, true)
       if (!verification.success) {

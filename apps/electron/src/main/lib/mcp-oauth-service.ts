@@ -58,6 +58,8 @@ interface McpApiKeyCredential {
   headerName: string
   /** stdio MCP 使用的认证环境变量（例如 BRAVE_API_KEY）。 */
   envName?: string
+  /** stdio MCP 凭据绑定的启动命令；注入前与当前配置比对，防止同名配置被改后泄露密钥。 */
+  stdioBinding?: { command: string; args: string[] }
   value: string
 }
 
@@ -297,12 +299,19 @@ function decryptCredential(encrypted: string): McpCredential | undefined {
       typeof parsed.value === 'string' &&
       (parsed.headerName.length > 0 || (typeof parsed.envName === 'string' && parsed.envName.length > 0))
     ) {
+      const rawBinding = parsed.stdioBinding as Record<string, unknown> | undefined
+      const stdioBinding = rawBinding &&
+        typeof rawBinding.command === 'string' &&
+        Array.isArray(rawBinding.args)
+        ? { command: rawBinding.command, args: rawBinding.args.filter((arg): arg is string => typeof arg === 'string') }
+        : undefined
       return {
         kind: 'api-key',
         serverUrl: parsed.serverUrl,
         headerName: parsed.headerName,
         value: parsed.value,
         ...(typeof parsed.envName === 'string' && parsed.envName ? { envName: parsed.envName } : {}),
+        ...(stdioBinding ? { stdioBinding } : {}),
       }
     }
     if (typeof parsed.accessToken !== 'string' || typeof parsed.clientId !== 'string' || typeof parsed.tokenEndpoint !== 'string' || typeof parsed.serverUrl !== 'string' || typeof parsed.provider !== 'string') return undefined
@@ -421,22 +430,48 @@ export function saveMcpApiKey(input: {
   headerName: string
   value: string
   envName?: string
+  stdioBinding?: { command: string; args: string[] }
 }): void {
   if (!input.value.trim()) throw new Error('请输入 API Key')
   if (!input.headerName.trim() && !input.envName?.trim()) throw new Error('凭据请求头或环境变量名不能为空')
+  const stdioBinding = input.stdioBinding && input.stdioBinding.command.trim()
+    ? {
+      command: input.stdioBinding.command.trim(),
+      args: input.stdioBinding.args.filter((arg): arg is string => typeof arg === 'string'),
+    }
+    : undefined
   saveCredential(input.workspaceSlug, input.serverName, {
     kind: 'api-key',
     serverUrl: normalizeMcpResource(input.serverUrl),
     headerName: input.headerName.trim(),
     value: input.value.trim(),
     ...(input.envName?.trim() ? { envName: input.envName.trim() } : {}),
+    ...(stdioBinding ? { stdioBinding } : {}),
   })
 }
 
 /** Resolve a stdio MCP's API-key environment variable without exposing it to the renderer. */
-export function getMcpApiKeyEnvironment(workspaceSlug: string, serverName: string): Record<string, string> | undefined {
+export function getMcpApiKeyEnvironment(
+  workspaceSlug: string,
+  serverName: string,
+  entry?: { command?: string; args?: string[] },
+): Record<string, string> | undefined {
   const credential = readCredential(workspaceSlug, serverName)
   if (!credential || !isMcpApiKeyCredential(credential) || !credential.envName) return undefined
+  // 保存时绑定了启动命令的凭据，只在当前配置与绑定完全一致时才注入，
+  // 防止同名 server 的 command/args 被改（含直接编辑 mcp.json）后密钥流入任意命令。
+  if (credential.stdioBinding && entry) {
+    const currentArgs = Array.isArray(entry.args) ? entry.args.filter((arg): arg is string => typeof arg === 'string') : []
+    const binding = credential.stdioBinding
+    if (
+      binding.command !== entry.command ||
+      binding.args.length !== currentArgs.length ||
+      binding.args.some((arg, index) => arg !== currentArgs[index])
+    ) {
+      console.warn(`[MCP 凭据] ${serverName} 的启动命令与凭据绑定不一致，已拒绝注入 API Key`)
+      return undefined
+    }
+  }
   return { [credential.envName]: credential.value }
 }
 
