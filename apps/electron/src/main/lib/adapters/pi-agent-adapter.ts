@@ -28,8 +28,8 @@ import type {
 } from '@proma/shared'
 import {
   calculatePiAutoCompactionReserveTokens,
-  inferReasoningTransport,
   isCodexFastModeSupportedModel,
+  isPromaOfficialOpenAIReasoningModel,
   resolveReasoningProfile,
   createSkillActivationFromPath,
 } from '@proma/shared'
@@ -191,6 +191,22 @@ export interface PiAgentQueryOptions extends AgentQueryInput {
   onXaiOAuthCredentialsRefreshed?: (credentials: XaiOAuthCredentials) => void | Promise<void>
   /** 会话级 OpenAI（Codex OAuth / Responses API）思考深度。 */
   openAIThinkingLevel?: AgentThinkingLevel
+}
+
+/** Resolve the request profile from the actual OpenAI Responses transport, including Proma official GPTs. */
+export function resolvePiOpenAIReasoningProfile(
+  provider: ProviderType,
+  modelId: string | undefined,
+  modelApiProtocol?: PiAgentQueryOptions['modelApiProtocol'],
+) {
+  const usesOpenAIResponses = modelApiProtocol === 'openai-responses'
+    || provider === 'openai-codex'
+    || provider === 'xai'
+    || provider === 'openai-responses'
+    || (provider === 'proma' && isPromaOfficialOpenAIReasoningModel(modelId))
+  return usesOpenAIResponses
+    ? resolveReasoningProfile({ modelId, transport: 'openai-responses' })
+    : undefined
 }
 
 interface ActivePiSession {
@@ -1469,12 +1485,13 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         },
         ...buildPiRemoteConnectionSettings(input),
       })
-      const openAIReasoningProfile = (input.provider === 'openai-codex' || input.provider === 'xai' || input.provider === 'openai-responses')
-        ? resolveReasoningProfile({
-          modelId: input.model,
-          transport: inferReasoningTransport(input.provider),
-        })
-        : undefined
+      // Proma 官方 Agent 会以模型协议下发 OpenAI Responses；不能只按 provider
+      // 白名单判断，否则 Astra 等官方 GPT 会缺少已验证的 reasoning.effort 注入。
+      const openAIReasoningProfile = resolvePiOpenAIReasoningProfile(
+        input.provider,
+        input.model,
+        input.modelApiProtocol,
+      )
       const deepSeekReasoningProfile = input.provider === 'deepseek'
         ? resolveReasoningProfile({
           modelId: input.model,

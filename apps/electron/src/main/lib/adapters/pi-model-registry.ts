@@ -13,6 +13,7 @@ import {
   inferContextWindow,
   inferCodexAlignedGPT5ContextWindow,
   getGeminiModelCapability,
+  isGpt6AstraFamily,
   resolveReasoningCapability,
   resolveReasoningProfile,
   type CodexOAuthCredentials,
@@ -859,6 +860,28 @@ export function stripLegacyAgentSdkContextSuffix(modelId: string | undefined): s
   return modelId?.replace(/\[1m\]$/i, '')
 }
 
+/**
+ * Pi 0.85 尚未在内置 Codex catalog 声明 Astra，但 ChatGPT 会将已授权的
+ * Astra SKU 原样作为模型 ID 返回。仅对严格的 Astra 家族派生基准 contract：
+ * 保留实际请求 ID，绝不把相邻的未知模型错误地接入 Codex OAuth。
+ */
+function createCodexAstraFamilyModel(
+  models: readonly PiCatalogModel[],
+  modelId: string,
+): PiCatalogModel | undefined {
+  if (!isGpt6AstraFamily(modelId)) return undefined
+
+  const baseline = findCatalogModelById(models, 'gpt-6-astra')
+  if (!baseline) return undefined
+  if (baseline.id === modelId) return baseline
+
+  return {
+    ...baseline,
+    id: modelId,
+    name: `GPT-6 Astra (${modelId})`,
+  }
+}
+
 function mergeCodexModels(models: readonly PiCatalogModel[]): PiCatalogModel[] {
   const merged = models.map((model) => ({ ...model }))
   const indexById = new Map(merged.map((model, index) => [model.id, index]))
@@ -921,6 +944,7 @@ export async function buildCodexModel(sdk: PiSdk, input: CodexModelInput) {
   const model = resolvedModelId
     ? runtimeModels.find((candidate) => candidate.id === resolvedModelId)
       ?? findCatalogModelById(codexModels, resolvedModelId)
+      ?? createCodexAstraFamilyModel(codexModels, resolvedModelId)
     : runtimeModels[0]
 
   if (!model) {

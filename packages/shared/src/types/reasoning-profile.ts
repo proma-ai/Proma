@@ -1,3 +1,4 @@
+import { isGpt6AstraFamily } from '../utils/model-family'
 import type { ProviderType } from './channel'
 import type { AgentThinkingLevel } from './agent'
 
@@ -336,7 +337,7 @@ export function resolveReasoningProfile(input: ResolveReasoningProfileInput): Re
   const isOpenAITransport = input.transport === 'openai-completions' || input.transport === 'openai-responses'
   const isOpenAIReasoningModel = !modelId.endsWith('-chat-latest')
     && (modelId.startsWith('gpt-5') || /^(o1|o3|o4)(?:-|$)/.test(modelId))
-  if (modelId === 'gpt-6-astra') {
+  if (isGpt6AstraFamily(modelId)) {
     return OPENAI_ASTRA_PROFILE.encodings[input.transport] ? OPENAI_ASTRA_PROFILE : undefined
   }
   const profile = /^deepseek-v4-flash(?:-|$)/.test(modelId)

@@ -1,11 +1,22 @@
 import { describe, expect, test } from 'bun:test'
 import type { Channel } from '@proma/shared'
-import { resolveModelDisplayName, resolveModelProvider } from './model-logo'
+import { getModelLogoById, resolveModelDisplayName, resolveModelProvider } from './model-logo'
 
 const channels = [
   { id: 'channel-a', provider: 'anthropic', models: [{ id: 'shared-model', name: '渠道 A 别名' }] },
   { id: 'channel-b', provider: 'openai', models: [{ id: 'shared-model', name: '渠道 B 别名' }] },
 ] as unknown as Channel[]
+
+describe('GPT-6 Astra Logo', () => {
+  test.each(['gpt-6-astra-1', 'gpt-6-astra-az'])
+    ('Given Astra family model %s When resolving Logo Then uses the Astra asset', (modelId) => {
+      expect(getModelLogoById(modelId)).toBe(getModelLogoById('gpt-6-astra'))
+    })
+
+  test('Given similarly named model When resolving Logo Then does not use the Astra asset', () => {
+    expect(getModelLogoById('gpt-6-astral')).not.toBe(getModelLogoById('gpt-6-astra'))
+  })
+})
 
 describe('模型渠道解析', () => {
   test('Given 同名模型位于多个渠道 When 提供来源渠道 Then 使用该渠道的别名和 provider', () => {

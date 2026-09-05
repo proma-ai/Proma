@@ -21,6 +21,18 @@ describe('Pi Codex request settings', () => {
     },
   )
 
+  test.each(['gpt-6-astra', 'gpt-6-astra-1', 'gpt-6-astra-az'])(
+    'Given Astra family model %s When resolving and injecting Then preserves its verified reasoning contract',
+    (model) => {
+      expect(resolveReasoningProfile({ modelId: model, transport: 'openai-responses' })?.id).toBe('openai-reasoning-astra')
+      expect(injectCodexFastMode({ model })).toEqual({ model, service_tier: 'priority' })
+      expect(injectOpenAIReasoningLevel({ model }, { thinkingLevel: 'minimal' })).toEqual({
+        model,
+        reasoning: { effort: 'low' },
+      })
+    },
+  )
+
   test('Given unsupported model When injecting Then leaves payload unchanged', () => {
     const payload = { model: 'gpt-5.4-mini' }
     expect(injectCodexFastMode(payload)).toBe(payload)

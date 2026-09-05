@@ -121,7 +121,7 @@ import EmbeddingLogo from '@/assets/models/embedding.png'
 
 // ===== 供应商类型 =====
 
-import type { ProviderType } from '@proma/shared'
+import { isGpt6AstraFamily, type ProviderType } from '@proma/shared'
 import type { ModelDisplayContext } from './model-display-name'
 export { resolveModelDisplayName } from './model-display-name'
 
@@ -142,7 +142,6 @@ const MODEL_LOGO_MAP: Record<string, string> = {
   o1: GPTo1Logo,
   o3: GPTo1Logo,
   o4: GPTo1Logo,
-  'gpt-6-astra$': GPT6AstraLogo,
   'gpt-5-mini': GPT5MiniLogo,
   'gpt-5-nano': GPT5NanoLogo,
   'gpt-5-chat': GPT5ChatLogo,
@@ -278,6 +277,7 @@ const PROVIDER_LOGO_MAP: Record<ProviderType, string> = {
  */
 export function getModelLogoById(modelId: string): string | undefined {
   if (!modelId) return undefined
+  if (isGpt6AstraFamily(modelId)) return GPT6AstraLogo
 
   for (const key in MODEL_LOGO_MAP) {
     const regex = new RegExp(key, 'i')

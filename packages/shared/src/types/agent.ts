@@ -1,3 +1,4 @@
+import { isGpt6AstraFamily } from '../utils/model-family'
 import type { ProviderType } from './channel'
 
 /**
@@ -88,8 +89,9 @@ export const PROMA_OFFICIAL_OPENAI_REASONING_MODEL_IDS = [
 ] as const
 
 export function isPromaOfficialOpenAIReasoningModel(modelId: string | undefined): boolean {
-  return modelId !== undefined
-    && (PROMA_OFFICIAL_OPENAI_REASONING_MODEL_IDS as readonly string[]).includes(modelId.toLowerCase())
+  return isGpt6AstraFamily(modelId)
+    || (modelId !== undefined
+      && (PROMA_OFFICIAL_OPENAI_REASONING_MODEL_IDS as readonly string[]).includes(modelId.toLowerCase()))
 }
 
 /** 支持 ChatGPT Codex Fast Mode（priority service tier）的模型。 */
@@ -97,7 +99,8 @@ export const CODEX_FAST_MODE_MODEL_IDS = PROMA_OFFICIAL_OPENAI_REASONING_MODEL_I
 
 /** 模型 ID 是否可通过 ChatGPT Codex OAuth 使用 Fast Mode。 */
 export function isCodexFastModeSupportedModel(modelId: string | undefined): boolean {
-  return modelId !== undefined && (CODEX_FAST_MODE_MODEL_IDS as readonly string[]).includes(modelId.toLowerCase())
+  return isGpt6AstraFamily(modelId)
+    || (modelId !== undefined && (CODEX_FAST_MODE_MODEL_IDS as readonly string[]).includes(modelId.toLowerCase()))
 }
 
 /**

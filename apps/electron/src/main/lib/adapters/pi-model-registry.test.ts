@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  buildCodexModel,
   resolvePiApi,
   resolvePiImageInputCapability,
   shouldForcePiAdaptiveThinking,
@@ -67,6 +68,45 @@ describe('DeepSeek V4 native image input', () => {
   test('Given official DeepSeek V4 Pro, when resolving capability, then preserves the Vision Relay-only boundary', async () => {
     expect(supportsPiNativeImageInput('deepseek-v4-pro')).toBe(false)
     await expect(resolvePiImageInputCapability('proma', 'deepseek-v4-pro')).resolves.toBe('unsupported')
+  })
+})
+
+describe('Codex Astra family fallback', () => {
+  const credentials = {
+    access: 'test-access-token',
+    refresh: 'test-refresh-token',
+    expires: Date.now() + 60_000,
+  }
+  const sdkWithoutAstraCatalog = {
+    ModelRuntime: {
+      create: async () => ({
+        getModels: () => [],
+      }),
+    },
+  } as never
+
+  test.each(['gpt-6-astra-1', 'gpt-6-astra-az'])(
+    'Given Pi catalog lacks %s When building a Codex model Then preserves the Astra request contract',
+    async (modelId) => {
+      const { model } = await buildCodexModel(sdkWithoutAstraCatalog, {
+        model: modelId,
+        codexOAuthCredentials: credentials,
+      })
+      expect(model).toMatchObject({
+        id: modelId,
+        api: 'openai-codex-responses',
+        baseUrl: 'https://chatgpt.com/backend-api',
+        contextWindow: 1_000_000,
+        input: ['text', 'image'],
+      })
+    },
+  )
+
+  test('Given a similarly named model When building a Codex model Then rejects it', async () => {
+    await expect(buildCodexModel(sdkWithoutAstraCatalog, {
+      model: 'gpt-6-astral',
+      codexOAuthCredentials: credentials,
+    })).rejects.toThrow('未找到指定的 ChatGPT (Codex) 模型')
   })
 })
 

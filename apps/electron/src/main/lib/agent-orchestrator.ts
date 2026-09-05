@@ -32,6 +32,7 @@ import {
   normalizeMcpTransportType,
   inferContextWindow,
   inferReasoningTransport,
+  isPromaOfficialOpenAIReasoningModel,
   resolveReasoningProfile,
   collectSkillActivations,
   mergeSkillActivations,
@@ -1707,11 +1708,20 @@ export class AgentOrchestrator {
             persistXaiOAuthCredentials(channelId, credentials)
           },
         }),
-        ...((channel.provider === 'openai-codex' || channel.provider === 'xai' || channel.provider === 'openai-responses' || channel.provider === 'openai' || channel.provider === 'custom')
+        ...(((selectedOfficialAgentModel?.apiProtocol === 'openai-responses'
+          || channel.provider === 'openai-codex'
+          || channel.provider === 'xai'
+          || channel.provider === 'openai-responses'
+          || channel.provider === 'openai'
+          || channel.provider === 'custom'
+          || (channel.provider === 'proma' && isPromaOfficialOpenAIReasoningModel(selectedModelId)))
           && resolveReasoningProfile({
             modelId: selectedModelId,
-            transport: inferReasoningTransport(channel.provider),
-          })?.id.startsWith('openai-reasoning-') && {
+            transport: selectedOfficialAgentModel?.apiProtocol === 'openai-responses'
+              || (channel.provider === 'proma' && isPromaOfficialOpenAIReasoningModel(selectedModelId))
+              ? 'openai-responses'
+              : inferReasoningTransport(channel.provider),
+          })?.id.startsWith('openai-reasoning-')) && {
             openAIThinkingLevel: piThinkingLevel!,
           }),
         thinkingLevel: piThinkingLevel!,
