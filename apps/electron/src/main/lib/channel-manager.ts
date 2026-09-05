@@ -99,40 +99,66 @@ const ARK_CODING_PLAN_MODELS: ChannelModel[] = [
 ]
 
 /**
- * 一次性预设更新 ID。独立于配置 schema 版本，保证高版本配置也能收到新增候选模型。
+ * 一次性模型候选更新。每个更新使用独立 ID，避免新增模型时重新加入用户已删除的旧候选。
+ * 更新独立于 config schema version，商业版等更高版本配置也能安全收到 OSS 新模型。
  */
-const PRESET_MODEL_CANDIDATE_UPDATE_ID = 'model-candidates-v3'
-
-/**
- * 本次预设更新向存量渠道追加的候选模型，默认禁用。
- * 不在每次启动时按完整预设列表补齐，以尊重用户主动删除过的模型。
- */
-const PRESET_MODEL_CANDIDATES: Partial<Record<ProviderType, readonly ChannelModel[]>> = {
-  deepseek: [
-    { id: 'deepseek-v4-flash-vision-exp', name: 'DeepSeek V4 Flash Vision Exp', enabled: false },
-  ],
-  'ark-coding-plan': [
-    { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
-  ],
-  doubao: [
-    { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
-  ],
-  'opencode-go-openai': [
-    { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
-  ],
-  zhipu: [
-    { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
-    { id: 'glm-5.3-flash', name: 'GLM-5.3-Flash', enabled: false },
-  ],
-  'zhipu-coding': [
-    { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
-    { id: 'glm-5.3-flash', name: 'GLM-5.3-Flash', enabled: false },
-  ],
-  'zhipu-coding-team': [
-    { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
-    { id: 'glm-5.3-flash', name: 'GLM-5.3-Flash', enabled: false },
-  ],
-}
+const PRESET_MODEL_CANDIDATE_UPDATES: readonly {
+  id: string
+  candidates?: Partial<Record<ProviderType, readonly ChannelModel[]>>
+  nameCorrections?: Partial<Record<ProviderType, readonly {
+    id: string
+    from: string
+    to: string
+  }[]>>
+}[] = [
+  {
+    id: 'model-candidates-v3',
+    candidates: {
+      deepseek: [
+        { id: 'deepseek-v4-flash-vision-exp', name: 'DeepSeek V4 Flash Vision Exp', enabled: false },
+      ],
+      'ark-coding-plan': [
+        { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
+      ],
+      doubao: [
+        { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
+      ],
+      'opencode-go-openai': [
+        { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
+      ],
+      zhipu: [
+        { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
+        { id: 'glm-5.3-flash', name: 'GLM-5.3-Flash', enabled: false },
+      ],
+      'zhipu-coding': [
+        { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
+        { id: 'glm-5.3-flash', name: 'GLM-5.3-Flash', enabled: false },
+      ],
+      'zhipu-coding-team': [
+        { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
+        { id: 'glm-5.3-flash', name: 'GLM-5.3-Flash', enabled: false },
+      ],
+    },
+  },
+  {
+    id: 'openai-codex-gpt-6-astra-v1',
+    candidates: {
+      // Codex 登录/拉取会启用全部精选模型；存量渠道迁移保持同一语义。
+      'openai-codex': [
+        { id: 'gpt-6-astra', name: 'GPT-6 Astra', enabled: true },
+      ],
+    },
+  },
+  {
+    id: 'openai-codex-gpt-6-astra-display-name-v1',
+    nameCorrections: {
+      // 只修正曾发布过的错误默认名，保留用户自定义名称和 enabled 状态。
+      'openai-codex': [
+        { id: 'gpt-6-astra', from: 'GPT-6-Astra', to: 'GPT-6 Astra' },
+      ],
+    },
+  },
+]
 
 /**
  * 为连接测试 / 模型拉取请求统一附加超时信号。
@@ -277,32 +303,57 @@ function migrateConfig(config: ChannelsConfig): { config: ChannelsConfig; change
 }
 
 /**
- * 应用一次性预设模型更新。更新 ID 不依赖 schema version，以兼容由其他版本写入的更高配置版本。
+ * 应用尚未执行的一次性模型候选更新。更新 ID 不依赖 schema version，以兼容由其他版本写入的更高配置版本。
  */
 function applyPresetModelCandidateUpdates(config: ChannelsConfig): { config: ChannelsConfig; changed: boolean } {
   const appliedUpdates = new Set(config.appliedPresetModelUpdates ?? [])
-  if (appliedUpdates.has(PRESET_MODEL_CANDIDATE_UPDATE_ID)) {
-    return { config, changed: false }
+  let channels = config.channels
+  let changed = false
+
+  for (const update of PRESET_MODEL_CANDIDATE_UPDATES) {
+    if (appliedUpdates.has(update.id)) continue
+
+    channels = channels.map((channel) => {
+      const candidates = update.candidates?.[channel.provider] ?? []
+      const nameCorrections = update.nameCorrections?.[channel.provider] ?? []
+      if (candidates.length === 0 && nameCorrections.length === 0) return channel
+
+      const existingModelIds = new Set(channel.models.map((model) => model.id))
+      const missingCandidates = candidates.filter((model) => !existingModelIds.has(model.id))
+      let models = missingCandidates.length > 0
+        ? [...channel.models, ...cloneModels(missingCandidates)]
+        : channel.models
+
+      if (missingCandidates.length > 0) {
+        console.log(
+          `[渠道管理] 预设更新 ${update.id} 为渠道 ${channel.name} (${channel.provider}) 添加 ${missingCandidates.length} 个候选模型`,
+        )
+      }
+
+      const correctionById = new Map(nameCorrections.map((correction) => [correction.id, correction]))
+      let correctedNames = 0
+      models = models.map((model) => {
+        const correction = correctionById.get(model.id)
+        if (!correction || model.name !== correction.from) return model
+        correctedNames += 1
+        return { ...model, name: correction.to }
+      })
+
+      if (correctedNames > 0) {
+        console.log(
+          `[渠道管理] 预设更新 ${update.id} 为渠道 ${channel.name} (${channel.provider}) 修正 ${correctedNames} 个模型显示名`,
+        )
+      }
+
+      if (missingCandidates.length === 0 && correctedNames === 0) return channel
+      return { ...channel, models }
+    })
+
+    appliedUpdates.add(update.id)
+    changed = true
   }
 
-  const channels = config.channels.map((channel) => {
-    const candidates = PRESET_MODEL_CANDIDATES[channel.provider]
-    if (!candidates) return channel
-
-    const existingModelIds = new Set(channel.models.map((model) => model.id))
-    const missingCandidates = candidates.filter((model) => !existingModelIds.has(model.id))
-    if (missingCandidates.length === 0) return channel
-
-    console.log(
-      `[渠道管理] 预设更新 ${PRESET_MODEL_CANDIDATE_UPDATE_ID} 为渠道 ${channel.name} (${channel.provider}) 添加 ${missingCandidates.length} 个候选模型`,
-    )
-    return {
-      ...channel,
-      models: [...channel.models, ...cloneModels(missingCandidates)],
-    }
-  })
-
-  appliedUpdates.add(PRESET_MODEL_CANDIDATE_UPDATE_ID)
+  if (!changed) return { config, changed: false }
   return {
     config: {
       ...config,

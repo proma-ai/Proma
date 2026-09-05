@@ -34,6 +34,7 @@ import GPT51Logo from '@/assets/models/gpt-5.1.png'
 import GPT51ChatLogo from '@/assets/models/gpt-5.1-chat.png'
 import GPT51CodexLogo from '@/assets/models/gpt-5.1-codex.png'
 import GPT51CodexMiniLogo from '@/assets/models/gpt-5.1-codex-mini.png'
+import GPT6AstraLogo from '@/assets/models/gpt-6-astra.webp'
 
 // DeepSeek
 import DeepSeekLogo from '@/assets/models/deepseek.png'
@@ -139,6 +140,7 @@ const MODEL_LOGO_MAP: Record<string, string> = {
   o1: GPTo1Logo,
   o3: GPTo1Logo,
   o4: GPTo1Logo,
+  'gpt-6-astra$': GPT6AstraLogo,
   'gpt-5-mini': GPT5MiniLogo,
   'gpt-5-nano': GPT5NanoLogo,
   'gpt-5-chat': GPT5ChatLogo,
