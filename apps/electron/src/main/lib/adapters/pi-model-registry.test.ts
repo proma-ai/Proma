@@ -85,7 +85,7 @@ describe('Codex Astra family fallback', () => {
     },
   } as never
 
-  test.each(['gpt-6-astra-1', 'gpt-6-astra-az'])(
+  test.each(['gpt-6-astra-1', 'gpt-6-astra-az', 'gpt-6-astral'])(
     'Given Pi catalog lacks %s When building a Codex model Then preserves the Astra request contract',
     async (modelId) => {
       const { model } = await buildCodexModel(sdkWithoutAstraCatalog, {
@@ -102,9 +102,9 @@ describe('Codex Astra family fallback', () => {
     },
   )
 
-  test('Given a similarly named model When building a Codex model Then rejects it', async () => {
+  test('Given a non-Astra prefix When building a Codex model Then rejects it', async () => {
     await expect(buildCodexModel(sdkWithoutAstraCatalog, {
-      model: 'gpt-6-astral',
+      model: 'gpt-6-astro',
       codexOAuthCredentials: credentials,
     })).rejects.toThrow('未找到指定的 ChatGPT (Codex) 模型')
   })

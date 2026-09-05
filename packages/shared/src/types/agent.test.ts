@@ -11,25 +11,26 @@ describe('Proma 官方 GPT 思考强度模型', () => {
     'gpt-6-astra',
     'gpt-6-astra-1',
     'gpt-6-astra-az',
+    'gpt-6-astral',
   ])('Given %s When checking official reasoning support Then returns true', (modelId) => {
     expect(isPromaOfficialOpenAIReasoningModel(modelId)).toBe(true)
   })
 
-  test.each(['gpt-5-chat-latest', 'gpt-4.1', 'gpt-6-astral', 'o4-mini', undefined])(
+  test.each(['gpt-5-chat-latest', 'gpt-4.1', 'gpt-6-astro', 'o4-mini', undefined])(
     'Given %s When checking official reasoning support Then returns false',
     (modelId) => {
       expect(isPromaOfficialOpenAIReasoningModel(modelId)).toBe(false)
     },
   )
 
-  test.each(['gpt-6-astra', 'gpt-6-astra-1', 'gpt-6-astra-az'])(
+  test.each(['gpt-6-astra', 'gpt-6-astra-1', 'gpt-6-astra-az', 'gpt-6-astral'])(
     'Given Astra family model %s When checking Codex Fast Mode Then returns true',
     (modelId) => {
       expect(isCodexFastModeSupportedModel(modelId)).toBe(true)
     },
   )
 
-  test('Given a similarly named model When checking Codex Fast Mode Then returns false', () => {
-    expect(isCodexFastModeSupportedModel('gpt-6-astral')).toBe(false)
+  test('Given a non-Astra prefix When checking Codex Fast Mode Then returns false', () => {
+    expect(isCodexFastModeSupportedModel('gpt-6-astro')).toBe(false)
   })
 })

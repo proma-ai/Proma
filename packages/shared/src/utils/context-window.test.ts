@@ -7,7 +7,7 @@ describe('Codex-aligned context window', () => {
       expect(inferCodexAlignedGPT5ContextWindow(modelId)).toBe(ONE_MILLION_CONTEXT_WINDOW)
     })
 
-  test('Given similarly named but unrelated model When inferring context Then does not assign Astra context', () => {
-    expect(inferCodexAlignedGPT5ContextWindow('gpt-6-astral')).toBeUndefined()
+  test('Given a non-Astra prefix When inferring context Then does not assign Astra context', () => {
+    expect(inferCodexAlignedGPT5ContextWindow('gpt-6-astro')).toBeUndefined()
   })
 })

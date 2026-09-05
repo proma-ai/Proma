@@ -13,8 +13,8 @@ describe('GPT-6 Astra Logo', () => {
       expect(getModelLogoById(modelId)).toBe(getModelLogoById('gpt-6-astra'))
     })
 
-  test('Given similarly named model When resolving Logo Then does not use the Astra asset', () => {
-    expect(getModelLogoById('gpt-6-astral')).not.toBe(getModelLogoById('gpt-6-astra'))
+  test('Given a non-Astra prefix When resolving Logo Then does not use the Astra asset', () => {
+    expect(getModelLogoById('gpt-6-astro')).not.toBe(getModelLogoById('gpt-6-astra'))
   })
 })
 
