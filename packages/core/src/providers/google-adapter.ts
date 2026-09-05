@@ -20,6 +20,7 @@ import type {
   ToolDefinition,
   ContinuationMessage,
 } from './types.ts'
+import { getGeminiModelCapability, normalizeGeminiThinkingLevel } from '@proma/shared'
 import { normalizeBaseUrl } from './url-utils.ts'
 
 // ===== Google 特有类型 =====
@@ -202,13 +203,24 @@ export class GoogleAdapter implements ProviderAdapter {
     // 构建 generationConfig
     const generationConfig: Record<string, unknown> = {}
 
-    // 思考模式配置：
-    // - 启用时：显示思考过程 + 设置 thinkingBudget 控制深度
-    // - 关闭时：不传 thinkingConfig，模型使用默认行为
+    // Gemini 3 使用 thinkingLevel 而非旧版 thinkingBudget。未知/旧模型保留预算模式，
+    // 已知 Gemini 3 文本模型则按其官方合法档位归一化，避免 3.7/3.8 收到 minimal 后 400。
     if (input.thinkingEnabled) {
-      generationConfig.thinkingConfig = {
-        includeThoughts: true,
-        thinkingBudget: 16384,
+      const geminiCapability = getGeminiModelCapability(input.modelId)
+      if (geminiCapability) {
+        const selectedLevel = normalizeGeminiThinkingLevel(
+          input.modelId,
+          input.thinkingLevel as 'minimal' | 'low' | 'medium' | 'high' | undefined,
+        )!
+        generationConfig.thinkingConfig = {
+          includeThoughts: true,
+          thinkingLevel: selectedLevel.toUpperCase(),
+        }
+      } else {
+        generationConfig.thinkingConfig = {
+          includeThoughts: true,
+          thinkingBudget: 16384,
+        }
       }
     }
 

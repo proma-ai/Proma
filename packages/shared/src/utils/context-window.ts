@@ -7,6 +7,8 @@
  * 必须共用同一份判定，避免出现"UI 显示 1M 但实际只 200K"的不一致。
  */
 
+import { getGeminiModelCapability } from './gemini-model-capabilities'
+
 /** 默认上下文窗口（无法识别模型时使用） */
 export const DEFAULT_CONTEXT_WINDOW = 200_000
 
@@ -126,6 +128,8 @@ export function inferContextWindow(model?: string): number | undefined {
   if (!model) return undefined
   const codexAlignedWindow = inferCodexAlignedGPT5ContextWindow(model)
   if (codexAlignedWindow !== undefined) return codexAlignedWindow
+  const geminiCapability = getGeminiModelCapability(model)
+  if (geminiCapability) return geminiCapability.contextWindow
   if (supports1MContext(model)) return ONE_MILLION_CONTEXT_WINDOW
   return DEFAULT_CONTEXT_WINDOW
 }

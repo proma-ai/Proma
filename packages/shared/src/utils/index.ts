@@ -29,6 +29,12 @@ export {
 } from './context-window'
 export { calculateContextUsageRatio } from './context-usage'
 export {
+  getGeminiModelCapability,
+  normalizeGeminiThinkingLevel,
+  type GeminiModelCapability,
+  type GeminiThinkingLevel,
+} from './gemini-model-capabilities'
+export {
   PI_AUTO_COMPACTION_THRESHOLD_RATIO,
   calculatePiAutoCompactionReserveTokens,
   calculatePiAutoCompactionThresholdTokens,

@@ -6,7 +6,7 @@
  * core 层不依赖 Electron / Node fs，通过注入函数访问平台能力。
  */
 
-import type { ChatMessage, FileAttachment, ProviderType } from '@proma/shared'
+import type { AgentThinkingLevel, ChatMessage, FileAttachment, ProviderType } from '@proma/shared'
 
 // ===== 图片附件数据 =====
 
@@ -220,6 +220,8 @@ export interface StreamRequestInput {
   readImageAttachments: ImageAttachmentReader
   /** 是否启用思考模式（各适配器根据供应商 API 自行转换） */
   thinkingEnabled?: boolean
+  /** 用户选择的思考深度；适配器应按模型能力安全归一化。 */
+  thinkingLevel?: AgentThinkingLevel
   /** 工具定义列表（可选，启用 function calling） */
   tools?: ToolDefinition[]
   /** 工具续接消息（tool use 循环中，前一轮的 tool_use + tool_result） */

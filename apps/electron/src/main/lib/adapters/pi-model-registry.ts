@@ -12,6 +12,7 @@ import {
   extractZhipuCodingTeamApiToken,
   inferContextWindow,
   inferCodexAlignedGPT5ContextWindow,
+  getGeminiModelCapability,
   resolveReasoningCapability,
   resolveReasoningProfile,
   type CodexOAuthCredentials,
@@ -281,8 +282,20 @@ export function supportsPiNativeImageInput(modelId: string | undefined): boolean
 }
 
 function applyPiModelCapabilityOverrides(model: PiCatalogModel | undefined): PiCatalogModel | undefined {
-  if (!model || !supportsPiNativeImageInput(model.id) || model.input.includes('image')) return model
-  return { ...model, input: [...model.input, 'image'] }
+  if (!model) return model
+
+  const normalizedId = model.id.trim().toLowerCase()
+  const geminiCapability = model.provider === 'google' ? getGeminiModelCapability(normalizedId) : undefined
+  const requiresMinimalThinkingExclusion = geminiCapability && !geminiCapability.thinkingLevels.includes('minimal')
+  const input: PiCatalogModel['input'] = supportsPiNativeImageInput(model.id) && !model.input.includes('image')
+    ? [...model.input, 'image']
+    : model.input
+  const thinkingLevelMap = requiresMinimalThinkingExclusion
+    ? { ...model.thinkingLevelMap, minimal: null }
+    : model.thinkingLevelMap
+
+  if (input === model.input && thinkingLevelMap === model.thinkingLevelMap) return model
+  return { ...model, input, ...(thinkingLevelMap ? { thinkingLevelMap } : {}) }
 }
 
 const CODEX_MODEL_PATCHES: PiCatalogModelPatch[] = [

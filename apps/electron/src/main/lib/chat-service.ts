@@ -197,7 +197,7 @@ export async function sendMessage(
   const {
     conversationId, userMessage, channelId,
     modelId, systemMessage, contextLength, contextDividers, attachments,
-    thinkingEnabled, enabledToolIds,
+    thinkingEnabled, thinkingLevel, enabledToolIds,
   } = input
 
   // 1. 查找渠道
@@ -332,6 +332,7 @@ export async function sendMessage(
         attachments,
         readImageAttachments: getImageAttachmentData,
         thinkingEnabled,
+        thinkingLevel,
         tools,
         continuationMessages: continuationMessages.length > 0 ? continuationMessages : undefined,
       })
@@ -408,6 +409,7 @@ export async function sendMessage(
         attachments,
         readImageAttachments: getImageAttachmentData,
         thinkingEnabled,
+        thinkingLevel,
         // 不传 tools，强制模型生成文本回复而非继续调用工具
         continuationMessages,
       })

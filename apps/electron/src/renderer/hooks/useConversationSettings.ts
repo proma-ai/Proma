@@ -12,12 +12,15 @@ import {
   selectedModelAtom,
   contextLengthAtom,
   thinkingEnabledAtom,
+  thinkingLevelAtom,
   conversationModelsAtom,
   conversationContextLengthAtom,
   conversationThinkingEnabledAtom,
+  conversationThinkingLevelAtom,
   conversationParallelModeAtom,
 } from '@/atoms/chat-atoms'
 import type { SelectedModel, ContextLengthValue } from '@/atoms/chat-atoms'
+import type { GeminiThinkingLevel } from '@proma/shared'
 import {
   selectedPromptIdAtom,
   conversationPromptIdAtom,
@@ -104,6 +107,15 @@ export function useConversationThinkingEnabled(): [boolean, (v: boolean) => void
   const defaultEnabled = useAtomValue(thinkingEnabledAtom)
   const value = useMapValue(conversationThinkingEnabledAtom, conversationId, defaultEnabled)
   const setter = useMapSetter(conversationThinkingEnabledAtom, conversationId)
+  return [value, setter]
+}
+
+/** 每个对话独立的 Gemini 3 思考深度。 */
+export function useConversationThinkingLevel(): [GeminiThinkingLevel, (v: GeminiThinkingLevel) => void] {
+  const conversationId = useConversationId()
+  const defaultLevel = useAtomValue(thinkingLevelAtom)
+  const value = useMapValue(conversationThinkingLevelAtom, conversationId, defaultLevel)
+  const setter = useMapSetter(conversationThinkingLevelAtom, conversationId)
   return [value, setter]
 }
 
