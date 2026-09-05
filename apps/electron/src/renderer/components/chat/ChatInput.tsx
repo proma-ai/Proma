@@ -14,11 +14,12 @@
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { CornerDownLeft, Square, Brain, Paperclip } from 'lucide-react'
+import { CornerDownLeft, Square, Paperclip } from 'lucide-react'
 import { ModelSelector } from './ModelSelector'
 import { ClearContextButton } from './ClearContextButton'
 import { ContextSettingsPopover } from './ContextSettingsPopover'
 import { ToolSelectorPopover } from './ToolSelectorPopover'
+import { ChatThinkingPopover } from './ChatThinkingPopover'
 import { AttachmentPreviewItem } from './AttachmentPreviewItem'
 import { QuotedSelectionChip } from '@/components/diff/QuotedSelectionChip'
 import { RichTextInput } from '@/components/ai-elements/rich-text-input'
@@ -47,7 +48,6 @@ import {
 import type { PendingAttachment } from '@/atoms/chat-atoms'
 import {
   useConversationModel,
-  useConversationThinkingEnabled,
 } from '@/hooks/useConversationSettings'
 import { cn } from '@/lib/utils'
 import { fileToBase64, formatFileNames } from '@/lib/file-utils'
@@ -111,7 +111,6 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
   }, [conversationId, setDraftsMap, setDraftSyncVersions])
 
   const [selectedModel] = useConversationModel()
-  const [thinkingEnabled, setThinkingEnabled] = useConversationThinkingEnabled()
   const setPendingAttachments = onSetPendingAttachments
   const [isDragOver, setIsDragOver] = React.useState(false)
   const chatVoiceInputId = React.useId()
@@ -350,30 +349,7 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
   const toolbarItems = React.useMemo<ToolbarItem[]>(() => [
     // Chat 可能与主 Agent 输入框并存；不能复用其全局 open atom，否则两个 Popover 会同时打开、互相关闭。
     { key: 'model', node: <ModelSelector excludedProviders={['openai-codex', 'xai']} /> },
-    {
-      key: 'thinking',
-      node: (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className={cn(
-                inputToolbarButtonClass,
-                thinkingEnabled && inputToolbarActiveButtonClass
-              )}
-              onClick={() => setThinkingEnabled(!thinkingEnabled)}
-            >
-              <Brain className="size-5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="top">
-            <p>{thinkingEnabled ? '关闭思考模式' : '开启思考模式'}</p>
-          </TooltipContent>
-        </Tooltip>
-      ),
-    },
+    { key: 'thinking', node: <ChatThinkingPopover modelId={selectedModel?.modelId} /> },
     {
       key: 'attach',
       node: (
@@ -399,7 +375,7 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
     { key: 'tools', node: <ToolSelectorPopover /> },
     { key: 'context', node: <ContextSettingsPopover /> },
     { key: 'clear', node: <ClearContextButton onClick={onClearContext} /> },
-  ], [handleOpenFileDialog, thinkingEnabled, setThinkingEnabled, onClearContext, chatVoiceInputId])
+  ], [handleOpenFileDialog, selectedModel?.modelId, onClearContext, chatVoiceInputId])
 
   const trailingNode = streaming ? (
     <Tooltip>

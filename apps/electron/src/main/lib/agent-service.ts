@@ -313,6 +313,7 @@ export async function runAgent(
       }
     } catch { /* 新会话可能尚未写入索引 */ }
   }
+  let didComplete = false
   try {
     await orchestrator.sendMessage(input, {
       onError: (error, opts) => {
@@ -326,8 +327,20 @@ export async function runAgent(
         }
       },
       onComplete: (messages, opts) => {
+        didComplete = true
         publishRunStopped(input.sessionId, opts?.stoppedByUser, opts?.startedAt, opts?.runGeneration)
         if (getChannelById(input.channelId)?.provider === 'proma') broadcastBillingChanged()
+        eventBus.emit(input.sessionId, {
+          kind: 'proma_event',
+          event: {
+            type: 'run_completed',
+            source: 'desktop',
+            stoppedByUser: opts?.stoppedByUser ?? false,
+            ...(opts?.startedAt != null ? { startedAt: opts.startedAt } : {}),
+            ...(opts?.runGeneration != null ? { runGeneration: opts.runGeneration } : {}),
+          },
+        })
+
         const target = streamRoutes.getTargetIfOwner(input.sessionId, route.ownerId)
         if (target) {
           sendAgentStreamComplete(target, input, {
@@ -372,6 +385,19 @@ export async function runAgent(
   } catch (err) {
     console.error('[Agent 服务] runAgent 未处理异常:', err)
     const errorMessage = err instanceof Error ? err.message : '未知错误'
+    // 上游请求若在 onComplete 前失败，仍需结束 Slack/Home 等 EventBus 消费方的运行态。
+    if (!didComplete) {
+      eventBus.emit(input.sessionId, {
+        kind: 'proma_event',
+        event: {
+          type: 'run_completed',
+          source: 'desktop',
+          stoppedByUser: false,
+          ...(input.startedAt != null ? { startedAt: input.startedAt } : {}),
+          ...(input.runGeneration != null ? { runGeneration: input.runGeneration } : {}),
+        },
+      })
+    }
     const target = streamRoutes.getTargetIfOwner(input.sessionId, route.ownerId)
     if (target) {
       target.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
@@ -449,6 +475,16 @@ export async function runAgentHeadless(
       onComplete: (messages, opts) => {
         callbacks.onComplete(messages)
         publishRunStopped(runInput.sessionId, opts?.stoppedByUser, opts?.startedAt, opts?.runGeneration)
+        eventBus.emit(runInput.sessionId, {
+          kind: 'proma_event',
+          event: {
+            type: 'run_completed',
+            source: callbacks.source ?? 'bridge',
+            stoppedByUser: opts?.stoppedByUser ?? false,
+            ...(opts?.startedAt != null ? { startedAt: opts.startedAt } : {}),
+            ...(opts?.runGeneration != null ? { runGeneration: opts.runGeneration } : {}),
+          },
+        })
         const target = route
           ? streamRoutes.getTargetIfOwner(runInput.sessionId, route.ownerId)
           : undefined
@@ -511,6 +547,10 @@ export async function runAgentHeadless(
     const errorMessage = err instanceof Error ? err.message : '未知错误'
     callbacks.onError(errorMessage)
     callbacks.onComplete()
+    eventBus.emit(runInput.sessionId, {
+      kind: 'proma_event',
+      event: { type: 'run_completed', source: callbacks.source ?? 'bridge', stoppedByUser: false, startedAt },
+    })
     const target = route
       ? streamRoutes.getTargetIfOwner(runInput.sessionId, route.ownerId)
       : undefined

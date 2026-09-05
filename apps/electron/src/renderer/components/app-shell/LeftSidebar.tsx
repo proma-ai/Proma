@@ -105,6 +105,8 @@ import { useOpenSession } from '@/hooks/useOpenSession'
 import { useSyncActiveTabSideEffects } from '@/hooks/useSyncActiveTabSideEffects'
 import { productivityToolsAtom, sessionHoverPreviewEnabledAtom } from '@/atoms/ui-preferences'
 import { CollapsedWorkspacePopover } from '@/components/agent/CollapsedWorkspacePopover'
+import { CollapsedToolsPopover, type CollapsedToolItem } from '@/components/agent/CollapsedToolsPopover'
+import { CollapsedSessionRail, type RailRecentItem } from '@/components/agent/CollapsedSessionRail'
 import { ObsidianIcon } from '@/components/obsidian/obsidian-brand'
 import { VirtualSidebarList, type VirtualSidebarRow } from '@/components/ui/virtual-sidebar-list'
 import { LocalProjectBadge } from '@/components/agent/LocalProjectBadge'
@@ -120,8 +122,17 @@ import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-regi
 import { rememberStopGenerationTarget } from '@/lib/stop-generation-target'
 import { markSessionCompletionViewed } from '@/lib/agent-completion-presence'
 import {
+  buildAgentSessionTrees,
+  getCollapsedAgentRailTreeStatus,
+  getCollapsedAgentRailTrees,
+  isDelegatedChildSession,
+  sortDelegatedChildSessions,
+  type AgentSessionTreeItem,
+} from '@/lib/collapsed-agent-rail'
+import {
   collectAgentSessionTreeIds,
   countSettledDelegatedChildren,
+  getAgentSessionTreeIndicatorStatus,
   getDelegatedChildSessionStatus,
   getDelegationStatusIconClass,
   groupArchivedAgentSessionsByProject,
@@ -322,11 +333,6 @@ interface AgentProjectGroup {
   sessions: AgentSessionMeta[]
 }
 
-interface AgentSessionTreeItem {
-  session: AgentSessionMeta
-  childSessions: AgentSessionMeta[]
-}
-
 /** 合成「自动任务」虚拟项目组的工作区 ID（不对应真实 workspace，仅用于聚合自动任务会话） */
 const AUTOMATION_GROUP_ID = '__automations__'
 /** 供合成组复用 AgentProjectGroupItem 时填充无意义的 workspace 专属回调 */
@@ -396,13 +402,6 @@ function groupByDate<T extends { updatedAt: number }>(items: T[]): Array<{ label
   if (yesterday.length > 0) groups.push({ label: '昨天', items: yesterday })
   if (earlier.length > 0) groups.push({ label: '更早', items: earlier })
   return groups
-}
-
-const RAIL_STATUS_CLASS: Record<SessionIndicatorStatus, string> = {
-  idle: 'hidden',
-  running: 'border-blue-500 animate-pulse',
-  blocked: 'border-orange-500',
-  completed: 'border-emerald-500',
 }
 
 const SIDEBAR_DRAG_STRIP_HEIGHT = {
@@ -485,49 +484,6 @@ function isHiddenAutomationSession(session: AgentSessionMeta): boolean {
   return !!session.sourceAutomationId && !session.pinned
 }
 
-function isDelegatedChildSession(session: AgentSessionMeta): boolean {
-  return !!session.parentSessionId && !!session.sourceDelegationId
-}
-
-function sortDelegatedChildSessions(
-  sessions: readonly AgentSessionMeta[],
-  agentIndicatorMap?: ReadonlyMap<string, SessionIndicatorStatus>,
-): AgentSessionMeta[] {
-  const priority = (session: AgentSessionMeta): number => Number(
-    agentIndicatorMap && ACTIVE_SESSION_STATUSES.has(getDelegatedChildSessionStatus(session, agentIndicatorMap)),
-  )
-  return [...sessions].sort((a, b) => priority(b) - priority(a) || b.updatedAt - a.updatedAt)
-}
-
-function buildAgentSessionTrees(
-  sessions: AgentSessionMeta[],
-  agentIndicatorMap?: ReadonlyMap<string, SessionIndicatorStatus>,
-): AgentSessionTreeItem[] {
-  const sessionIds = new Set(sessions.map((session) => session.id))
-  const childrenByParentId = new Map<string, AgentSessionMeta[]>()
-  const roots: AgentSessionMeta[] = []
-
-  for (const session of sessions) {
-    if (
-      isDelegatedChildSession(session)
-      && session.parentSessionId
-      && sessionIds.has(session.parentSessionId)
-    ) {
-      const children = childrenByParentId.get(session.parentSessionId) ?? []
-      children.push(session)
-      childrenByParentId.set(session.parentSessionId, children)
-      continue
-    }
-
-    roots.push(session)
-  }
-
-  return roots.map((session) => ({
-    session,
-    childSessions: sortDelegatedChildSessions(childrenByParentId.get(session.id) ?? [], agentIndicatorMap),
-  }))
-}
-
 function getDelegatedChildStatus(
   session: AgentSessionMeta,
   agentIndicatorMap: Map<string, SessionIndicatorStatus>,
@@ -539,15 +495,7 @@ function getSessionTreeStatus(
   item: AgentSessionTreeItem,
   agentIndicatorMap: Map<string, SessionIndicatorStatus>,
 ): SessionIndicatorStatus {
-  const statuses = [
-    agentIndicatorMap.get(item.session.id) ?? 'idle',
-    ...item.childSessions.map((session) => getDelegatedChildStatus(session, agentIndicatorMap)),
-  ]
-
-  if (statuses.includes('blocked')) return 'blocked'
-  if (statuses.includes('running')) return 'running'
-  if (statuses.includes('completed')) return 'completed'
-  return 'idle'
+  return getAgentSessionTreeIndicatorStatus(item.session, item.childSessions, agentIndicatorMap)
 }
 
 function treeContainsSessionId(item: AgentSessionTreeItem, sessionId: string | null): boolean {
@@ -620,83 +568,6 @@ function getArchivedDelegatedChildren(
     && !child.isDraft
     && !draftSessionIds.has(child.id)
   ))
-}
-
-interface RailRecentItem {
-  id: string
-  title: string
-  type: SessionMiniMapType
-  initial: string
-  active: boolean
-  status: SessionIndicatorStatus
-  pinned: boolean
-  workspaceName?: string
-  isAutomation?: boolean
-  isDelegation?: boolean
-}
-
-function RailRecentButton({
-  item,
-  onSelect,
-  miniMapDisabled,
-}: {
-  item: RailRecentItem
-  onSelect: (item: RailRecentItem) => void
-  miniMapDisabled?: boolean
-}): React.ReactElement {
-  const preview = useSessionMiniMapHover(600, miniMapDisabled)
-
-  return (
-    <>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            ref={preview.setAnchorRef}
-            type="button"
-            aria-label={`打开${item.type === 'agent' ? 'Agent 会话' : 'Chat 对话'}：${item.title}`}
-            onClick={() => onSelect(item)}
-            onMouseEnter={preview.handleMouseEnter}
-            onMouseLeave={preview.handleMouseLeave}
-            className={cn(
-              'relative size-10 flex items-center justify-center overflow-hidden rounded-[12px] transition-colors titlebar-no-drag',
-              item.active
-                ? 'bg-primary/10 text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
-                : 'text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/80'
-            )}
-          >
-            <span
-              className={cn(
-                'absolute inset-y-0 left-0 w-0 border-l-[3px] rounded-l-[12px] pointer-events-none',
-                RAIL_STATUS_CLASS[item.status]
-              )}
-            />
-            {item.isAutomation
-              ? <Clock size={14} className="text-foreground/40" />
-              : item.isDelegation
-                ? <GitBranch size={14} className="text-foreground/40" />
-                : <span className="text-[13px] font-semibold leading-none">{item.initial}</span>
-            }
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="right">
-          {item.type === 'agent' ? 'Agent' : 'Chat'} · {item.title}
-        </TooltipContent>
-      </Tooltip>
-      <SessionMiniMapPopover
-        target={{
-          type: item.type,
-          sessionId: item.id,
-          title: item.title,
-          workspaceName: item.workspaceName,
-        }}
-        anchorRef={preview.anchorRef}
-        open={preview.isOpen}
-        isLeaving={preview.isLeaving}
-        onMouseEnter={preview.handlePanelMouseEnter}
-        onMouseLeave={preview.handlePanelMouseLeave}
-      />
-    </>
-  )
 }
 
 function SidebarWindowDragStrip({ height }: { height: number }): React.ReactElement {
@@ -1860,44 +1731,50 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     if (selectedSession?.sourceDelegationId && selectedSession.parentSessionId) {
       const parentSession = agentSessions.find((session) => session.id === selectedSession.parentSessionId)
       if (parentSession) {
-        if (store.get(agentSidePanelSplitMapAtom).has(parentSession.id)) {
-          toast.info('请先退出并排模式，再切换子会话', {
-            id: 'split-delegation-sidebar-navigation',
-          })
-        }
-        openSession('agent', parentSession.id, parentSession.title)
-        store.set(agentSideDelegationMapAtom, (previous) => (
-          selectDelegatedSession(previous, parentSession.id, selectedSession.id)
-        ))
-        store.set(agentSidePanelOpenAtomFamily(parentSession.id), true)
-        rememberStopGenerationTarget({ kind: 'agent', sessionId: selectedSession.id })
-        setUnviewedDelegatedCompleted((prev) => (
-          markSessionCompletionViewed(prev, selectedSession.id)
-        ))
-        store.set(agentDiffPanelTabAtom, (previous) => {
-          const next = new Map(previous)
-          next.set(parentSession.id, getDelegationSidePanelTab())
-          return next
+        openSession('agent', parentSession.id, parentSession.title, {
+          onOpened: () => {
+            if (store.get(agentSidePanelSplitMapAtom).has(parentSession.id)) {
+              toast.info('请先退出并排模式，再切换子会话', {
+                id: 'split-delegation-sidebar-navigation',
+              })
+            }
+            store.set(agentSideDelegationMapAtom, (previous) => (
+              selectDelegatedSession(previous, parentSession.id, selectedSession.id)
+            ))
+            store.set(agentSidePanelOpenAtomFamily(parentSession.id), true)
+            rememberStopGenerationTarget({ kind: 'agent', sessionId: selectedSession.id })
+            setUnviewedDelegatedCompleted((prev) => (
+              markSessionCompletionViewed(prev, selectedSession.id)
+            ))
+            store.set(agentDiffPanelTabAtom, (previous) => {
+              const next = new Map(previous)
+              next.set(parentSession.id, getDelegationSidePanelTab())
+              return next
+            })
+            setActiveView('conversations')
+            setUnviewedCompleted((prev: Set<string>) => {
+              if (!prev.has(id)) return prev
+              const next = new Set(prev)
+              next.delete(id)
+              return next
+            })
+          },
         })
+        return
+      }
+    }
+
+    openSession('agent', id, title, {
+      onOpened: () => {
         setActiveView('conversations')
+        // 清除该会话的"已完成未查看"标记
         setUnviewedCompleted((prev: Set<string>) => {
           if (!prev.has(id)) return prev
           const next = new Set(prev)
           next.delete(id)
           return next
         })
-        return
-      }
-    }
-
-    openSession('agent', id, title)
-    setActiveView('conversations')
-    // 清除该会话的"已完成未查看"标记
-    setUnviewedCompleted((prev: Set<string>) => {
-      if (!prev.has(id)) return prev
-      const next = new Set(prev)
-      next.delete(id)
-      return next
+      },
     })
   }, [agentSessions, openSession, setActiveView, setUnviewedCompleted, setUnviewedDelegatedCompleted, store])
 
@@ -2449,7 +2326,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     setViewMode,
   ])
 
-  const railRecentItems = React.useMemo(() => {
+  const railRecentItems = React.useMemo<RailRecentItem[]>(() => {
     if (mode === 'chat') {
       return conversations
         .filter((c) => !c.archived && !draftSessionIds.has(c.id))
@@ -2475,43 +2352,40 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
         }))
     }
 
-    return agentSessions
-      .filter((session) =>
-        !session.archived
-        && !session.isDraft
-        && !draftSessionIds.has(session.id)
-        && (!currentWorkspaceId || session.workspaceId === currentWorkspaceId)
-        // 自动任务会话不出现在收起态 Rail，与展开态列表保持一致
-        && !isHiddenAutomationSession(session)
-      )
-      .sort((a, b) => {
-        const statusA = agentIndicatorMap.get(a.id) ?? (unviewedCompletedSessionIds.has(a.id) ? 'completed' : 'idle')
-        const statusB = agentIndicatorMap.get(b.id) ?? (unviewedCompletedSessionIds.has(b.id) ? 'completed' : 'idle')
-        const priority = (session: AgentSessionMeta, status: SessionIndicatorStatus): number => {
-          if (session.id === activeSessionId) return 0
-          if (status === 'blocked') return 1
-          if (status === 'running') return 2
-          if (session.pinned) return 3
-          if (status === 'completed') return 4
-          return 5
-        }
-        const priorityDelta = priority(a, statusA) - priority(b, statusB)
-        if (priorityDelta !== 0) return priorityDelta
-        return b.updatedAt - a.updatedAt
-      })
-      .slice(0, 5)
-      .map((session) => ({
-        id: session.id,
-        title: session.title,
-        type: 'agent' as const,
-        initial: getRailInitial(session.title),
-        active: session.id === activeSessionId,
-        status: agentIndicatorMap.get(session.id) ?? (unviewedCompletedSessionIds.has(session.id) ? 'completed' as const : 'idle' as const),
-        pinned: !!session.pinned,
-        workspaceName: session.workspaceId ? workspaceNameMap.get(session.workspaceId) : undefined,
-        isAutomation: !!session.sourceAutomationId,
-        isDelegation: !!session.sourceDelegationId,
-      }))
+    const eligibleSessions = agentSessions.filter((session) => (
+      !session.archived
+      && !session.isDraft
+      && !draftSessionIds.has(session.id)
+      // 自动任务会话不出现在收起态 Rail，与展开态列表保持一致
+      && !isHiddenAutomationSession(session)
+    ))
+    const railTrees = getCollapsedAgentRailTrees({
+      sessions: eligibleSessions,
+      workspaceId: currentWorkspaceId,
+      activeSessionId,
+      agentIndicatorMap,
+      unviewedCompletedSessionIds,
+      // CollapsedSessionRail 自己截取 5 个可见根；Popover 打开后它需要完整候选集，
+      // 才能用快照 id 取回可能已被动态排序挤出前五的 Anchor。
+      limit: Number.POSITIVE_INFINITY,
+    })
+
+    return railTrees.map((tree) => ({
+      id: tree.session.id,
+      title: tree.session.title,
+      type: 'agent' as const,
+      initial: getRailInitial(tree.session.title),
+      active: tree.session.id === activeSessionId,
+      // 色条与展开态行共用会话树聚合状态：父会话空闲时也跟随子会话的运行/阻塞/完成态。
+      status: getCollapsedAgentRailTreeStatus(tree, agentIndicatorMap, unviewedCompletedSessionIds),
+      pinned: !!tree.session.pinned,
+      workspaceName: tree.session.workspaceId ? workspaceNameMap.get(tree.session.workspaceId) : undefined,
+      isAutomation: !!tree.session.sourceAutomationId,
+      // 正常 child 收纳进父 Popover；仅父不在当前 workspace 的 moved/orphan child
+      // 复用展开态策略成为可达根条目，并以 delegation 图标区分。
+      isDelegation: isDelegatedChildSession(tree.session),
+      childSessions: tree.childSessions,
+    }))
   }, [
     mode,
     conversations,
@@ -2524,6 +2398,10 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     unviewedCompletedSessionIds,
     workspaceNameMap,
   ])
+
+  const handleSelectRailChild = React.useCallback((session: AgentSessionMeta): void => {
+    handleSelectAgentSession(session.id, session.title)
+  }, [handleSelectAgentSession])
 
   // 删除确认弹窗（collapsed/expanded 共享）
   const deleteDialog = (
@@ -3272,6 +3150,47 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       isWorkspaceComponentActive(component as WorkspaceComponentTab),
     );
 
+    const collapsedToolItems: CollapsedToolItem[] = [
+      ...(productivityTools.todosEnabled ? [{
+        label: "Todo",
+        icon: <ListTodo size={16} />,
+        active: isWorkspaceComponentActive("todos"),
+        onClick: () => handleOpenPlanningComponent("todos"),
+      }] : []),
+      ...(productivityTools.calendarEnabled ? [{
+        label: "日程",
+        icon: <CalendarDays size={16} />,
+        active: isWorkspaceComponentActive("calendar"),
+        onClick: () => handleOpenPlanningComponent("calendar"),
+      }] : []),
+      ...(productivityTools.obsidianEnabled ? [{
+        label: "Obsidian",
+        icon: <ObsidianIcon size={16} />,
+        active: isWorkspaceComponentActive("vault"),
+        onClick: handleOpenVault,
+      }] : []),
+      ...(mode === "agent" ? [{
+        label: "项目记忆",
+        icon: <Brain size={16} />,
+        active: isWorkspaceComponentActive("memory"),
+        onClick: () => handleOpenCapabilityComponent("memory"),
+      }] : []),
+      {
+        label: "定时任务",
+        icon: <Clock size={16} />,
+        active: isWorkspaceComponentActive("automations"),
+        badge: automationCount > 0 ? formatAutomationCount(automationCount) : undefined,
+        onClick: () => handleOpenPlanningComponent("automations"),
+      },
+      ...(mode === "agent" ? [{
+        label: "MCP/Skills",
+        icon: <Blocks size={16} />,
+        active: isWorkspaceComponentActive("skills") || isWorkspaceComponentActive("mcp"),
+        showUpdate: (capabilities?.skills.filter((skill) => skill.hasUpdate).length ?? 0) > 0,
+        onClick: handleOpenMcpSkillsComponents,
+      }] : []),
+    ];
+
     return (
       <div
         ref={sidebarRootRef}
@@ -3414,129 +3333,50 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
             </TooltipTrigger>
             <TooltipContent side="right">搜索</TooltipContent>
           </Tooltip>
+          <CollapsedToolsPopover items={collapsedToolItems}>
+            <button
+              type="button"
+              aria-label="工作区工具"
+              className="group relative flex size-10 items-center justify-center p-1 titlebar-no-drag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <span
+                className={cn(
+                  "flex size-8 items-center justify-center rounded-[10px] text-foreground/45 transition-[background-color,color,box-shadow] duration-150 group-hover:bg-foreground/[0.06] group-hover:text-foreground/75",
+                  hasActiveCollapsedTool && "bg-primary/10 text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]",
+                )}
+              >
+                <Blocks size={16} />
+              </span>
+              {hasActiveCollapsedTool && (
+                <span className="absolute right-1 top-1 size-1.5 rounded-full bg-primary" />
+              )}
+            </button>
+          </CollapsedToolsPopover>
+
+          <div className="my-1 h-px w-6 bg-border/70" />
         </div>
 
         {/* 会话列表不再和 Todo、日程、Skills 等次级入口抢占垂直空间。 */}
-        <div className="mt-2 flex-1 min-h-0 w-full overflow-y-auto scrollbar-thin">
-          <div className="flex flex-col items-center gap-0.5 pb-2">
-            {railRecentItems.map((item) => (
-              <RailRecentButton
-                key={`${item.type}-${item.id}`}
-                item={item}
-                miniMapDisabled={!sessionHoverPreviewEnabled}
-                onSelect={(selected) => {
-                  if (selected.type === "agent") {
-                    handleSelectAgentSession(selected.id, selected.title);
-                  } else {
-                    handleSelectConversation(selected.id, selected.title);
-                  }
-                }}
-              />
-            ))}
-          </div>
-        </div>
+        {/* Rail 的面板开合与顺序冻结都在组件内部，hover 不会重渲染整个侧栏。 */}
+        <CollapsedSessionRail
+          items={railRecentItems}
+          activeSessionId={activeSessionId}
+          activeDelegationSessionId={activeDelegationSessionId}
+          agentIndicatorMap={agentIndicatorMap}
+          miniMapDisabled={!sessionHoverPreviewEnabled}
+          onSelectChild={handleSelectRailChild}
+          onSelect={(selected) => {
+            if (selected.type === "agent") {
+              handleSelectAgentSession(selected.id, selected.title);
+            } else {
+              handleSelectConversation(selected.id, selected.title);
+            }
+          }}
+        />
 
-        {/* 次级工作区工具收纳至底部菜单，始终可达且不挤压会话入口。 */}
-        <div className="flex flex-col items-center gap-0.5 border-t border-border/50 py-2">
-          <DropdownMenu>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    aria-label="更多工作区工具"
-                    className="group relative flex size-10 items-center justify-center p-1 titlebar-no-drag"
-                  >
-                    <span
-                      className={cn(
-                        "flex size-8 items-center justify-center rounded-[10px] text-foreground/45 transition-[background-color,color] duration-150 group-hover:bg-foreground/[0.06] group-hover:text-foreground/75",
-                        hasActiveCollapsedTool &&
-                          "bg-primary/10 text-foreground",
-                      )}
-                    >
-                      <MoreHorizontal size={17} />
-                    </span>
-                    {hasActiveCollapsedTool && (
-                      <span className="absolute right-1 top-1 size-1.5 rounded-full bg-primary" />
-                    )}
-                  </button>
-                </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent side="right">更多工作区工具</TooltipContent>
-            </Tooltip>
-            <DropdownMenuContent side="right" align="end" className="min-w-40">
-              {productivityTools.todosEnabled && (
-                <DropdownMenuItem
-                  aria-current={isWorkspaceComponentActive("todos") ? "page" : undefined}
-                  className={cn(isWorkspaceComponentActive("todos") && "bg-accent/70 text-accent-foreground")}
-                  onSelect={() => handleOpenPlanningComponent("todos")}
-                >
-                  <ListTodo />
-                  Todo
-                </DropdownMenuItem>
-              )}
-              {productivityTools.calendarEnabled && (
-                <DropdownMenuItem
-                  aria-current={isWorkspaceComponentActive("calendar") ? "page" : undefined}
-                  className={cn(isWorkspaceComponentActive("calendar") && "bg-accent/70 text-accent-foreground")}
-                  onSelect={() => handleOpenPlanningComponent("calendar")}
-                >
-                  <CalendarDays />
-                  日程
-                </DropdownMenuItem>
-              )}
-              {productivityTools.obsidianEnabled && (
-                <DropdownMenuItem
-                  aria-current={isVaultActive ? "page" : undefined}
-                  className={cn(isVaultActive && "bg-accent/70 text-accent-foreground")}
-                  onSelect={handleOpenVault}
-                >
-                  <ObsidianIcon size={16} />
-                  Obsidian
-                </DropdownMenuItem>
-              )}
 
-              <DropdownMenuItem
-                aria-current={isWorkspaceComponentActive("automations") ? "page" : undefined}
-                className={cn(isWorkspaceComponentActive("automations") && "bg-accent/70 text-accent-foreground")}
-                onSelect={() => handleOpenPlanningComponent("automations")}
-              >
-                <Clock />
-                定时任务
-                {automationCount > 0 && (
-                  <span className="ml-auto rounded-full bg-primary px-1.5 text-[10px] font-medium leading-4 text-primary-foreground tabular-nums">
-                    {formatAutomationCount(automationCount)}
-                  </span>
-                )}
-              </DropdownMenuItem>
-              {mode === "agent" && (
-                <>
-                  <DropdownMenuItem
-                    aria-current={isWorkspaceComponentActive("skills") || isWorkspaceComponentActive("mcp") ? "page" : undefined}
-                    className={cn((isWorkspaceComponentActive("skills") || isWorkspaceComponentActive("mcp")) && "bg-accent/70 text-accent-foreground")}
-                    onSelect={handleOpenMcpSkillsComponents}
-                  >
-                    <Blocks />
-                    MCP/Skills
-                    {(capabilities?.skills.filter((skill) => skill.hasUpdate)
-                      .length ?? 0) > 0 && (
-                      <span className="ml-auto size-2 rounded-full bg-blue-500" />
-                    )}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    aria-current={isWorkspaceComponentActive("memory") ? "page" : undefined}
-                    className={cn(isWorkspaceComponentActive("memory") && "bg-accent/70 text-accent-foreground")}
-                    onSelect={() => handleOpenCapabilityComponent("memory")}
-                  >
-                    <Brain />
-                    项目记忆
-                  </DropdownMenuItem>
-                </>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-
+        {/* 底部只保留全局状态与账户入口，工作区工具统一从搜索下方进入。 */}
+        <div className="flex flex-col items-center gap-0.5 py-2">
           {hasUpdate && (
             <SidebarUpdateButton
               status={updateStatus}

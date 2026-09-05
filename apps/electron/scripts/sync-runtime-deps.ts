@@ -46,6 +46,8 @@ export interface SyncRuntimeDepsResult {
 
 export const EXTERNAL_RUNTIME_PACKAGES: readonly string[] = [
   '@earendil-works/pi-coding-agent',
+  // pi-coding-agent 0.85.0 的根入口会加载 experimental server，但发布包漏声明了该依赖。
+  '@earendil-works/pi-server',
   '@earendil-works/pi-agent-core',
   '@earendil-works/pi-ai',
   'pdfjs-dist',
@@ -65,7 +67,7 @@ const defaultTargetNodeModules = join(appDir, 'node_modules')
 // 外置 Pi 包会被 electron-builder 原样收入 asar，因此必须在复制后显式套用同一补丁。
 const RUNTIME_PACKAGE_PATCHES: ReadonlyMap<string, { file: string; marker: string }> = new Map([
   ['@earendil-works/pi-ai', {
-    file: resolve(repoRoot, 'patches/@earendil-works%2Fpi-ai@0.84.4.patch'),
+    file: resolve(repoRoot, 'patches/@earendil-works%2Fpi-ai@0.85.0.patch'),
     marker: 'stream_read_error',
   }],
 ])

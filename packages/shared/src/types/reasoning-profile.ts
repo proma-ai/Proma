@@ -51,7 +51,7 @@ export interface ReasoningEncoding {
 }
 
 export interface ReasoningProfile {
-  id: 'deepseek-v4-flash' | 'deepseek-v4-pro' | 'kimi-k3' | 'glm-5.2' | 'glm-5.3' | 'openai-reasoning-standard' | 'openai-reasoning-max'
+  id: 'deepseek-v4-flash' | 'deepseek-v4-pro' | 'kimi-k3' | 'glm-5.2' | 'glm-5.3' | 'openai-reasoning-standard' | 'openai-reasoning-max' | 'openai-reasoning-astra'
   levels: readonly AgentThinkingLevel[]
   defaultLevel: AgentThinkingLevel
   normalize(level: AgentThinkingLevel | undefined): AgentThinkingLevel
@@ -306,6 +306,17 @@ const OPENAI_MAX_PROFILE: ReasoningProfile = {
   },
 }
 
+const OPENAI_ASTRA_PROFILE: ReasoningProfile = {
+  id: 'openai-reasoning-astra',
+  levels: ['low', 'medium', 'high', 'xhigh', 'max'],
+  defaultLevel: 'low',
+  normalize: (level) => level === 'off' || level === 'minimal' ? 'low' : level ?? 'low',
+  encodings: {
+    'openai-completions': { kind: 'openai-reasoning-effort', effortMap: { off: 'low', minimal: 'low', xhigh: 'xhigh', max: 'max' } },
+    'openai-responses': { kind: 'openai-reasoning-effort', effortMap: { off: 'low', minimal: 'low', xhigh: 'xhigh', max: 'max' } },
+  },
+}
+
 export const REASONING_PROFILES: readonly ReasoningProfile[] = [
   DEEPSEEK_V4_FLASH_PROFILE,
   DEEPSEEK_V4_PRO_PROFILE,
@@ -314,6 +325,7 @@ export const REASONING_PROFILES: readonly ReasoningProfile[] = [
   GLM_53_PROFILE,
   OPENAI_STANDARD_PROFILE,
   OPENAI_MAX_PROFILE,
+  OPENAI_ASTRA_PROFILE,
 ]
 
 /** 仅按模型 ID 匹配，再以实际 transport 确认该模型是否有已验证的协议 encoding。 */
@@ -324,6 +336,9 @@ export function resolveReasoningProfile(input: ResolveReasoningProfileInput): Re
   const isOpenAITransport = input.transport === 'openai-completions' || input.transport === 'openai-responses'
   const isOpenAIReasoningModel = !modelId.endsWith('-chat-latest')
     && (modelId.startsWith('gpt-5') || /^(o1|o3|o4)(?:-|$)/.test(modelId))
+  if (modelId === 'gpt-6-astra') {
+    return OPENAI_ASTRA_PROFILE.encodings[input.transport] ? OPENAI_ASTRA_PROFILE : undefined
+  }
   const profile = /^deepseek-v4-flash(?:-|$)/.test(modelId)
     ? DEEPSEEK_V4_FLASH_PROFILE
     : /^deepseek-v4-pro(?:-|$)/.test(modelId)

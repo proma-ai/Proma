@@ -12,6 +12,7 @@ import {
   extractZhipuCodingTeamApiToken,
   inferContextWindow,
   inferCodexAlignedGPT5ContextWindow,
+  getGeminiModelCapability,
   resolveReasoningCapability,
   resolveReasoningProfile,
   type CodexOAuthCredentials,
@@ -58,6 +59,8 @@ const VOLCENGINE_GLM_MAX_TOKENS = 128_000
 const GLM_53_FAMILY_MAX_TOKENS = 131_072
 const CODEX_BASE_URL = 'https://chatgpt.com/backend-api'
 const CODEX_MAX_TOKENS = 128_000
+// GPT-6 Astra 按 1M 上下文声明，与 Proma 共享上下文推断保持一致。
+const CODEX_GPT_6_ASTRA_CONTEXT_WINDOW = 1_000_000
 /**
  * 将 Codex 已标记的 GPT-5.x 上下文窗口外推到同名第三方模型。
  *
@@ -277,7 +280,7 @@ function createXaiRuntimeCredentialStore(
 }
 
 /**
- * Pi 0.84.4 已在 catalog 中原生声明 experimental vision 变体。
+ * Pi 0.85.0 已在 catalog 中原生声明 experimental vision 变体。
  * 常规 Flash 的视觉能力仍由 Proma 已验证的渠道契约兜底，不改变实际模型 ID、协议或推理参数。
  */
 const DEEPSEEK_V4_FLASH_VISION_MODEL_IDS = new Set([
@@ -291,11 +294,38 @@ export function supportsPiNativeImageInput(modelId: string | undefined): boolean
 }
 
 function applyPiModelCapabilityOverrides(model: PiCatalogModel | undefined): PiCatalogModel | undefined {
-  if (!model || !supportsPiNativeImageInput(model.id) || model.input.includes('image')) return model
-  return { ...model, input: [...model.input, 'image'] }
+  if (!model) return model
+
+  const normalizedId = model.id.trim().toLowerCase()
+  // Pi catalog also exposes Google-protocol Gemini through OpenCode Go. The API
+  // contract—not the catalog provider name—determines whether Google thinking levels apply.
+  const geminiCapability = model.api === 'google-generative-ai' ? getGeminiModelCapability(normalizedId) : undefined
+  const requiresMinimalThinkingExclusion = geminiCapability && !geminiCapability.thinkingLevels.includes('minimal')
+  const input: PiCatalogModel['input'] = supportsPiNativeImageInput(model.id) && !model.input.includes('image')
+    ? [...model.input, 'image']
+    : model.input
+  const thinkingLevelMap = requiresMinimalThinkingExclusion
+    ? { ...model.thinkingLevelMap, minimal: null }
+    : model.thinkingLevelMap
+
+  if (input === model.input && thinkingLevelMap === model.thinkingLevelMap) return model
+  return { ...model, input, ...(thinkingLevelMap ? { thinkingLevelMap } : {}) }
 }
 
 const CODEX_MODEL_PATCHES: PiCatalogModelPatch[] = [
+  {
+    id: 'gpt-6-astra',
+    name: 'GPT-6 Astra',
+    api: 'openai-codex-responses',
+    provider: 'openai-codex',
+    baseUrl: CODEX_BASE_URL,
+    reasoning: true,
+    thinkingLevelMap: compilePiReasoningCapabilities('openai-responses', 'gpt-6-astra')?.thinkingLevelMap,
+    input: ['text', 'image'],
+    cost: ZERO_MODEL_COST,
+    contextWindow: CODEX_GPT_6_ASTRA_CONTEXT_WINDOW,
+    maxTokens: CODEX_MAX_TOKENS,
+  },
   {
     id: 'gpt-5.4',
     contextWindow: CODEX_GPT_54_55_CONTEXT_WINDOW,
@@ -886,12 +916,17 @@ export async function buildCodexModel(sdk: PiSdk, input: CodexModelInput) {
   })
 
   const resolvedModelId = stripLegacyAgentSdkContextSuffix(input.model)
+  const runtimeModels = modelRuntime.getModels('openai-codex')
   const codexModels = await getCodexCatalogModels()
-  const model = (resolvedModelId ? modelRuntime.getModel('openai-codex', resolvedModelId) : undefined)
-    ?? (resolvedModelId ? findCatalogModelById(codexModels, resolvedModelId) : undefined)
-    // 指定模型缺失时回退到首个内置 codex 模型，避免因模型 ID 漂移直接失败。
-    ?? modelRuntime.getModels('openai-codex')[0]
+  const model = resolvedModelId
+    ? runtimeModels.find((candidate) => candidate.id === resolvedModelId)
+      ?? findCatalogModelById(codexModels, resolvedModelId)
+    : runtimeModels[0]
+
   if (!model) {
+    if (resolvedModelId) {
+      throw new Error(`未找到指定的 ChatGPT (Codex) 模型: ${resolvedModelId}`)
+    }
     throw new Error('未找到可用的 ChatGPT (Codex) 模型，请确认已登录并升级 Pi 运行时')
   }
   return { modelRuntime, model }

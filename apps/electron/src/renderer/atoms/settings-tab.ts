@@ -42,5 +42,7 @@ export interface SettingsSessionNavigation {
   type: TabType
   sessionId: string
   title: string
+  /** 导航经设置脏表单确认并真正执行后提交的调用方 intent。 */
+  onOpened?: () => void
 }
 export const settingsPendingSessionNavigationAtom = atom<SettingsSessionNavigation | null>(null)

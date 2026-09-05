@@ -261,6 +261,31 @@ export function getDelegatedChildSessionStatus(
 }
 
 /**
+ * Resolve the sidebar indicator status of one parent session together with its
+ * delegated children, taking the highest priority of
+ * blocked > running > completed > idle.
+ *
+ * Expanded rows and the collapsed Rail must both call this: the parent's color
+ * code has to follow its children even while the parent itself is idle, and the
+ * two sidebar forms must never disagree about the same session tree.
+ */
+export function getAgentSessionTreeIndicatorStatus(
+  session: AgentSessionMeta,
+  childSessions: readonly AgentSessionMeta[],
+  agentIndicatorMap: ReadonlyMap<string, SessionIndicatorStatus>,
+): SessionIndicatorStatus {
+  const statuses: SessionIndicatorStatus[] = [
+    agentIndicatorMap.get(session.id) ?? 'idle',
+    ...childSessions.map((child) => getDelegatedChildSessionStatus(child, agentIndicatorMap)),
+  ]
+
+  if (statuses.includes('blocked')) return 'blocked'
+  if (statuses.includes('running')) return 'running'
+  if (statuses.includes('completed')) return 'completed'
+  return 'idle'
+}
+
+/**
  * Count direct children whose current sidebar state has settled. This must use
  * the same status source as child rows so parent progress cannot disagree.
  */

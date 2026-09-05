@@ -149,6 +149,9 @@ import {
 } from './lib/main-window-lifecycle'
 import { dingtalkBridgeManager } from './lib/dingtalk-bridge-manager'
 import { getDingTalkMultiBotConfig } from './lib/dingtalk-config'
+import { redactSensitiveLogValue } from './lib/bridge-log-redaction'
+import { slackBridgeManager } from './lib/slack-bridge-manager'
+import { getSlackConfig } from './lib/slack-config'
 import { wechatBridge } from './lib/wechat-bridge'
 import { getWeChatConfig } from './lib/wechat-config'
 import { createQuickTaskWindow, toggleQuickTaskWindow, destroyQuickTaskWindow } from './lib/quick-task-window'
@@ -235,6 +238,24 @@ registerBridge({
 })
 
 registerBridge({
+  name: 'Slack BridgeManager',
+  shouldAutoStart: () => {
+    const config = getSlackConfig()
+    return config.bots.some((bot) => bot.enabled && bot.botToken && bot.appToken)
+  },
+  needsRecovery: () => {
+    const config = getSlackConfig()
+    const states = slackBridgeManager.getStates()
+    return config.bots.some((bot) => (
+      bot.enabled && !!bot.botToken && !!bot.appToken && states.bots[bot.id]?.status === 'error'
+    ))
+  },
+  start: () => slackBridgeManager.startAll(),
+  stop: () => slackBridgeManager.stopAll(),
+  recover: () => recoverEnabledSlackBots(),
+})
+
+registerBridge({
   name: '微信 Bridge',
   shouldAutoStart: () => {
     const config = getWeChatConfig()
@@ -276,6 +297,23 @@ async function recoverEnabledDingTalkBots(): Promise<void> {
   }
   if (failedCount > 0) {
     throw new Error(`${failedCount} 个钉钉 Bot 自愈恢复失败`)
+  }
+}
+
+async function recoverEnabledSlackBots(): Promise<void> {
+  const config = getSlackConfig()
+  let failedCount = 0
+  for (const bot of config.bots) {
+    if (!bot.enabled || !bot.botToken || !bot.appToken) continue
+    try {
+      await slackBridgeManager.restartBot(bot.id)
+    } catch (error) {
+      failedCount++
+      console.error(`[Slack BridgeManager] Bot "${bot.name}" 自愈恢复失败:`, redactSensitiveLogValue(error))
+    }
+  }
+  if (failedCount > 0) {
+    throw new Error(`${failedCount} 个 Slack Bot 自愈恢复失败`)
   }
 }
 

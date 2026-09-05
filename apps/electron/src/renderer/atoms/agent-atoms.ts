@@ -7,7 +7,8 @@
 
 import { atom } from 'jotai'
 import type { Getter } from 'jotai'
-import { atomFamily, atomWithStorage, selectAtom } from 'jotai/utils'
+import { atomWithStorage, selectAtom } from 'jotai/utils'
+import { atomFamily } from 'jotai-family'
 import type { AgentSessionMeta, AgentEvent, AgentWorkspace, AgentPendingFile, RetryAttempt, PromaPermissionMode, PermissionRequest, AskUserRequest, ExitPlanModeRequest, ThinkingConfig, AgentEffort, SDKMessage, UnstagedChangesResult } from '@proma/shared'
 import { PROMA_DEFAULT_PERMISSION_MODE } from '@proma/shared'
 import { calculateDockBadgeCount, countPendingRequests } from '@/lib/dock-badge-count'

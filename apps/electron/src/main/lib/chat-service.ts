@@ -264,7 +264,8 @@ export async function sendMessage(
   const {
     conversationId, userMessage, channelId,
     modelId, systemMessage: customSystemMessage, contextLength, contextDividers, attachments,
-    thinkingEnabled, enabledToolIds,
+    thinkingEnabled, thinkingLevel, enabledToolIds,
+
   } = input
 
   // 使用自定义系统提示词，否则使用默认提示词
@@ -394,6 +395,7 @@ export async function sendMessage(
         round++
         pendingToolResults = false
 
+
         const request = adapter.buildStreamRequest({
           baseUrl,
           apiKey: key,
@@ -404,6 +406,7 @@ export async function sendMessage(
           attachments,
           readImageAttachments: getImageAttachmentData,
           thinkingEnabled,
+          thinkingLevel,
           tools,
           continuationMessages: continuationMessages.length > 0 ? continuationMessages : undefined,
         })
@@ -474,6 +477,7 @@ export async function sendMessage(
           attachments,
           readImageAttachments: getImageAttachmentData,
           thinkingEnabled,
+          thinkingLevel,
           continuationMessages,
         })
         await streamSSE({ request: finalRequest, adapter, signal: controller.signal, fetchFn, onEvent: handleStreamEvent })
@@ -491,6 +495,7 @@ export async function sendMessage(
           broadcastQuotaExceeded()
           throw streamError
         }
+
 
         if (status === 401) {
           const newToken = await tryRefreshAuthToken()

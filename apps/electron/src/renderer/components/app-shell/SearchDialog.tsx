@@ -474,7 +474,7 @@ export function SearchDialog(): React.ReactElement {
       )}
       <DialogContent
         hideClose
-        className="w-[min(720px,calc(100vw_-_32px))] sm:max-w-[720px] p-0 gap-0 overflow-hidden"
+        className="w-[min(56rem,calc(100vw_-_2rem))] max-w-[calc(100vw_-_2rem)] p-0 gap-0 overflow-hidden"
         aria-describedby={undefined}
       >
         <DialogTitle className="sr-only">搜索对话</DialogTitle>
