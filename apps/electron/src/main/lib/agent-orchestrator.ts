@@ -773,6 +773,31 @@ export class AgentOrchestrator {
 
     // 环境 / 配置类错误的统一上报：持久化为 TypedError 消息，由 SDKMessageRenderer 渲染
     const reportPreflightError = (typedError: TypedError) => {
+      // 凭据预检可能跨越 await；失败出口也必须遵守并发拒绝和主动停止语义。
+      if (this.activeSessions.has(sessionId)) {
+        callbacks.onError(getActiveRunRejectionMessage())
+        completeBeforeRun()
+        return
+      }
+      if (this.stoppedBeforeRunSessions.has(sessionId)) {
+        completeBeforeRun({ stoppedByUser: true })
+        return
+      }
+
+      // 正常请求即使未通过预检，也要先保留本轮原始输入，避免刷新后丢失，
+      // 或错误卡片重试时误取上一轮用户消息。已有错误的重试不重复写入用户消息。
+      if (shouldPersistInitialUserMessage({ hasActiveRun: false, retryOfErrorUuid })) {
+        try {
+          persistInitialUserMessage()
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          console.error('[Agent 编排] 持久化预检失败的用户消息失败:', error)
+          callbacks.onError(`消息保存失败：${message}`)
+          completeBeforeRun()
+          return
+        }
+      }
+
       const errorContent = typedError.title
         ? `${typedError.title}: ${typedError.message}`
         : typedError.message
