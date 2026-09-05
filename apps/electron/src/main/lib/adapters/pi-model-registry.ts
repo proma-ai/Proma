@@ -285,7 +285,9 @@ function applyPiModelCapabilityOverrides(model: PiCatalogModel | undefined): PiC
   if (!model) return model
 
   const normalizedId = model.id.trim().toLowerCase()
-  const geminiCapability = model.provider === 'google' ? getGeminiModelCapability(normalizedId) : undefined
+  // Pi catalog also exposes Google-protocol Gemini through OpenCode Go. The API
+  // contract—not the catalog provider name—determines whether Google thinking levels apply.
+  const geminiCapability = model.api === 'google-generative-ai' ? getGeminiModelCapability(normalizedId) : undefined
   const requiresMinimalThinkingExclusion = geminiCapability && !geminiCapability.thinkingLevels.includes('minimal')
   const input: PiCatalogModel['input'] = supportsPiNativeImageInput(model.id) && !model.input.includes('image')
     ? [...model.input, 'image']

@@ -28,7 +28,21 @@ const GEMINI_TEXT_MODEL_CAPABILITIES: Readonly<Record<string, GeminiModelCapabil
     thinkingLevels: ALL_LEVELS,
     defaultThinkingLevel: 'high',
   },
+  'gemini-3.1-pro': {
+    contextWindow: ONE_MILLION,
+    maxOutputTokens: SIXTY_FOUR_K,
+    thinkingLevels: NO_MINIMAL_LEVELS,
+    defaultThinkingLevel: 'high',
+  },
   'gemini-3.1-pro-preview': {
+    contextWindow: ONE_MILLION,
+    maxOutputTokens: SIXTY_FOUR_K,
+    thinkingLevels: NO_MINIMAL_LEVELS,
+    defaultThinkingLevel: 'high',
+  },
+  // Google catalog 在启用 custom tools 时使用此精确别名；它仍是同一文本模型，
+  // 不能误回退到旧版 thinkingBudget 或默认 200K 上下文。
+  'gemini-3.1-pro-preview-customtools': {
     contextWindow: ONE_MILLION,
     maxOutputTokens: SIXTY_FOUR_K,
     thinkingLevels: NO_MINIMAL_LEVELS,

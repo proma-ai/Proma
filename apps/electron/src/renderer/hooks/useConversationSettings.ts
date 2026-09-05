@@ -110,12 +110,21 @@ export function useConversationThinkingEnabled(): [boolean, (v: boolean) => void
   return [value, setter]
 }
 
-/** 每个对话独立的 Gemini 3 思考深度。 */
+/**
+ * 每个对话独立的 Gemini 3 思考深度。
+ * 用户选择也同步为持久化默认值：重启后当前及新对话保持最近选择，
+ * 同时在当前窗口内仍允许各对话独立切换。
+ */
 export function useConversationThinkingLevel(): [GeminiThinkingLevel, (v: GeminiThinkingLevel) => void] {
   const conversationId = useConversationId()
   const defaultLevel = useAtomValue(thinkingLevelAtom)
+  const setDefaultLevel = useSetAtom(thinkingLevelAtom)
   const value = useMapValue(conversationThinkingLevelAtom, conversationId, defaultLevel)
-  const setter = useMapSetter(conversationThinkingLevelAtom, conversationId)
+  const setConversationLevel = useMapSetter(conversationThinkingLevelAtom, conversationId)
+  const setter = React.useCallback((level: GeminiThinkingLevel) => {
+    setConversationLevel(level)
+    setDefaultLevel(level)
+  }, [setConversationLevel, setDefaultLevel])
   return [value, setter]
 }
 
