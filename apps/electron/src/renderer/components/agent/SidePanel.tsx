@@ -2249,7 +2249,7 @@ function AttachedDirItem({ expandedStateKey, entry, depth, selectedPaths, onSele
   // 当前显示的名称和路径（重命名后更新）
   const [currentName, setCurrentName] = React.useState(entry.name)
   const [currentPath, setCurrentPath] = React.useState(entry.path)
-  const [expanded, setExpanded] = useFileTreeExpanded(expandedStateKey, currentPath)
+  const [expanded, setExpanded, relocateExpandedPath] = useFileTreeExpanded(expandedStateKey, currentPath)
   const { children, loaded, error } = useAttachedDirectoryChildren({
     stateKey: expandedStateKey, path: currentPath, sessionId, allowedPaths,
     expanded, isDirectory: entry.isDirectory, refreshVersion,
@@ -2310,6 +2310,8 @@ function AttachedDirItem({ expandedStateKey, entry, depth, selectedPaths, onSele
       // 更新本地显示
       const parentDir = getPathDirname(currentPath)
       const newPath = joinPath(parentDir, newName)
+      // 先迁移展开记录，再切换路径；子目录由新 identity 重新加载。
+      if (entry.isDirectory) relocateExpandedPath(newPath)
       // 更新选中状态中的路径
       onSelect(newPath, false)
       setCurrentName(newName)
@@ -2334,6 +2336,7 @@ function AttachedDirItem({ expandedStateKey, entry, depth, selectedPaths, onSele
       await window.electronAPI.moveAttachedFile(currentPath, result.path, { sessionId, candidateBasePaths: allowedPaths })
       // 移动后更新路径
       const newPath = joinPath(result.path, currentName)
+      if (entry.isDirectory) relocateExpandedPath(newPath)
       setCurrentPath(newPath)
     } catch (err) {
       console.error('[AttachedDirItem] 移动失败:', err)

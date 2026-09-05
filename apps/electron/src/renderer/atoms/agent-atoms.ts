@@ -631,6 +631,43 @@ export function updateFileBrowserExpandedPath(
   return next
 }
 
+/**
+ * 目录重命名/移动成功后，迁移当前文件树中该目录及后代的显式展开/折叠记录。
+ * 路径按目录边界匹配，不影响同名前缀的兄弟目录或其他文件树；清除目标位置
+ * 可能残留的旧记录，避免新搬来的目录继承之前同名目录的展开状态。
+ */
+export function relocateFileBrowserExpandedPath(
+  state: Map<string, Map<string, boolean>>,
+  stateKey: string,
+  oldPath: string,
+  newPath: string,
+): Map<string, Map<string, boolean>> {
+  const current = state.get(stateKey)
+  if (!current || oldPath === newPath) return state
+
+  const isWithin = (path: string, parent: string): boolean => {
+    // FileEntry 使用绝对路径；仅 Windows 盘符/UNC 路径把反斜杠视为分隔符。
+    // POSIX 文件名可以包含反斜杠，不能误迁移 a\\sibling 这样的兄弟目录。
+    const isWindowsPath = /^[a-z]:[/\\]/i.test(parent) || parent.startsWith('\\\\')
+    return path === parent || path.startsWith(parent + '/') || (isWindowsPath && path.startsWith(parent + '\\'))
+  }
+  const nextPaths = new Map(current)
+  let changed = false
+  for (const path of current.keys()) {
+    if (isWithin(path, oldPath) || isWithin(path, newPath)) {
+      nextPaths.delete(path)
+      changed = true
+    }
+  }
+  if (!changed) return state
+  for (const [path, expanded] of current) {
+    if (isWithin(path, oldPath)) nextPaths.set(newPath + path.slice(oldPath.length), expanded)
+  }
+  const next = new Map(state)
+  next.set(stateKey, nextPaths)
+  return next
+}
+
 /** Files Tab 各滚动视图的 scrollTop，按会话和文件视图隔离。 */
 export const fileBrowserScrollTopMapAtom = atom<Map<string, number>>(new Map())
 

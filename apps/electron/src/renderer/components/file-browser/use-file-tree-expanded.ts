@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { selectAtom } from 'jotai/utils'
-import { fileBrowserExpandedPathsAtom, updateFileBrowserExpandedPath } from '@/atoms/agent-atoms'
+import { fileBrowserExpandedPathsAtom, updateFileBrowserExpandedPath, relocateFileBrowserExpandedPath } from '@/atoms/agent-atoms'
 
 /** 主文件树与附加目录树共用运行期状态，每行只订阅自己的展开布尔值。 */
 export function useFileTreeExpanded(stateKey: string, path: string) {
@@ -17,5 +17,8 @@ export function useFileTreeExpanded(stateKey: string, path: string) {
       return updateFileBrowserExpandedPath(previous, stateKey, path, next)
     })
   }, [path, stateKey, setPaths])
-  return [expanded, setExpanded] as const
+  const relocateExpandedPath = React.useCallback((newPath: string) => {
+    setPaths((previous) => relocateFileBrowserExpandedPath(previous, stateKey, path, newPath))
+  }, [path, stateKey, setPaths])
+  return [expanded, setExpanded, relocateExpandedPath] as const
 }
