@@ -74,6 +74,12 @@ jobs:
         run: bun run electron:build
         working-directory: .
 
+      - name: 准备运行时依赖
+        shell: bash
+        run: |
+          bun run --filter='@proma/electron' sync:runtime-deps
+          bun run --filter='@proma/electron' rebuild:node-pty
+
       # 打包并发布到 GitHub Releases
       - name: 打包并发布 (macOS)
         env:
@@ -148,6 +154,12 @@ jobs:
       - name: 构建 Electron 应用
         run: bun run electron:build
         working-directory: .
+
+      - name: 准备运行时依赖
+        shell: bash
+        run: |
+          bun run --filter='@proma/electron' sync:runtime-deps
+          bun run --filter='@proma/electron' rebuild:node-pty
 
       # 打包并发布到 GitHub Releases
       - name: 打包并发布 (macOS x64)
@@ -341,6 +353,7 @@ jobs:
         run: bun run electron:build
 
       - name: 准备运行时依赖
+        shell: bash
         run: |
           bun run --filter='@proma/electron' sync:runtime-deps
           bun run --filter='@proma/electron' rebuild:node-pty
@@ -379,6 +392,12 @@ jobs:
       - name: 构建 Electron 应用
         run: bun run electron:build
         working-directory: .
+
+      - name: 准备运行时依赖
+        shell: bash
+        run: |
+          bun run --filter='@proma/electron' sync:runtime-deps
+          bun run --filter='@proma/electron' rebuild:node-pty
 
       - name: 打包并发布 (Windows)
         env:

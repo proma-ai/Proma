@@ -25,8 +25,8 @@ asarUnpack:
   - "node_modules/@napi-rs/**"
   - "node_modules/@earendil-works/pi-tui/native/**"
   # Pi 0.85 的 chord 会在运行时加载 esbuild；其平台二进制必须位于 ASAR 外。
-  - "node_modules/esbuild/**"
-  - "node_modules/@esbuild/**"
+  - "**/node_modules/esbuild/**"
+  - "**/node_modules/@esbuild/**"
   - "node_modules/sharp/**"
   - "node_modules/@img/**"
   # node-pty 的 platform-native .node 与 ConPTY helper 不能留在 asar 内。

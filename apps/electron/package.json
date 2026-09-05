@@ -1,6 +1,6 @@
 {
   "name": "@proma/electron",
-  "version": "0.19.30",
+  "version": "0.19.31",
   "description": "Proma，为专业用户设计的 Agent",
   "main": "dist/main.cjs",
   "author": {
