@@ -1844,6 +1844,8 @@ export const AGENT_IPC_CHANNELS = {
   GET_MCP_CONFIG: 'agent:get-mcp-config',
   /** 保存工作区 MCP 配置 */
   SAVE_MCP_CONFIG: 'agent:save-mcp-config',
+  /** 原子删除单个 MCP，保留其他条目的当前状态。 */
+  DELETE_MCP: 'agent:delete-mcp',
   /** 刷新并持久化工作区 MCP 真实连接状态 */
   REFRESH_MCP_CONNECTIONS: 'agent:refresh-mcp-connections',
   /** 原子切换 MCP 启用状态，并在启用时条件持久化真实验证结果。 */

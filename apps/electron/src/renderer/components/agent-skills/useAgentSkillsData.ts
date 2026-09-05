@@ -341,10 +341,9 @@ export function useAgentSkillsData(workspaceId?: string): AgentSkillsData {
     const entry = mcpConfig.servers[name]
     if (entry?.isBuiltin) return
     try {
-      const newServers = { ...mcpConfig.servers }
-      delete newServers[name]
-      const newConfig: WorkspaceMcpConfig = { servers: newServers }
-      await window.electronAPI.saveWorkspaceMcpConfig(workspaceSlug, newConfig)
+      // Delete against the main-process snapshot so unrelated enabled MCPs are
+      // neither overwritten by this renderer snapshot nor re-validated.
+      const newConfig = await window.electronAPI.deleteWorkspaceMcp(workspaceSlug, name)
       setMcpConfig(newConfig)
       bumpCapabilitiesVersion((v) => v + 1)
       try {
