@@ -86,6 +86,10 @@ jobs:
         run: bun run sync:runtime-deps
         working-directory: apps/electron
 
+      - name: 重建 macOS arm64 node-pty 原生依赖
+        run: bun run rebuild:node-pty
+        working-directory: apps/electron
+
       - name: 打包 (macOS arm64)
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -192,6 +196,10 @@ jobs:
 
       - name: 同步 Electron 运行时依赖
         run: bun run sync:runtime-deps
+        working-directory: apps/electron
+
+      - name: 重建 macOS x64 node-pty 原生依赖
+        run: bun run rebuild:node-pty
         working-directory: apps/electron
 
       - name: 打包 (macOS x64)
@@ -390,6 +398,10 @@ jobs:
 
       - name: 同步 Electron 运行时依赖
         run: bun run sync:runtime-deps
+        working-directory: apps/electron
+
+      - name: 重建 Windows node-pty 原生依赖
+        run: bun run rebuild:node-pty
         working-directory: apps/electron
 
       - name: 打包 (Windows x64)
