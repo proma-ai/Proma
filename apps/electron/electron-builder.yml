@@ -24,6 +24,9 @@ asarUnpack:
   - "node_modules/@mariozechner/**"
   - "node_modules/@napi-rs/**"
   - "node_modules/@earendil-works/pi-tui/native/**"
+  # Pi 0.85 的 chord 会在运行时加载 esbuild；其平台二进制必须位于 ASAR 外。
+  - "node_modules/esbuild/**"
+  - "node_modules/@esbuild/**"
   - "node_modules/sharp/**"
   - "node_modules/@img/**"
   # node-pty 的 platform-native .node 与 ConPTY helper 不能留在 asar 内。
@@ -49,10 +52,8 @@ files:
   - "!node_modules/electron/**"
   - "!node_modules/electron-builder/**"
   - "!node_modules/electronmon/**"
-  - "!node_modules/esbuild/**"
   - "!node_modules/@electron/**"
   - "!node_modules/@electron-builder/**"
-  - "!node_modules/@esbuild/**"
   # 排除 Pi SDK 纯演示/文档/sourcemap 内容，保留运行时必需文件。
   - "!node_modules/@earendil-works/*/examples/**"
   - "!node_modules/@earendil-works/*/docs/**"
