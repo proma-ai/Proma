@@ -45,6 +45,7 @@ export {
   inferMcpTransportType,
   normalizeMcpTransportType,
 } from './mcp-transport'
+export { removeMcpServerFromConfig } from './mcp-config'
 export {
   THINKING_SIGNATURE_ERROR_CODE,
   THINKING_SIGNATURE_ERROR_TITLE,
