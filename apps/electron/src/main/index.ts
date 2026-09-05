@@ -113,6 +113,7 @@ import {
 } from './lib/main-window-lifecycle'
 import { dingtalkBridgeManager } from './lib/dingtalk-bridge-manager'
 import { getDingTalkMultiBotConfig } from './lib/dingtalk-config'
+import { redactSensitiveLogValue } from './lib/bridge-log-redaction'
 import { slackBridgeManager } from './lib/slack-bridge-manager'
 import { getSlackConfig } from './lib/slack-config'
 import { wechatBridge } from './lib/wechat-bridge'
@@ -272,7 +273,7 @@ async function recoverEnabledSlackBots(): Promise<void> {
       await slackBridgeManager.restartBot(bot.id)
     } catch (error) {
       failedCount++
-      console.error(`[Slack BridgeManager] Bot "${bot.name}" 自愈恢复失败:`, error)
+      console.error(`[Slack BridgeManager] Bot "${bot.name}" 自愈恢复失败:`, redactSensitiveLogValue(error))
     }
   }
   if (failedCount > 0) {

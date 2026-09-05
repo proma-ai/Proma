@@ -1,29 +1,35 @@
 import { randomUUID } from 'node:crypto'
 import { safeStorage } from 'electron'
-import type { SlackBotConfig, SlackBotConfigInput, SlackConfig } from '@proma/shared'
+import type { SlackBotConfig, SlackBotConfigInput, SlackConfig, SlackBotSettingsConfig, SlackSettingsConfig } from '@proma/shared'
 import { getSlackConfigPath } from './config-paths'
 import { redactSensitiveLogValue } from './bridge-log-redaction'
 import { readJsonFileSafe, writeJsonFileAtomic } from './safe-file'
 
 const EMPTY_CONFIG: SlackConfig = { version: 1, bots: [] }
 const CHINESE_CHARACTER_PATTERN = /[\u3400-\u9FFF\uF900-\uFAFF]/u
+const SAFE_STORAGE_PREFIX = 'safeStorage:v1:'
+
+function assertSafeStorageAvailable(): void {
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('系统安全存储不可用，无法保存或使用 Slack Token。请恢复系统 Keychain/Secret Service 后重试。')
+  }
+}
 
 function encryptSecret(secret: string): string {
-  if (!safeStorage.isEncryptionAvailable()) {
-    console.warn('[Slack 配置] safeStorage 加密不可用，将以明文存储')
-    return secret
-  }
-  return safeStorage.encryptString(secret).toString('base64')
+  assertSafeStorageAvailable()
+  return `${SAFE_STORAGE_PREFIX}${safeStorage.encryptString(secret).toString('base64')}`
 }
 
 function decryptSecret(secret: string): string {
   if (!secret) return ''
-  if (!safeStorage.isEncryptionAvailable()) return secret
+  assertSafeStorageAvailable()
+  // Accept legacy ciphertext from earlier V1 builds; newly saved values are tagged.
+  const encoded = secret.startsWith(SAFE_STORAGE_PREFIX) ? secret.slice(SAFE_STORAGE_PREFIX.length) : secret
   try {
-    return safeStorage.decryptString(Buffer.from(secret, 'base64'))
+    return safeStorage.decryptString(Buffer.from(encoded, 'base64'))
   } catch (error) {
     console.error('[Slack 配置] 解密 token 失败:', redactSensitiveLogValue(error))
-    throw new Error('Slack token 解密失败，请重新保存配置')
+    throw new Error('Slack token 解密失败，请重新粘贴并保存配置')
   }
 }
 
@@ -74,6 +80,24 @@ export function getSlackConfig(): SlackConfig {
   return readRawConfig()
 }
 
+export function toSlackBotSettingsConfig(bot: SlackBotConfig): SlackBotSettingsConfig {
+  return {
+    id: bot.id,
+    name: bot.name,
+    enabled: bot.enabled,
+    hasBotToken: Boolean(bot.botToken),
+    hasAppToken: Boolean(bot.appToken),
+    defaultChannelId: bot.defaultChannelId,
+    defaultModelId: bot.defaultModelId,
+    homeChannelId: bot.homeChannelId,
+  }
+}
+
+export function getSlackSettingsConfig(): SlackSettingsConfig {
+  const config = readRawConfig()
+  return { version: config.version, bots: config.bots.map(toSlackBotSettingsConfig) }
+}
+
 export function getSlackBotById(botId: string): SlackBotConfig | undefined {
   return readRawConfig().bots.find((bot) => bot.id === botId)
 }
@@ -89,6 +113,9 @@ export function saveSlackBotConfig(input: SlackBotConfigInput): SlackBotConfig {
     const index = config.bots.findIndex((bot) => bot.id === input.id)
     if (index === -1) throw new Error(`Slack Bot ${input.id} 不存在`)
     const existing = config.bots[index]!
+    if ((existing.botToken || existing.appToken || input.botToken.trim() || input.appToken.trim()) && !safeStorage.isEncryptionAvailable()) {
+      assertSafeStorageAvailable()
+    }
     const next: SlackBotConfig = normalizeBotConfig({
       ...existing,
       name,

@@ -452,10 +452,12 @@ import { presenceService } from './lib/feishu-presence'
 import { getDingTalkConfig, saveDingTalkConfig, getDecryptedClientSecret, getDingTalkMultiBotConfig, saveDingTalkBotConfig, removeDingTalkBot, getDecryptedBotClientSecret } from './lib/dingtalk-config'
 import { listShallowDirectory } from './lib/directory-listing'
 import { dingtalkBridgeManager } from './lib/dingtalk-bridge-manager'
+import { redactSensitiveLogValue } from './lib/bridge-log-redaction'
 import {
-  getSlackConfig,
+  getSlackSettingsConfig,
   removeSlackBot,
   saveSlackBotConfig,
+  toSlackBotSettingsConfig,
 } from './lib/slack-config'
 import { slackBridgeManager } from './lib/slack-bridge-manager'
 import { buildSlackManifest } from './lib/slack/manifest'
@@ -5203,7 +5205,7 @@ export function registerIpcHandlers(): void {
     SLACK_IPC_CHANNELS.GET_CONFIG,
     async (event) => {
       assertMainSettingsRenderer(event.sender.id)
-      return getSlackConfig()
+      return getSlackSettingsConfig()
     },
   )
 
@@ -5213,13 +5215,13 @@ export function registerIpcHandlers(): void {
       assertMainSettingsRenderer(event.sender.id)
       const saved = saveSlackBotConfig(input)
       if (saved.enabled && saved.botToken && saved.appToken) {
-        slackBridgeManager.restartBot(saved.id).catch((error) => {
-          console.error(`[Slack IPC] Bot "${saved.name}" 重启失败:`, error)
+        void slackBridgeManager.restartBot(saved.id).catch((error) => {
+          console.error(`[Slack IPC] Bot "${saved.name}" 重启失败:`, redactSensitiveLogValue(error))
         })
       } else {
-        slackBridgeManager.stopBot(saved.id)
+        void slackBridgeManager.stopBot(saved.id)
       }
-      return saved
+      return toSlackBotSettingsConfig(saved)
     },
   )
 
@@ -5227,7 +5229,7 @@ export function registerIpcHandlers(): void {
     SLACK_IPC_CHANNELS.REMOVE_BOT,
     async (event, botId: string) => {
       assertMainSettingsRenderer(event.sender.id)
-      slackBridgeManager.stopBot(botId)
+      await slackBridgeManager.stopBot(botId)
       return removeSlackBot(botId)
     },
   )
@@ -5260,7 +5262,7 @@ export function registerIpcHandlers(): void {
     SLACK_IPC_CHANNELS.STOP_BOT,
     async (event, botId: string): Promise<void> => {
       assertMainSettingsRenderer(event.sender.id)
-      slackBridgeManager.stopBot(botId)
+      await slackBridgeManager.stopBot(botId)
     },
   )
 

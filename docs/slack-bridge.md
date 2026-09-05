@@ -92,7 +92,7 @@ Socket Mode 是必须项：Proma 不提供 HTTP Events receiver，也不需要�
    - **已连接**：配置完成，Proma 已接收 Slack Socket Mode 事件。
    - **连接错误**：展开卡片查看脱敏错误信息，按“排障”处理。
 
-Proma 使用 Electron `safeStorage` 加密保存 Token。正式版配置位于 `~/.proma/slack.json`；开发模式位于 `~/.proma-dev/slack.json`。每个 Bot 的 thread 绑定和投递 ledger 以 `slack-bindings-<botId>.json` 与 `slack-delivery-<botId>.json` 保存在同一配置目录。系统 Keychain 不可用时，Proma 会明确警告；生产环境不应忽略该提示。
+Proma 使用 Electron `safeStorage` 加密保存 Token。正式版配置位于 `~/.proma/slack.json`；开发模式位于 `~/.proma-dev/slack.json`。每个 Bot 的 thread 绑定和投递 ledger 以 `slack-bindings-<botId>.json` 与 `slack-delivery-<botId>.json` 保存在同一配置目录。系统 Keychain/Secret Service 不可用时，Proma 会拒绝保存或使用 Token；恢复安全存储后重新粘贴并保存凭证。
 
 ## 频道验收
 
@@ -132,10 +132,10 @@ Proma 会在读取旧本地配置时丢弃遗留的配对码、成员授权名�
 
 ## 安全与可靠性
 
-- Token 仅由用户粘贴到本机 Settings；已保存的明文 Token 永不回传 renderer，配置状态与日志都会脱敏。
+- Token 仅由用户粘贴到本机 Settings；Settings IPC 使用不含 Token 字段的 DTO，已保存的 Token 永不回传 renderer，配置状态与日志都会脱敏。
 - Bot 不接收私信。它会订阅自己已加入频道的消息，以延续已绑定的 thread，但只会由 `@mention` 创建新任务，并忽略普通频道消息与未绑定的 thread。
 - 会话按 `teamId + channelId + rootThreadTs + userId` 隔离，避免多人 thread 上下文串扰。
 - 事件处理使用去重、每个会话串行队列和持久化 delivery ledger；进程重启后会重试尚未送达的最终回复，并为运行中的任务投递明确的中断提示。
-- Home Channel 只发送会话标题与完成/停止状态，不会转发桌面端、Automation 或其他 Bridge 的回复正文。
+- Home Channel 只发送会话标题与完成/停止状态，不会转发桌面端、Automation 或其他 Bridge 的回复正文。标题本身仍会对该频道成员可见，请勿将敏感信息写入会话标题。
 
 建议在专用 Slack development workspace 完成手工验收：频道 mention/thread、同一 thread 的串行消息、AskUserQuestion 的重复 event、计划批准/拒绝、permission 允许/拒绝、Home Channel 的无正文完成通知，以及在运行中重启后的中断提示。

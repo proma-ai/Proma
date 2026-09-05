@@ -1178,8 +1178,8 @@ export interface ElectronAPI {
 
   // ===== Slack 集成 =====
 
-  getSlackConfig: () => Promise<import('@proma/shared').SlackConfig>
-  saveSlackBotConfig: (input: import('@proma/shared').SlackBotConfigInput) => Promise<import('@proma/shared').SlackBotConfig>
+  getSlackConfig: () => Promise<import('@proma/shared').SlackSettingsConfig>
+  saveSlackBotConfig: (input: import('@proma/shared').SlackBotConfigInput) => Promise<import('@proma/shared').SlackBotSettingsConfig>
   removeSlackBot: (botId: string) => Promise<boolean>
   getSlackManifest: (options?: { botName?: string }) => Promise<import('@proma/shared').SlackAppManifestResult>
   testSlackConnection: (botToken: string) => Promise<import('@proma/shared').SlackTestResult>

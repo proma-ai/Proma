@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { App } from '@slack/bolt'
 import type { WebClient } from '@slack/web-api'
 import { BrowserWindow } from 'electron'
@@ -15,7 +16,7 @@ import { getSlackBotBindingsPath, getSlackBotDeliveryPath } from './config-paths
 import { getSettings } from './settings-service'
 import { createAgentSession, getAgentSessionMeta } from './agent-session-manager'
 import { getAgentWorkspace } from './agent-workspace-manager'
-import { agentEventBus, runAgentHeadless } from './agent-service'
+import { agentEventBus, runAgentHeadless, stopAgent } from './agent-service'
 import { askUserService } from './agent-ask-user-service'
 import { exitPlanService } from './agent-exit-plan-service'
 import { permissionService } from './agent-permission-service'
@@ -97,6 +98,7 @@ export class SlackBridge {
   private readonly homeRuns = new Map<string, HomeRun>()
   private readonly interactions = new Map<string, PendingInteraction>()
   private readonly recentEventIds = new Set<string>()
+  private stopping = false
   private eventBusUnsubscribe: (() => void) | null = null
   private deliveryStore: SlackDeliveryStore
 
@@ -117,7 +119,8 @@ export class SlackBridge {
     if (!this.botConfig.botToken || !this.botConfig.appToken) {
       throw new Error('请先配置 Slack Bot Token 和 App Token')
     }
-    if (this.app) this.stop()
+    if (this.app) await this.stop()
+    this.stopping = false
     this.updateStatus({ status: 'connecting' })
 
     try {
@@ -159,7 +162,31 @@ export class SlackBridge {
     }
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
+    if (this.stopping) return
+    this.stopping = true
+
+    const activeRuns = [...this.activeRuns.values()]
+    for (const run of activeRuns) {
+      run.finalized = true
+      if (run.updateTimer) clearTimeout(run.updateTimer)
+      stopAgent(run.binding.sessionId)
+    }
+    for (const interaction of [...this.interactions.values()]) {
+      await this.expireInteraction(interaction.requestId, 'Slack Bot 已停止或重启')
+    }
+    for (const run of activeRuns) {
+      const text = '⚠️ Slack Bot 已停止或重启，本次任务已取消。请重新 @mention Proma 发起任务。'
+      const clientMessageId = run.responseTs ? undefined : randomUUID()
+      this.deliveryStore.update(run.eventId, {
+        status: 'final-ready',
+        finalText: text,
+        responseTs: run.responseTs,
+        ...(clientMessageId ? { clientMessageId } : {}),
+      })
+      await this.deliverFinal(run.eventId, run.binding, text, run.responseTs, clientMessageId)
+    }
+
     this.eventBusUnsubscribe?.()
     this.eventBusUnsubscribe = null
     for (const run of this.activeRuns.values()) {
@@ -167,10 +194,6 @@ export class SlackBridge {
     }
     this.activeRuns.clear()
     this.homeRuns.clear()
-    for (const interaction of this.interactions.values()) {
-      if (interaction.timeout) clearTimeout(interaction.timeout)
-    }
-    this.interactions.clear()
     this.runTails.clear()
     this.recentEventIds.clear()
     this.bindings.clear()
@@ -179,9 +202,13 @@ export class SlackBridge {
     this.client = null
     this.teamId = null
     this.botUserId = null
-    if (app) void app.stop().catch((error: unknown) => {
-      console.warn(`[Slack Bridge/${this.botConfig.name}] 关闭 Socket Mode 失败:`, redactSensitiveLogValue(error))
-    })
+    if (app) {
+      try {
+        await app.stop()
+      } catch (error) {
+        console.warn(`[Slack Bridge/${this.botConfig.name}] 关闭 Socket Mode 失败:`, redactSensitiveLogValue(error))
+      }
+    }
     this.updateStatus({ status: 'disconnected', activeBindings: 0, queuedRuns: 0 })
   }
 
@@ -238,6 +265,7 @@ export class SlackBridge {
   }
 
   private async acceptIncoming(incoming: IncomingSlackMessage): Promise<void> {
+    if (this.stopping) return
     if (!incoming.teamId || !incoming.channelId || !incoming.userId || !incoming.text.trim()) return
     if (!this.isCurrentTeam(incoming.teamId)) return
     const threadTs = incoming.threadTs ?? incoming.ts
@@ -376,30 +404,41 @@ export class SlackBridge {
   }
 
   private async finalizeRun(sessionId: string, forcedText?: string): Promise<void> {
+    if (this.stopping) return
     const run = this.activeRuns.get(sessionId)
     if (!run || run.finalized) return
     run.finalized = true
     if (run.updateTimer) clearTimeout(run.updateTimer)
 
     const text = forcedText ?? (run.finalText.trim() || run.partialText.trim() || 'Proma 已完成，但没有可显示的文本结果。')
-    this.deliveryStore.update(run.eventId, { status: 'final-ready', finalText: text, responseTs: run.responseTs })
+    const clientMessageId = run.responseTs ? undefined : randomUUID()
+    this.deliveryStore.update(run.eventId, {
+      status: 'final-ready',
+      finalText: text,
+      responseTs: run.responseTs,
+      ...(clientMessageId ? { clientMessageId } : {}),
+    })
     try {
-      await this.deliverFinal(run.eventId, run.binding, text, run.responseTs)
+      await this.deliverFinal(run.eventId, run.binding, text, run.responseTs, clientMessageId)
     } finally {
       this.activeRuns.delete(sessionId)
     }
   }
 
-  private async deliverFinal(eventId: string, binding: SlackThreadBinding, text: string, responseTs?: string): Promise<void> {
-    await this.deliverToSlack(eventId, binding.channelId, binding.rootThreadTs, text, responseTs)
+  private async deliverFinal(eventId: string, binding: SlackThreadBinding, text: string, responseTs?: string, clientMessageId?: string): Promise<void> {
+    await this.deliverToSlack(eventId, binding.channelId, binding.rootThreadTs, text, responseTs, clientMessageId)
   }
 
   private async deliverStoredFinal(record: SlackDeliveryRecord): Promise<void> {
     if (!record.finalText) return
-    await this.deliverToSlack(record.eventId, record.channelId, record.threadTs, record.finalText, record.responseTs)
+    const clientMessageId = record.responseTs ? undefined : (record.clientMessageId ?? randomUUID())
+    if (clientMessageId && clientMessageId !== record.clientMessageId) {
+      this.deliveryStore.update(record.eventId, { clientMessageId })
+    }
+    await this.deliverToSlack(record.eventId, record.channelId, record.threadTs, record.finalText, record.responseTs, clientMessageId)
   }
 
-  private async deliverToSlack(eventId: string, channelId: string, threadTs: string, text: string, responseTs?: string): Promise<void> {
+  private async deliverToSlack(eventId: string, channelId: string, threadTs: string, text: string, responseTs?: string, clientMessageId?: string): Promise<void> {
     const client = this.client
     if (!client) return
     const rendered = renderSlackMessage(text)
@@ -412,6 +451,7 @@ export class SlackBridge {
           thread_ts: threadTs,
           text: rendered.text,
           blocks: rendered.blocks as never,
+          ...(clientMessageId ? { client_msg_id: clientMessageId } : {}),
         })
       }
       this.deliveryStore.update(eventId, { status: 'delivered', errorMessage: undefined })
@@ -721,7 +761,9 @@ export class SlackBridge {
 
   private enqueue(key: string, work: () => Promise<void>): Promise<void> {
     const previous = this.runTails.get(key) ?? Promise.resolve()
-    const next = previous.catch(() => {}).then(work)
+    const next = previous.catch(() => {}).then(async () => {
+      if (!this.stopping) await work()
+    })
     this.runTails.set(key, next)
     this.updateStatus({ queuedRuns: this.runTails.size })
     return next.finally(() => {

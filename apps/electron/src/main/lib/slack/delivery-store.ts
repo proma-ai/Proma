@@ -9,6 +9,8 @@ export interface SlackDeliveryRecord {
   channelId: string
   threadTs: string
   responseTs?: string
+  /** Stable Slack idempotency key for a terminal post without a response placeholder. */
+  clientMessageId?: string
   finalText?: string
   errorMessage?: string
   createdAt: number

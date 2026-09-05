@@ -18,9 +18,10 @@ class SlackBridgeManager {
     }
   }
 
-  stopAll(): void {
-    for (const bridge of this.bridges.values()) bridge.stop()
+  async stopAll(): Promise<void> {
+    const bridges = [...this.bridges.values()]
     this.bridges.clear()
+    await Promise.all(bridges.map((bridge) => bridge.stop()))
   }
 
   async startBot(botId: string): Promise<void> {
@@ -31,7 +32,7 @@ class SlackBridgeManager {
 
     const existing = this.bridges.get(botId)
     if (existing) {
-      existing.stop()
+      await existing.stop()
       existing.updateConfig(config)
       await existing.start()
       return
@@ -41,15 +42,15 @@ class SlackBridgeManager {
     await bridge.start()
   }
 
-  stopBot(botId: string): void {
+  async stopBot(botId: string): Promise<void> {
     const bridge = this.bridges.get(botId)
     if (!bridge) return
-    bridge.stop()
     this.bridges.delete(botId)
+    await bridge.stop()
   }
 
   async restartBot(botId: string): Promise<void> {
-    this.stopBot(botId)
+    await this.stopBot(botId)
     await this.startBot(botId)
   }
 
