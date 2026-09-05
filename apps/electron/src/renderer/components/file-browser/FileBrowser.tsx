@@ -11,8 +11,8 @@
  */
 
 import * as React from 'react'
-import { useAtomValue, useSetAtom } from 'jotai'
-import { selectAtom } from 'jotai/utils'
+import { useAtomValue } from 'jotai'
+import { useFileTreeExpanded } from './use-file-tree-expanded'
 import { toast } from 'sonner'
 import {
   ChevronRight,
@@ -47,7 +47,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { workspaceFilesVersionAtom, fileBrowserAutoRevealAtom, recentlyModifiedPathsAtom, currentAgentSessionIdAtom, fileBrowserExpandedPathsAtom, isFileBrowserAutoRevealActive, updateFileBrowserExpandedPath } from '@/atoms/agent-atoms'
+import { workspaceFilesVersionAtom, fileBrowserAutoRevealAtom, recentlyModifiedPathsAtom, currentAgentSessionIdAtom, isFileBrowserAutoRevealActive } from '@/atoms/agent-atoms'
 import type { FileAccessOptions, FileEntry } from '@proma/shared'
 import { FileTypeIcon } from './FileTypeIcon'
 import { DefaultAppMenuItem } from './DefaultAppMenuItem'
@@ -617,16 +617,7 @@ function FileTreeItem({
   onAddToChat,
   onFilePreview,
 }: FileTreeItemProps): React.ReactElement {
-  // 每行只订阅自己的布尔值；其他目录展开/折叠不重渲染整棵已展开树。
-  const expandedAtom = React.useMemo(
-    () => selectAtom(fileBrowserExpandedPathsAtom, (state) => state.get(expandedStateKey)?.get(entry.path) ?? false),
-    [entry.path, expandedStateKey],
-  )
-  const expanded = useAtomValue(expandedAtom)
-  const setExpandedPathsMap = useSetAtom(fileBrowserExpandedPathsAtom)
-  const setExpanded = React.useCallback((nextExpanded: boolean) => {
-    setExpandedPathsMap((previous) => updateFileBrowserExpandedPath(previous, expandedStateKey, entry.path, nextExpanded))
-  }, [entry.path, expandedStateKey, setExpandedPathsMap])
+  const [expanded, setExpanded] = useFileTreeExpanded(expandedStateKey, entry.path)
   const [children, setChildren] = React.useState<ScopedFileEntry[]>([])
   const [childrenLoaded, setChildrenLoaded] = React.useState(false)
   const rowRef = React.useRef<HTMLDivElement>(null)

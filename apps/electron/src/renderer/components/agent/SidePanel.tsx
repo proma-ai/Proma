@@ -18,6 +18,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
+import { getAttachedDirectoryStateKey } from '@/components/file-browser/file-browser-roots'
+import { useFileTreeExpanded } from '@/components/file-browser/use-file-tree-expanded'
+import { useAttachedDirectoryChildren } from '@/components/file-browser/use-attached-directory-children'
 import { productivityToolsAtom } from '@/atoms/ui-preferences'
 import { markdownToHtml } from '@/lib/markdown-rich-text'
 import { FileBrowser, FileDropZone, FileTypeIcon, FileSearchBar, computeRevealAncestors, isPathUnderRoot, computeTreeRowLayout, AncestorGuides, STICKY_ROW_BASE_CLASS, canBeSticky } from '@/components/file-browser'
@@ -1997,7 +2000,7 @@ function AttachedDirsSection({ title, scope = 'project', showSessionBadge = true
 
   // ===== 接入搜索点击触发的 reveal：附加目录文件搜到后，需要展开/选中目标 =====
   const autoReveal = useAtomValue(fileBrowserAutoRevealAtom)
-  const activeAutoReveal = isFileBrowserAutoRevealActive(autoReveal) ? autoReveal : null
+  const activeAutoReveal = autoReveal?.sessionId === sessionId && isFileBrowserAutoRevealActive(autoReveal) ? autoReveal : null
   // 找到 reveal target 命中的那个附加目录根。如果用户附加了嵌套目录（如同时附加 /a 和 /a/b），
   // 取"最深匹配"——只让真正包含该文件的最近一棵树展开，避免外层 /a 树被无谓打开。
   const revealRoot = React.useMemo(() => {
@@ -2046,7 +2049,7 @@ function AttachedDirsSection({ title, scope = 'project', showSessionBadge = true
         const isRevealRoot = dir === revealRoot
         return (
           <AttachedDirTree
-            key={dir}
+            key={getAttachedDirectoryStateKey(sessionId, scope, dir)}
             dirPath={dir}
             onDetach={() => onDetach(dir)}
             selectedPaths={selectedPaths}
@@ -2090,9 +2093,12 @@ interface AttachedDirTreeProps {
 }
 
 function AttachedDirTree({ dirPath, onDetach, selectedPaths, onSelect, refreshVersion, onAddToChat, onFilePreview, onOpenDirectoryTerminal, allowedPaths, sessionId, scope, showSessionBadge, revealTarget = null, revealTs = 0 }: AttachedDirTreeProps): React.ReactElement {
-  const [expanded, setExpanded] = React.useState(false)
-  const [children, setChildren] = React.useState<FileEntry[]>([])
-  const [loaded, setLoaded] = React.useState(false)
+  const expandedStateKey = getAttachedDirectoryStateKey(sessionId, scope, dirPath)
+  const [expanded, setExpanded] = useFileTreeExpanded(expandedStateKey, dirPath)
+  const { children, loaded, error } = useAttachedDirectoryChildren({
+    stateKey: expandedStateKey, path: dirPath, sessionId, allowedPaths,
+    expanded, isDirectory: true, refreshVersion,
+  })
 
   const dirName = dirPath.split(/[\\/]/).filter(Boolean).pop() || dirPath
 
@@ -2102,50 +2108,12 @@ function AttachedDirTree({ dirPath, onDetach, selectedPaths, onSelect, refreshVe
     [dirPath, revealTarget],
   )
 
-  // 当 refreshVersion 变化时，已展开的目录自动重新加载
+  // 定位只发出展开意图；加载完成不得覆盖此后用户的收起操作。
   React.useEffect(() => {
-    if (expanded && loaded) {
-      window.electronAPI.listAttachedDirectory(dirPath, { sessionId, candidateBasePaths: allowedPaths })
-        .then((items) => setChildren(items))
-        .catch((err) => console.error('[AttachedDirTree] 刷新失败:', err))
-    }
-  }, [refreshVersion]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (revealTs !== 0 && revealTarget) setExpanded(true)
+  }, [revealTs, setExpanded]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ===== 自动定位：reveal target 命中时自动加载子项 + 展开 =====
-  React.useEffect(() => {
-    if (revealTs === 0 || !revealTarget) return
-    let cancelled = false
-    const run = async (): Promise<void> => {
-      if (!loaded) {
-        try {
-          const items = await window.electronAPI.listAttachedDirectory(dirPath, { sessionId, candidateBasePaths: allowedPaths })
-          if (!cancelled) {
-            setChildren(items)
-            setLoaded(true)
-          }
-        } catch (err) {
-          console.error('[AttachedDirTree] reveal 加载失败:', err)
-          return
-        }
-      }
-      if (!cancelled) setExpanded(true)
-    }
-    void run()
-    return () => { cancelled = true }
-  }, [revealTs]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const toggleExpand = async (): Promise<void> => {
-    if (!expanded && !loaded) {
-      try {
-        const items = await window.electronAPI.listAttachedDirectory(dirPath, { sessionId, candidateBasePaths: allowedPaths })
-        setChildren(items)
-        setLoaded(true)
-      } catch (err) {
-        console.error('[AttachedDirTree] 加载失败:', err)
-      }
-    }
-    setExpanded(!expanded)
-  }
+  const toggleExpand = (): void => { setExpanded((previous) => !previous) }
 
   // depth=0 的根行，与 FileBrowser 保持一致的布局：铺满、无外边距、可 sticky
   const { paddingLeft, guideLeft } = computeTreeRowLayout(0)
@@ -2235,16 +2203,16 @@ function AttachedDirTree({ dirPath, onDetach, selectedPaths, onSelect, refreshVe
             className="file-tree-guide pointer-events-none absolute bottom-1 top-0 w-px bg-border/70"
             style={{ left: guideLeft }}
           />
-          {children.length === 0 && loaded && (
+          {(error || (children.length === 0 && loaded)) && (
             <div
               className="text-[11px] text-muted-foreground/50 py-1"
               style={{ paddingLeft: paddingLeft + 24 }}
             >
-              空文件夹
+              {error ?? '空文件夹'}
             </div>
           )}
           {children.map((child) => (
-            <AttachedDirItem key={child.path} entry={child} depth={1} selectedPaths={selectedPaths} onSelect={onSelect} refreshVersion={refreshVersion} onAddToChat={onAddToChat} onFilePreview={onFilePreview} onOpenDirectoryTerminal={onOpenDirectoryTerminal} allowedPaths={allowedPaths} sessionId={sessionId} scope={scope} revealTarget={revealTarget} revealTs={revealTs} revealAncestors={revealAncestors} />
+            <AttachedDirItem key={child.path} expandedStateKey={expandedStateKey} entry={child} depth={1} selectedPaths={selectedPaths} onSelect={onSelect} refreshVersion={refreshVersion} onAddToChat={onAddToChat} onFilePreview={onFilePreview} onOpenDirectoryTerminal={onOpenDirectoryTerminal} allowedPaths={allowedPaths} sessionId={sessionId} scope={scope} revealTarget={revealTarget} revealTs={revealTs} revealAncestors={revealAncestors} />
           ))}
         </div>
       )}
@@ -2253,6 +2221,7 @@ function AttachedDirTree({ dirPath, onDetach, selectedPaths, onSelect, refreshVe
 }
 
 interface AttachedDirItemProps {
+  expandedStateKey: string
   entry: FileEntry
   depth: number
   selectedPaths: Set<string>
@@ -2272,10 +2241,7 @@ interface AttachedDirItemProps {
   revealAncestors?: Set<string>
 }
 
-function AttachedDirItem({ entry, depth, selectedPaths, onSelect, refreshVersion, onAddToChat, onFilePreview, onOpenDirectoryTerminal, allowedPaths, sessionId, scope, revealTarget = null, revealTs = 0, revealAncestors }: AttachedDirItemProps): React.ReactElement {
-  const [expanded, setExpanded] = React.useState(false)
-  const [children, setChildren] = React.useState<FileEntry[]>([])
-  const [loaded, setLoaded] = React.useState(false)
+function AttachedDirItem({ expandedStateKey, entry, depth, selectedPaths, onSelect, refreshVersion, onAddToChat, onFilePreview, onOpenDirectoryTerminal, allowedPaths, sessionId, scope, revealTarget = null, revealTs = 0, revealAncestors }: AttachedDirItemProps): React.ReactElement {
   // 重命名状态
   const [isRenaming, setIsRenaming] = React.useState(false)
   const [renameValue, setRenameValue] = React.useState(entry.name)
@@ -2283,75 +2249,34 @@ function AttachedDirItem({ entry, depth, selectedPaths, onSelect, refreshVersion
   // 当前显示的名称和路径（重命名后更新）
   const [currentName, setCurrentName] = React.useState(entry.name)
   const [currentPath, setCurrentPath] = React.useState(entry.path)
+  const [expanded, setExpanded] = useFileTreeExpanded(expandedStateKey, currentPath)
+  const { children, loaded, error } = useAttachedDirectoryChildren({
+    stateKey: expandedStateKey, path: currentPath, sessionId, allowedPaths,
+    expanded, isDirectory: entry.isDirectory, refreshVersion,
+  })
   const rowRef = React.useRef<HTMLDivElement>(null)
 
   const isSelected = selectedPaths.has(currentPath)
 
-  // 当 refreshVersion 变化时，已展开的文件夹自动重新加载子项
+  // 同一个定位脉冲只展开一次，目录加载与用户手动折叠不重放定位。
   React.useEffect(() => {
-    if (expanded && loaded && entry.isDirectory) {
-      window.electronAPI.listAttachedDirectory(currentPath, { sessionId, candidateBasePaths: allowedPaths })
-        .then((items) => setChildren(items))
-        .catch((err) => console.error('[AttachedDirItem] 刷新子目录失败:', err))
-    }
-  }, [refreshVersion]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (revealTs === 0 || !revealTarget || !entry.isDirectory) return
+    if (revealAncestors?.has(currentPath) || currentPath === revealTarget) setExpanded(true)
+  }, [revealTs, currentPath, setExpanded]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ===== 自动定位：祖先目录自动展开 + 目标行滚动到中心 =====
+  const scrolledRevealTsRef = React.useRef(0)
   React.useEffect(() => {
-    if (revealTs === 0 || !revealTarget) return
+    if (revealTs === 0 || currentPath !== revealTarget || scrolledRevealTsRef.current === revealTs) return
+    if (entry.isDirectory && (!expanded || !loaded)) return
+    const frame = requestAnimationFrame(() => {
+      rowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      scrolledRevealTsRef.current = revealTs
+    })
+    return () => { cancelAnimationFrame(frame) }
+  }, [revealTs, revealTarget, currentPath, entry.isDirectory, expanded, loaded])
 
-    const isAncestor = !!revealAncestors && revealAncestors.has(currentPath)
-    const isTarget = currentPath === revealTarget
-
-    const scrollToTarget = (): void => {
-      requestAnimationFrame(() => {
-        rowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      })
-    }
-
-    // 自身需要展开：祖先目录 OR 目标本身就是目录
-    const willExpand = entry.isDirectory && (isAncestor || isTarget) && !expanded
-    if (willExpand) {
-      let cancelled = false
-      const run = async (): Promise<void> => {
-        if (!loaded) {
-          try {
-            const items = await window.electronAPI.listAttachedDirectory(currentPath, { sessionId, candidateBasePaths: allowedPaths })
-            if (!cancelled) {
-              setChildren(items)
-              setLoaded(true)
-            }
-          } catch (err) {
-            console.error('[AttachedDirItem] reveal 加载子目录失败:', err)
-            return
-          }
-        }
-        if (cancelled) return
-        setExpanded(true)
-        // 目标自身就是这个目录时，等展开成功后再滚动，避免子项渲染改变行高使
-        // smooth scroll 偏离；加载失败路径自然跳过滚动。
-        if (isTarget) scrollToTarget()
-      }
-      void run()
-      return () => { cancelled = true }
-    }
-
-    // 目标行：滚动到可视区中心（不打 flash，直接靠选中态高亮）
-    if (isTarget) scrollToTarget()
-  }, [revealTs]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const toggleDir = async (): Promise<void> => {
-    if (!entry.isDirectory) return
-    if (!expanded && !loaded) {
-      try {
-        const items = await window.electronAPI.listAttachedDirectory(currentPath, { sessionId, candidateBasePaths: allowedPaths })
-        setChildren(items)
-        setLoaded(true)
-      } catch (err) {
-        console.error('[AttachedDirItem] 加载子目录失败:', err)
-      }
-    }
-    setExpanded(!expanded)
+  const toggleDir = (): void => {
+    if (entry.isDirectory) setExpanded((previous) => !previous)
   }
 
   const handleClick = (e: React.MouseEvent): void => {
@@ -2600,16 +2525,16 @@ function AttachedDirItem({ entry, depth, selectedPaths, onSelect, refreshVersion
             className="file-tree-guide pointer-events-none absolute bottom-1 top-0 w-px bg-border/70"
             style={{ left: guideLeft }}
           />
-          {children.length === 0 && loaded && (
+          {(error || (children.length === 0 && loaded)) && (
             <div
               className="text-[11px] text-muted-foreground/50 py-1"
               style={{ paddingLeft: paddingLeft + 24 }}
             >
-              空文件夹
+              {error ?? '空文件夹'}
             </div>
           )}
           {children.map((child) => (
-            <AttachedDirItem key={child.path} entry={child} depth={depth + 1} selectedPaths={selectedPaths} onSelect={onSelect} refreshVersion={refreshVersion} onAddToChat={onAddToChat} onFilePreview={onFilePreview} onOpenDirectoryTerminal={onOpenDirectoryTerminal} allowedPaths={allowedPaths} sessionId={sessionId} scope={scope} revealTarget={revealTarget} revealTs={revealTs} revealAncestors={revealAncestors} />
+            <AttachedDirItem key={child.path} expandedStateKey={expandedStateKey} entry={child} depth={depth + 1} selectedPaths={selectedPaths} onSelect={onSelect} refreshVersion={refreshVersion} onAddToChat={onAddToChat} onFilePreview={onFilePreview} onOpenDirectoryTerminal={onOpenDirectoryTerminal} allowedPaths={allowedPaths} sessionId={sessionId} scope={scope} revealTarget={revealTarget} revealTs={revealTs} revealAncestors={revealAncestors} />
           ))}
         </div>
       )}
