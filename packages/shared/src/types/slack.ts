@@ -2,7 +2,7 @@
  * Slack 集成相关类型定义。
  *
  * Slack Bot Token 与 App Token 在主进程通过 Electron safeStorage 加密后保存；
- * renderer 仅通过受限 IPC 获取配置、状态和短暂编辑所需的解密值。
+ * renderer 仅通过受限 IPC 获取密文配置与连接状态；已保存的明文 Token 永不回传 renderer。
  */
 
 export type SlackBridgeStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
@@ -90,7 +90,6 @@ export const SLACK_IPC_CHANNELS = {
   GET_CONFIG: 'slack:get-config',
   SAVE_BOT_CONFIG: 'slack:save-bot-config',
   REMOVE_BOT: 'slack:remove-bot',
-  GET_BOT_TOKENS: 'slack:get-bot-tokens',
   GET_MANIFEST: 'slack:get-manifest',
   TEST_CONNECTION: 'slack:test-connection',
   START_BOT: 'slack:start-bot',

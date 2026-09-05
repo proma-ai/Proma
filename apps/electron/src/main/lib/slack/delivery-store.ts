@@ -1,6 +1,6 @@
 import { readJsonFileSafe, writeJsonFileAtomic } from '../safe-file'
 
-export type SlackDeliveryStatus = 'accepted' | 'running' | 'final-ready' | 'delivered' | 'failed'
+export type SlackDeliveryStatus = 'accepted' | 'running' | 'final-ready' | 'delivered' | 'consumed' | 'failed'
 
 export interface SlackDeliveryRecord {
   eventId: string
@@ -81,6 +81,15 @@ export class SlackDeliveryStore {
    */
   pendingFinalDeliveries(): SlackDeliveryRecord[] {
     return [...this.records.values()].filter((record) => record.status === 'final-ready' || record.status === 'failed')
+  }
+
+  /**
+   * Socket Mode ACKs inbound events before the local Agent completes. A restart
+   * cannot safely resume those Agent runs, so callers must post an interruption
+   * notice rather than leave the originating Slack thread without an outcome.
+   */
+  interruptedRuns(): SlackDeliveryRecord[] {
+    return [...this.records.values()].filter((record) => record.status === 'accepted' || record.status === 'running')
   }
 
   private prune(persist = true): void {

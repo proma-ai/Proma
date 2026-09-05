@@ -23,7 +23,7 @@ import { extractFinalAssistantText, isPartialSDKMessage } from './bridge-agent-m
 import { redactSensitiveLogText, redactSensitiveLogValue } from './bridge-log-redaction'
 import { readJsonFileSafe, writeJsonFileAtomic } from './safe-file'
 import { buildAskUserBlocks, buildPermissionBlocks, buildPlanApprovalBlocks, renderSlackMessage, type SlackBlock } from './slack/block-kit'
-import { SlackDeliveryStore } from './slack/delivery-store'
+import { SlackDeliveryStore, type SlackDeliveryRecord } from './slack/delivery-store'
 
 const STREAM_UPDATE_INTERVAL_MS = 900
 const INTERACTION_TTL_MS = 15 * 60_000
@@ -57,7 +57,6 @@ interface ActiveRun {
 interface HomeRun {
   sessionId: string
   title: string
-  finalText: string
 }
 
 interface PendingInteraction {
@@ -94,7 +93,7 @@ export class SlackBridge {
   private readonly bindings = new Map<string, SlackThreadBinding>()
   private readonly runTails = new Map<string, Promise<void>>()
   private readonly activeRuns = new Map<string, ActiveRun>()
-  /** Desktop-originated sessions that should post one completion summary to homeChannelId. */
+  /** Desktop-originated sessions that should post one title-and-status notification to homeChannelId. */
   private readonly homeRuns = new Map<string, HomeRun>()
   private readonly interactions = new Map<string, PendingInteraction>()
   private readonly recentEventIds = new Set<string>()
@@ -247,17 +246,18 @@ export class SlackBridge {
     // A channel thread may continue after its initial mention, but a new channel root must mention the bot.
     if (!incoming.mentioned && !this.bindings.has(key)) return
 
-    const pendingAsk = this.findPendingAsk(key, incoming.userId)
-    if (pendingAsk) {
-      await this.acceptTextAnswer(pendingAsk, incoming.text)
-      return
-    }
-
     if (this.isDuplicate(incoming.eventId)) return
     const existing = this.deliveryStore.get(incoming.eventId)
     if (existing && existing.status !== 'failed') return
     this.rememberEvent(incoming.eventId)
     this.deliveryStore.accept({ eventId: incoming.eventId, channelId: incoming.channelId, threadTs })
+
+    const pendingAsk = this.findPendingAsk(key, incoming.userId)
+    if (pendingAsk) {
+      await this.acceptTextAnswer(pendingAsk, incoming.text)
+      this.deliveryStore.update(incoming.eventId, { status: 'consumed' })
+      return
+    }
 
     await this.enqueue(key, async () => {
       const binding = this.getOrCreateBinding(incoming, threadTs)
@@ -309,7 +309,7 @@ export class SlackBridge {
         || (payload.event.type === 'external_run_started' && payload.event.source !== 'slack'))) {
       if (this.botConfig.homeChannelId) {
         const session = getAgentSessionMeta(sessionId)
-        this.homeRuns.set(sessionId, { sessionId, title: session?.title ?? `Proma 会话 ${sessionId.slice(0, 8)}`, finalText: '' })
+        this.homeRuns.set(sessionId, { sessionId, title: session?.title ?? `Proma 会话 ${sessionId.slice(0, 8)}` })
       }
       return
     }
@@ -322,11 +322,7 @@ export class SlackBridge {
     if (payload.kind === 'sdk_message') {
       if (payload.message.type === 'assistant' && !isPartialSDKMessage(payload.message)) {
         const text = extractFinalAssistantText(payload.message)
-        if (text) {
-          if (run) run.finalText += text
-          const homeRun = this.homeRuns.get(sessionId)
-          if (homeRun) homeRun.finalText += text
-        }
+        if (text && run) run.finalText += text
       }
       return
     }
@@ -395,16 +391,25 @@ export class SlackBridge {
   }
 
   private async deliverFinal(eventId: string, binding: SlackThreadBinding, text: string, responseTs?: string): Promise<void> {
+    await this.deliverToSlack(eventId, binding.channelId, binding.rootThreadTs, text, responseTs)
+  }
+
+  private async deliverStoredFinal(record: SlackDeliveryRecord): Promise<void> {
+    if (!record.finalText) return
+    await this.deliverToSlack(record.eventId, record.channelId, record.threadTs, record.finalText, record.responseTs)
+  }
+
+  private async deliverToSlack(eventId: string, channelId: string, threadTs: string, text: string, responseTs?: string): Promise<void> {
     const client = this.client
     if (!client) return
     const rendered = renderSlackMessage(text)
     try {
       if (responseTs) {
-        await client.chat.update({ channel: binding.channelId, ts: responseTs, text: rendered.text, blocks: rendered.blocks as never })
+        await client.chat.update({ channel: channelId, ts: responseTs, text: rendered.text, blocks: rendered.blocks as never })
       } else {
         await client.chat.postMessage({
-          channel: binding.channelId,
-          thread_ts: binding.rootThreadTs,
+          channel: channelId,
+          thread_ts: threadTs,
           text: rendered.text,
           blocks: rendered.blocks as never,
         })
@@ -419,12 +424,13 @@ export class SlackBridge {
     }
   }
 
-
   private async recoverPendingDeliveries(): Promise<void> {
+    const interruption = '⚠️ Proma 在任务完成前重启，因此无法可靠恢复本次执行。请重新 @mention Proma 发起任务。'
+    for (const record of this.deliveryStore.interruptedRuns()) {
+      this.deliveryStore.update(record.eventId, { status: 'final-ready', finalText: interruption })
+    }
     for (const record of this.deliveryStore.pendingFinalDeliveries()) {
-      const binding = [...this.bindings.values()].find((candidate) => candidate.sessionId === record.sessionId)
-      if (!binding || !record.finalText) continue
-      await this.deliverFinal(record.eventId, binding, record.finalText, record.responseTs)
+      await this.deliverStoredFinal(record)
     }
   }
 
@@ -669,9 +675,10 @@ export class SlackBridge {
     const client = this.client
     const channel = this.botConfig.homeChannelId
     if (!client || !channel) return
+    // Home Channel is a status surface, not an export of private session content.
     const summary = stoppedByUser
       ? `Proma 桌面会话已停止：${run.title}`
-      : `Proma 桌面会话已完成：${run.title}${run.finalText.trim() ? `\n\n${run.finalText.trim()}` : ''}`
+      : `Proma 桌面会话已完成：${run.title}`
     const rendered = renderSlackMessage(summary)
     try {
       await client.chat.postMessage({ channel, text: rendered.text, blocks: rendered.blocks as never })

@@ -453,8 +453,6 @@ import { getDingTalkConfig, saveDingTalkConfig, getDecryptedClientSecret, getDin
 import { listShallowDirectory } from './lib/directory-listing'
 import { dingtalkBridgeManager } from './lib/dingtalk-bridge-manager'
 import {
-  getDecryptedSlackAppToken,
-  getDecryptedSlackBotToken,
   getSlackConfig,
   removeSlackBot,
   saveSlackBotConfig,
@@ -5231,19 +5229,6 @@ export function registerIpcHandlers(): void {
       assertMainSettingsRenderer(event.sender.id)
       slackBridgeManager.stopBot(botId)
       return removeSlackBot(botId)
-    },
-  )
-
-  // Tokens are needed only while the local Settings form is actively editing.
-  // They never cross into logs, status events or persisted renderer state.
-  ipcMain.handle(
-    SLACK_IPC_CHANNELS.GET_BOT_TOKENS,
-    async (event, botId: string) => {
-      assertMainSettingsRenderer(event.sender.id)
-      return {
-        botToken: getDecryptedSlackBotToken(botId),
-        appToken: getDecryptedSlackAppToken(botId),
-      }
     },
   )
 

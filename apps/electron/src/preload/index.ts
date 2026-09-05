@@ -1181,7 +1181,6 @@ export interface ElectronAPI {
   getSlackConfig: () => Promise<import('@proma/shared').SlackConfig>
   saveSlackBotConfig: (input: import('@proma/shared').SlackBotConfigInput) => Promise<import('@proma/shared').SlackBotConfig>
   removeSlackBot: (botId: string) => Promise<boolean>
-  getDecryptedSlackBotTokens: (botId: string) => Promise<{ botToken: string; appToken: string }>
   getSlackManifest: (options?: { botName?: string }) => Promise<import('@proma/shared').SlackAppManifestResult>
   testSlackConnection: (botToken: string) => Promise<import('@proma/shared').SlackTestResult>
   startSlackBot: (botId: string) => Promise<void>
@@ -2710,8 +2709,6 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.invoke(SLACK_IPC_CHANNELS.SAVE_BOT_CONFIG, input),
 
   removeSlackBot: (botId: string) => ipcRenderer.invoke(SLACK_IPC_CHANNELS.REMOVE_BOT, botId),
-
-  getDecryptedSlackBotTokens: (botId: string) => ipcRenderer.invoke(SLACK_IPC_CHANNELS.GET_BOT_TOKENS, botId),
 
   getSlackManifest: (options?: { botName?: string }) =>
     ipcRenderer.invoke(SLACK_IPC_CHANNELS.GET_MANIFEST, options),

@@ -10,7 +10,7 @@ Slack Bridge 让运行 Proma 的**本机桌面客户端**通过 Slack **Socket M
 - 同一成员在同一 thread 中的后续消息会继续同一个 Proma 会话；不同成员各自隔离会话上下文。
 - AskUserQuestion、计划批准/拒绝和单次 permission approval 会以 Block Kit 卡片回到原 thread。
 - 普通模式先显示“Proma 正在规划…”，再节流更新；最终回复有持久化重试保障。
-- 配置 Home Channel 后，桌面端、Automation 或其他 Bridge 发起的会话完成时会向该频道发送摘要；由 Slack 发起的任务不会重复通知。
+- 配置 Home Channel 后，桌面端、Automation 或其他 Bridge 发起的会话完成时会向该频道发送仅含标题与状态的完成通知，绝不复制会话回复；由 Slack 发起的任务不会重复通知。
 
 V1 **仅支持频道 `@mention`**：不接收 Slack 私信、不提供配对码或用户授权名单，也不注册 Slash Commands。它同样不支持附件、语音、reaction trigger、全频道监听、用户 token、多 Slack workspace、Proma 管理的 OAuth 流程或 Slack Marketplace 分发。
 
@@ -106,7 +106,7 @@ Proma 使用 Electron `safeStorage` 加密保存 Token。正式版配置位于 `
 3. 预期 Proma 在该消息的 thread 内回复。后续消息请继续发在同一 thread，以延续上下文。
 4. 若任务触发 AskUserQuestion、计划确认或权限确认，预期卡片也出现在同一 thread；仅该 thread 的原发起人可以操作自己的交互请求。
 
-频道不需要逐个成员授权，但仍要求 Bot 已在频道中，并且新 thread 的首条消息必须包含 `@Proma`。普通频道消息不会触发。
+频道不需要逐个成员授权，但仍要求 Bot 已在频道中，并且新 thread 的首条消息必须包含 `@Proma`。将 Bot 邀请进频道即表示信任该频道全体成员：他们可发起任务，并对自己任务的计划和单次权限请求作出确认。普通频道消息不会触发。
 
 ## 从旧版私信配置迁移
 
@@ -128,13 +128,14 @@ Proma 会在读取旧本地配置时丢弃遗留的配对码、成员授权名�
 | `测试 Token` 成功但状态不是“已连接” | 测试只覆盖 `xoxb`。确认 `xapp` 具有 `connections:write`、Socket Mode 已开启，然后点击 **保存并连接** 并查看脱敏错误。 |
 | Slack 页面提示 scopes changed / reinstall | 先 **Save Changes**，再到 **Install App** 重装；scope 更新不会自动生效。 |
 | 频道没有响应 | 确认 Bot 已被邀请进该频道，新 thread 的首条消息确实 `@Proma`，并确认 Proma 状态为“已连接”。普通频道消息不会触发。 |
-| Bot 能收到消息但没有最终回复 | 保持 Proma 桌面端运行并检查状态。Proma 会持久化最终投递义务；Socket 重连或进程重启后会重试未送达的终态回复。 |
+| Bot 能收到消息但没有最终回复 | 保持 Proma 桌面端运行并检查状态。已准备好的终态会在 Socket 重连或进程重启后重试；若进程在 Agent 运行中重启，原 thread 会收到中断提示，请重新 @mention 发起任务。 |
 
 ## 安全与可靠性
 
-- Token 仅由用户粘贴到本机 Settings；受限 IPC 只面向主窗口 renderer，状态和日志都会脱敏。
+- Token 仅由用户粘贴到本机 Settings；已保存的明文 Token 永不回传 renderer，配置状态与日志都会脱敏。
 - Bot 不接收私信。它会订阅自己已加入频道的消息，以延续已绑定的 thread，但只会由 `@mention` 创建新任务，并忽略普通频道消息与未绑定的 thread。
 - 会话按 `teamId + channelId + rootThreadTs + userId` 隔离，避免多人 thread 上下文串扰。
-- 事件处理使用去重、每个会话串行队列和持久化 delivery ledger；进程重启后会重试尚未送达的最终回复。
+- 事件处理使用去重、每个会话串行队列和持久化 delivery ledger；进程重启后会重试尚未送达的最终回复，并为运行中的任务投递明确的中断提示。
+- Home Channel 只发送会话标题与完成/停止状态，不会转发桌面端、Automation 或其他 Bridge 的回复正文。
 
-建议在专用 Slack development workspace 完成手工验收：频道 mention/thread、同一 thread 的串行消息、AskUserQuestion、计划批准/拒绝、permission 允许/拒绝、Home Channel 摘要，以及离线后重连的最终回复。
+建议在专用 Slack development workspace 完成手工验收：频道 mention/thread、同一 thread 的串行消息、AskUserQuestion 的重复 event、计划批准/拒绝、permission 允许/拒绝、Home Channel 的无正文完成通知，以及在运行中重启后的中断提示。
