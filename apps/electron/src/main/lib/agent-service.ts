@@ -307,6 +307,16 @@ export async function runAgent(
       },
       onComplete: (messages, opts) => {
         publishRunStopped(input.sessionId, opts?.stoppedByUser, opts?.startedAt, opts?.runGeneration)
+        eventBus.emit(input.sessionId, {
+          kind: 'proma_event',
+          event: {
+            type: 'run_completed',
+            source: 'desktop',
+            stoppedByUser: opts?.stoppedByUser ?? false,
+            ...(opts?.startedAt != null ? { startedAt: opts.startedAt } : {}),
+            ...(opts?.runGeneration != null ? { runGeneration: opts.runGeneration } : {}),
+          },
+        })
         const target = streamRoutes.getTargetIfOwner(input.sessionId, route.ownerId)
         if (target) {
           sendAgentStreamComplete(target, input, {
@@ -428,6 +438,16 @@ export async function runAgentHeadless(
       onComplete: (messages, opts) => {
         callbacks.onComplete(messages)
         publishRunStopped(runInput.sessionId, opts?.stoppedByUser, opts?.startedAt, opts?.runGeneration)
+        eventBus.emit(runInput.sessionId, {
+          kind: 'proma_event',
+          event: {
+            type: 'run_completed',
+            source: callbacks.source ?? 'bridge',
+            stoppedByUser: opts?.stoppedByUser ?? false,
+            ...(opts?.startedAt != null ? { startedAt: opts.startedAt } : {}),
+            ...(opts?.runGeneration != null ? { runGeneration: opts.runGeneration } : {}),
+          },
+        })
         const target = route
           ? streamRoutes.getTargetIfOwner(runInput.sessionId, route.ownerId)
           : undefined
@@ -490,6 +510,10 @@ export async function runAgentHeadless(
     const errorMessage = err instanceof Error ? err.message : '未知错误'
     callbacks.onError(errorMessage)
     callbacks.onComplete()
+    eventBus.emit(runInput.sessionId, {
+      kind: 'proma_event',
+      event: { type: 'run_completed', source: callbacks.source ?? 'bridge', stoppedByUser: false, startedAt },
+    })
     const target = route
       ? streamRoutes.getTargetIfOwner(runInput.sessionId, route.ownerId)
       : undefined

@@ -6,7 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, VAULT_IPC_CHANNELS, AGENT_ISLAND_IPC_CHANNELS, TERMINAL_IPC_CHANNELS } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, SLACK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, VAULT_IPC_CHANNELS, AGENT_ISLAND_IPC_CHANNELS, TERMINAL_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS } from '../types'
 import type {
   RuntimeStatus,
@@ -1175,6 +1175,19 @@ export interface ElectronAPI {
   stopDingTalkBot: (botId: string) => Promise<void>
   /** 获取多 Bot 状态 */
   getDingTalkMultiStatus: () => Promise<import('@proma/shared').DingTalkMultiBridgeState>
+
+  // ===== Slack 集成 =====
+
+  getSlackConfig: () => Promise<import('@proma/shared').SlackConfig>
+  saveSlackBotConfig: (input: import('@proma/shared').SlackBotConfigInput) => Promise<import('@proma/shared').SlackBotConfig>
+  removeSlackBot: (botId: string) => Promise<boolean>
+  getDecryptedSlackBotTokens: (botId: string) => Promise<{ botToken: string; appToken: string }>
+  getSlackManifest: (options?: { botName?: string }) => Promise<import('@proma/shared').SlackAppManifestResult>
+  testSlackConnection: (botToken: string) => Promise<import('@proma/shared').SlackTestResult>
+  startSlackBot: (botId: string) => Promise<void>
+  stopSlackBot: (botId: string) => Promise<void>
+  getSlackStatus: () => Promise<import('@proma/shared').SlackMultiBridgeState>
+  onSlackStatusChanged: (callback: (state: import('@proma/shared').SlackBotBridgeState) => void) => () => void
 
   // ===== 微信集成 =====
 
@@ -2687,6 +2700,34 @@ const electronAPI: ElectronAPI = {
     const listener = (_: unknown, payload: import('@proma/shared').FeishuRegisterAppStatus) => callback(payload)
     ipcRenderer.on(FEISHU_IPC_CHANNELS.REGISTER_APP_STATUS, listener)
     return () => { ipcRenderer.removeListener(FEISHU_IPC_CHANNELS.REGISTER_APP_STATUS, listener) }
+  },
+
+  // ===== Slack 集成 =====
+
+  getSlackConfig: () => ipcRenderer.invoke(SLACK_IPC_CHANNELS.GET_CONFIG),
+
+  saveSlackBotConfig: (input: import('@proma/shared').SlackBotConfigInput) =>
+    ipcRenderer.invoke(SLACK_IPC_CHANNELS.SAVE_BOT_CONFIG, input),
+
+  removeSlackBot: (botId: string) => ipcRenderer.invoke(SLACK_IPC_CHANNELS.REMOVE_BOT, botId),
+
+  getDecryptedSlackBotTokens: (botId: string) => ipcRenderer.invoke(SLACK_IPC_CHANNELS.GET_BOT_TOKENS, botId),
+
+  getSlackManifest: (options?: { botName?: string }) =>
+    ipcRenderer.invoke(SLACK_IPC_CHANNELS.GET_MANIFEST, options),
+
+  testSlackConnection: (botToken: string) => ipcRenderer.invoke(SLACK_IPC_CHANNELS.TEST_CONNECTION, botToken),
+
+  startSlackBot: (botId: string) => ipcRenderer.invoke(SLACK_IPC_CHANNELS.START_BOT, botId),
+
+  stopSlackBot: (botId: string) => ipcRenderer.invoke(SLACK_IPC_CHANNELS.STOP_BOT, botId),
+
+  getSlackStatus: () => ipcRenderer.invoke(SLACK_IPC_CHANNELS.GET_STATUS),
+
+  onSlackStatusChanged: (callback: (state: import('@proma/shared').SlackBotBridgeState) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, state: import('@proma/shared').SlackBotBridgeState): void => callback(state)
+    ipcRenderer.on(SLACK_IPC_CHANNELS.STATUS_CHANGED, listener)
+    return () => { ipcRenderer.removeListener(SLACK_IPC_CHANNELS.STATUS_CHANGED, listener) }
   },
 
   // ===== 微信集成 =====

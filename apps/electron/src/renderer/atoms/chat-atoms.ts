@@ -6,7 +6,8 @@
  */
 
 import { atom } from 'jotai'
-import { atomFamily, atomWithStorage } from 'jotai/utils'
+import { atomWithStorage } from 'jotai/utils'
+import { atomFamily } from 'jotai-family'
 import type { ConversationMeta, ChatMessage, FileAttachment, ChatToolActivity, Channel } from '@proma/shared'
 import type { QuotedSelection } from './preview-atoms'
 

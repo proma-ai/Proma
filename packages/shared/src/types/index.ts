@@ -52,6 +52,9 @@ export * from './feishu'
 // 钉钉集成相关类型
 export * from './dingtalk'
 
+// Slack 集成相关类型
+export * from './slack'
+
 // 微信集成相关类型
 export * from './wechat'
 

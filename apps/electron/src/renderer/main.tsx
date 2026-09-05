@@ -68,6 +68,7 @@ import type { TabItem } from './atoms/tab-atoms'
 import { chatToolsAtom } from './atoms/chat-tool-atoms'
 import { feishuBotStatesAtom } from './atoms/feishu-atoms'
 import { dingtalkBotStatesAtom } from './atoms/dingtalk-atoms'
+import { slackBotStatesAtom } from './atoms/slack-atoms'
 import { currentConversationIdAtom, channelsAtom, channelsLoadedAtom, selectedModelAtom } from './atoms/chat-atoms'
 import { appModeAtom } from './atoms/app-mode'
 import type { FeishuBotBridgeState, FeishuBridgeState, DingTalkBotBridgeState, DingTalkBridgeState } from '@proma/shared'
@@ -796,6 +797,22 @@ function FeishuInitializer(): null {
  * - 加载多 Bot 初始状态
  * - 订阅钉钉 Bridge 状态变化
  */
+function SlackInitializer(): null {
+  const store = useStore()
+
+  useEffect(() => {
+    window.electronAPI.getSlackStatus()
+      .then((multiState) => store.set(slackBotStatesAtom, multiState.bots))
+      .catch((error: unknown) => console.error('[SlackInitializer] 加载状态失败:', error))
+    const cleanup = window.electronAPI.onSlackStatusChanged((state) => {
+      store.set(slackBotStatesAtom, (previous) => ({ ...previous, [state.botId]: state }))
+    })
+    return cleanup
+  }, [store])
+
+  return null
+}
+
 function DingTalkInitializer(): null {
   const store = useStore()
 
@@ -1074,6 +1091,7 @@ if (isQuickTaskWindow) {
       <AutomationInitializer />
       <PlanningInitializer />
       <FeishuInitializer />
+      <SlackInitializer />
       <DingTalkInitializer />
       <TabStatePersistenceInitializer />
       <LegacyScratchPadMigrationInitializer />

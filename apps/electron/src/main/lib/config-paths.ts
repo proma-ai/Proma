@@ -652,6 +652,24 @@ export function getDingTalkBotBindingsPath(botId: string): string {
   return join(getConfigDir(), `dingtalk-bindings-${botId}.json`)
 }
 
+/** 获取 Slack 配置文件路径（~/.proma/slack.json）。 */
+export function getSlackConfigPath(): string {
+  return join(getConfigDir(), 'slack.json')
+}
+
+/** 获取单个 Slack Bot 的 thread → Proma session 绑定文件。 */
+export function getSlackBotBindingsPath(botId: string): string {
+  return join(getConfigDir(), `slack-bindings-${botId}.json`)
+}
+
+/**
+ * 获取单个 Slack Bot 的可恢复 delivery ledger。
+ * 它只保存发送状态与已准备的终态文本，不保存 token 或原始外部事件。
+ */
+export function getSlackBotDeliveryPath(botId: string): string {
+  return join(getConfigDir(), `slack-delivery-${botId}.json`)
+}
+
 /**
  * 获取飞书配置文件路径
  *

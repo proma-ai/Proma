@@ -632,6 +632,8 @@ export type PromaEvent =
   | { type: 'external_run_started'; source: AgentExternalRunSource; sessionId: string; title?: string; workspaceId?: string; modelId?: string; startedAt: number; runGeneration?: number; session?: AgentSessionMeta }
   /** 普通桌面会话已开始执行；startedAt 用于展示，runGeneration 是主进程单调递增的可靠代际。 */
   | { type: 'run_started'; startedAt: number; runGeneration?: number }
+  /** 普通桌面会话已结束；供已显式配置的外部通知通道发送摘要。 */
+  | { type: 'run_completed'; source: AgentExternalRunSource | 'desktop'; stoppedByUser: boolean; startedAt?: number; runGeneration?: number }
   | { type: 'run_resumed'; sessionId: string }
   /** 用户主动停止当前执行；startedAt 防止旧运行的终态覆盖新一轮执行。 */
   | { type: 'run_stopped'; startedAt?: number; runGeneration?: number }
@@ -641,7 +643,7 @@ export type PromaEvent =
   | { type: 'automation_graduated' }
 
 /** 外部入口触发 Agent 运行的来源 */
-export type AgentExternalRunSource = 'feishu' | 'dingtalk' | 'wechat' | 'bridge' | 'delegation'
+export type AgentExternalRunSource = 'feishu' | 'dingtalk' | 'wechat' | 'slack' | 'bridge' | 'delegation'
 
 /** Pi AssistantMessageEvent 的可序列化增量；不携带累计 partial，避免跨进程复制整段输出。 */
 export type AgentAssistantDelta =

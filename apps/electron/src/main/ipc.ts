@@ -10,7 +10,7 @@ import { existsSync, realpathSync, readFileSync, writeFileSync, mkdirSync, statS
 import { realpath, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, AGENT_ISLAND_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, VAULT_IPC_CHANNELS, PLANNING_CONFLICT_ERROR, MAX_ATTACHMENT_SIZE, isPromaPermissionMode, normalizePathForCompare, TERMINAL_IPC_CHANNELS } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, AGENT_ISLAND_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, SLACK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, VAULT_IPC_CHANNELS, PLANNING_CONFLICT_ERROR, MAX_ATTACHMENT_SIZE, isPromaPermissionMode, normalizePathForCompare, TERMINAL_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS, WINDOWS_AGENT_ISLAND_IPC_CHANNELS, TRAY_IPC_CHANNELS } from '../types'
 import type {
   QuickTaskSubmitInput,
@@ -109,6 +109,7 @@ import type {
   DingTalkConfig,
   DingTalkBridgeState,
   DingTalkTestResult,
+  SlackTestResult,
   WeChatConfig,
   WeChatBridgeState,
   SDKMessage,
@@ -451,6 +452,15 @@ import { presenceService } from './lib/feishu-presence'
 import { getDingTalkConfig, saveDingTalkConfig, getDecryptedClientSecret, getDingTalkMultiBotConfig, saveDingTalkBotConfig, removeDingTalkBot, getDecryptedBotClientSecret } from './lib/dingtalk-config'
 import { listShallowDirectory } from './lib/directory-listing'
 import { dingtalkBridgeManager } from './lib/dingtalk-bridge-manager'
+import {
+  getDecryptedSlackAppToken,
+  getDecryptedSlackBotToken,
+  getSlackConfig,
+  removeSlackBot,
+  saveSlackBotConfig,
+} from './lib/slack-config'
+import { slackBridgeManager } from './lib/slack-bridge-manager'
+import { buildSlackManifest } from './lib/slack/manifest'
 import { getWeChatConfig } from './lib/wechat-config'
 import { wechatBridge } from './lib/wechat-bridge'
 
@@ -1308,6 +1318,12 @@ export function registerIpcHandlers(): void {
     const mainWindow = getMainWindow()
     if (!mainWindow || mainWindow.webContents.id !== senderId) {
       throw new Error('仅主窗口可以操作本地终端。')
+    }
+  }
+  const assertMainSettingsRenderer = (senderId: number): void => {
+    const mainWindow = getMainWindow()
+    if (!mainWindow || mainWindow.webContents.id !== senderId) {
+      throw new Error('仅主窗口可以访问 Slack Bot 设置。')
     }
   }
   ipcMain.handle(TERMINAL_IPC_CHANNELS.CREATE, async (event, input) => {
@@ -5181,6 +5197,94 @@ export function registerIpcHandlers(): void {
     async () => {
       return dingtalkBridgeManager.getStates()
     }
+  )
+
+  // ===== Slack 集成 =====
+
+  ipcMain.handle(
+    SLACK_IPC_CHANNELS.GET_CONFIG,
+    async (event) => {
+      assertMainSettingsRenderer(event.sender.id)
+      return getSlackConfig()
+    },
+  )
+
+  ipcMain.handle(
+    SLACK_IPC_CHANNELS.SAVE_BOT_CONFIG,
+    async (event, input: import('@proma/shared').SlackBotConfigInput) => {
+      assertMainSettingsRenderer(event.sender.id)
+      const saved = saveSlackBotConfig(input)
+      if (saved.enabled && saved.botToken && saved.appToken) {
+        slackBridgeManager.restartBot(saved.id).catch((error) => {
+          console.error(`[Slack IPC] Bot "${saved.name}" 重启失败:`, error)
+        })
+      } else {
+        slackBridgeManager.stopBot(saved.id)
+      }
+      return saved
+    },
+  )
+
+  ipcMain.handle(
+    SLACK_IPC_CHANNELS.REMOVE_BOT,
+    async (event, botId: string) => {
+      assertMainSettingsRenderer(event.sender.id)
+      slackBridgeManager.stopBot(botId)
+      return removeSlackBot(botId)
+    },
+  )
+
+  // Tokens are needed only while the local Settings form is actively editing.
+  // They never cross into logs, status events or persisted renderer state.
+  ipcMain.handle(
+    SLACK_IPC_CHANNELS.GET_BOT_TOKENS,
+    async (event, botId: string) => {
+      assertMainSettingsRenderer(event.sender.id)
+      return {
+        botToken: getDecryptedSlackBotToken(botId),
+        appToken: getDecryptedSlackAppToken(botId),
+      }
+    },
+  )
+
+  ipcMain.handle(
+    SLACK_IPC_CHANNELS.GET_MANIFEST,
+    async (event, options?: { botName?: string }) => {
+      assertMainSettingsRenderer(event.sender.id)
+      return buildSlackManifest(options)
+    },
+  )
+
+  ipcMain.handle(
+    SLACK_IPC_CHANNELS.TEST_CONNECTION,
+    async (event, botToken: string): Promise<SlackTestResult> => {
+      assertMainSettingsRenderer(event.sender.id)
+      return slackBridgeManager.testConnection(botToken)
+    },
+  )
+
+  ipcMain.handle(
+    SLACK_IPC_CHANNELS.START_BOT,
+    async (event, botId: string): Promise<void> => {
+      assertMainSettingsRenderer(event.sender.id)
+      await slackBridgeManager.startBot(botId)
+    },
+  )
+
+  ipcMain.handle(
+    SLACK_IPC_CHANNELS.STOP_BOT,
+    async (event, botId: string): Promise<void> => {
+      assertMainSettingsRenderer(event.sender.id)
+      slackBridgeManager.stopBot(botId)
+    },
+  )
+
+  ipcMain.handle(
+    SLACK_IPC_CHANNELS.GET_STATUS,
+    async (event) => {
+      assertMainSettingsRenderer(event.sender.id)
+      return slackBridgeManager.getStates()
+    },
   )
 
   // ===== 微信集成 =====

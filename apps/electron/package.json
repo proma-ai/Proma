@@ -57,6 +57,8 @@
     "@fontsource-variable/inter": "5.2.8",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@pierre/diffs": "^1.1.20",
+    "@slack/bolt": "^5.1.0",
+    "@slack/web-api": "^8.1.1",
     "@xmldom/xmldom": "^0.8.11",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
