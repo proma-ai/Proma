@@ -2,12 +2,12 @@
  * Chat 工具配置服务
  *
  * 管理 ~/.proma/chat-tools.json 的读写。
- * 存储工具开关状态和非记忆工具的凭据。
- * 记忆凭据保留在 memory.json（Chat + Agent 共用）。
+ * 管理 Agent 模式推荐和自定义 HTTP 工具。旧凭据字段仅透传保留，不再执行旧搜索或生图能力。
  */
 
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { getChatToolsConfigPath } from './config-paths'
+import { writeJsonFileAtomic } from './safe-file'
 import type { ChatToolsFileConfig, ChatToolState, ChatToolMeta } from '@proma/shared'
 
 /** 默认配置 */
@@ -15,8 +15,6 @@ const DEFAULT_CONFIG: ChatToolsFileConfig = {
   toolStates: {
     memory: { enabled: true },
     'agent-mode-recommend': { enabled: true },
-    'web-search': { enabled: false },
-    'nano-banana': { enabled: false },
   },
   toolCredentials: {},
   customTools: [],
@@ -52,7 +50,7 @@ export function getChatToolsConfig(): ChatToolsFileConfig {
 export function saveChatToolsConfig(config: ChatToolsFileConfig): void {
   const filePath = getChatToolsConfigPath()
   try {
-    writeFileSync(filePath, JSON.stringify(config, null, 2), 'utf-8')
+    writeJsonFileAtomic(filePath, config)
     console.log('[Chat 工具配置] 已保存')
   } catch (error) {
     console.error('[Chat 工具配置] 保存失败:', error)
@@ -67,31 +65,6 @@ export function updateToolState(toolId: string, state: ChatToolState): void {
   const config = getChatToolsConfig()
   config.toolStates[toolId] = state
   saveChatToolsConfig(config)
-}
-
-/**
- * 更新工具凭据
- */
-export function updateToolCredentials(toolId: string, credentials: Record<string, string>): void {
-  const config = getChatToolsConfig()
-  config.toolCredentials[toolId] = credentials
-  saveChatToolsConfig(config)
-}
-
-/**
- * 获取工具开关状态（不存在时返回默认关闭）
- */
-export function getToolState(toolId: string): ChatToolState {
-  const config = getChatToolsConfig()
-  return config.toolStates[toolId] ?? { enabled: false }
-}
-
-/**
- * 获取工具凭据
- */
-export function getToolCredentials(toolId: string): Record<string, string> {
-  const config = getChatToolsConfig()
-  return config.toolCredentials[toolId] ?? {}
 }
 
 /**

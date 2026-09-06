@@ -786,7 +786,7 @@ function parseSkillFrontmatter(content: string, slug: string, enabled: boolean):
 export function getWorkspaceCapabilities(workspaceSlug: string): WorkspaceCapabilities {
   const mcpConfig = getWorkspaceMcpConfig(workspaceSlug)
   const skills = getWorkspaceSkills(workspaceSlug)
-  const builtinMcpServers = listBuiltinMcpServers({ workspaceSlug })
+  const builtinMcpServers = listBuiltinMcpServers()
   const memory = getWorkspaceMemorySummary(workspaceSlug)
 
   const mcpServers = Object.entries(mcpConfig.servers ?? {}).map(([name, entry]) => ({

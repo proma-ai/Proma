@@ -1030,7 +1030,7 @@ export class AgentOrchestrator {
         console.log(`[Agent 编排] 将直接使用已保存的 sdkSessionId 进行 resume: ${existingSdkSessionId}`)
       }
 
-      // 10. 构建 MCP 服务器配置 + 记忆工具 + 生图工具 + 自定义工具
+      // 10. 构建工作区 MCP 配置与 Pi 基础运行时工具
       const mcpServers = await this.buildMcpServers(workspaceSlug, proxyUrl)
       let piBuiltinTools: unknown[] = []
       let piMcpTools: unknown[] = []
@@ -1203,7 +1203,7 @@ export class AgentOrchestrator {
 
       // Plan 模式下允许的只读工具（不包含 Write/Edit/Bash 等写操作）
       const PLAN_MODE_ALLOWED_TOOLS = new Set([
-        'Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch',
+        'Read', 'Glob', 'Grep',
         'TodoRead', 'TaskOutput',
         'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet',
         'ListMcpResourcesTool', 'ReadMcpResourceTool',

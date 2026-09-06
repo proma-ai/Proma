@@ -223,7 +223,6 @@ import { getUserProfile, updateUserProfile } from './lib/user-profile-service'
 import { getSettings, updateSettings } from './lib/settings-service'
 import { refreshAgentIslandConfiguration, markAgentIslandSessionViewed } from './lib/agent-island-service'
 import { getAgentStatusHoverWindow } from './agent-status-hover-window'
-import { setBuiltinMcpUserEnabled } from './lib/builtin-mcp/settings'
 import { setDockBadgeCount } from './lib/dock-badge-service'
 
 import { checkEnvironment } from './lib/environment-checker'
@@ -422,7 +421,7 @@ function stopWorkspaceMemoryWatch(webContentsId: number, workspaceSlug: string):
 }
 
 import { getAllToolInfos } from './lib/chat-tool-registry'
-import { updateToolState, updateToolCredentials, getToolCredentials, addCustomTool, deleteCustomTool } from './lib/chat-tool-config'
+import { updateToolState, addCustomTool, deleteCustomTool } from './lib/chat-tool-config'
 import {
   getSystemPromptConfig,
   createSystemPrompt,
@@ -3153,15 +3152,6 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // 启用或关闭 Proma 内置 MCP
-  ipcMain.handle(
-    AGENT_IPC_CHANNELS.SET_BUILTIN_MCP_ENABLED,
-    async (_, workspaceSlug: string, id: string, enabled: boolean): Promise<WorkspaceCapabilities> => {
-      setBuiltinMcpUserEnabled(id, enabled)
-      return getWorkspaceCapabilities(workspaceSlug)
-    }
-  )
-
   // 获取工作区 Skill 列表（含活跃和不活跃，设置页 UI 用）
   ipcMain.handle(
     AGENT_IPC_CHANNELS.GET_SKILLS,
@@ -3605,27 +3595,11 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // 获取工具凭据
-  ipcMain.handle(
-    CHAT_TOOL_IPC_CHANNELS.GET_TOOL_CREDENTIALS,
-    async (_, toolId: string): Promise<Record<string, string>> => {
-      return getToolCredentials(toolId)
-    }
-  )
-
   // 更新工具开关状态
   ipcMain.handle(
     CHAT_TOOL_IPC_CHANNELS.UPDATE_TOOL_STATE,
     async (_, toolId: string, state: ChatToolState): Promise<void> => {
       updateToolState(toolId, state)
-    }
-  )
-
-  // 更新工具凭据
-  ipcMain.handle(
-    CHAT_TOOL_IPC_CHANNELS.UPDATE_TOOL_CREDENTIALS,
-    async (_, toolId: string, credentials: Record<string, string>): Promise<void> => {
-      updateToolCredentials(toolId, credentials)
     }
   )
 
@@ -3642,73 +3616,6 @@ export function registerIpcHandlers(): void {
     CHAT_TOOL_IPC_CHANNELS.DELETE_CUSTOM_TOOL,
     async (_, toolId: string): Promise<void> => {
       deleteCustomTool(toolId)
-    }
-  )
-
-  // 测试工具连接
-  ipcMain.handle(
-    CHAT_TOOL_IPC_CHANNELS.TEST_TOOL,
-    async (_, toolId: string): Promise<{ success: boolean; message: string }> => {
-      // 联网搜索工具测试
-      if (toolId === 'web-search') {
-        const { getToolCredentials: getCredentials } = await import('./lib/chat-tool-config')
-        const credentials = getCredentials('web-search')
-        if (!credentials.apiKey) {
-          return { success: false, message: '请先填写 Tavily API Key' }
-        }
-        try {
-          const response = await getFetchFn(await getEffectiveProxyUrl())('https://api.tavily.com/search', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${credentials.apiKey}`,
-            },
-            body: JSON.stringify({
-              query: 'test connection',
-              search_depth: 'basic',
-              max_results: 1,
-            }),
-          })
-          if (!response.ok) {
-            const errorText = await response.text()
-            return { success: false, message: `API 请求失败 (${response.status}): ${errorText}` }
-          }
-          return { success: true, message: '连接成功，Tavily 搜索 API 可用' }
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error)
-          return { success: false, message: `连接失败: ${msg}` }
-        }
-      }
-      // Nano Banana 生图工具测试
-      if (toolId === 'nano-banana') {
-        const { getToolCredentials: getCredentials } = await import('./lib/chat-tool-config')
-        const credentials = getCredentials('nano-banana')
-        if (!credentials.apiKey) {
-          return { success: false, message: '请先填写 Gemini API Key' }
-        }
-        try {
-          const baseUrl = credentials.baseUrl?.trim() || 'https://generativelanguage.googleapis.com'
-          const model = credentials.model?.trim() || 'gemini-3.1-flash-image-preview'
-          const url = `${baseUrl}/v1beta/models/${model}:generateContent?key=${credentials.apiKey}`
-          const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ role: 'user', parts: [{ text: 'Hi' }] }],
-              generationConfig: { maxOutputTokens: 10 },
-            }),
-          })
-          if (!response.ok) {
-            const errorText = await response.text()
-            return { success: false, message: `API 请求失败 (${response.status}): ${errorText.slice(0, 200)}` }
-          }
-          return { success: true, message: `连接成功，模型 ${model} 可用` }
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error)
-          return { success: false, message: `连接失败: ${msg}` }
-        }
-      }
-      return { success: false, message: `工具 ${toolId} 不支持测试` }
     }
   )
 

@@ -36,12 +36,10 @@ import { getAgentSessionMeta, updateAgentSessionMeta } from '../agent-session-ma
 import { getMainWindow } from '../main-window-store'
 import { getMainRepoRoot, listWorktrees } from '../git-diff-service'
 import { getWorktreeRepos } from '../agent-workspace-manager'
-import { isBuiltinMcpUserEnabled } from '../builtin-mcp/settings'
 import { downloadInstaller, launchInstaller } from '../installer-downloader'
 import { fetchInstallerManifest, findInstallerSource } from '../installer-manifest'
 import { shouldOfferWindowsShellInstaller } from './windows-shell-installer'
 import { buildPiCollaborationTools } from '../agent-collaboration-tools'
-import { buildPiNanoBananaTools } from '../chat-tools/nano-banana-mcp'
 import { getVisionRelayRouteLabel, inspectImageWithVisionRelay, isVisionRelayConfigured, isVisionRelayEligibleForModel } from '../vision-relay-service'
 import {
   listTodos,
@@ -72,13 +70,6 @@ import {
   snoozePlanningReminder,
 } from '../planning-manager'
 import { broadcastPlanningAgentOperation, broadcastPlanningChanged } from '../planning-events'
-import {
-  fetchWebPage,
-  formatFetchResults,
-  formatSearchResults,
-  isWebSearchEnabledForAgent,
-  searchWeb,
-} from '../web-search-service'
 import { browserController } from '../browser-controller'
 import { resolveBrowserProfileKey } from '../browser-profile-policy'
 import {
@@ -107,7 +98,7 @@ export interface PiBuiltinToolsContext {
   modelId?: string
   workspaceId?: string
   workspaceSlug?: string
-  /** 当前 Agent 工作目录；用于解析生图产物、参考图和本地网页预览的相对路径。 */
+  /** 当前 Agent 工作目录；用于解析本地网页预览等相对路径。 */
   agentCwd?: string
   /** 图片外发前必须校验在这些已授权目录内。 */
   allowedRoots?: string[]
@@ -126,27 +117,6 @@ function jsonToolResult(payload: unknown): AgentToolResult<unknown> {
     content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
     details: payload,
   } as AgentToolResult<unknown>
-}
-
-function textToolResult(text: string, details?: unknown): AgentToolResult<unknown> {
-  return {
-    content: [{ type: 'text', text }],
-    details,
-  } as AgentToolResult<unknown>
-}
-
-// ===== Web 工具 =====
-
-type WebSearchDepth = 'basic' | 'advanced'
-
-function isWebSearchDepth(value: unknown): value is WebSearchDepth {
-  return value === 'basic' || value === 'advanced'
-}
-
-function stringArray(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) return undefined
-  const items = value.map((item) => String(item).trim()).filter(Boolean)
-  return items.length > 0 ? items : undefined
 }
 
 function numberOrUndefined(value: unknown): number | undefined {
@@ -170,64 +140,6 @@ function defaultTodoDueAt(): number {
   const date = new Date()
   date.setHours(23, 59, 59, 999)
   return date.getTime()
-}
-
-function buildWebTools(sdk: PiSdk): ToolDefinition[] {
-  return [
-    sdk.defineTool({
-      name: 'WebSearch',
-      label: '搜索网页',
-      description: 'Search the web for up-to-date information through Proma\'s Tavily integration. Use for current events, recent data, facts that may be stale, or when the user explicitly asks to search.',
-      promptSnippet: 'WebSearch: search the web for current information and cite source URLs in the final answer.',
-      parameters: Type.Object({
-        query: Type.String({ description: 'Search query. Keep it concise and avoid including private local file contents, API keys, tokens, or secrets.' }),
-        maxResults: Type.Optional(Type.Number({ description: 'Maximum number of results to return. Default 5, max 10.' })),
-        searchDepth: Type.Optional(Type.Union([Type.Literal('basic'), Type.Literal('advanced')], { description: 'Search depth. Use basic by default; advanced costs more but may improve recall.' })),
-        includeDomains: Type.Optional(Type.Array(Type.String({ description: 'Domain to include, e.g. example.com' }), { description: 'Optional allowlist of domains.' })),
-        excludeDomains: Type.Optional(Type.Array(Type.String({ description: 'Domain to exclude, e.g. example.com' }), { description: 'Optional blocklist of domains.' })),
-      }),
-      async execute(_toolCallId, params, signal) {
-        const args = params as Record<string, unknown>
-        const query = typeof args.query === 'string' ? args.query.trim() : ''
-        if (!query) throw new Error('query 必填')
-        const result = await searchWeb({
-          query,
-          maxResults: numberOrUndefined(args.maxResults),
-          searchDepth: isWebSearchDepth(args.searchDepth) ? args.searchDepth : undefined,
-          includeDomains: stringArray(args.includeDomains),
-          excludeDomains: stringArray(args.excludeDomains),
-          signal,
-        })
-        return textToolResult(formatSearchResults(result), result)
-      },
-    }),
-    sdk.defineTool({
-      name: 'WebFetch',
-      label: '抓取网页',
-      description: 'Fetch and extract readable Markdown content from a URL through Proma\'s Tavily integration. Use after WebSearch or when the user gives a URL and asks to inspect page content.',
-      promptSnippet: 'WebFetch: fetch readable webpage content by URL. Use it to inspect source pages and cite URLs.',
-      parameters: Type.Object({
-        url: Type.String({ description: 'HTTP/HTTPS URL to fetch.' }),
-        prompt: Type.Optional(Type.String({ description: 'Optional extraction focus or question. Use when only part of a page is relevant.' })),
-        extractDepth: Type.Optional(Type.Union([Type.Literal('basic'), Type.Literal('advanced')], { description: 'Extraction depth. Use basic by default; advanced may handle difficult pages better.' })),
-        maxChars: Type.Optional(Type.Number({ description: 'Maximum characters returned to the model. Default 20000.' })),
-      }),
-      async execute(_toolCallId, params, signal) {
-        const args = params as Record<string, unknown>
-        const url = typeof args.url === 'string' ? args.url.trim() : ''
-        if (!url) throw new Error('url 必填')
-        const maxChars = numberOrUndefined(args.maxChars)
-        const result = await fetchWebPage({
-          url,
-          prompt: typeof args.prompt === 'string' ? args.prompt : undefined,
-          extractDepth: isWebSearchDepth(args.extractDepth) ? args.extractDepth : undefined,
-          maxChars,
-          signal,
-        })
-        return textToolResult(formatFetchResults(result, { maxChars }), result)
-      },
-    }),
-  ] as unknown as ToolDefinition[]
 }
 
 // ===== Automation 工具 =====
@@ -1550,14 +1462,6 @@ export async function buildPiBuiltinTools(
 
   const tools: ToolDefinition[] = []
 
-  if (isWebSearchEnabledForAgent()) {
-    try {
-      tools.push(...buildWebTools(sdk))
-    } catch (error) {
-      console.error('[Pi 桥接] 注入 WebSearch/WebFetch 工具失败:', error)
-    }
-  }
-
   // 自动化是 Proma 基础运行时能力，不作为可配置 MCP 展示或开关。
   try {
     tools.push(...buildAutomationTools(sdk, ctx))
@@ -1633,18 +1537,6 @@ export async function buildPiBuiltinTools(
     tools.push(...buildVisionRelayTools(sdk, ctx))
   } catch (error) {
     console.error('[Pi 桥接] 注入视觉助手失败:', error)
-  }
-
-  if (isBuiltinMcpUserEnabled('nano-banana')) {
-    try {
-      tools.push(...buildPiNanoBananaTools(sdk, {
-        sessionId: ctx.sessionId,
-        agentCwd: ctx.agentCwd,
-        allowedRoots: ctx.allowedRoots,
-      }))
-    } catch (error) {
-      console.error('[Pi 桥接] 注入 nano-banana 工具失败:', error)
-    }
   }
 
   const cloudTools = buildPromaCloudTools(sdk, ctx)
