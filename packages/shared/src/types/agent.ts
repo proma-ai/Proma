@@ -1864,8 +1864,6 @@ export const AGENT_IPC_CHANNELS = {
   SET_CLI_INTEGRATION_ENABLED: 'agent:set-cli-integration-enabled',
   /** 测试 MCP 服务器连接 */
   TEST_MCP_SERVER: 'agent:test-mcp-server',
-  /** 启用或关闭 Proma 内置 MCP */
-  SET_BUILTIN_MCP_ENABLED: 'agent:set-builtin-mcp-enabled',
   /** 获取工作区 Skill 列表 */
   GET_SKILLS: 'agent:get-skills',
   /** 获取工作区 Skills 目录绝对路径 */

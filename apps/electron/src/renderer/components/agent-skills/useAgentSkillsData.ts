@@ -67,7 +67,6 @@ export interface AgentSkillsData {
   refreshMcpConfig: () => Promise<void>
   toggleMcp: (name: string, enabled: boolean) => Promise<{ success: boolean; message: string }>
   installMcp: (name: string, entry: McpServerEntry) => Promise<boolean>
-  toggleBuiltinMcp: (id: string, enabled: boolean) => Promise<void>
   deleteMcp: (name: string) => Promise<void>
 }
 
@@ -324,19 +323,6 @@ export function useAgentSkillsData(workspaceId?: string): AgentSkillsData {
     }
   }, [workspaceSlug, bumpCapabilitiesVersion])
 
-  const toggleBuiltinMcp = React.useCallback(async (id: string, enabled: boolean) => {
-    try {
-      const capabilities = await window.electronAPI.setBuiltinMcpEnabled(workspaceSlug, id, enabled)
-      setCapabilities(capabilities)
-      setBuiltinMcpServers(capabilities.builtinMcpServers)
-      bumpCapabilitiesVersion((v) => v + 1)
-      toast.success(enabled ? '已启用内置 MCP' : '已关闭内置 MCP')
-    } catch (error) {
-      console.error('[Agent 技能] 切换内置 MCP 状态失败:', error)
-      toast.error('切换内置 MCP 状态失败')
-    }
-  }, [workspaceSlug, bumpCapabilitiesVersion])
-
   const deleteMcp = React.useCallback(async (name: string) => {
     const entry = mcpConfig.servers[name]
     if (entry?.isBuiltin) return
@@ -383,7 +369,6 @@ export function useAgentSkillsData(workspaceId?: string): AgentSkillsData {
     refreshMcpConfig,
     toggleMcp,
     installMcp,
-    toggleBuiltinMcp,
     deleteMcp,
   }
 }

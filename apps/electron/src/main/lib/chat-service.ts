@@ -351,15 +351,9 @@ export async function sendMessage(
       }
 
       // 执行工具调用（通过统一执行器）
-      // 提取前一轮对话的附件（用于参考图支持）
-      const lastUserMsg = fullHistory.filter((m) => m.role === 'user').at(-1)
-      const lastAssistantMsg = fullHistory.filter((m) => m.role === 'assistant').at(-1)
       const toolResults = await executeToolCalls(toolCalls, {
         webContents,
         conversationId,
-        currentAttachments: attachments,
-        previousUserAttachments: lastUserMsg?.attachments,
-        previousAssistantAttachments: lastAssistantMsg?.attachments,
       })
 
       // 累积工具结果到持久化数据

@@ -7,13 +7,9 @@
 
 import type { ToolCall, ToolResult } from '@proma/core'
 import type { WebContents } from 'electron'
-import type { FileAttachment } from '@proma/shared'
 import { CHAT_IPC_CHANNELS } from '@proma/shared'
-import { isWebSearchToolCall, executeWebSearchTool } from './chat-tools/web-search-tool'
 import { isCustomHttpToolCall, executeHttpTool } from './chat-tools/http-tool-executor'
 import { isAgentRecommendToolCall, executeAgentRecommendTool } from './chat-tools/agent-recommend-tool'
-import { isNanoBananaToolCall, executeNanoBananaTool } from './chat-tools/nano-banana-tool'
-import type { NanoBananaContext } from './chat-tools/nano-banana-tool'
 import { getChatToolsConfig } from './chat-tool-config'
 
 /** 工具执行上下文 */
@@ -22,12 +18,6 @@ export interface ToolExecutionContext {
   webContents: WebContents
   /** 对话 ID */
   conversationId: string
-  /** 当前用户消息的附件列表 */
-  currentAttachments?: FileAttachment[]
-  /** 前一轮用户消息的附件 */
-  previousUserAttachments?: FileAttachment[]
-  /** 前一轮助手消息的附件 */
-  previousAssistantAttachments?: FileAttachment[]
 }
 
 /**
@@ -48,18 +38,8 @@ export async function executeToolCalls(
   for (const tc of toolCalls) {
     let result: ToolResult
 
-    if (isWebSearchToolCall(tc.name)) {
-      result = await executeWebSearchTool(tc)
-    } else if (isAgentRecommendToolCall(tc.name)) {
+    if (isAgentRecommendToolCall(tc.name)) {
       result = await executeAgentRecommendTool(tc)
-    } else if (isNanoBananaToolCall(tc.name)) {
-      const nanoBananaContext: NanoBananaContext = {
-        conversationId: context.conversationId,
-        currentAttachments: context.currentAttachments,
-        previousUserAttachments: context.previousUserAttachments,
-        previousAssistantAttachments: context.previousAssistantAttachments,
-      }
-      result = await executeNanoBananaTool(tc, nanoBananaContext)
     } else if (isCustomHttpToolCall(tc.name)) {
       const config = getChatToolsConfig()
       const meta = config.customTools.find((t) => t.id === tc.name)

@@ -1,20 +1,5 @@
 {
-  "comment": "Proma 内置、用户可配置的 MCP 能力单一事实源。这里仅登记需要在 MCP 组件展示和配置的能力；Proma 基础运行时工具（如自动化、协作）不在此目录中。name 必须是下划线安全名（SDK 会把 server 名里的连字符规范化成下划线，源名与运行名不一致正是工具被 Agent 调错的根因），id 保持历史值（设置/凭据键，向后兼容）。kind=internal 表示由代码注入、不写入工作区 mcp.json。",
+  "comment": "Proma 内置 MCP 能力目录。基础运行时工具（如自动化、协作）不在此展示，外部 MCP 由工作区配置管理。旧 Nano Banana 内置能力已移除。",
   "version": 1,
-  "servers": [
-    {
-      "id": "nano-banana",
-      "name": "nano_banana",
-      "displayName": "Nano Banana 生图",
-      "description": "通过 Gemini Image Generation 为 Agent 提供图片生成和编辑能力。",
-      "category": "media",
-      "kind": "internal",
-      "deletable": false,
-      "defaultEnabled": false,
-      "toggleable": true,
-      "tools": [
-        { "name": "generate_image", "description": "生成或编辑图片。" }
-      ]
-    }
-  ]
+  "servers": []
 }

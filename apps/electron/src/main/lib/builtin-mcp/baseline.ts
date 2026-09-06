@@ -13,7 +13,7 @@ import type { BuiltinMcpCategory, McpToolSummary } from '@proma/shared'
 import manifest from './default-mcp.json' with { type: 'json' }
 
 export interface BuiltinMcpDefinition {
-  /** 设置 / 凭据键，历史值，向后兼容（如 'proma-cloud'、'nano-banana'） */
+  /** 内置能力 ID（如 'proma-cloud'）。 */
   id: string
   /** 运行时真实 server 名，下划线安全（= prompt = 注入 = UI 真实名） */
   name: string
@@ -24,7 +24,7 @@ export interface BuiltinMcpDefinition {
   kind: 'internal'
   /** 是否允许用户删除（内置项恒为 false，删除护栏的事实源） */
   deletable: boolean
-  /** 默认是否向 Agent 注入（如 mem/nano-banana 需用户手动开启） */
+  /** 默认是否向 Agent 注入。 */
   defaultEnabled: boolean
   /** 是否提供开关（基础设施型如 proma-cloud 置 false） */
   toggleable: boolean

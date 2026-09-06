@@ -48,7 +48,6 @@ import { migratePermissionMode, mergeSkillActivations, findBestSearchMatch, inse
 import { getConversationMessages } from './conversation-manager'
 // 旧格式 → SDKMessage 的转换逻辑下沉到 @proma/session-core 作为唯一真源，避免主进程与渲染层各存一份。
 import { convertLegacyMessage } from '@proma/session-core'
-import { clearNanoBananaAgentHistory } from './chat-tools/nano-banana-mcp'
 import { assertEnabledModelForChannel } from './agent-model-selection'
 import { copyForkWorkspaceFiles } from './agent-fork-workspace-copy'
 
@@ -665,9 +664,6 @@ export function deleteAgentSession(id: string): void {
   }
 
   console.log(`[Agent 会话] 已删除会话: ${removed.title} (${removed.id})`)
-
-  // 清理 Nano Banana 生图历史
-  clearNanoBananaAgentHistory(id)
 
 }
 
