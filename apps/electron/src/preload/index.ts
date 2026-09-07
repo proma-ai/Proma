@@ -1171,8 +1171,8 @@ export interface ElectronAPI {
     onQuotaExceeded: (callback: () => void) => () => void
     /** 订阅余额变动事件（对话扣费后，返回清理函数） */
     onBillingChanged: (callback: () => void) => () => void
-    /** 同步官方渠道（拉取最新模型列表） */
-    syncOfficialChannel: () => Promise<BillingIpcResponse<void>>
+    /** 静默校验官方目录；仅服务端目录变化时写入并返回 changed。 */
+    syncOfficialChannel: () => Promise<BillingIpcResponse<{ changed: boolean }>>
     /** 订阅官方渠道更新事件（返回清理函数） */
     onOfficialChannelUpdated: (callback: () => void) => () => void
     /** 获取模型健康数据 */

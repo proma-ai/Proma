@@ -9,6 +9,7 @@
 import { readFileSync, existsSync, unlinkSync } from 'node:fs'
 import { safeStorage } from 'electron'
 import { randomUUID } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import { getChannelsPath, getChannelRemovalNoticePath } from './config-paths'
 import { writeJsonFileAtomic, readJsonFileSafe } from './safe-file'
 import type {
@@ -59,7 +60,7 @@ import {
   resolveOpenAIModelsUrl,
 } from '@proma/core'
 import { normalizeHttpResponse, normalizeRequestError } from './channel-test-error'
-import { applyOfficialModelEnabledStates } from './official-channel-models'
+import { applyOfficialModelEnabledStates, preserveOfficialModelEnabledStates } from './official-channel-models'
 import { migrateVolcengineOfficialEndpoint } from './volcengine-channel-migration'
 import pkg from '../../../package.json' with { type: 'json' }
 
@@ -580,18 +581,72 @@ function decryptKey(encryptedKey: string): string {
 }
 
 /**
- * 同步 Proma 官方渠道
+ * 将官方 Chat 与 Agent 目录作为一个服务端快照落盘。
  *
- * - 若 proma-official 不存在 → 创建
- * - 若已存在 → 更新模型列表（保留用户对单个模型的 enabled 状态）
+ * 目录成员和模型元数据始终以服务端为准；本地只保留用户切换过的 enabled 状态。
+ * 两份清单与其 ETag 在一次原子写入中更新，避免渲染层观察到半新半旧的目录。
+ */
+export function syncOfficialModelCatalog(
+  models: ChannelModel[],
+  agentModels: ChannelModel[],
+  officialCatalogEtag: string,
+): boolean {
+  const config = readConfig()
+  const index = config.channels.findIndex((channel) => channel.id === PROMA_OFFICIAL_CHANNEL_ID)
+  const now = Date.now()
+
+  if (index === -1) {
+    config.channels.push({
+      id: PROMA_OFFICIAL_CHANNEL_ID,
+      name: 'Proma 官方',
+      provider: 'proma',
+      baseUrl: '',
+      apiKey: '',
+      models,
+      agentModels,
+      officialCatalogEtag,
+      enabled: true,
+      createdAt: now,
+      updatedAt: now,
+    })
+    writeConfig(config)
+    console.log(`[渠道管理] 已创建官方模型目录，Chat ${models.length} 个，Agent ${agentModels.length} 个`)
+    return true
+  }
+
+  const existing = config.channels[index]!
+  const updatedModels = preserveOfficialModelEnabledStates(models, existing.models)
+  const updatedAgentModels = preserveOfficialModelEnabledStates(agentModels, existing.agentModels)
+  const changed = !isDeepStrictEqual(updatedModels, existing.models)
+    || !isDeepStrictEqual(updatedAgentModels, existing.agentModels ?? [])
+
+  // An upstream model mutation can change the snapshot ETag without changing
+  // fields used by the desktop picker. Persist that ETag to avoid repeat 200s,
+  // but preserve the old timestamp and suppress a renderer update in this case.
+  config.channels[index] = {
+    ...existing,
+    models: updatedModels,
+    agentModels: updatedAgentModels,
+    officialCatalogEtag,
+    updatedAt: changed ? now : existing.updatedAt,
+  }
+  writeConfig(config)
+  if (changed) {
+    console.log(`[渠道管理] 已更新官方模型目录，Chat ${updatedModels.length} 个，Agent ${updatedAgentModels.length} 个`)
+  }
+  return changed
+}
+
+/**
+ * 兼容仅更新 Chat 清单的旧调用。新的官方同步应使用 syncOfficialModelCatalog。
  */
 export function syncOfficialChannel(models: ChannelModel[]): void {
   const config = readConfig()
-  const index = config.channels.findIndex((c) => c.id === PROMA_OFFICIAL_CHANNEL_ID)
+  const index = config.channels.findIndex((channel) => channel.id === PROMA_OFFICIAL_CHANNEL_ID)
 
   if (index === -1) {
-    // 创建官方渠道
-    const channel: Channel = {
+    const now = Date.now()
+    config.channels.push({
       id: PROMA_OFFICIAL_CHANNEL_ID,
       name: 'Proma 官方',
       provider: 'proma',
@@ -599,68 +654,38 @@ export function syncOfficialChannel(models: ChannelModel[]): void {
       apiKey: '',
       models,
       enabled: true,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    }
-    config.channels.push(channel)
-    writeConfig(config)
-    console.log(`[渠道管理] 已创建官方渠道，共 ${models.length} 个模型`)
+      createdAt: now,
+      updatedAt: now,
+    })
   } else {
-    // 更新模型：保留用户的 enabled 状态
     const existing = config.channels[index]!
-    const enabledMap = new Map<string, boolean>()
-    for (const m of existing.models) {
-      enabledMap.set(m.id, m.enabled)
-    }
-
-    const updatedModels = models.map((m) => ({
-      ...m,
-      enabled: enabledMap.has(m.id) ? enabledMap.get(m.id)! : m.enabled,
-    }))
-
     config.channels[index] = {
       ...existing,
-      models: updatedModels,
+      models: preserveOfficialModelEnabledStates(models, existing.models),
       updatedAt: Date.now(),
-    } as Channel
-    writeConfig(config)
-    console.log(`[渠道管理] 已更新官方渠道模型，共 ${updatedModels.length} 个`)
+    }
   }
+  writeConfig(config)
 }
 
 /**
- * 同步 Proma 官方渠道的 Agent 专用模型列表
- *
- * 仅更新 proma-official 的 agentModels 字段，保留用户 enabled 状态。
- * 若渠道不存在则静默跳过（等 syncOfficialChannel 先创建）。
+ * 兼容仅更新 Agent 清单的旧调用。新的官方同步应使用 syncOfficialModelCatalog。
  */
 export function syncOfficialAgentModels(models: ChannelModel[]): void {
   const config = readConfig()
-  const index = config.channels.findIndex((c) => c.id === PROMA_OFFICIAL_CHANNEL_ID)
-
+  const index = config.channels.findIndex((channel) => channel.id === PROMA_OFFICIAL_CHANNEL_ID)
   if (index === -1) {
     console.warn('[渠道管理] 官方渠道不存在，跳过 Agent 模型同步')
     return
   }
 
   const existing = config.channels[index]!
-  const enabledMap = new Map<string, boolean>()
-  for (const m of existing.agentModels ?? []) {
-    enabledMap.set(m.id, m.enabled)
-  }
-
-  const updatedModels = models.map((m) => ({
-    ...m,
-    enabled: enabledMap.has(m.id) ? enabledMap.get(m.id)! : m.enabled,
-  }))
-
   config.channels[index] = {
     ...existing,
-    agentModels: updatedModels,
+    agentModels: preserveOfficialModelEnabledStates(models, existing.agentModels),
     updatedAt: Date.now(),
-  } as Channel
+  }
   writeConfig(config)
-  console.log(`[渠道管理] 已更新官方渠道 Agent 模型，共 ${updatedModels.length} 个`)
 }
 
 /**

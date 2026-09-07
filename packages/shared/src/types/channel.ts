@@ -326,6 +326,8 @@ export interface Channel {
   models: ChannelModel[]
   /** Agent 专用模型列表（仅 Proma 官方渠道使用） */
   agentModels?: ChannelModel[]
+  /** 官方 Chat + Agent 目录快照的服务端 ETag；仅 Proma 官方渠道使用。 */
+  officialCatalogEtag?: string
   /** 是否启用 */
   enabled: boolean
   /** 创建时间戳 */

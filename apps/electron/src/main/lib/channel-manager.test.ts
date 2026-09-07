@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { ChannelModel } from '@proma/shared'
-import { applyOfficialModelEnabledStates } from './official-channel-models'
+import { applyOfficialModelEnabledStates, preserveOfficialModelEnabledStates } from './official-channel-models'
 
 const officialModels: ChannelModel[] = [
   {
@@ -37,5 +37,22 @@ describe('applyOfficialModelEnabledStates', () => {
       ...officialModels,
       { id: 'untrusted-model', name: 'Untrusted model', enabled: true },
     ])).toThrow('Proma Cloud 渠道的模型目录由 Proma 管理，无法编辑')
+  })
+})
+
+describe('preserveOfficialModelEnabledStates', () => {
+  test('Given a fresh server catalog, when reconciling it, then only preserves existing enabled flags', () => {
+    const freshCatalog: ChannelModel[] = [
+      { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true, modelListHint: '更新后的说明' },
+      { id: 'new-model', name: 'New Model', enabled: true },
+    ]
+
+    expect(preserveOfficialModelEnabledStates(freshCatalog, [
+      { id: 'deepseek-v4-flash', name: 'stale local name', enabled: false },
+      { id: 'removed-model', name: 'Removed Model', enabled: false },
+    ])).toEqual([
+      { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: false, modelListHint: '更新后的说明' },
+      { id: 'new-model', name: 'New Model', enabled: true },
+    ])
   })
 })

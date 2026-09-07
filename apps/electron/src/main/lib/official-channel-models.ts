@@ -22,4 +22,19 @@ export function applyOfficialModelEnabledStates(
   })
 }
 
+/**
+ * Server snapshots are the source of truth for model metadata and membership.
+ * Preserve only the user-owned enabled flag from a previously persisted catalog.
+ */
+export function preserveOfficialModelEnabledStates(
+  catalogModels: ChannelModel[],
+  persistedModels: ChannelModel[] = [],
+): ChannelModel[] {
+  const enabledById = new Map(persistedModels.map((model) => [model.id, model.enabled]))
+  return catalogModels.map((model) => ({
+    ...model,
+    enabled: enabledById.get(model.id) ?? model.enabled,
+  }))
+}
+
 export { OFFICIAL_MODEL_CATALOG_LOCKED_MESSAGE }

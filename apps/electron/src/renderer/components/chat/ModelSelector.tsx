@@ -176,12 +176,20 @@ export function ModelSelector({
   // 外部模型优先 → per-conversation 模型
   const selectedModel = externalSelectedModel !== undefined ? externalSelectedModel : conversationModel
 
-  // 每次打开 Popover 时刷新渠道列表，确保最新
+  // 打开时先读取已落盘的频道缓存，因此列表不会因网络校验而清空或闪烁。
+  // 随后在后台进行一次条件目录请求；只有服务端 ETag 变化才重新读取并替换列表。
   React.useEffect(() => {
-    if (open) {
-      window.electronAPI.listChannels().then(setChannels).catch(console.error)
-      setSearch('')
-    }
+    if (!open) return
+
+    window.electronAPI.listChannels().then(setChannels).catch(console.error)
+    void window.electronAPI.cloudBilling.syncOfficialChannel()
+      .then(async (result) => {
+        if (!result.success || !result.data?.changed) return
+        const latestChannels = await window.electronAPI.listChannels()
+        setChannels(latestChannels)
+      })
+      .catch(console.error)
+    setSearch('')
   }, [open, setChannels])
 
   const modelOptions = React.useMemo(
