@@ -1,20 +1,19 @@
 import * as React from 'react'
 import { ChevronDown, ChevronUp, Search, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import type { LiveMarkdownEditorHandle, LiveMarkdownFindOptions } from '@/components/markdown/LiveMarkdownEditor'
 
 interface PreviewFindBarProps {
   open: boolean
   rootRef: React.RefObject<HTMLElement>
   contentKey: string
   unsupportedReason?: string
+  /** Markdown 预览由 CodeMirror 管理，必须由其 StateField 绘制高亮而非改写 DOM。 */
+  markdownEditorRef?: React.RefObject<LiveMarkdownEditorHandle>
   onOpenChange: (open: boolean) => void
 }
 
-interface FindOptions {
-  caseSensitive: boolean
-  wholeWord: boolean
-  regex: boolean
-}
+type FindOptions = LiveMarkdownFindOptions
 
 const MATCH_SELECTOR = 'mark[data-proma-find-match]'
 const SHADOW_STYLE_ID = 'proma-find-highlight-style'
@@ -192,7 +191,7 @@ function setActiveMatch(marks: HTMLElement[], activeIndex: number): void {
   })
 }
 
-export function PreviewFindBar({ open, rootRef, contentKey, unsupportedReason, onOpenChange }: PreviewFindBarProps): React.ReactElement | null {
+export function PreviewFindBar({ open, rootRef, contentKey, unsupportedReason, markdownEditorRef, onOpenChange }: PreviewFindBarProps): React.ReactElement | null {
   const [query, setQuery] = React.useState('')
   const [caseSensitive, setCaseSensitive] = React.useState(false)
   const [wholeWord, setWholeWord] = React.useState(false)
@@ -229,15 +228,19 @@ export function PreviewFindBar({ open, rootRef, contentKey, unsupportedReason, o
   }), [caseSensitive, wholeWord, regex])
 
   const clearMarks = React.useCallback(() => {
-    withObserverPaused(() => {
-      const root = rootRef.current
-      if (root) cleanupHighlights(root)
-    })
+    if (markdownEditorRef) {
+      markdownEditorRef.current?.clearFindMatches()
+    } else {
+      withObserverPaused(() => {
+        const root = rootRef.current
+        if (root) cleanupHighlights(root)
+      })
+    }
     marksRef.current = []
     activeIndexRef.current = -1
     setMatchCount(0)
     setActiveIndex(-1)
-  }, [rootRef, withObserverPaused])
+  }, [markdownEditorRef, rootRef, withObserverPaused])
 
   const runSearch = React.useCallback(() => {
     const root = rootRef.current
@@ -253,6 +256,17 @@ export function PreviewFindBar({ open, rootRef, contentKey, unsupportedReason, o
     setRegexInvalid(options.regex && matcher === null)
     if (!matcher) {
       clearMarks()
+      return
+    }
+
+    if (markdownEditorRef) {
+      const requestedActiveIndex = activeIndexRef.current >= 0 ? activeIndexRef.current : 0
+      const nextMatchCount = markdownEditorRef.current?.setFindMatches(trimmed, options, requestedActiveIndex) ?? 0
+      const nextActiveIndex = nextMatchCount === 0 ? -1 : Math.min(requestedActiveIndex, nextMatchCount - 1)
+      marksRef.current = []
+      activeIndexRef.current = nextActiveIndex
+      setMatchCount(nextMatchCount)
+      setActiveIndex(nextActiveIndex)
       return
     }
 
@@ -272,7 +286,7 @@ export function PreviewFindBar({ open, rootRef, contentKey, unsupportedReason, o
     activeIndexRef.current = nextActiveIndex
     setMatchCount(marks.length)
     setActiveIndex(nextActiveIndex)
-  }, [clearMarks, open, options, query, rootRef, unsupportedReason, withObserverPaused])
+  }, [clearMarks, markdownEditorRef, open, options, query, rootRef, unsupportedReason, withObserverPaused])
 
   React.useEffect(() => {
     if (!open) {
@@ -287,7 +301,19 @@ export function PreviewFindBar({ open, rootRef, contentKey, unsupportedReason, o
   }, [open, runSearch, clearMarks, contentKey, unsupportedReason])
 
   React.useEffect(() => {
-    if (!open || unsupportedReason) return
+    if (!open || !markdownEditorRef) return
+    const editor = markdownEditorRef.current
+    if (!editor) return
+    return editor.subscribeToFindUpdates(({ matchCount: nextMatchCount, activeIndex: nextActiveIndex }) => {
+      marksRef.current = []
+      activeIndexRef.current = nextActiveIndex
+      setMatchCount(nextMatchCount)
+      setActiveIndex(nextActiveIndex)
+    })
+  }, [markdownEditorRef, open])
+
+  React.useEffect(() => {
+    if (!open || unsupportedReason || markdownEditorRef) return
     const root = rootRef.current
     if (!root) return
 
@@ -303,7 +329,7 @@ export function PreviewFindBar({ open, rootRef, contentKey, unsupportedReason, o
       observerRef.current = null
       window.clearTimeout(timer)
     }
-  }, [open, rootRef, runSearch, unsupportedReason])
+  }, [markdownEditorRef, open, rootRef, runSearch, unsupportedReason])
 
   React.useEffect(() => {
     if (!open) return
@@ -312,10 +338,14 @@ export function PreviewFindBar({ open, rootRef, contentKey, unsupportedReason, o
   }, [open])
 
   React.useEffect(() => {
-    if (activeIndex < 0 || activeIndex >= marksRef.current.length) return
+    if (activeIndex < 0 || activeIndex >= matchCount) return
     activeIndexRef.current = activeIndex
+    if (markdownEditorRef) {
+      markdownEditorRef.current?.setActiveFindMatch(activeIndex)
+      return
+    }
     withObserverPaused(() => setActiveMatch(marksRef.current, activeIndex))
-  }, [activeIndex, matchCount, withObserverPaused])
+  }, [activeIndex, markdownEditorRef, matchCount, withObserverPaused])
 
   React.useEffect(() => {
     return () => clearMarks()

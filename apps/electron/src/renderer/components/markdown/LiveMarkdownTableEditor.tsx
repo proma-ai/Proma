@@ -7,6 +7,7 @@ import {
   shouldCommitLiveMarkdownTableCell,
   updateLiveMarkdownTableCell,
 } from './live-markdown-table'
+import type { LiveMarkdownFindController, LiveMarkdownFindOptions, LiveMarkdownFindState } from './LiveMarkdownPreview'
 
 const { useEffect, useRef, useState } = React
 
@@ -21,10 +22,64 @@ interface LiveMarkdownTableEditorProps {
   autoFocusCell?: LiveMarkdownTableCell | null
   onCommit: (table: LiveMarkdownTable, focusCell?: LiveMarkdownTableCell) => void
   onMeasure: () => void
+  findController?: LiveMarkdownFindController
+  sourceRange?: { from: number; to: number }
+  /** 原始 GFM 表格源码，用于将当前搜索结果精确映射回单元格。 */
+  source?: string
+}
+
+const EMPTY_FIND_STATE: LiveMarkdownFindState = {
+  query: '',
+  options: { caseSensitive: false, wholeWord: false, regex: false },
+  activeMatchFrom: null,
+}
+
+export function doesLiveMarkdownTableCellMatch(value: string, query: string, options: LiveMarkdownFindOptions): boolean {
+  if (!query) return false
+  try {
+    const source = options.regex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const wrappedSource = options.wholeWord ? `\\b(?:${source})\\b` : source
+    return new RegExp(wrappedSource, options.caseSensitive ? '' : 'i').test(value)
+  } catch {
+    return false
+  }
 }
 
 function cellValue(table: LiveMarkdownTable, { row, column }: LiveMarkdownTableCell): string {
   return row === 0 ? table.header[column] ?? '' : table.rows[row - 1]?.[column] ?? ''
+}
+
+export function findLiveMarkdownTableCellSourceRange(source: string | undefined, sourceRange: { from: number; to: number } | undefined, cell: LiveMarkdownTableCell): { from: number; to: number } | null {
+  if (!source || !sourceRange) return null
+  // row=0 为表头；body 的第一个 row 需要跳过分隔行。
+  const lineIndex = cell.row === 0 ? 0 : cell.row + 1
+  const lines = source.split('\n')
+  const line = lines[lineIndex]
+  if (line === undefined) return null
+  const lineOffset = sourceRange.from + lines.slice(0, lineIndex).reduce((offset, current) => offset + current.length + 1, 0)
+  const cells: Array<{ from: number; to: number }> = []
+  let start = line.startsWith('|') ? 1 : 0
+  let escaped = false
+  for (let index = start; index <= line.length; index += 1) {
+    const char = line[index]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (char === '\\') {
+      escaped = true
+      continue
+    }
+    if (char === '|' || index === line.length) {
+      let from = start
+      let to = index
+      while (from < to && /\s/.test(line[from] ?? '')) from += 1
+      while (to > from && /\s/.test(line[to - 1] ?? '')) to -= 1
+      cells.push({ from: lineOffset + from, to: lineOffset + to })
+      start = index + 1
+    }
+  }
+  return cells[cell.column] ?? null
 }
 
 function renderInlineMath(value: string): React.ReactNode[] {
@@ -69,8 +124,12 @@ export function LiveMarkdownTableEditor({
   autoFocusCell = null,
   onCommit,
   onMeasure,
+  findController,
+  sourceRange,
+  source,
 }: LiveMarkdownTableEditorProps): React.ReactElement {
   const [activeCell, setActiveCell] = useState<LiveMarkdownTableCell | null>(autoFocusCell)
+  const [findState, setFindState] = useState<LiveMarkdownFindState>(() => findController?.getState() ?? EMPTY_FIND_STATE)
   const [draft, setDraft] = useState(() => autoFocusCell ? cellValue(table, autoFocusCell) : '')
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -79,6 +138,15 @@ export function LiveMarkdownTableEditor({
     setActiveCell(autoFocusCell)
     setDraft(cellValue(table, autoFocusCell))
   }, [autoFocusCell, table])
+
+  useEffect(() => {
+    if (!findController) {
+      setFindState(EMPTY_FIND_STATE)
+      return
+    }
+    setFindState(findController.getState())
+    return findController.subscribe(() => setFindState(findController.getState()))
+  }, [findController])
 
   useEffect(() => {
     if (!activeCell) return
@@ -135,11 +203,23 @@ export function LiveMarkdownTableEditor({
     const cell = { row, column }
     const value = cellValue(table, cell)
     const isActive = activeCell?.row === row && activeCell.column === column
+    const matchesFind = doesLiveMarkdownTableCellMatch(value, findState.query, findState.options)
+    const sourceCellRange = findLiveMarkdownTableCellSourceRange(source, sourceRange, cell)
+    const hasActiveFindMatch = matchesFind
+      && sourceCellRange !== null
+      && findState.activeMatchFrom !== null
+      && findState.activeMatchFrom >= sourceCellRange.from
+      && findState.activeMatchFrom < sourceCellRange.to
     const Cell = header ? 'th' : 'td'
     const ariaLabel = `${header ? '表头' : '单元格'} ${row + 1}，${column + 1}`
+    const className = [
+      isActive && 'is-editing',
+      matchesFind && 'live-markdown-table-find-match',
+      hasActiveFindMatch && 'live-markdown-table-find-match-active',
+    ].filter(Boolean).join(' ') || undefined
 
     return (
-      <Cell key={column} className={isActive ? 'is-editing' : undefined}>
+      <Cell key={column} className={className}>
         {isActive ? (
           <input
             ref={inputRef}

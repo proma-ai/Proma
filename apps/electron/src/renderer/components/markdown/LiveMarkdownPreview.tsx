@@ -29,6 +29,47 @@ export type SaveLiveMarkdownPastedImage = (file: File) => Promise<string | null>
 export type { LiveMarkdownPropertyEntry } from './live-markdown-frontmatter'
 export type ChangeLiveMarkdownProperties = (entries: LiveMarkdownPropertyEntry[], documentValue?: string) => void
 
+export interface LiveMarkdownFindOptions {
+  caseSensitive: boolean
+  wholeWord: boolean
+  regex: boolean
+}
+
+export interface LiveMarkdownFindState {
+  query: string
+  options: LiveMarkdownFindOptions
+  activeMatchFrom: number | null
+}
+
+export interface LiveMarkdownFindController {
+  getState: () => LiveMarkdownFindState
+  setState: (state: LiveMarkdownFindState) => void
+  subscribe: (listener: () => void) => () => void
+}
+
+const EMPTY_LIVE_MARKDOWN_FIND_STATE: LiveMarkdownFindState = {
+  query: '',
+  options: { caseSensitive: false, wholeWord: false, regex: false },
+  activeMatchFrom: null,
+}
+
+/** 让替换型表格 widget 响应查找状态，无需直接改写 React 管理的 DOM。 */
+export function createLiveMarkdownFindController(): LiveMarkdownFindController {
+  let state = EMPTY_LIVE_MARKDOWN_FIND_STATE
+  const listeners = new Set<() => void>()
+  return {
+    getState: () => state,
+    setState: (nextState) => {
+      state = nextState
+      listeners.forEach((listener) => listener())
+    },
+    subscribe: (listener) => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+  }
+}
+
 interface PreviewBlock {
   kind: PreviewKind
   from: number
@@ -178,6 +219,18 @@ function sameLines(left: Set<number>, right: Set<number>): boolean {
   return left.size === right.size && [...left].every((line) => right.has(line))
 }
 
+/** 仅识别原生滚动条 gutter，图表画布本身的点击仍应进入源码编辑。 */
+export function isMermaidScrollbarPointer(event: MouseEvent, target: HTMLElement): boolean {
+  const scroller = target.closest<HTMLElement>('.mermaid-block-scroll')
+  if (!scroller) return false
+  const verticalScrollbarWidth = scroller.offsetWidth - scroller.clientWidth
+  const horizontalScrollbarHeight = scroller.offsetHeight - scroller.clientHeight
+  const rect = scroller.getBoundingClientRect()
+  const inVerticalScrollbar = verticalScrollbarWidth > 0 && event.clientX >= rect.right - verticalScrollbarWidth
+  const inHorizontalScrollbar = horizontalScrollbarHeight > 0 && event.clientY >= rect.bottom - horizontalScrollbarHeight
+  return inVerticalScrollbar || inHorizontalScrollbar
+}
+
 abstract class LiveMarkdownBlockWidget extends WidgetType {
   private observer: ResizeObserver | null = null
 
@@ -232,6 +285,8 @@ class TableWidget extends LiveMarkdownBlockWidget {
     private readonly table: LiveMarkdownTable,
     private readonly from: number,
     private readonly to: number,
+    private readonly findController?: LiveMarkdownFindController,
+    private readonly source?: string,
   ) { super() }
 
   override eq(other: TableWidget): boolean {
@@ -252,6 +307,9 @@ class TableWidget extends LiveMarkdownBlockWidget {
         table={this.table}
         readOnly={view.state.readOnly}
         onMeasure={onMeasure}
+        findController={this.findController}
+        sourceRange={{ from: this.from, to: this.to }}
+        source={this.source}
         onCommit={(nextTable, focusCell) => {
           if (view.state.readOnly) return
           const nextSource = serializeLiveMarkdownTable(nextTable)
@@ -423,6 +481,7 @@ class MermaidWidget extends LiveMarkdownBlockWidget {
     const wrapper = document.createElement('div')
     wrapper.className = 'vault-mermaid-block'
     wrapper.dataset.liveMarkdownBlockFrom = String(this.from)
+    wrapper.dataset.liveMarkdownBlockKind = 'mermaid'
     this.root = createRoot(wrapper)
     this.root.render(<MermaidBlock code={this.code} />)
     this.observeSize(wrapper, view)
@@ -547,6 +606,7 @@ function buildBlocks(
   state: EditorState,
   onChangeProperties?: ChangeLiveMarkdownProperties,
   enableProperties = false,
+  findController?: LiveMarkdownFindController,
 ): PreviewBlock[] {
   const blocks: PreviewBlock[] = []
   const lines = Array.from({ length: state.doc.lines }, (_, index) => state.doc.line(index + 1).text)
@@ -612,7 +672,7 @@ function buildBlocks(
       const from = state.doc.line(number).from
       const to = state.doc.line(end).to
       const table = parseLiveMarkdownTable(state.sliceDoc(from, to))
-      if (table) blocks.push({ kind: 'table', from, to, decoration: Decoration.replace({ widget: new TableWidget(table, from, to), block: true }) })
+      if (table) blocks.push({ kind: 'table', from, to, decoration: Decoration.replace({ widget: new TableWidget(table, from, to, findController, state.sliceDoc(from, to)), block: true }) })
       number = end
     }
   }
@@ -660,13 +720,14 @@ export function createLiveMarkdownBlockPreview(
   savePastedImage?: SaveLiveMarkdownPastedImage,
   onChangeProperties?: ChangeLiveMarkdownProperties,
   enableProperties = false,
+  findController?: LiveMarkdownFindController,
 ): Extension {
   return [
   liveMarkdownShikiHighlight,
   StateField.define<PreviewState>({
     create: (state) => {
       const lines = activeLines(state)
-      const blocks = buildBlocks(state, onChangeProperties, enableProperties)
+      const blocks = buildBlocks(state, onChangeProperties, enableProperties, findController)
       return {
         activeLines: lines,
         blocks,
@@ -675,7 +736,7 @@ export function createLiveMarkdownBlockPreview(
     },
     update: (value, transaction) => {
       const lines = activeLines(transaction.state)
-      const blocks = transaction.docChanged ? buildBlocks(transaction.state, onChangeProperties, enableProperties) : value.blocks
+      const blocks = transaction.docChanged ? buildBlocks(transaction.state, onChangeProperties, enableProperties, findController) : value.blocks
       if (!transaction.docChanged && sameLines(lines, value.activeLines)) return value
       return {
         activeLines: lines,
@@ -705,6 +766,8 @@ export function createLiveMarkdownBlockPreview(
       const inlineMath = target?.closest<HTMLElement>('[data-live-markdown-inline-from]')
       if (!block && !inlineMath) return false
       if (block?.dataset.liveMarkdownBlockKind === 'table') return true
+      // Mermaid 容器自身提供横纵滚动；只保留滚动条拖动，图表内容点击仍可进入源码。
+      if (block?.dataset.liveMarkdownBlockKind === 'mermaid' && target && isMermaidScrollbarPointer(event, target)) return true
       // CodeBlock 的复制按钮必须在外层选区切换之前收到完整 click 序列。
       // 否则 mousedown 会把预览切回源码并卸载按钮，导致 click 永远无法触发。
       // `.cm-content` 本身就是 contenteditable；把它纳入排除条件会让所有

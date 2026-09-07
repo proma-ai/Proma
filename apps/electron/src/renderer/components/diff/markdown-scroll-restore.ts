@@ -6,6 +6,8 @@ export interface MarkdownScrollRestoreMaskOptions {
   cachedScrollPosition: MarkdownScrollPosition | undefined
   restoredScrollKey: string | null
   scrollKey: string
+  /** ink-mde 已挂载时，后续任意 React 重渲染都不应重新遮罩正文。 */
+  editorReady: boolean
 }
 
 /** 异步恢复仍属于当前导航时才允许它回写滚动位置。 */
@@ -23,10 +25,12 @@ export function shouldMaskMarkdownForScrollRestore({
   cachedScrollPosition,
   restoredScrollKey,
   scrollKey,
+  editorReady,
 }: MarkdownScrollRestoreMaskOptions): boolean {
   return Boolean(
     isMarkdown
       && !loading
+      && !editorReady
       && cachedScrollPosition
       && (cachedScrollPosition.top > 0 || cachedScrollPosition.left > 0)
       && restoredScrollKey !== scrollKey,

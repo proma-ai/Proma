@@ -2410,6 +2410,16 @@
 .vault-ink-mde .vault-markdown-syntax-hidden * {
   display: none !important;
 }
+/* CodeMirror 状态层的查找装饰，避免预览搜索直接改写 .cm-content 的受控 DOM。 */
+.live-markdown-editor .live-markdown-find-match {
+  background: rgb(250 204 21 / 0.48);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.live-markdown-editor .live-markdown-find-match-active {
+  background: rgb(249 115 22 / 0.72);
+  box-shadow: 0 0 0 1px rgb(249 115 22 / 0.55);
+}
 .vault-ink-mde .cm-editor.cm-focused,
 .vault-ink-mde .cm-editor:focus-visible,
 .vault-ink-mde .cm-content:focus-visible {
@@ -2630,6 +2640,14 @@
 .vault-ink-mde .vault-markdown-table td,
 .live-markdown-table-editor td {
   color: hsl(var(--foreground) / 0.88);
+}
+/* 替换型表格不承载 CodeMirror 的文本装饰，单元格自行响应预览查找状态。 */
+.live-markdown-table-editor .live-markdown-table-find-match {
+  background: rgb(250 204 21 / 0.48);
+}
+.live-markdown-table-editor .live-markdown-table-find-match-active {
+  background: rgb(249 115 22 / 0.72);
+  box-shadow: inset 0 0 0 1px rgb(249 115 22 / 0.55);
 }
 .live-markdown-table-editor-root {
   display: block;

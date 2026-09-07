@@ -4,7 +4,14 @@ import { Prec, RangeSetBuilder, StateEffect, StateField, type EditorState, type 
 import { Decoration, EditorView, ViewPlugin, keymap, type DecorationSet } from '@codemirror/view'
 import ink, { type Instance } from 'ink-mde'
 import { cn } from '@/lib/utils'
-import { createLiveMarkdownBlockPreview, type ResolveLiveMarkdownImageSrc, type SaveLiveMarkdownPastedImage, type ChangeLiveMarkdownProperties } from './LiveMarkdownPreview'
+import {
+  createLiveMarkdownBlockPreview,
+  createLiveMarkdownFindController,
+  type ResolveLiveMarkdownImageSrc,
+  type SaveLiveMarkdownPastedImage,
+  type ChangeLiveMarkdownProperties,
+  type LiveMarkdownFindOptions,
+} from './LiveMarkdownPreview'
 import {
   shouldRebuildMarkdownHeadingDecorations,
   shouldRebuildMarkdownSyntaxDecorations,
@@ -13,13 +20,52 @@ export type { ChangeLiveMarkdownProperties } from './LiveMarkdownPreview'
 export type { LiveMarkdownPropertyEntry } from './live-markdown-frontmatter'
 import type { LiveMarkdownPropertyEntry } from './live-markdown-frontmatter'
 
+export type { LiveMarkdownFindOptions } from './LiveMarkdownPreview'
+
 export interface LiveMarkdownEditorHandle {
   focus: () => void
   insert: (text: string) => void
   scrollToPosition: (position: number) => void
+  /** 在 CodeMirror 的状态层渲染查找高亮，避免改写受控编辑器 DOM。 */
+  setFindMatches: (query: string, options: LiveMarkdownFindOptions, activeIndex: number) => number
+  setActiveFindMatch: (activeIndex: number) => void
+  clearFindMatches: () => void
+  subscribeToFindUpdates: (listener: (update: { matchCount: number; activeIndex: number }) => void) => () => void
   getPositionAtViewportY: (viewportY: number) => number | null
   getHost: () => HTMLDivElement | null
   getView: () => EditorView | null
+}
+
+interface LiveMarkdownFindMatch {
+  from: number
+  to: number
+}
+
+export function findLiveMarkdownMatches(
+  documentText: string,
+  query: string,
+  options: LiveMarkdownFindOptions,
+): LiveMarkdownFindMatch[] {
+  if (!query) return []
+
+  try {
+    const source = options.regex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const wrappedSource = options.wholeWord ? `\\b(?:${source})\\b` : source
+    const matcher = new RegExp(wrappedSource, `g${options.caseSensitive ? '' : 'i'}`)
+    const matches: LiveMarkdownFindMatch[] = []
+    let match = matcher.exec(documentText)
+    while (match) {
+      if (match[0].length === 0) {
+        matcher.lastIndex += 1
+      } else {
+        matches.push({ from: match.index, to: match.index + match[0].length })
+      }
+      match = matcher.exec(documentText)
+    }
+    return matches
+  } catch {
+    return []
+  }
 }
 
 /** CodeMirror 选区的文本与可用于浮层定位的视口坐标。 */
@@ -57,6 +103,47 @@ interface MeasureView {
 }
 
 const markdownSyntaxFocusEffect = StateEffect.define<boolean>()
+const liveMarkdownFindMatchesEffect = StateEffect.define<{
+  matches: readonly LiveMarkdownFindMatch[]
+  activeIndex: number
+}>()
+
+type LiveMarkdownFindState = {
+  decorations: DecorationSet
+  matches: readonly LiveMarkdownFindMatch[]
+}
+
+function buildLiveMarkdownFindDecorations(matches: readonly LiveMarkdownFindMatch[], activeIndex: number): DecorationSet {
+  const builder = new RangeSetBuilder<Decoration>()
+  matches.forEach((match, index) => {
+    builder.add(match.from, match.to, Decoration.mark({
+      class: index === activeIndex ? 'live-markdown-find-match live-markdown-find-match-active' : 'live-markdown-find-match',
+    }))
+  })
+  return builder.finish()
+}
+
+const liveMarkdownFindMatchesField = StateField.define<LiveMarkdownFindState>({
+  create: () => ({ decorations: Decoration.none, matches: [] }),
+  update: (value, transaction) => {
+    const effect = transaction.effects.find((item) => item.is(liveMarkdownFindMatchesEffect))
+    if (effect) {
+      return {
+        decorations: buildLiveMarkdownFindDecorations(effect.value.matches, effect.value.activeIndex),
+        matches: effect.value.matches,
+      }
+    }
+    return {
+      decorations: value.decorations.map(transaction.changes),
+      matches: value.matches.map((match) => ({
+        from: transaction.changes.mapPos(match.from),
+        to: transaction.changes.mapPos(match.to, 1),
+      })),
+    }
+  },
+  provide: (field) => EditorView.decorations.from(field, (value) => value.decorations),
+})
+
 const markdownSyntaxMarkerNames = new Set([
   'CodeMark',
   'EmphasisMark',
@@ -243,6 +330,9 @@ export const LiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, Liv
   const viewRef = React.useRef<EditorView | null>(null)
   const instanceRef = React.useRef<Instance | null>(null)
   const valueRef = React.useRef(value)
+  const findControllerRef = React.useRef(createLiveMarkdownFindController())
+  const findQueryRef = React.useRef<{ query: string; options: LiveMarkdownFindOptions; activeIndex: number } | null>(null)
+  const findUpdateListenersRef = React.useRef(new Set<(update: { matchCount: number; activeIndex: number }) => void>())
   const onChangeRef = React.useRef(onChange)
   const onSaveRef = React.useRef(onSave)
   const onCancelRef = React.useRef(onCancel)
@@ -264,6 +354,27 @@ export const LiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, Liv
     onChangePropertiesRef.current?.(entries, documentValue)
   }, [])
 
+  const applyFindMatches = React.useCallback((query: string, options: LiveMarkdownFindOptions, activeIndex: number, scrollIntoView: boolean): number => {
+    const view = viewRef.current
+    if (!view) return 0
+    const matches = findLiveMarkdownMatches(view.state.doc.toString(), query, options)
+    const nextActiveIndex = matches.length === 0 ? -1 : Math.max(0, Math.min(activeIndex, matches.length - 1))
+    findQueryRef.current = { query, options, activeIndex: nextActiveIndex }
+    findControllerRef.current.setState({
+      query,
+      options,
+      activeMatchFrom: nextActiveIndex >= 0 ? matches[nextActiveIndex]!.from : null,
+    })
+    const findEffect = liveMarkdownFindMatchesEffect.of({ matches, activeIndex: nextActiveIndex })
+    view.dispatch({
+      effects: scrollIntoView && nextActiveIndex >= 0
+        ? [findEffect, EditorView.scrollIntoView(matches[nextActiveIndex]!.from, { y: 'center', yMargin: 24 })]
+        : findEffect,
+    })
+    findUpdateListenersRef.current.forEach((listener) => listener({ matchCount: matches.length, activeIndex: nextActiveIndex }))
+    return matches.length
+  }, [])
+
   React.useImperativeHandle(ref, () => ({
     focus: () => instanceRef.current?.focus(),
     insert: (text) => instanceRef.current?.insert(text),
@@ -272,6 +383,43 @@ export const LiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, Liv
       if (!view) return
       const safePosition = Math.max(0, Math.min(position, view.state.doc.length))
       view.dispatch({ effects: EditorView.scrollIntoView(safePosition, { y: 'start', yMargin: 8 }) })
+    },
+    setFindMatches: (query, options, activeIndex) => applyFindMatches(query, options, activeIndex, true),
+    setActiveFindMatch: (activeIndex) => {
+      const view = viewRef.current
+      if (!view) return
+      const { matches } = view.state.field(liveMarkdownFindMatchesField)
+      if (matches.length === 0) return
+      const nextActiveIndex = Math.max(0, Math.min(activeIndex, matches.length - 1))
+      const findState = findControllerRef.current.getState()
+      findQueryRef.current = { query: findState.query, options: findState.options, activeIndex: nextActiveIndex }
+      findControllerRef.current.setState({
+        ...findState,
+        activeMatchFrom: matches[nextActiveIndex]!.from,
+      })
+      view.dispatch({
+        effects: [
+          liveMarkdownFindMatchesEffect.of({ matches, activeIndex: nextActiveIndex }),
+          EditorView.scrollIntoView(matches[nextActiveIndex]!.from, { y: 'center', yMargin: 24 }),
+        ],
+      })
+      findUpdateListenersRef.current.forEach((listener) => listener({ matchCount: matches.length, activeIndex: nextActiveIndex }))
+    },
+    clearFindMatches: () => {
+      const view = viewRef.current
+      if (!view) return
+      findQueryRef.current = null
+      findControllerRef.current.setState({
+        query: '',
+        options: { caseSensitive: false, wholeWord: false, regex: false },
+        activeMatchFrom: null,
+      })
+      view.dispatch({ effects: liveMarkdownFindMatchesEffect.of({ matches: [], activeIndex: -1 }) })
+      findUpdateListenersRef.current.forEach((listener) => listener({ matchCount: 0, activeIndex: -1 }))
+    },
+    subscribeToFindUpdates: (listener) => {
+      findUpdateListenersRef.current.add(listener)
+      return () => findUpdateListenersRef.current.delete(listener)
     },
     getPositionAtViewportY: (viewportY) => {
       const view = viewRef.current
@@ -317,9 +465,11 @@ export const LiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, Liv
           },
         }])),
         markdownHeadingMarkers,
+        liveMarkdownFindMatchesField,
         ViewPlugin.define((view) => {
           viewRef.current = view
           let selectionFrame = 0
+          let findRefreshFrame = 0
           const reportSelection = (): void => {
             selectionFrame = 0
             const range = view.state.selection.main
@@ -356,16 +506,28 @@ export const LiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, Liv
               if (update.selectionSet && update.view.hasFocus && !isPointerSelection) {
                 scheduleSelectionReport()
               }
+              // 搜索栏打开期间，文档编辑必须重算匹配集合。延迟到本次 CodeMirror
+              // update 完成后 dispatch，避免在 ViewPlugin.update 内嵌套事务。
+              if (update.docChanged && findQueryRef.current && !findRefreshFrame) {
+                findRefreshFrame = requestAnimationFrame(() => {
+                  findRefreshFrame = 0
+                  const currentFind = findQueryRef.current
+                  if (currentFind && viewRef.current === view) {
+                    applyFindMatches(currentFind.query, currentFind.options, currentFind.activeIndex, false)
+                  }
+                })
+              }
             },
             destroy: () => {
               view.dom.removeEventListener('mouseup', scheduleSelectionReport)
               if (selectionFrame) cancelAnimationFrame(selectionFrame)
+              if (findRefreshFrame) cancelAnimationFrame(findRefreshFrame)
               if (viewRef.current === view) viewRef.current = null
             },
           }
         }),
         ...markdownSyntaxVisibility,
-        createLiveMarkdownBlockPreview(resolveImageSrc, savePastedImage, onChangePropertiesProxy, enableProperties),
+        createLiveMarkdownBlockPreview(resolveImageSrc, savePastedImage, onChangePropertiesProxy, enableProperties, findControllerRef.current),
         ...extensions,
       ].map((extension) => ({ type: 'default' as const, value: extension })),
       search: false,
