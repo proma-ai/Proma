@@ -38,3 +38,14 @@ export function shouldNotifyForWatchFilename(filename: string | Buffer | null): 
   const normalizedFilename = normalizeWatchFilename(filename)
   return normalizedFilename !== null && (!isHighNoisePath(normalizedFilename) || isGitDiffStatePath(normalizedFilename))
 }
+
+/** 输入相对 agent-workspaces 根目录；仅工作区顶层能力目录触发能力通知。 */
+export function classifyWorkspaceWatchFilename(filename: string | Buffer | null): 'capabilities' | 'files' | null {
+  const normalized = normalizeWatchFilename(filename)
+  if (!normalized || !shouldNotifyForWatchFilename(normalized)) return null
+  const parts = normalized.split('/').filter(Boolean)
+  if (parts.length === 2 && parts[1] === 'config.json') return null
+  if ((parts.length === 2 && parts[1] === 'mcp.json')
+    || parts[1] === 'skills' || parts[1] === 'skills-inactive') return 'capabilities'
+  return 'files'
+}

@@ -12,6 +12,7 @@ import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 import type { AgentToolResult } from '@earendil-works/pi-agent-core'
 import { AGENT_IPC_CHANNELS, getTerminalProfilesForPlatform, normalizePathForCompare, parseTerminalProfile } from '@proma/shared'
 import type {
+  AgentWorkspace,
   CreateAutomationInput,
   PromaPermissionMode,
   TerminalProfile,
@@ -35,7 +36,8 @@ import {
 import { getAgentSessionMeta, updateAgentSessionMeta } from '../agent-session-manager'
 import { getMainWindow } from '../main-window-store'
 import { getMainRepoRoot, listWorktrees } from '../git-diff-service'
-import { getWorktreeRepos } from '../agent-workspace-manager'
+import { getWorktreeRepos, getAgentWorkspace, listAgentWorkspaces, listAgentWorkspacesWithProjectRootStatus } from '../agent-workspace-manager'
+import { resolveAutomationWorkspace, summarizeAutomationWorkspace } from './automation-workspace'
 import { downloadInstaller, launchInstaller } from '../installer-downloader'
 import { fetchInstallerManifest, findInstallerSource } from '../installer-manifest'
 import { shouldOfferWindowsShellInstaller } from './windows-shell-installer'
@@ -156,7 +158,15 @@ interface AutomationSummary {
   [key: string]: unknown
 }
 
-function summarizeAutomation(a: import('@proma/shared').Automation, includeHistory: boolean): AutomationSummary {
+function summarizeAutomation(
+  a: import('@proma/shared').Automation,
+  includeHistory: boolean,
+  workspacesById?: ReadonlyMap<string, AgentWorkspace>,
+): AutomationSummary {
+  // 列表使用本次请求的索引快照；失效归属也不回退逐项磁盘读取。
+  const workspace = a.workspaceId
+    ? (workspacesById ? workspacesById.get(a.workspaceId) : getAgentWorkspace(a.workspaceId))
+    : undefined
   return {
     id: a.id,
     name: a.name,
@@ -175,6 +185,8 @@ function summarizeAutomation(a: import('@proma/shared').Automation, includeHisto
     completedAt: a.completedAt,
     sessionMode: a.sessionMode,
     workspaceId: a.workspaceId,
+    workspaceName: workspace?.name,
+    workspaceSlug: workspace?.slug,
     sourceSessionId: a.sourceSessionId,
     lastSessionId: a.lastSessionId,
     createdAt: a.createdAt,
@@ -245,6 +257,18 @@ function validateScheduleFields(input: Partial<CreateAutomationInput | UpdateAut
 function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinition[] {
   return [
     sdk.defineTool({
+      name: 'mcp__automation__list_workspaces',
+      label: '列出定时任务目标工作区',
+      description: '查询可作为定时任务创建目标的工作区，仅返回 ID、名称、slug、是否当前工作区和项目根状态，不读取文件内容。跨工作区创建前先查询并用精确 ID 选择；重名时向用户确认。managed 表示托管项目；missing/not_directory/unavailable 表示本地项目根不可用。',
+      parameters: Type.Object({}),
+      async execute() {
+        const workspaces = await listAgentWorkspacesWithProjectRootStatus()
+        return jsonToolResult({
+          workspaces: workspaces.map((workspace) => summarizeAutomationWorkspace(workspace, ctx.workspaceId)),
+        })
+      },
+    }),
+    sdk.defineTool({
       name: 'mcp__automation__list_automations',
       label: '列出定时任务',
       description: '列出 Proma 持久化定时任务。用于查看已有长期反复任务、判断是否需要新建任务、检查运行状态和最近失败情况。',
@@ -254,9 +278,10 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
       }),
       async execute(_toolCallId: string, params: unknown) {
         const args = params as { active?: boolean; includeHistory?: boolean }
+        const workspacesById = new Map(listAgentWorkspaces().map((workspace) => [workspace.id, workspace]))
         const items = listAutomations()
           .filter((a) => args.active === undefined || a.active === args.active)
-          .map((a) => summarizeAutomation(a, args.includeHistory === true))
+          .map((a) => summarizeAutomation(a, args.includeHistory === true, workspacesById))
         return jsonToolResult({ automations: items })
       },
     }),
@@ -279,13 +304,14 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
     sdk.defineTool({
       name: 'mcp__automation__create_automation',
       label: '创建定时任务',
-      description: '创建 Proma 持久化定时任务。适合无人值守、有稳定价值的场景。纯提醒/闹钟、需要用户实时参与判断、或现在就该做完即终结的事不要创建。',
+      description: '创建 Proma 持久化定时任务。可通过 workspaceId 指定其他工作区，先用 list_workspaces 查询；省略则使用当前工作区。适合无人值守、有稳定价值的场景。纯提醒/闹钟、需要用户实时参与判断、或现在就该做完即终结的事不要创建。',
       parameters: automationCreateToolParameters,
       async execute(_toolCallId: string, params: unknown) {
         const args = params as Record<string, unknown>
         if (ctx.triggeredBy === 'automation' || getCurrentAutomationId(ctx)) {
           throw new Error('当前是定时任务自动执行，禁止递归创建新的定时任务')
         }
+        const targetWorkspace = resolveAutomationWorkspace(args.workspaceId, ctx.workspaceId, getAgentWorkspace)
         const input: CreateAutomationInput = {
           name: assertNonBlank(args.name as string, 'name'),
           prompt: assertNonBlank(args.prompt as string, 'prompt'),
@@ -301,7 +327,7 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
           maxRuns: args.maxRuns as number | null | undefined,
           channelId: ctx.channelId,
           modelId: ctx.modelId,
-          workspaceId: ctx.workspaceId,
+          workspaceId: targetWorkspace?.id,
           sessionMode: args.sessionMode as 'daily' | 'reuse' | undefined,
           sourceSessionId: ctx.sessionId,
           active: (args.active as boolean) ?? true,

@@ -15,6 +15,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
@@ -49,7 +50,7 @@ import { getAdapter, fetchTitle } from '@proma/core'
 import pkg from '../../../package.json' with { type: 'json' }
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
-import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, removeSDKErrorMessage, updateSDKUserMessageSkillActivations, rewindPiAgentSession, resolveAgentCwd, getActiveWorktreePath, getAgentCwdMode, getSessionWorkbenchLayout } from './agent-session-manager'
+import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, removeSDKErrorMessage, updateSDKUserMessageSkillActivations, rewindPiAgentSession, resolveAgentCwd, getActiveWorktreePath, getAgentCwdMode, getSessionWorkbenchLayout, resolveSessionWorkbenchContextDir } from './agent-session-manager'
 import { getAgentWorkspace, getProjectFilesPath, getWorkspaceMcpConfig, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles, getWorkspaceAgentsMdPath, readWorkspaceAgentsMd, getWorkspaceMemoryGuidance, isWorkspaceProjectKnowledgeMaintenanceApproved } from './agent-workspace-manager'
 import { getLocalProjectRootStatus } from './project-root-health'
 import { getMcpApiKeyEnvironment, getMcpOAuthHeaders } from './mcp-oauth-service'
@@ -67,6 +68,7 @@ import { resolvePlanningDeletionPermission } from './planning-permission-policy'
 import { askUserService } from './agent-ask-user-service'
 import { exitPlanService, type ExitPlanPermissionResult } from './agent-exit-plan-service'
 import { validateToolInput } from './agent-tool-input-validator'
+import { isSessionPlanMarkdownPath } from './agent-plan-file-policy'
 import { estimateTokenCount, WRITE_CONTENT_TOKEN_THRESHOLD } from './agent-tool-token-estimator'
 import { buildPiBuiltinTools } from './adapters/pi-builtin-tools'
 import { getAgentVaultRoots, getVaultUserContext } from './vault-service'
@@ -1142,6 +1144,29 @@ export class AgentOrchestrator {
       const getPermissionMode = (): PromaPermissionMode =>
         this.sessionPermissionModes.get(sessionId) ?? initialPermissionMode
 
+      // 计划工件只允许来自当前会话的工作台 plan/ 目录；ExitPlanMode 服务会做 realpath + 哈希复核。
+      const sessionPlanDirectory = (() => {
+        const sessionContextDirectory = resolveSessionWorkbenchContextDir(
+          workspace,
+          sessionId,
+          getSessionWorkbenchLayout(sessionMeta),
+        )
+        return sessionContextDirectory ? join(sessionContextDirectory, 'plan') : undefined
+      })()
+      // 计划目录由 Proma 创建，确保后续路径策略不需要为首次写入放宽符号链接校验。
+      // 运行中切换到 Plan 模式时，也会在首次写入前调用此函数。
+      const ensureSessionPlanDirectory = (): boolean => {
+        if (!sessionPlanDirectory) return false
+        try {
+          mkdirSync(sessionPlanDirectory, { recursive: true })
+          return true
+        } catch (error) {
+          console.warn(`[Agent 编排] 创建计划目录失败: ${sessionPlanDirectory}`, error)
+          return false
+        }
+      }
+      if (initialPermissionMode === 'plan') ensureSessionPlanDirectory()
+
       // ExitPlanMode 拦截器：plan 模式下走 UI 审批流程
       const handleExitPlanMode = (toolInput: Record<string, unknown>, signal: AbortSignal): Promise<ExitPlanPermissionResult> => {
         return exitPlanService.handleExitPlanMode(
@@ -1151,6 +1176,7 @@ export class AgentOrchestrator {
           (request: ExitPlanModeRequest) => {
             this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'exit_plan_mode_request', request } })
           },
+          { planDirectory: sessionPlanDirectory },
         )
       }
 
@@ -1299,6 +1325,7 @@ export class AgentOrchestrator {
 
         // EnterPlanMode：标记进入状态，通知渲染进程
         if (toolName === 'EnterPlanMode') {
+          ensureSessionPlanDirectory()
           planModeEntered = true
           emitPlanModeChanged(true, 'tool')
           this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'enter_plan_mode', sessionId } })
@@ -1389,16 +1416,17 @@ export class AgentOrchestrator {
             return { behavior: 'allow' as const, updatedInput: input }
 
           case 'plan': {
-            // Plan 模式：只允许只读工具 + Write/Edit 任意 .md 文件（计划文档）
+            // Plan 模式：只允许只读工具，以及当前会话 plan/ 目录中的 Markdown 计划文档。
             if (PLAN_MODE_ALLOWED_TOOLS.has(toolName)) {
               return { behavior: 'allow' as const, updatedInput: input }
             }
-            // 允许 Write/Edit 到任意 .md 文件（计划文档一定是 markdown；非 .md 仍被拒）
+            // 计划文档必须位于会话私有 plan/ 目录，避免以 Markdown 名义修改项目或用户文档。
             if (toolName === 'Write' || toolName === 'Edit') {
               const filePath = typeof input.file_path === 'string' ? input.file_path : ''
-              if (filePath.toLowerCase().endsWith('.md')) {
+              if (ensureSessionPlanDirectory() && isSessionPlanMarkdownPath(filePath, sessionPlanDirectory)) {
                 return { behavior: 'allow' as const, updatedInput: input }
               }
+              return { behavior: 'deny' as const, message: '计划模式下只能在当前会话的 plan/ 目录中写入 Markdown 计划文档，请在计划审批通过后再修改其他文件' }
             }
             // Bash 工具：只读命令（find、grep、cat 等）允许执行，写操作拒绝
             if (toolName === 'Bash') {
@@ -2264,8 +2292,9 @@ export class AgentOrchestrator {
   /**
    * 回退 Pi 会话到指定消息点。
    *
-   * Pi 可安全回退其对话树；文件快照不属于 Pi runtime，因此明确告知用户
-   * 当前不会修改工作区文件。退役 Claude 会话仅可查看，不允许回退或继续。
+   * Pi 可安全回退其对话树；文件快照不属于 Pi runtime，当前不会修改工作区文件。
+   * 未提供文件回退能力是正常状态，不作为回退错误返回。
+   * 退役 Claude 会话仅可查看，不允许回退或继续。
    */
   async rewindSession(
     sessionId: string,
@@ -2289,7 +2318,6 @@ export class AgentOrchestrator {
       remainingMessages,
       fileRewind: {
         canRewind: false,
-        error: '已回退 Pi 对话；Pi 文件回退尚未启用，当前未修改任何文件。',
       },
     }
   }

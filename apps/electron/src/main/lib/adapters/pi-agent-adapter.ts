@@ -920,8 +920,8 @@ function buildPromaProductToolDefinitions(sdk: PiSdk, canUseTool: PiAgentQueryOp
     sdk.defineTool({
       name: 'EnterPlanMode',
       label: '进入计划模式',
-      description: '进入 Proma 计划模式。进入后只能调研、整理计划，并等待用户批准后再执行写操作。',
-      promptSnippet: '进入计划模式，先调研并输出计划，再等待用户确认。',
+      description: '进入 Proma 计划模式。进入后只能调研、整理计划；将完整计划写入会话 plan/ 目录，并等待用户批准后再执行写操作。',
+      promptSnippet: '进入计划模式，先调研，将完整计划写入 plan Markdown 文档，再等待用户确认。',
       parameters: Type.Object({
         reason: Type.Optional(Type.String({ description: '进入计划模式的原因。' })),
       }),
@@ -932,10 +932,11 @@ function buildPromaProductToolDefinitions(sdk: PiSdk, canUseTool: PiAgentQueryOp
     sdk.defineTool({
       name: 'ExitPlanMode',
       label: '提交计划审批',
-      description: '向用户提交计划并请求批准。用户批准后才能退出计划模式并继续执行。',
-      promptSnippet: '提交计划审批，等待用户批准后继续执行。',
+      description: '向用户提交计划并请求批准。应传入 planFile 以便用户在右侧只读预览完整 Markdown 计划；用户批准后才能退出计划模式并继续执行。',
+      promptSnippet: '提交计划审批：附上已写入 plan/ 目录的 Markdown 计划文件，等待用户批准后继续执行。',
       parameters: Type.Object({
         plan: Type.Optional(Type.String({ description: '计划正文或摘要。' })),
+        planFile: Type.String({ description: '当前会话 plan/ 目录内、待审批的 Markdown 计划文件绝对路径（必填）。' }),
         allowedPrompts: Type.Optional(Type.Array(Type.Object({
           tool: Type.String({ description: '批准后可执行的工具，通常为 Bash。' }),
           prompt: Type.String({ description: '批准后可执行的命令或操作描述。' }),

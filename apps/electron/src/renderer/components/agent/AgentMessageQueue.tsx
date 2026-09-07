@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { useSkillMentionNames } from './SkillMentionNamesProvider'
 import { CalendarDays, Clock3, CornerDownLeft, FileText, GripVertical, ListTodo, MessageSquareText, Paperclip, Quote, Server, Sparkles, Trash2, Undo2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -174,11 +175,12 @@ const QUEUED_REFERENCE_STYLES = {
 } as const
 
 function QueuedMessagePreview({ text }: { text: string }): React.ReactElement {
+  const skillNames = useSkillMentionNames()
   if (!text) return <div className="line-clamp-2">仅附件</div>
 
   return (
     <div className="line-clamp-2 whitespace-pre-wrap">
-      {getQueuedMessageDisplayParts(text).map((part, index) => {
+      {getQueuedMessageDisplayParts(text, skillNames).map((part, index) => {
         if (part.type === 'text') return <React.Fragment key={index}>{part.value}</React.Fragment>
 
         const { icon: Icon, className } = QUEUED_REFERENCE_STYLES[part.referenceType]

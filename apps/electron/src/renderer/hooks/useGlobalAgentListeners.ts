@@ -100,6 +100,7 @@ import { detectIsWindows } from '@/lib/platform'
 import { arePathsEqual, getInactiveSessionFileChangePaths, getSessionFileChangeKind, getOwnedSessionWatcherPaths, removeSessionFileChange, upsertSessionFileChange, type SessionFileChange } from '@/lib/session-file-changes'
 import { rememberStopGenerationTarget } from '@/lib/stop-generation-target'
 import { doesWorkspaceChangeAffectPreview } from '@/components/diff/preview-open-path'
+import { openPreviewInStore } from '@/components/diff/preview-opener'
 import { removeQueuedMessage, createQueuedAgentStreamState, createAgentQueuedMessage } from '@/lib/agent-message-queue'
 import { createAgentStreamEventBatcher } from '@/lib/agent-stream-event-batcher'
 import { getChangedWorkspaceComponentFromSdkMessage, shouldRevealChangedWorkspaceComponentImmediately } from '@/lib/agent-component-activation'
@@ -918,6 +919,64 @@ export function useGlobalAgentListeners(): void {
       })
     }
 
+    const openPlanDocumentPreview = (sessionId: string, planDocument: NonNullable<import('@proma/shared').ExitPlanModeRequest['planDocument']>): void => {
+      const planPreview: PreviewFile = {
+        filePath: planDocument.filePath,
+        previewOnly: true,
+        readOnly: true,
+      }
+      openPreviewInStore(store, sessionId, planPreview)
+      // 同一路径在反馈后重新提交时必须绕过旧内容缓存，确保审批页重读本次哈希对应的文件版本。
+      bumpPreviewContentRefresh(sessionId, planPreview)
+    }
+
+    // pending 快照与实时事件可以乱序抵达。保留有限的已解决 ID，避免迟到快照复活已处理横幅。
+    const resolvedExitPlanRequestIds = new Set<string>()
+    const markExitPlanRequestResolved = (requestId: string): void => {
+      resolvedExitPlanRequestIds.add(requestId)
+      if (resolvedExitPlanRequestIds.size > 256) {
+        const oldest = resolvedExitPlanRequestIds.values().next().value
+        if (oldest) resolvedExitPlanRequestIds.delete(oldest)
+      }
+      store.set(allPendingExitPlanRequestsAtom, (prev) => {
+        let changed = false
+        const next = new Map(prev)
+        for (const [sessionId, requests] of prev) {
+          const remaining = requests.filter((request) => request.requestId !== requestId)
+          if (remaining.length === requests.length) continue
+          changed = true
+          if (remaining.length > 0) next.set(sessionId, remaining)
+          else next.delete(sessionId)
+        }
+        return changed ? next : prev
+      })
+    }
+
+    const queueExitPlanRequest = (request: import('@proma/shared').ExitPlanModeRequest): boolean => {
+      if (resolvedExitPlanRequestIds.has(request.requestId)) return false
+      let inserted = false
+      store.set(allPendingExitPlanRequestsAtom, (prev) => {
+        const current = prev.get(request.sessionId) ?? []
+        if (current.some((item) => item.requestId === request.requestId)) return prev
+        inserted = true
+        const map = new Map(prev)
+        map.set(request.sessionId, [...current, request])
+        return map
+      })
+      return inserted
+    }
+
+    // renderer 重载后，主进程仍保留未决审批；恢复横幅时同步重建只读计划预览。
+    void window.electronAPI.getPendingRequests()
+      .then(({ exitPlans }) => {
+        for (const request of exitPlans) {
+          if (queueExitPlanRequest(request) && request.planDocument) {
+            openPlanDocumentPreview(request.sessionId, request.planDocument)
+          }
+        }
+      })
+      .catch((error) => console.warn('[GlobalAgentListeners] 恢复待处理审批请求失败', error))
+
     const refreshAffectedPreviews = (filePaths: readonly string[]): void => {
       if (filePaths.length === 0) return
       const previewsBySession = store.get(previewFilesMapAtom)
@@ -1550,13 +1609,11 @@ export function useGlobalAgentListeners(): void {
               return map
             })
           } else if (event.type === 'exit_plan_mode_request') {
-            // ExitPlanMode 请求入队
-            store.set(allPendingExitPlanRequestsAtom, (prev) => {
-              const map = new Map(prev)
-              const current = map.get(sessionId) ?? []
-              map.set(sessionId, [...current, event.request])
-              return map
-            })
+            // 计划文件已由主进程限定在当前会话 plan/ 目录。审批到达时自动以只读 Markdown 打开；
+            // 不切换主会话，因此后台会话不会抢走用户的当前工作。
+            if (queueExitPlanRequest(event.request) && event.request.planDocument) {
+              openPlanDocumentPreview(sessionId, event.request.planDocument)
+            }
             // 退出 Plan 模式指示状态
             store.set(agentPlanModeSessionsAtom, (prev: Set<string>) => {
               if (!prev.has(sessionId)) return prev
@@ -1571,6 +1628,8 @@ export function useGlobalAgentListeners(): void {
               'Agent 已完成计划，等待你的审批',
               'exitPlanMode'
             )
+          } else if (event.type === 'exit_plan_mode_resolved') {
+            markExitPlanRequestResolved(event.requestId)
           } else if (event.type === 'enter_plan_mode') {
             // 进入 Plan 模式
             store.set(agentPlanModeSessionsAtom, (prev: Set<string>) =>

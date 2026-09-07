@@ -1,3 +1,4 @@
+import { resolveSkillMentionName, EMPTY_SKILL_MENTION_NAMES } from './skill-mention-name'
 import type { AgentStreamState } from '@/atoms/agent-atoms'
 import type { QuotedSelection } from '@/atoms/preview-atoms'
 import {
@@ -227,7 +228,10 @@ function decodeReferenceLabel(value: string): string {
  * 将排队消息中的文件、Skill、MCP、会话、历史引用和规划协议转换为展示片段。
  * `item.text` 仍完整保留，发送时继续通过 parseQueuedMessageMentions 提取原始 ID。
  */
-export function getQueuedMessageDisplayParts(text: string): QueuedMessageDisplayPart[] {
+export function getQueuedMessageDisplayParts(
+  text: string,
+  skillNames: ReadonlyMap<string, string> = EMPTY_SKILL_MENTION_NAMES,
+): QueuedMessageDisplayPart[] {
   const parts: QueuedMessageDisplayPart[] = []
   let lastIndex = 0
 
@@ -295,7 +299,9 @@ export function getQueuedMessageDisplayParts(text: string): QueuedMessageDisplay
             ? `Todo ${id.slice(0, 8)}`
             : referenceType === 'calendar_event'
               ? `日程 ${id.slice(0, 8)}`
-              : decodedId
+              : referenceType === 'skill'
+                ? resolveSkillMentionName(decodedId, skillNames)
+                : decodedId
 
     parts.push({ type: 'reference', referenceType, id, label })
     lastIndex = match.index + match[0].length

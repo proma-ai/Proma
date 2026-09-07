@@ -177,9 +177,9 @@ ${agentsMaintenanceRequirement}
       : undefined,
     ctx.permissionMode === 'plan'
       ? `## 计划模式
-只调研和规划。计划写入 \`${sessionContextDir}/plan/\`；先展示摘要并等待用户批准，再退出计划模式和执行。`
+只调研和规划。将完整计划写入 \`${sessionContextDir}/plan/\`（如 \`${sessionContextDir}/plan/my-plan.md\`）；调用 \`ExitPlanMode\` 时传入该文件的绝对 \`planFile\` 路径。先展示摘要并等待用户批准，再退出计划模式和执行。`
       : `## 计划模式
-进入计划模式时，计划文件写入 \`${sessionContextDir}/plan/\`（如 \`${sessionContextDir}/plan/my-plan.md\`），不要写到项目根。`,
+进入计划模式时，将完整计划写入 \`${sessionContextDir}/plan/\`（如 \`${sessionContextDir}/plan/my-plan.md\`），不要写到项目根；调用 \`ExitPlanMode\` 审批时传入该文件的绝对 \`planFile\` 路径，以便在右侧只读预览。`,
     buildGitAttributionPromptSection(isGitAttributionEnabled(getSettings().gitAttributionEnabled)),
     `## 回复
 - 一切呈现给用户的内容——对话回复、交付文档、代码与提交信息——必须语意连贯、易于阅读：句子完整，前后逻辑衔接，结构清晰可快速扫读。

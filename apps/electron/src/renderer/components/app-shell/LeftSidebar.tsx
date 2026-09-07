@@ -11,7 +11,7 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Star, Settings, Plus, CirclePlus, Trash2, Pencil, PanelLeft, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, FolderInput, FolderPlus, GripVertical, Clock, CalendarDays, ChevronRight, ChevronDown, ChevronUp, Blocks, Brain, ListTodo, GitBranch, Download, Loader2, RotateCw, Info } from 'lucide-react'
+import { Pin, PinOff, Star, Settings, Plus, CirclePlus, Trash2, Pencil, PanelLeft, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, FolderInput, FolderPlus, GripVertical, Clock, CalendarDays, ChevronRight, ChevronDown, ChevronUp, ChevronsDownUp, Blocks, Brain, ListTodo, GitBranch, Download, Loader2, RotateCw, Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
@@ -2893,6 +2893,8 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       }
     }
 
+    const hasExpandedProject = displayProjectGroups.some((group) => !collapsedWorkspaceIds.has(group.workspace.id))
+
     rows.push({
       id: 'agent-project-heading',
       estimateSize: 34,
@@ -2900,6 +2902,26 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
         <div className="px-2 pt-2 pb-1 flex items-center justify-between">
           <span className="px-1.5 text-[13px] font-medium leading-[18px] text-foreground/40 select-none">项目</span>
           <div className="flex items-center gap-0.5">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  disabled={!hasExpandedProject}
+                  onClick={() => {
+                    setCollapsedWorkspaceIds((prev) => {
+                      const next = new Set(prev)
+                      for (const group of displayProjectGroups) next.add(group.workspace.id)
+                      return next
+                    })
+                  }}
+                  className="size-6 flex items-center justify-center rounded-md text-foreground/35 hover:bg-foreground/[0.06] hover:text-foreground/60 transition-colors titlebar-no-drag disabled:opacity-30 disabled:pointer-events-none"
+                  aria-label="折叠所有项目"
+                >
+                  <ChevronsDownUp size={13} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">折叠所有项目</TooltipContent>
+            </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button

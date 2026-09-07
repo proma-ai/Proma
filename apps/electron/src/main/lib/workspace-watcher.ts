@@ -3,7 +3,7 @@
  *
  * 使用 fs.watch 递归监听 ~/.proma/agent-workspaces/ 目录，
  * 根据变化的文件路径区分事件类型：
- * - mcp.json / skills/ 变化 → 推送 CAPABILITIES_CHANGED（侧边栏刷新）
+ * - mcp.json / skills/ / skills-inactive/ 变化 → 推送 CAPABILITIES_CHANGED（侧边栏刷新）
  * - 其他文件变化 → 推送 WORKSPACE_FILES_CHANGED（文件浏览器刷新）
  *
  * 同时支持监听附加目录（外部路径），变化时统一推送 WORKSPACE_FILES_CHANGED。
@@ -19,7 +19,7 @@ import { AGENT_IPC_CHANNELS } from '@proma/shared'
 import { getAgentWorkspacesDir } from './config-paths'
 import { listAgentSessions } from './agent-session-manager'
 import { invalidateGitDiffCache } from './git-diff-service'
-import { isHighNoisePath, normalizeWatchFilename, shouldNotifyForWatchFilename } from './workspace-watcher-utils'
+import { classifyWorkspaceWatchFilename, isHighNoisePath, normalizeWatchFilename, shouldNotifyForWatchFilename } from './workspace-watcher-utils'
 
 /** debounce 延迟（ms） */
 const DEBOUNCE_MS = 300
@@ -222,20 +222,10 @@ export function startWorkspaceWatcher(win: BrowserWindow): void {
       if (shouldNotifyForWatchFilename(normalizedFilename)) {
         invalidateGitDiffCache(join(watchDir, normalizedFilename))
       }
-      if (isHighNoisePath(normalizedFilename) && !shouldNotifyForWatchFilename(normalizedFilename)) return
+      const changeType = classifyWorkspaceWatchFilename(normalizedFilename)
+      if (!changeType) return
 
-      const pathParts = normalizedFilename.split('/').filter(Boolean)
-
-      // 仅忽略工作区顶层 config.json；会话目录内同名文件仍属于用户文件。
-      if (pathParts.length === 2 && pathParts[1] === 'config.json') {
-        return
-      }
-
-      const isCapabilitiesChange =
-        normalizedFilename.endsWith('/mcp.json') ||
-        normalizedFilename.includes('/skills/')
-
-      if (isCapabilitiesChange) {
+      if (changeType === 'capabilities') {
         // MCP/Skills 变化 → 通知侧边栏刷新
         if (capabilitiesTimer) clearTimeout(capabilitiesTimer)
         capabilitiesTimer = setTimeout(() => {
