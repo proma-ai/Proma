@@ -2,8 +2,8 @@
  * Chat Tool 模块化系统类型定义
  *
  * Chat 模式的工具（function calling）注册、配置、执行相关的共享类型。
- * 记忆凭据保留在 memory.json（Chat + Agent 共用），
- * chat-tools.json 管理工具开关和非记忆工具凭据。
+ * chat-tools.json 管理 Agent 模式推荐和自定义 HTTP 工具的开关与定义。
+ * 旧凭据字段仅为配置兼容保留，不再提供搜索或生图能力。
  */
 
 // ===== 工具元数据 =====
@@ -70,7 +70,7 @@ export interface ChatToolState {
 export interface ChatToolsFileConfig {
   /** 各工具的开关状态，key 为工具 id */
   toolStates: Record<string, ChatToolState>
-  /** 非记忆工具的凭据，key 为工具 id */
+  /** 旧版凭据字段，仅为配置往返兼容而保留，不再用于工具执行。 */
   toolCredentials: Record<string, Record<string, string>>
   /** 自定义工具定义列表 */
   customTools: ChatToolMeta[]
@@ -93,14 +93,8 @@ export interface ChatToolInfo {
 export const CHAT_TOOL_IPC_CHANNELS = {
   /** 获取所有可用工具信息 */
   GET_ALL_TOOLS: 'chat-tool:get-all-tools',
-  /** 获取工具凭据 */
-  GET_TOOL_CREDENTIALS: 'chat-tool:get-credentials',
   /** 更新单个工具的开关状态 */
   UPDATE_TOOL_STATE: 'chat-tool:update-state',
-  /** 更新工具凭据 */
-  UPDATE_TOOL_CREDENTIALS: 'chat-tool:update-credentials',
-  /** 测试工具连接 */
-  TEST_TOOL: 'chat-tool:test',
   /** 创建自定义工具 */
   CREATE_CUSTOM_TOOL: 'chat-tool:create-custom',
   /** 删除自定义工具 */

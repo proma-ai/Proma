@@ -18,7 +18,6 @@ import {
   Info,
   Globe,
   BookOpen,
-  Wrench,
   Bot,
   GraduationCap,
   ArrowLeft,
@@ -58,7 +57,6 @@ import { ProxySettings } from "./ProxySettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { AboutSettings } from "./AboutSettings";
 import { PromptSettings } from "./PromptSettings";
-import { ToolSettings } from "./ToolSettings";
 // Cloud 模式专属组件
 import { BillingSettings } from "@/components/billing/BillingSettings";
 import { ApiKeysSettings } from "./ApiKeysSettings";
@@ -102,11 +100,6 @@ const API_TAB: TabItem = {
   icon: <KeyRound size={16} />,
 };
 
-const TOOLS_TAB: TabItem = {
-  id: "tools",
-  label: "Chat 工具",
-  icon: <Wrench size={16} />,
-};
 const BOTS_TAB: TabItem = {
   id: "bots",
   label: "远程连接",
@@ -156,8 +149,6 @@ function renderTabContent(tab: SettingsTab): React.ReactElement {
       return <PromptSettings />;
     case "proxy":
       return <ProxySettings />;
-    case "tools":
-      return <ToolSettings />;
     case "appearance":
       return <AppearanceSettings />;
     case "about":
@@ -284,7 +275,6 @@ export function SettingsPanel({
       result.push(API_TAB);
     }
     result.push(...BASE_TABS);
-    result.push(TOOLS_TAB);
     result.push(VOICE_INPUT_TAB);
     result.push(BOTS_TAB);
     result.push(SHORTCUTS_TAB);

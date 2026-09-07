@@ -219,9 +219,8 @@ export async function refreshOfficialModels(): Promise<BillingIpcResponse<void>>
 export function cleanupOfficialChannel(): void {
   removeOfficialChannel()
   clearSystemKeyCache()
-  // 清理云端工具凭据
-  updateToolCredentials('web-search', {})
-  updateToolCredentials('nano-banana', {})
+  // 清理与当前 Cloud 登录态关联的 GPT Image 2 凭据。
+  updateToolCredentials('gpt-image-2', {})
   broadcastOfficialChannelUpdated()
   console.log('[Cloud Channel] 官方渠道已移除')
 }
@@ -229,7 +228,7 @@ export function cleanupOfficialChannel(): void {
 // ===== 云端工具默认配置 =====
 
 /** 需要自动配置的云端内置工具 */
-const CLOUD_TOOLS = ['web-search', 'nano-banana', 'gpt-image-2'] as const
+const CLOUD_TOOLS = ['gpt-image-2'] as const
 
 /**
  * 同步云端工具默认配置
@@ -248,22 +247,7 @@ function syncCloudToolDefaults(): void {
     }
   }
 
-  // 写入云端凭据：保留已有的 useCloud / model / apiKey 偏好
-  const existingWs = rawConfig.toolCredentials?.['web-search'] ?? {}
-  updateToolCredentials('web-search', {
-    ...existingWs,
-    cloudMode: 'true',
-    useCloud: existingWs.useCloud ?? 'true',
-  })
-
-  const existingNb = rawConfig.toolCredentials?.['nano-banana'] ?? {}
-  updateToolCredentials('nano-banana', {
-    ...existingNb,
-    cloudMode: 'true',
-    model: existingNb.model || 'gemini-3.1-flash-image-preview',
-    useCloud: existingNb.useCloud ?? 'true',
-  })
-
+  // 写入 GPT Image 2 云端凭据：保留用户已有偏好。
   // [Proma Cloud] GPT Image 2（仅云端，无需 model / apiKey）
   const existingGpt = rawConfig.toolCredentials?.['gpt-image-2'] ?? {}
   updateToolCredentials('gpt-image-2', {

@@ -14,16 +14,12 @@ import { atom } from 'jotai'
 import type { TabType } from './tab-atoms'
 
 export type SettingsTab =
-  | 'general' | 'channels' | 'vision-relay' | 'proxy' | 'appearance' | 'about' | 'onboarding' | 'prompts' | 'tools' | 'bots' | 'shortcuts' | 'voice-input' | 'migration' | 'storage'
+  | 'general' | 'channels' | 'vision-relay' | 'proxy' | 'appearance' | 'about' | 'onboarding' | 'prompts' | 'bots' | 'shortcuts' | 'voice-input' | 'migration' | 'storage'
   // Cloud 模式专属标签页
   | 'billing' | 'api' | 'usage'
-export type ToolSettingsFocus = 'web-search' | 'nano-banana' | 'custom-tools'
 
 /** 当前设置标签页（不持久化，商业版默认显示购买额度） */
 export const settingsTabAtom = atom<SettingsTab>('billing')
-
-/** Chat 工具设置页的目标配置区，用于从内置 MCP 详情直达对应配置 */
-export const toolSettingsFocusAtom = atom<ToolSettingsFocus | null>(null)
 
 /** 设置浮窗是否打开 */
 export const settingsOpenAtom = atom(false)

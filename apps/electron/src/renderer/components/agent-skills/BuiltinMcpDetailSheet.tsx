@@ -3,7 +3,7 @@
  */
 
 import * as React from 'react'
-import { ArrowLeft, CheckCircle2, Plug, Settings2, XCircle } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Plug, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
@@ -13,7 +13,6 @@ interface BuiltinMcpDetailSheetProps {
   open: boolean
   server: BuiltinMcpServerSummary | null
   onOpenChange: (open: boolean) => void
-  onConfigure?: (serverId: string) => void
 }
 
 const CATEGORY_LABELS: Record<BuiltinMcpServerSummary['category'], string> = {
@@ -28,7 +27,6 @@ const CATEGORY_LABELS: Record<BuiltinMcpServerSummary['category'], string> = {
 interface BuiltinMcpConfigInfo {
   source: string
   description: string
-  actionLabel?: string
 }
 
 function getConfigInfo(server: BuiltinMcpServerSummary): BuiltinMcpConfigInfo {
@@ -38,20 +36,13 @@ function getConfigInfo(server: BuiltinMcpServerSummary): BuiltinMcpConfigInfo {
       description: '凭据网关随 Proma 登录态自动注入，是生图、AI 应用生成等能力的基础设施，因此不提供开关。',
     }
   }
-  if (server.id === 'nano-banana') {
-    return {
-      source: 'Chat 工具 / Nano Banana',
-      description: '配置 Gemini API Key、API 地址、模型与开关后，Agent 会话才能注入生图 MCP。',
-      actionLabel: '配置生图',
-    }
-  }
   return {
     source: 'Proma 运行时',
     description: '该内置能力由 Proma 运行时托管。',
   }
 }
 
-export function BuiltinMcpDetailSheet({ open, server, onOpenChange, onConfigure }: BuiltinMcpDetailSheetProps): React.ReactElement {
+export function BuiltinMcpDetailSheet({ open, server, onOpenChange }: BuiltinMcpDetailSheetProps): React.ReactElement {
   const configInfo = server ? getConfigInfo(server) : null
 
   return (
@@ -103,17 +94,6 @@ export function BuiltinMcpDetailSheet({ open, server, onOpenChange, onConfigure 
                       <div className="text-sm font-medium text-foreground">如何配置</div>
                       <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{configInfo.description}</p>
                     </div>
-                    {configInfo.actionLabel && onConfigure && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="shrink-0"
-                        onClick={() => onConfigure(server.id)}
-                      >
-                        <Settings2 size={14} />
-                        <span>{configInfo.actionLabel}</span>
-                      </Button>
-                    )}
                   </div>
                 </section>
 

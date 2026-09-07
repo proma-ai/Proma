@@ -23,7 +23,6 @@ import {
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { agentPendingPromptAtom, agentSessionDraftHtmlAtom, agentSessionDraftsAtom, agentSessionDraftSyncVersionsAtom, currentAgentSessionIdAtom, skillDetailNavigationAtomFamily, workspaceCapabilitiesVersionAtom } from '@/atoms/agent-atoms'
 import { agentSkillsTabAtom } from '@/atoms/active-view'
-import { settingsOpenAtom, settingsTabAtom, toolSettingsFocusAtom, type ToolSettingsFocus } from '@/atoms/settings-tab'
 import { useProjectActions } from '@/hooks/useProjectActions'
 import { useCreateSession } from '@/hooks/useCreateSession'
 import { LocalProjectBadge } from '@/components/agent/LocalProjectBadge'
@@ -132,9 +131,6 @@ export function AgentSkillsView({
   const setDraftHtml = useSetAtom(agentSessionDraftHtmlAtom)
   const setDraftSyncVersions = useSetAtom(agentSessionDraftSyncVersionsAtom)
   const setPendingPrompt = useSetAtom(agentPendingPromptAtom)
-  const setSettingsOpen = useSetAtom(settingsOpenAtom)
-  const setSettingsTab = useSetAtom(settingsTabAtom)
-  const setToolSettingsFocus = useSetAtom(toolSettingsFocusAtom)
   const currentAgentSessionId = useAtomValue(currentAgentSessionIdAtom)
   const skillDetailNavigation = useAtomValue(skillDetailNavigationAtomFamily(sessionId ?? ''))
   const setSkillDetailNavigation = useSetAtom(skillDetailNavigationAtomFamily(sessionId ?? ''))
@@ -327,16 +323,6 @@ export function AgentSkillsView({
       toast.error('打开 Skill 目录失败')
     })
   }
-
-  const configureBuiltinMcp = React.useCallback((serverId: string): void => {
-    const focusMap: Partial<Record<string, ToolSettingsFocus>> = { 'nano-banana': 'nano-banana' }
-    const focus = focusMap[serverId]
-    if (!focus) return
-    setToolSettingsFocus(focus)
-    setSettingsTab('tools')
-    setSettingsOpen(true)
-    setSelectedBuiltinMcp(null)
-  }, [setSettingsOpen, setSettingsTab, setToolSettingsFocus])
 
   const guideManualMcp = React.useCallback((): void => {
     if (guidingManualMcp) return
@@ -799,7 +785,6 @@ export function AgentSkillsView({
               onOpen={(name) => setSelectedMcpName(name)}
               onOpenBuiltin={setSelectedBuiltinMcp}
               onToggle={data.toggleMcp}
-              onToggleBuiltin={data.toggleBuiltinMcp}
               onRequestDelete={setPendingDeleteMcpName}
               onInstallCatalogMcp={(integration) => { void installCatalogMcp(integration) }}
               onGuideCatalogCli={guideCatalogCli}
@@ -843,7 +828,6 @@ export function AgentSkillsView({
         open={!!selectedBuiltinMcp}
         server={selectedBuiltinMcp}
         onOpenChange={(open) => { if (!open) setSelectedBuiltinMcp(null) }}
-        onConfigure={configureBuiltinMcp}
       />
 
       <ImportSkillDialog
@@ -1010,7 +994,6 @@ interface McpTabProps {
   onOpen: (name: string, entry: McpServerEntry) => void
   onOpenBuiltin: (server: BuiltinMcpServerSummary) => void
   onToggle: (name: string, enabled: boolean) => void
-  onToggleBuiltin: (id: string, enabled: boolean) => void
   onRequestDelete: (name: string) => void
   onInstallCatalogMcp: (integration: CatalogMcpIntegration) => void
   onGuideCatalogCli: (integration: CatalogCliIntegration) => void
@@ -1019,7 +1002,7 @@ interface McpTabProps {
   onRequestCredential: (integration: CatalogCredentialIntegration) => void
 }
 
-function McpTab({ userEntries, builtinServers, catalogMcps, catalogClis, catalogGuided, catalogCredentials, embedded, installedMcpNames, enabledMcpNames, verifiedMcpNames, activeSkillSlugs, connectedCliIds, cliIntegrationProbeState, installingCatalogMcpId, onOpen, onOpenBuiltin, onToggle, onToggleBuiltin, onRequestDelete, onInstallCatalogMcp, onGuideCatalogCli, onDisconnectCatalogCli, onGuideCatalogIntegration, onRequestCredential }: McpTabProps): React.ReactElement {
+function McpTab({ userEntries, builtinServers, catalogMcps, catalogClis, catalogGuided, catalogCredentials, embedded, installedMcpNames, enabledMcpNames, verifiedMcpNames, activeSkillSlugs, connectedCliIds, cliIntegrationProbeState, installingCatalogMcpId, onOpen, onOpenBuiltin, onToggle, onRequestDelete, onInstallCatalogMcp, onGuideCatalogCli, onDisconnectCatalogCli, onGuideCatalogIntegration, onRequestCredential }: McpTabProps): React.ReactElement {
   if (userEntries.length === 0 && builtinServers.length === 0 && catalogMcps.length === 0 && catalogClis.length === 0 && catalogGuided.length === 0 && catalogCredentials.length === 0) {
     return <EmptyState icon={<Search className="size-8 text-foreground/30" />} title="没有匹配的 MCP 服务器" hint="试试更换搜索关键词。" />
   }
@@ -1056,7 +1039,7 @@ function McpTab({ userEntries, builtinServers, catalogMcps, catalogClis, catalog
               statusTone={getBuiltinMcpStatus(server).tone}
               readOnly
               onOpen={() => onOpenBuiltin(server)}
-              onToggle={server.toggleable === false ? undefined : (enabled) => onToggleBuiltin(server.id, enabled)}
+              onToggle={undefined}
             />
           ))}
         </McpSection>

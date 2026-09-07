@@ -139,7 +139,7 @@ export class AgentPermissionService {
       // 会话白名单检查（用户之前选择了"始终允许"）
       if (this.isWhitelisted(sessionId, toolName, input)) return allow()
 
-      // auto 模式本地 classifier：只读工具（Read/Glob/Grep/WebSearch/WebFetch 及只读 Bash 命令）自动放行
+      // auto 模式本地 classifier：只读工具（Read/Glob/Grep 及只读 Bash 命令）自动放行
       // 原因：CLI 的 --permission-prompt-tool stdio 会把每次 tool 调用都转发给 canUseTool，
       // SDK 的 auto classifier 对只读操作未必真的放行，这里做本地兜底避免用户被无意义的审批打扰
       if (this.isReadOnlyTool(toolName, input)) return allow()

@@ -9,11 +9,8 @@ import type { ToolCall, ToolResult } from '@proma/core'
 import type { WebContents } from 'electron'
 import type { FileAttachment } from '@proma/shared'
 import { CHAT_IPC_CHANNELS } from '@proma/shared'
-import { isWebSearchToolCall, executeWebSearchTool } from './chat-tools/web-search-tool'
 import { isCustomHttpToolCall, executeHttpTool } from './chat-tools/http-tool-executor'
 import { isAgentRecommendToolCall, executeAgentRecommendTool } from './chat-tools/agent-recommend-tool'
-import { isNanoBananaToolCall, executeNanoBananaTool } from './chat-tools/nano-banana-tool'
-import type { NanoBananaContext } from './chat-tools/nano-banana-tool'
 import { isGptImage2ToolCall, executeGptImage2Tool } from './chat-tools/gpt-image-2-tool' // [Proma Cloud]
 import type { GptImage2Context } from './chat-tools/gpt-image-2-tool' // [Proma Cloud]
 import { getChatToolsConfig } from './chat-tool-config'
@@ -26,10 +23,6 @@ export interface ToolExecutionContext {
   conversationId: string
   /** 当前用户消息的附件列表 */
   currentAttachments?: FileAttachment[]
-  /** 前一轮用户消息的附件（保留用于 Nano Banana 等旧工具） */
-  previousUserAttachments?: FileAttachment[]
-  /** 前一轮助手消息的附件（保留用于 Nano Banana 等旧工具） */
-  previousAssistantAttachments?: FileAttachment[]
   /**
    * 最近 N 轮对话中所有消息的附件（user + assistant），按时间倒序
    * 由 chat-service 提取，供 GPT Image 2 等多轮参考图工具使用
@@ -55,18 +48,8 @@ export async function executeToolCalls(
   for (const tc of toolCalls) {
     let result: ToolResult
 
-    if (isWebSearchToolCall(tc.name)) {
-      result = await executeWebSearchTool(tc)
-    } else if (isAgentRecommendToolCall(tc.name)) {
+    if (isAgentRecommendToolCall(tc.name)) {
       result = await executeAgentRecommendTool(tc)
-    } else if (isNanoBananaToolCall(tc.name)) {
-      const nanoBananaContext: NanoBananaContext = {
-        conversationId: context.conversationId,
-        currentAttachments: context.currentAttachments,
-        previousUserAttachments: context.previousUserAttachments,
-        previousAssistantAttachments: context.previousAssistantAttachments,
-      }
-      result = await executeNanoBananaTool(tc, nanoBananaContext)
     // [Proma Cloud] GPT Image 2 tool dispatch
     } else if (isGptImage2ToolCall(tc.name)) {
       const gptImageContext: GptImage2Context = {

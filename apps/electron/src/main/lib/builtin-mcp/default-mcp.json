@@ -1,5 +1,5 @@
 {
-  "comment": "Proma 内置、用户可配置的 MCP 能力单一事实源。这里登记需要在 MCP 组件展示的能力；自动化与协作是始终由 Pi runtime 注入的基础能力，不在此目录中。Proma Cloud 凭据网关是商业版基础设施，始终可用但不可开关。name 必须是下划线安全名（SDK 会把 server 名里的连字符规范化成下划线，源名与运行名不一致正是工具被 Agent 调错的根因），id 保持历史值（设置/凭据键，向后兼容）。kind=internal 表示由代码注入、不写入工作区 mcp.json。",
+  "comment": "Proma 内置、用户可配置的 MCP 能力单一事实源。这里登记需要在 MCP 组件展示的能力；自动化与协作是始终由 Pi runtime 注入的基础能力，不在此目录中。Proma Cloud 凭据网关是商业版基础设施，始终可用但不可开关。",
   "version": 1,
   "servers": [
     {
@@ -15,20 +15,6 @@
       "tools": [
         { "name": "get_credentials", "description": "获取 Agent 自用的 Proma API 凭据（Inner Key + baseUrl）。", "readOnly": true },
         { "name": "create_app_key", "description": "为生成的 AI 应用创建带 quota 上限的专用 API Key。" }
-      ]
-    },
-    {
-      "id": "nano-banana",
-      "name": "nano_banana",
-      "displayName": "Nano Banana 生图",
-      "description": "通过 Gemini Image Generation 为 Agent 提供图片生成和编辑能力。",
-      "category": "media",
-      "kind": "internal",
-      "deletable": false,
-      "defaultEnabled": false,
-      "toggleable": true,
-      "tools": [
-        { "name": "generate_image", "description": "生成或编辑图片。" }
       ]
     }
   ]

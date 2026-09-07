@@ -424,16 +424,12 @@ export async function sendMessage(
         }
 
         // 执行工具调用（通过统一执行器）
-        // 提取前一轮对话的附件（用于 Nano Banana 等旧工具），以及最近 N 轮全部附件（用于 GPT Image 2 多轮参考图）
-        const lastUserMsg = fullHistory.filter((m) => m.role === 'user').at(-1)
-        const lastAssistantMsg = fullHistory.filter((m) => m.role === 'assistant').at(-1)
+        // 提取最近 N 轮全部附件（用于 GPT Image 2 多轮参考图）。
         const recentRoundsAttachments = collectRecentRoundsAttachments(fullHistory, DEFAULT_REFERENCE_ROUNDS)
         const toolResults = await executeToolCalls(toolCalls, {
           webContents,
           conversationId,
           currentAttachments: attachments,
-          previousUserAttachments: lastUserMsg?.attachments,
-          previousAssistantAttachments: lastAssistantMsg?.attachments,
           recentRoundsAttachments,
         })
 

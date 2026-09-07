@@ -2,7 +2,7 @@
  * ToolSelectorPopover - 工具选择器弹出层
  *
  * 在 ChatInput footer 中显示工具开关列表。
- * 用户可以快速启用/禁用工具（记忆、联网搜索等）。
+ * 用户可以快速启用/禁用 Agent 模式推荐及自定义工具。
  * 类似 ContextSettingsPopover 的交互方式。
  */
 
@@ -21,9 +21,8 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { Wrench, Brain, Globe, Settings, ImagePlus } from 'lucide-react'
+import { Wrench, Brain, Globe, ImagePlus } from 'lucide-react'
 import { chatToolsAtom, hasActiveToolsAtom } from '@/atoms/chat-tool-atoms'
-import { settingsTabAtom, settingsOpenAtom } from '@/atoms/settings-tab'
 import { inputToolbarActiveButtonClass, inputToolbarButtonClass } from '@/components/ai-elements/input-toolbar-styles'
 
 /** 工具 ID 到图标的映射 */
@@ -45,8 +44,6 @@ export function ToolSelectorPopover(): React.ReactElement {
   const tools = useAtomValue(chatToolsAtom)
   const setChatTools = useSetAtom(chatToolsAtom)
   const hasActiveTools = useAtomValue(hasActiveToolsAtom)
-  const setSettingsOpen = useSetAtom(settingsOpenAtom)
-  const setSettingsTab = useSetAtom(settingsTabAtom)
 
   /** 切换工具开关（通过 IPC 更新后端配置，再刷新 atom） */
   const toggleTool = async (toolId: string, currentEnabled: boolean): Promise<void> => {
@@ -57,13 +54,6 @@ export function ToolSelectorPopover(): React.ReactElement {
     } catch (err) {
       console.error('[ToolSelectorPopover] 切换工具失败:', err)
     }
-  }
-
-  /** 跳转到设置页工具 tab */
-  const goToToolSettings = (): void => {
-    setOpen(false)
-    setSettingsOpen(true)
-    setSettingsTab('tools')
   }
 
   return (
@@ -138,16 +128,6 @@ export function ToolSelectorPopover(): React.ReactElement {
               })}
             </div>
           )}
-
-          {/* 管理工具链接 */}
-          <button
-            type="button"
-            onClick={goToToolSettings}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors w-full pt-1 border-t border-border/50"
-          >
-            <Settings className="size-3" />
-            <span>管理工具</span>
-          </button>
         </div>
       </PopoverContent>
     </Popover>

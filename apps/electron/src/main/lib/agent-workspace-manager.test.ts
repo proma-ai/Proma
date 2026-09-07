@@ -84,8 +84,10 @@ describe('Agent 工作区 MCP 配置', () => {
       },
     })
 
-    expect(Object.keys(normalized.servers).sort()).toEqual(['github'])
+    expect(Object.keys(normalized.servers).sort()).toEqual(['github', 'nano_banana'])
     expect(normalized.servers.github?.command).toBe('github-mcp')
+    // Nano Banana is no longer a built-in runtime tool, so users may configure it as a normal MCP.
+    expect(normalized.servers.nano_banana?.command).toBe('custom-nano')
   })
 })
 

@@ -6,8 +6,9 @@
  * 记忆凭据保留在 memory.json（Chat + Agent 共用）。
  */
 
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { getChatToolsConfigPath } from './config-paths'
+import { writeJsonFileAtomic } from './safe-file'
 import type { ChatToolsFileConfig, ChatToolState, ChatToolMeta } from '@proma/shared'
 
 /** 默认配置 */
@@ -15,8 +16,6 @@ const DEFAULT_CONFIG: ChatToolsFileConfig = {
   toolStates: {
     memory: { enabled: true },
     'agent-mode-recommend': { enabled: true },
-    'web-search': { enabled: false },
-    'nano-banana': { enabled: false },
     'gpt-image-2': { enabled: false }, // [Proma Cloud]
   },
   toolCredentials: {},
@@ -53,7 +52,7 @@ export function getChatToolsConfig(): ChatToolsFileConfig {
 export function saveChatToolsConfig(config: ChatToolsFileConfig): void {
   const filePath = getChatToolsConfigPath()
   try {
-    writeFileSync(filePath, JSON.stringify(config, null, 2), 'utf-8')
+    writeJsonFileAtomic(filePath, config)
     console.log('[Chat 工具配置] 已保存')
   } catch (error) {
     console.error('[Chat 工具配置] 保存失败:', error)
