@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { resolveVaultWikiLink } from './vault-wikilinks'
 import { VaultLiveMarkdownEditor } from './VaultLiveMarkdownEditor'
 import { VaultNoteTitle } from './VaultNoteTitle'
 import { focusVaultBody } from './vault-title-focus'
@@ -65,6 +66,10 @@ function getVaultCandidateDisplayName(candidate: VaultCandidate): string {
 
 function displayDocumentTitle(filename: string): string {
   return filename.replace(/\.md$/i, '')
+}
+
+function isVaultFileNotFoundError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('Vault 文件不存在:')
 }
 
 function VaultFileList({
@@ -277,6 +282,7 @@ function VaultMarkdownEditor({
   bodyFocusRequest,
   onBodyFocused,
   onOpenTutorial,
+  onOpenWikiLink,
 }: {
   readResult: VaultReadResult
   /** Stable renderer-safe identity of the currently authorized Vault. */
@@ -290,6 +296,7 @@ function VaultMarkdownEditor({
   bodyFocusRequest: VaultBodyFocusRequest | null
   onBodyFocused: (request: VaultBodyFocusRequest) => void
   onOpenTutorial: () => void
+  onOpenWikiLink: (target: string) => void
 }): React.ReactElement {
   const documentController = React.useMemo(() => getVaultDocumentController(readResult, vaultId), [readResult.relativePath, vaultId])
   const documentSnapshot = React.useSyncExternalStore(
@@ -522,6 +529,7 @@ function VaultMarkdownEditor({
         <div className="min-h-0 flex-1">
           <VaultLiveMarkdownEditor
             ref={editorHandleRef}
+            onOpenWikiLink={onOpenWikiLink}
             relativePath={readResult.relativePath}
             value={draft}
             onChange={updateDraft}
@@ -557,6 +565,7 @@ function VaultMarkdownPane({
   bodyFocusRequest,
   onBodyFocused,
   onOpenTutorial,
+  onOpenWikiLink,
 }: {
   readResult: VaultReadResult | null
   vaultId?: string
@@ -571,6 +580,7 @@ function VaultMarkdownPane({
   bodyFocusRequest: VaultBodyFocusRequest | null
   onBodyFocused: (request: VaultBodyFocusRequest) => void
   onOpenTutorial: () => void
+  onOpenWikiLink: (target: string) => void
 }): React.ReactElement {
   if (loading || !readResult || !vaultId) {
     return (
@@ -604,6 +614,7 @@ function VaultMarkdownPane({
           bodyFocusRequest={bodyFocusRequest}
           onBodyFocused={onBodyFocused}
           onOpenTutorial={onOpenTutorial}
+          onOpenWikiLink={onOpenWikiLink}
         />
       </VaultContentErrorBoundary>
     </section>
@@ -856,13 +867,26 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
       }
     } catch (error) {
       if (requestId === readRequestRef.current) {
+        // The tree can be stale when a note is deleted or renamed outside this
+        // renderer. Refresh it once so the unavailable note is removed.
+        if (isVaultFileNotFoundError(error)) void refresh()
         toast.error(error instanceof Error ? error.message : '无法打开笔记')
         setReadResult(null)
       }
     } finally {
       if (requestId === readRequestRef.current) setFileLoading(false)
     }
-  }, [flushCurrentEditor, selectFile, setReadResult])
+  }, [flushCurrentEditor, refresh, selectFile, setReadResult])
+
+  const openWikiLink = React.useCallback((target: string): void => {
+    if (!readResult) return
+    const path = resolveVaultWikiLink(target, readResult.relativePath, entries.filter((entry) => entry.kind === 'file').map((entry) => entry.relativePath))
+    if (!path) {
+      toast.error(`无法定位笔记“${target}”，请检查名称或使用完整的 Vault 内路径`)
+      return
+    }
+    void openFile(path)
+  }, [entries, readResult, openFile])
 
   const selectVaultManually = async (): Promise<void> => {
     if (!await flushCurrentEditor()) return
@@ -1237,6 +1261,7 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
             bodyFocusRequest={bodyFocusRequest}
             onBodyFocused={consumeBodyFocus}
             onOpenTutorial={() => setVaultHelpOpen(true)}
+            onOpenWikiLink={openWikiLink}
           />
         </div>
       </main>

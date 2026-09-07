@@ -2,6 +2,8 @@ import * as React from 'react'
 import { LiveMarkdownEditor, type LiveMarkdownEditorHandle, type LiveMarkdownTextSelection, type LiveMarkdownPropertyEntry } from '@/components/markdown/LiveMarkdownEditor'
 import { serializeFlatLeadingFrontmatter } from '@/components/markdown/live-markdown-frontmatter'
 
+import { createVaultWikiLinks } from './vault-wikilinks'
+
 const MAX_PASTED_IMAGE_BYTES = 10 * 1024 * 1024
 
 async function fileToBase64(file: File): Promise<string> {
@@ -22,11 +24,15 @@ interface VaultLiveMarkdownEditorProps {
   /** CodeMirror 异步挂载完成后通知外层，用于恢复阅读位置。 */
   onReady?: () => void
   relativePath: string
+  onOpenWikiLink: (target: string) => void
 }
 
 /** Vault's file adapter around the reusable, domain-neutral Markdown editor. */
 export const VaultLiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle, VaultLiveMarkdownEditorProps>(
-  function VaultLiveMarkdownEditor({ relativePath, ...props }, ref): React.ReactElement {
+  function VaultLiveMarkdownEditor({ relativePath, onOpenWikiLink, ...props }, ref): React.ReactElement {
+    const onOpenRef = React.useRef(onOpenWikiLink)
+    onOpenRef.current = onOpenWikiLink
+    const extensions = React.useMemo(() => [createVaultWikiLinks((target) => onOpenRef.current(target))], [])
     const valueRef = React.useRef(props.value)
     const onChangeRef = React.useRef(props.onChange)
     valueRef.current = props.value
@@ -58,6 +64,6 @@ export const VaultLiveMarkdownEditor = React.forwardRef<LiveMarkdownEditorHandle
       onChangeRef.current(nextValue)
     }, [])
 
-    return <LiveMarkdownEditor ref={ref} {...props} enableProperties onChangeProperties={handlePropertiesChange} resolveImageSrc={resolveImageSrc} savePastedImage={savePastedImage} />
+    return <LiveMarkdownEditor ref={ref} {...props} extensions={extensions} enableProperties onChangeProperties={handlePropertiesChange} resolveImageSrc={resolveImageSrc} savePastedImage={savePastedImage} />
   },
 )
