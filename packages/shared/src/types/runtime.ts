@@ -184,6 +184,8 @@ export interface DetachedPreviewWindowInput {
   readOnly?: boolean
   /** 候选基础目录（previewOnly 模式下用于路径解析） */
   basePaths?: string[]
+  /** 仅由可信 UI 主动选择的外部文件允许超出会话授权根。 */
+  unrestricted?: boolean
   /** Managed Skill workspace slug for a relocatable relative path. */
   workspaceSkillSlug?: string
   /** Original absolute Skill entry path used as a legacy fallback. */

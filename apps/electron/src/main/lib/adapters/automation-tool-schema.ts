@@ -28,6 +28,7 @@ export function discardInapplicableAutomationScheduleFields(
 }
 
 export const automationCreateToolParameters = Type.Object({
+  workspaceId: Type.Optional(Type.String({ description: '目标工作区 ID，来自 list_workspaces；省略使用当前会话工作区。指定其他工作区时任务在该工作区运行，渠道和模型仍继承当前会话。' })),
   name: Type.String({ description: '任务名，简短说明长期反复执行的目标' }),
   prompt: Type.String({ description: '每次触发时发送给 Agent 的完整自然语言指令' }),
   scheduleType: Type.Union([

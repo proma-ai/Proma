@@ -21,6 +21,7 @@ import { CornerDownLeft, Square, Settings, X, Copy, Check, Brain, Sparkles, List
 import { AgentMessages, type AgentHistoryQuoteNavigationRequest } from './AgentMessages'
 import { AgentHeader } from './AgentHeader'
 import { AgentMessageQueue } from './AgentMessageQueue'
+import { SkillMentionNamesProvider } from './SkillMentionNamesProvider'
 import { ContextUsageBadge } from './ContextUsageBadge'
 import { PermissionBanner } from './PermissionBanner'
 import { PermissionModeSelector } from './PermissionModeSelector'
@@ -2622,7 +2623,7 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
         return map
       })
 
-      // 刷新预览面板的 diff（文件已被回退，当前显示的内容已过期）
+      // 对话已截断，刷新基于会话消息展示的 diff；当前回退不修改文件。
       store.set(agentDiffRefreshVersionAtom, (prev) => {
         const m = new Map(prev); m.set(sessionId, (prev.get(sessionId) ?? 0) + 1); return m
       })
@@ -3006,7 +3007,7 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
   )
 
   return (
-    <>
+    <SkillMentionNamesProvider workspaceSlug={workspaceSlug}>
       <div
         className="flex h-full min-h-0 flex-1 min-w-0 flex-col overflow-hidden"
         onFocusCapture={markStopShortcutTarget}
@@ -3220,7 +3221,7 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
         <AlertDialogHeader>
           <AlertDialogTitle>确认回退</AlertDialogTitle>
           <AlertDialogDescription>
-            回退将截断该消息之后的所有对话，并恢复文件到该时刻的状态。此操作不可撤销，确定要回退吗？
+            回退将截断该消息之后的所有对话。此操作不可撤销，确定要回退吗？
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -3251,6 +3252,6 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
-    </>
+    </SkillMentionNamesProvider>
   )
 }

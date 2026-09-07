@@ -39,9 +39,11 @@ import {
 import { LoadingIndicator } from '@/components/ui/loading-indicator'
 import { CodeBlock, MermaidBlock } from '@proma/ui'
 import { detectLanguage } from '@proma/core'
-import { FilePathChip, isAbsoluteFilePath, isImageFilePath, isRelativeFilePath } from './file-path-chip'
+import { FilePathChip, isAbsoluteFilePath, isImageFilePath, isLocalFileReference, isRelativeFilePath } from './file-path-chip'
 import { buildAgentHistoryQuoteLabel, parseAgentHistoryQuoteMention } from '@/lib/quoted-selection'
 import { createMentionPattern } from '@/lib/mention-patterns'
+import { resolveSkillMentionName } from '@/lib/skill-mention-name'
+import { useSkillMentionNames } from '@/components/agent/SkillMentionNamesProvider'
 import { useAgentBrowserLink } from '@/components/browser/AgentBrowserLinkProvider'
 import type { HTMLAttributes, ComponentProps, ReactNode } from 'react'
 import type { FileAttachment } from '@proma/shared'
@@ -339,6 +341,12 @@ export function normalizeNamedReferenceDelimiters(markdown: string): string {
   }).join('\n')
 }
 
+/** 只有 Skill 标签订阅名称；文件、MCP 等引用不随 Skill 改名重渲染。 */
+function SkillMentionLabel({ slug }: { slug: string }): React.ReactElement {
+  const names = useSkillMentionNames()
+  return <>{resolveSkillMentionName(slug, names)}</>
+}
+
 function MentionChip({ type, value }: { type: MentionType; value: string }): React.ReactElement {
   const style = MENTION_STYLES[type]
   const Icon = style.icon
@@ -402,7 +410,7 @@ function MentionChip({ type, value }: { type: MentionType; value: string }): Rea
       title={type === 'file' || isNamedReference ? (label || referenceId) : undefined}
     >
       <Icon className="size-3 inline shrink-0" />
-      {display}
+      {type === 'skill' ? <SkillMentionLabel slug={decoded} /> : display}
     </span>
   )
 }
@@ -536,6 +544,7 @@ const MarkdownLink = React.memo(function MarkdownLink({
   ...linkProps
 }: React.AnchorHTMLAttributes<HTMLAnchorElement>): React.ReactElement {
   const agentBrowserLink = useAgentBrowserLink()
+  const contextBasePaths = React.useContext(BasePathsContext)
   // mention:// 协议 → 渲染为 MentionChip
   if (href) {
     const mentionMatch = MENTION_URL_RE.exec(href)
@@ -544,8 +553,8 @@ const MarkdownLink = React.memo(function MarkdownLink({
     }
 
     const filePath = safeDecode(href)
-    if (isAbsoluteFilePath(filePath)) {
-      return <FilePathChip filePath={filePath} />
+    if (isLocalFileReference(filePath)) {
+      return <FilePathChip filePath={filePath} basePaths={contextBasePaths} />
     }
   }
 
@@ -760,16 +769,22 @@ export const UserMessageContent = React.memo(
     const [shouldCollapse, setShouldCollapse] = React.useState(false)
     const contentRef = React.useRef<HTMLDivElement>(null)
 
-    // 检测内容是否超过阈值行数
+    // 观察内部自然高度而非带 max-height 的外壳，避免折叠动画触发测量反馈。
+    // 名称异步更新与容器宽度变化都可能改变换行；不需要订阅全局名称 Context。
     React.useEffect(() => {
-      if (!contentRef.current) return
-
       const element = contentRef.current
-      const lineHeight = parseFloat(getComputedStyle(element).lineHeight)
-      const maxHeight = lineHeight * COLLAPSE_LINE_THRESHOLD
+      const content = element?.firstElementChild
+      if (!element || !content) return
 
-      // scrollHeight 超过最大高度 + 容差时折叠
-      setShouldCollapse(element.scrollHeight > maxHeight + 10)
+      const measure = (): void => {
+        const lineHeight = parseFloat(getComputedStyle(element).lineHeight)
+        const maxHeight = lineHeight * COLLAPSE_LINE_THRESHOLD
+        setShouldCollapse(element.scrollHeight > maxHeight + 10)
+      }
+      measure()
+      const observer = new ResizeObserver(measure)
+      observer.observe(content)
+      return () => observer.disconnect()
     }, [children])
 
     const toggleExpand = React.useCallback(() => {

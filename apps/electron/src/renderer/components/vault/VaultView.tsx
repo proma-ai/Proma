@@ -11,6 +11,9 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } 
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { VaultLiveMarkdownEditor } from './VaultLiveMarkdownEditor'
+import { VaultNoteTitle } from './VaultNoteTitle'
+import { focusVaultBody } from './vault-title-focus'
+import { commitVaultTitle } from './vault-title-commit'
 import { useVaultScrollMemory } from './useVaultScrollMemory'
 import { getVaultScrollKey } from './vault-scroll-memory'
 import type { LiveMarkdownEditorHandle, LiveMarkdownTextSelection } from '@/components/markdown/LiveMarkdownEditor'
@@ -257,6 +260,11 @@ type VaultSaveResult =
   | { ok: false; reason: 'conflict' | 'error'; message?: string }
 
 type VaultEditorFlush = () => Promise<boolean>
+type VaultRename = (name: string, flush: VaultEditorFlush, shouldFocusBody?: () => boolean) => Promise<boolean>
+interface VaultBodyFocusRequest {
+  vaultId: string
+  relativePath: string
+}
 
 function VaultMarkdownEditor({
   readResult,
@@ -266,6 +274,8 @@ function VaultMarkdownEditor({
   onRename,
   onReload,
   onRegisterFlush,
+  bodyFocusRequest,
+  onBodyFocused,
   onOpenTutorial,
 }: {
   readResult: VaultReadResult
@@ -274,9 +284,11 @@ function VaultMarkdownEditor({
   /** 嵌入 Agent 右侧工作区时，用于接入 Agent 引用与右侧问答。 */
   sessionId?: string
   onSave: (request: VaultSaveRequest, options?: { silent?: boolean }) => Promise<VaultSaveResult>
-  onRename: (name: string) => Promise<void>
+  onRename: VaultRename
   onReload: () => void
   onRegisterFlush?: (flush: VaultEditorFlush | null) => void
+  bodyFocusRequest: VaultBodyFocusRequest | null
+  onBodyFocused: (request: VaultBodyFocusRequest) => void
   onOpenTutorial: () => void
 }): React.ReactElement {
   const documentController = React.useMemo(() => getVaultDocumentController(readResult, vaultId), [readResult.relativePath, vaultId])
@@ -286,7 +298,6 @@ function VaultMarkdownEditor({
     documentController.getSnapshot,
   )
   const { draft, saving, conflict: saveConflict } = documentSnapshot
-  const [filename, setFilename] = React.useState(displayDocumentTitle(readResult.relativePath.split('/').pop() ?? readResult.relativePath))
   const editorPageRef = React.useRef<HTMLDivElement>(null)
   const [selection, setSelection] = React.useState<VaultTextSelection | null>(null)
   const openSelectionChatPendingRef = React.useRef(false)
@@ -305,10 +316,27 @@ function VaultMarkdownEditor({
   // view, a right-workspace tab, or the open note does not jump back to the top.
   const editorHandleRef = React.useRef<LiveMarkdownEditorHandle | null>(null)
   const getEditorView = React.useCallback(() => editorHandleRef.current?.getView() ?? null, [])
-  const { onEditorReady: handleEditorReady, takeOver: takeOverScrollRestore } = useVaultScrollMemory({
+  const { onEditorReady: restoreEditorScroll, takeOver: takeOverScrollRestore } = useVaultScrollMemory({
     getView: getEditorView,
     storageKey: getVaultScrollKey(vaultId, readResult.relativePath, sessionId),
   })
+
+  const [editorReady, setEditorReady] = React.useState(false)
+  const handleEditorReady = React.useCallback(() => {
+    restoreEditorScroll()
+    setEditorReady(true)
+  }, [restoreEditorScroll])
+
+  React.useEffect(() => {
+    if (!editorReady || !bodyFocusRequest || bodyFocusRequest.vaultId !== vaultId
+      || bodyFocusRequest.relativePath !== readResult.relativePath) return
+    const view = getEditorView()
+    if (!view) return
+    // 显式编辑意图优先于历史阅读位置恢复；只操作实际挂载的实例。
+    takeOverScrollRestore()
+    focusVaultBody(view)
+    onBodyFocused(bodyFocusRequest)
+  }, [bodyFocusRequest, editorReady, getEditorView, onBodyFocused, readResult.relativePath, takeOverScrollRestore, vaultId])
 
   const clearSelection = React.useCallback(() => setSelection(null), [])
   const handleTextSelectionChange = React.useCallback((nextSelection: LiveMarkdownTextSelection | null) => {
@@ -445,15 +473,8 @@ function VaultMarkdownEditor({
     void flushPendingSave()
   }, [flushPendingSave])
 
-  const rename = async (): Promise<void> => {
-    const currentName = displayDocumentTitle(readResult.relativePath.split('/').pop() ?? readResult.relativePath)
-    if (!filename.trim() || filename.trim() === currentName) {
-      setFilename(currentName)
-      return
-    }
-    if (!await flushPendingSave()) return
-    await onRename(filename.trim())
-  }
+  const commitTitle = (name: string, shouldFocusBody?: () => boolean): Promise<boolean> =>
+    onRename(name, flushPendingSave, shouldFocusBody)
 
   const copyLocalDraft = async (): Promise<void> => {
     try {
@@ -473,19 +494,9 @@ function VaultMarkdownEditor({
     >
       <div className="mx-auto flex h-full w-full max-w-5xl flex-col px-5 py-5">
         <div className="vault-note-editor-titlebar mb-5 flex min-w-0 items-center gap-2">
-          <input
-            aria-label="重命名笔记"
-            value={filename}
-            onChange={(event) => setFilename(event.target.value)}
-            onBlur={() => { void rename() }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') event.currentTarget.blur()
-              if (event.key === 'Escape') {
-                setFilename(displayDocumentTitle(readResult.relativePath.split('/').pop() ?? readResult.relativePath))
-                event.currentTarget.blur()
-              }
-            }}
-            className="h-9 min-w-0 flex-1 bg-transparent px-0 text-2xl font-semibold leading-tight text-foreground outline-none placeholder:text-muted-foreground/50"
+          <VaultNoteTitle
+            title={displayDocumentTitle(readResult.relativePath.split('/').pop() ?? readResult.relativePath)}
+            onCommit={commitTitle}
           />
           {saveConflict && (
             <div className="flex shrink-0 items-center gap-1.5 text-xs text-destructive">
@@ -543,6 +554,8 @@ function VaultMarkdownPane({
   onRename,
   onReload,
   onRegisterFlush,
+  bodyFocusRequest,
+  onBodyFocused,
   onOpenTutorial,
 }: {
   readResult: VaultReadResult | null
@@ -552,9 +565,11 @@ function VaultMarkdownPane({
   hasVault: boolean
   reopenVersion: number
   onSave: (request: VaultSaveRequest, options?: { silent?: boolean }) => Promise<VaultSaveResult>
-  onRename: (name: string) => Promise<void>
+  onRename: VaultRename
   onReload: () => void
   onRegisterFlush: (flush: VaultEditorFlush | null) => void
+  bodyFocusRequest: VaultBodyFocusRequest | null
+  onBodyFocused: (request: VaultBodyFocusRequest) => void
   onOpenTutorial: () => void
 }): React.ReactElement {
   if (loading || !readResult || !vaultId) {
@@ -586,6 +601,8 @@ function VaultMarkdownPane({
           onRename={onRename}
           onReload={onReload}
           onRegisterFlush={onRegisterFlush}
+          bodyFocusRequest={bodyFocusRequest}
+          onBodyFocused={onBodyFocused}
           onOpenTutorial={onOpenTutorial}
         />
       </VaultContentErrorBoundary>
@@ -597,6 +614,32 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
   const vaultSidebarContentId = React.useId()
   const vaultSessionScope = getVaultSessionScope(sessionId)
   const [config, setConfig] = React.useState<VaultSummary | null>(null)
+  const mountedRef = React.useRef(true)
+  React.useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
+  const vaultIdRef = React.useRef(config?.vaultId)
+  vaultIdRef.current = config?.vaultId
+  const [bodyFocusRequest, setBodyFocusRequest] = React.useState<VaultBodyFocusRequest | null>(null)
+  const consumeBodyFocus = React.useCallback((request: VaultBodyFocusRequest) => {
+    setBodyFocusRequest((current) => current === request ? null : current)
+  }, [])
+  React.useEffect(() => {
+    if (!bodyFocusRequest) return
+    if (bodyFocusRequest.vaultId !== config?.vaultId) {
+      consumeBodyFocus(bodyFocusRequest)
+      return
+    }
+    // 新编辑器异步挂载期间用户已经转向其他控件，就不再抢回焦点。
+    const cancel = (): void => consumeBodyFocus(bodyFocusRequest)
+    window.addEventListener('pointerdown', cancel, true)
+    window.addEventListener('keydown', cancel, true)
+    return () => {
+      window.removeEventListener('pointerdown', cancel, true)
+      window.removeEventListener('keydown', cancel, true)
+    }
+  }, [bodyFocusRequest, config?.vaultId, consumeBodyFocus])
   const [candidates, setCandidates] = React.useState<VaultCandidate[]>([])
   const [vaultSwitcherOpen, setVaultSwitcherOpen] = React.useState(false)
   const [candidatesLoading, setCandidatesLoading] = React.useState(false)
@@ -629,6 +672,7 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
   // "opened note cannot be refreshed" error.
   const selectFile = React.useCallback((relativePath: string | null): void => {
     selectedFileRef.current = relativePath
+    setBodyFocusRequest(null)
     setSelectedFile(relativePath)
   }, [setSelectedFile])
   // Start from wall-clock time so a remounted workspace tab still supersedes an older IPC snapshot.
@@ -731,6 +775,9 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
           if (requestId === readRequestRef.current) {
             toast.error(error instanceof Error ? error.message : '无法刷新已打开的笔记')
           }
+        } finally {
+          // 刷新可能接管尚未完成的导航读取，也负责结束该请求的加载态。
+          if (requestId === readRequestRef.current) setFileLoading(false)
         }
       }
     } catch (error) {
@@ -935,23 +982,35 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
     }
   }, [setReadResult])
 
-  const rename = async (name: string): Promise<void> => {
-    if (!readResult) return
+  const rename: VaultRename = async (name, flush, shouldFocusBody) => {
+    if (!readResult || !config) return false
+    const vaultId = config.vaultId
+    const relativePath = readResult.relativePath
+    const isVaultCurrent = (): boolean => mountedRef.current && vaultIdRef.current === vaultId
     try {
-      // Re-read after the editor flushes so rename validates the revision that
-      // is actually on disk rather than a stale render snapshot.
-      const current = await window.electronAPI.readVaultFile(readResult.relativePath)
-      const renamed = await window.electronAPI.renameVaultFile({
-        relativePath: current.relativePath,
-        name,
-        expectedSha256: current.sha256,
+      const result = await commitVaultTitle({
+        name, title: displayDocumentTitle(relativePath.split('/').pop() ?? relativePath), relativePath, flush,
+        isVaultCurrent,
+        isNoteCurrent: () => selectedFileRef.current === relativePath,
+        read: (path) => window.electronAPI.readVaultFile(path),
+        rename: (input) => window.electronAPI.renameVaultFile(input),
       })
-      selectFile(renamed.relativePath)
-      setReadResult(renamed)
-      setRefreshToken((value) => value + 1)
-      toast.success('已重命名笔记')
+      if (!result || !isVaultCurrent()) return false
+      if (result.isNoteCurrent && selectedFileRef.current === relativePath) {
+        if (result.renamed) {
+          selectFile(result.renamed.relativePath)
+          setReadResult(result.renamed)
+        }
+        if (shouldFocusBody?.()) setBodyFocusRequest({ vaultId, relativePath: result.renamed?.relativePath ?? relativePath })
+      }
+      if (result.renamed) {
+        setRefreshToken((value) => value + 1)
+        toast.success('已重命名笔记')
+      }
+      return true
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : '无法重命名笔记')
+      if (isVaultCurrent()) toast.error(error instanceof Error ? error.message : '无法重命名笔记')
+      return false
     }
   }
 
@@ -1175,6 +1234,8 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
             onRename={rename}
             onReload={() => { if (readResult) void openFile(readResult.relativePath, { discardLocalDraft: true, forceReopen: true }) }}
             onRegisterFlush={registerEditorFlush}
+            bodyFocusRequest={bodyFocusRequest}
+            onBodyFocused={consumeBodyFocus}
             onOpenTutorial={() => setVaultHelpOpen(true)}
           />
         </div>

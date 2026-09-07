@@ -28,6 +28,7 @@ function PreviewPanelContent({ sessionId, file, onClose }: PreviewPanelProps): R
             previewOnly={file.previewOnly}
             readOnly={file.readOnly}
             basePaths={file.basePaths}
+            unrestricted={file.unrestricted}
             workspaceSkillSlug={file.workspaceSkillSlug}
             legacySkillFilePath={file.legacySkillFilePath}
             baseRef={file.baseRef}

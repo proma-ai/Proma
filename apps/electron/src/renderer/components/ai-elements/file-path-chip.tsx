@@ -27,6 +27,7 @@ import {
   isAbsoluteFilePath,
   isAsyncResultCurrent,
   isImageFilePath,
+  isLocalFileReference,
   isRelativeFilePath,
   stripLineCol,
 } from './file-path-chip-utils'
@@ -211,4 +212,4 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
   )
 }
 
-export { isAbsoluteFilePath, isImageFilePath, isRelativeFilePath }
+export { isAbsoluteFilePath, isImageFilePath, isLocalFileReference, isRelativeFilePath }

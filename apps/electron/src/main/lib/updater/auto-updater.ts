@@ -7,10 +7,12 @@
 
 import { autoUpdater } from 'electron-updater'
 import { BrowserWindow, app } from 'electron'
+import { join } from 'node:path'
 import type { UpdateStatus } from './updater-types'
 import { UPDATER_IPC_CHANNELS } from './updater-types'
 import { createIdleInstallScheduler } from './idle-install-scheduler'
 import { isNewerVersion } from './version'
+import { createUpdateCacheCleanup, getDefaultUpdaterBaseCacheDirectory, shouldDeferUpdateCacheCleanup } from './update-cache-cleanup'
 
 /** 当前更新状态 */
 let currentStatus: UpdateStatus = { status: 'idle' }
@@ -20,6 +22,9 @@ let win: BrowserWindow | null = null
 
 /** 定时检查定时器 */
 let checkInterval: ReturnType<typeof setInterval> | null = null
+
+/** 新版窗口稳定后执行的更新缓存清理定时器。 */
+let appliedUpdateCacheCleanupTimer: ReturnType<typeof setTimeout> | null = null
 
 /**
  * 已下载更新时仍会定期检查最新 Release。保留该快照可以在“更新源版本
@@ -32,6 +37,12 @@ let activeDownloadVersion: string | null = null
 
 /** 由 Agent 服务注入，覆盖所有窗口/后台 Agent 的运行状态。 */
 let hasActiveAgents = (): boolean => false
+
+/** 已安装更新包的延后清理：新版窗口稳定后才执行，避免安装链路中途删包。 */
+const APPLIED_UPDATE_CACHE_CLEANUP_DELAY_MS = 15_000
+/** Windows Defender、索引器等短暂占用缓存文件时的异步重试策略。 */
+const APPLIED_UPDATE_CACHE_CLEANUP_RETRY_DELAY_MS = 1_000
+const APPLIED_UPDATE_CACHE_CLEANUP_MAX_RETRIES = 2
 
 /**
  * 用户选择「空闲时更新」后，等待所有 Agent 结束再安装。
@@ -191,6 +202,10 @@ export function cleanupUpdater(): void {
     clearInterval(checkInterval)
     checkInterval = null
   }
+  if (appliedUpdateCacheCleanupTimer) {
+    clearTimeout(appliedUpdateCacheCleanupTimer)
+    appliedUpdateCacheCleanupTimer = null
+  }
   downloadedStatusDuringCheck = null
   activeDownloadVersion = null
   idleInstallScheduler.dispose()
@@ -203,6 +218,59 @@ export function cleanupUpdater(): void {
  */
 export function initAutoUpdater(mainWindow: BrowserWindow): void {
   configureUpdater(mainWindow)
+
+  const updateCacheCleanup = createUpdateCacheCleanup({
+    stateFilePath: join(app.getPath('userData'), 'updater-cache-state.json'),
+    baseCacheDirectory: getDefaultUpdaterBaseCacheDirectory(),
+  })
+
+  // 不在刚启动时立即删包：只有主窗口实际可展示且连续稳定 15 秒，才视为基础健康检查通过。
+  // Renderer 加载失败或进程崩溃时，保留安装包供重试与诊断；不以错误页的 did-finish-load 为健康信号。
+  let rendererFailedDuringHealthCheck = false
+  const cancelAppliedUpdateCacheCleanup = () => {
+    rendererFailedDuringHealthCheck = true
+    if (appliedUpdateCacheCleanupTimer) {
+      clearTimeout(appliedUpdateCacheCleanupTimer)
+      appliedUpdateCacheCleanupTimer = null
+    }
+  }
+  let cleanupRetryCount = 0
+  const runAppliedUpdateCacheCleanup = () => {
+    appliedUpdateCacheCleanupTimer = null
+    if (rendererFailedDuringHealthCheck || mainWindow.isDestroyed()) return
+    // pending 是 electron-updater 的共享下载目录；任何下载进行中都不能与清理并发。
+    if (shouldDeferUpdateCacheCleanup(activeDownloadVersion !== null, currentStatus.status === 'downloading')) {
+      console.log('[更新缓存] 有更新正在下载，跳过本次已安装包清理')
+      return
+    }
+    const result = updateCacheCleanup.cleanupForRunningVersion(app.getVersion())
+    if (result.status === 'skipped-unsafe') {
+      console.warn('[更新缓存] 跳过了未通过路径安全校验的缓存清理')
+    } else if (result.status === 'failed') {
+      if (cleanupRetryCount < APPLIED_UPDATE_CACHE_CLEANUP_MAX_RETRIES) {
+        cleanupRetryCount += 1
+        console.warn(`[更新缓存] 清理未完成，${APPLIED_UPDATE_CACHE_CLEANUP_RETRY_DELAY_MS / 1_000} 秒后重试（${cleanupRetryCount}/${APPLIED_UPDATE_CACHE_CLEANUP_MAX_RETRIES}）`)
+        appliedUpdateCacheCleanupTimer = setTimeout(runAppliedUpdateCacheCleanup, APPLIED_UPDATE_CACHE_CLEANUP_RETRY_DELAY_MS)
+      } else {
+        console.warn('[更新缓存] 缓存清理多次失败，将在下次启动时重试')
+      }
+    }
+  }
+  const cleanupAppliedUpdateCache = () => {
+    if (rendererFailedDuringHealthCheck || mainWindow.isDestroyed()) return
+    if (appliedUpdateCacheCleanupTimer) clearTimeout(appliedUpdateCacheCleanupTimer)
+    cleanupRetryCount = 0
+    appliedUpdateCacheCleanupTimer = setTimeout(runAppliedUpdateCacheCleanup, APPLIED_UPDATE_CACHE_CLEANUP_DELAY_MS)
+  }
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, _errorDescription, _validatedURL, isMainFrame) => {
+    if (isMainFrame && errorCode !== -3) cancelAppliedUpdateCacheCleanup()
+  })
+  mainWindow.webContents.once('render-process-gone', cancelAppliedUpdateCacheCleanup)
+  if (mainWindow.isVisible()) {
+    cleanupAppliedUpdateCache()
+  } else {
+    mainWindow.once('ready-to-show', cleanupAppliedUpdateCache)
+  }
 
   autoUpdater.logger = {
     info: (...args: unknown[]) => console.log('[更新-updater]', ...args),
@@ -263,6 +331,7 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
   autoUpdater.on('update-downloaded', (info) => {
     downloadedStatusDuringCheck = null
     activeDownloadVersion = null
+    updateCacheCleanup.recordDownloadedUpdate(info.version, info.downloadedFile)
     console.log('[更新] 下载完成:', info.version)
     setStatus({
       status: 'downloaded',
@@ -313,9 +382,14 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
 
   // 窗口关闭时清理定时器
   mainWindow.on('closed', () => {
+    cancelAppliedUpdateCacheCleanup()
     if (checkInterval) {
       clearInterval(checkInterval)
       checkInterval = null
+    }
+    if (appliedUpdateCacheCleanupTimer) {
+      clearTimeout(appliedUpdateCacheCleanupTimer)
+      appliedUpdateCacheCleanupTimer = null
     }
     downloadedStatusDuringCheck = null
     activeDownloadVersion = null

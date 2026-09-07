@@ -21,6 +21,8 @@ export interface PreviewFile {
   readOnly?: boolean
   /** 候选基础目录（用于相对路径解析） */
   basePaths?: string[]
+  /** 仅由用户在文件面板等可信 UI 中主动选择的外部文件可放宽预览范围。 */
+  unrestricted?: boolean
   /** Workspace slug for a relocatable managed Skill path. */
   workspaceSkillSlug?: string
   /** Original absolute Skill entry path used only when the managed locator cannot resolve. */

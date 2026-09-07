@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { CODEX_GPT_56_CONTEXT_WINDOW } from '@proma/shared'
 import {
   buildCodexModel,
   resolvePiApi,
@@ -85,7 +86,7 @@ describe('Codex Astra family fallback', () => {
     },
   } as never
 
-  test.each(['gpt-6-astra-1', 'gpt-6-astra-az', 'gpt-6-astral'])(
+  test.each(['gpt-6-astra-1', 'gpt-6-astra-az'])(
     'Given Pi catalog lacks %s When building a Codex model Then preserves the Astra request contract',
     async (modelId) => {
       const { model } = await buildCodexModel(sdkWithoutAstraCatalog, {
@@ -96,18 +97,21 @@ describe('Codex Astra family fallback', () => {
         id: modelId,
         api: 'openai-codex-responses',
         baseUrl: 'https://chatgpt.com/backend-api',
-        contextWindow: 1_000_000,
+        contextWindow: CODEX_GPT_56_CONTEXT_WINDOW,
         input: ['text', 'image'],
       })
     },
   )
 
-  test('Given a non-Astra prefix When building a Codex model Then rejects it', async () => {
-    await expect(buildCodexModel(sdkWithoutAstraCatalog, {
-      model: 'gpt-6-astro',
-      codexOAuthCredentials: credentials,
-    })).rejects.toThrow('未找到指定的 ChatGPT (Codex) 模型')
-  })
+  test.each(['gpt-6-astral', 'gpt-6-astrafoo', 'gpt-6-astra_', 'gpt-6-astra-', 'gpt-6-astro'])(
+    'Given non-Astra model %s When building a Codex model Then rejects it',
+    async (model) => {
+      await expect(buildCodexModel(sdkWithoutAstraCatalog, {
+        model,
+        codexOAuthCredentials: credentials,
+      })).rejects.toThrow('未找到指定的 ChatGPT (Codex) 模型')
+    },
+  )
 })
 
 describe('resolvePiApi', () => {

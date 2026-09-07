@@ -28,7 +28,7 @@ export const CODEX_GPT_56_CONTEXT_WINDOW = 372_000
  * provider catalog 决定，避免把不同 SKU 误写成同一窗口。
  */
 export function inferCodexAlignedGPT5ContextWindow(modelId: string | undefined): number | undefined {
-  if (isGpt6AstraFamily(modelId)) return ONE_MILLION_CONTEXT_WINDOW
+  if (isGpt6AstraFamily(modelId)) return CODEX_GPT_56_CONTEXT_WINDOW
 
   const model = modelId?.toLowerCase().replace(/\[1m\]$/i, '')
   switch (model) {
