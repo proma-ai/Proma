@@ -516,6 +516,8 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     openPreview(sessionId, {
       filePath,
       previewOnly: true,
+      // 文件面板是用户主动选择的入口，保留任意本地路径预览能力。
+      unrestricted: true,
       basePaths: bp.length > 0 ? bp : undefined,
     })
   }, [sessionId, openPreview])

@@ -80,8 +80,8 @@ export function getPreviewFileAccess(
 ): FileAccessOptions {
   return {
     sessionId,
-    // 与右侧文件面板一致：预览 Agent 实际操作过的外部路径不受附件白名单限制。
-    unrestricted: true,
+    // 仅用户主动从文件面板选中的外部文件可放宽范围；模型回复中的路径保持会话授权边界。
+    unrestricted: file.unrestricted === true,
     ...(file.workspaceSkillSlug ? { workspaceSkillSlug: file.workspaceSkillSlug } : {}),
     ...(file.legacySkillFilePath ? { legacySkillFilePath: file.legacySkillFilePath } : {}),
     candidateBasePaths: getPreviewCandidateBasePaths(

@@ -239,6 +239,8 @@ interface DiffTabContentProps {
   readOnly?: boolean
   /** 候选基础目录（previewOnly 模式下用于路径解析） */
   basePaths?: string[]
+  /** 仅可信 UI 主动选择的文件允许超出会话授权根。 */
+  unrestricted?: boolean
   /** Managed Skill workspace slug for a relocatable relative path. */
   workspaceSkillSlug?: string
   /** Original absolute Skill entry path used as a legacy fallback. */
@@ -251,7 +253,7 @@ interface DiffTabContentProps {
   baseRef?: string
 }
 
-export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewOnly, readOnly, basePaths, workspaceSkillSlug, legacySkillFilePath, onEmptyDiff, toolbarActions, baseRef }: DiffTabContentProps): React.ReactElement {
+export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewOnly, readOnly, basePaths, unrestricted, workspaceSkillSlug, legacySkillFilePath, onEmptyDiff, toolbarActions, baseRef }: DiffTabContentProps): React.ReactElement {
   const ext = getExtension(filePath)
   const isMarkdown = previewOnly && MD_EXTS.has(ext)
   const isHtml = previewOnly && HTML_EXTS.has(ext)
@@ -581,14 +583,14 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
 
   const fileAccess = React.useMemo(() => ({
     sessionId,
-    // 预览必须覆盖 Agent 实际操作的外部文件，与右侧文件面板保持一致。
-    unrestricted: true,
+    // 只有文件面板等可信 UI 明确标记的用户主动选择可放宽范围；模型回复中的 chip 默认受会话授权约束。
+    unrestricted: unrestricted === true,
     ...(workspaceSkillSlug ? { workspaceSkillSlug } : {}),
     ...(legacySkillFilePath ? { legacySkillFilePath } : {}),
     // 历史工具调用的预览仅有相对 filePath；以当前 dirPath（通常是会话 CWD）补全解析上下文。
     // 绝对路径不追加该回退，避免失效路径按同名文件误命中会话目录。
     candidateBasePaths: getPreviewCandidateBasePaths(basePaths, isAbsoluteFilePath(filePath) ? undefined : dirPath),
-  }), [sessionId, basePaths, dirPath, filePath, workspaceSkillSlug, legacySkillFilePath])
+  }), [sessionId, basePaths, dirPath, filePath, unrestricted, workspaceSkillSlug, legacySkillFilePath])
 
   const resolveProjectMarkdownImageSrc = React.useMemo(() => (
     createLiveMarkdownImageResolver(filePath, async (candidate) => (

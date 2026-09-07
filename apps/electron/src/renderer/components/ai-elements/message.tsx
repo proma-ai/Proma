@@ -39,7 +39,7 @@ import {
 import { LoadingIndicator } from '@/components/ui/loading-indicator'
 import { CodeBlock, MermaidBlock } from '@proma/ui'
 import { detectLanguage } from '@proma/core'
-import { FilePathChip, isAbsoluteFilePath, isImageFilePath, isRelativeFilePath } from './file-path-chip'
+import { FilePathChip, isAbsoluteFilePath, isImageFilePath, isLocalFileReference, isRelativeFilePath } from './file-path-chip'
 import { buildAgentHistoryQuoteLabel, parseAgentHistoryQuoteMention } from '@/lib/quoted-selection'
 import { createMentionPattern } from '@/lib/mention-patterns'
 import { useAgentBrowserLink } from '@/components/browser/AgentBrowserLinkProvider'
@@ -536,6 +536,7 @@ const MarkdownLink = React.memo(function MarkdownLink({
   ...linkProps
 }: React.AnchorHTMLAttributes<HTMLAnchorElement>): React.ReactElement {
   const agentBrowserLink = useAgentBrowserLink()
+  const contextBasePaths = React.useContext(BasePathsContext)
   // mention:// 协议 → 渲染为 MentionChip
   if (href) {
     const mentionMatch = MENTION_URL_RE.exec(href)
@@ -544,8 +545,8 @@ const MarkdownLink = React.memo(function MarkdownLink({
     }
 
     const filePath = safeDecode(href)
-    if (isAbsoluteFilePath(filePath)) {
-      return <FilePathChip filePath={filePath} />
+    if (isLocalFileReference(filePath)) {
+      return <FilePathChip filePath={filePath} basePaths={contextBasePaths} />
     }
   }
 

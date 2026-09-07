@@ -5,9 +5,9 @@
  * 供 PreviewPanel 内联面板使用。
  */
 
-import { basename, join, dirname, extname, resolve, posix as pathPosix } from 'node:path'
+import { basename, join, dirname, extname, resolve, relative, sep, isAbsolute as isAbsolutePath, posix as pathPosix } from 'node:path'
 import { readFileSync, readdirSync, statSync, mkdirSync, existsSync, writeFileSync, unlinkSync } from 'node:fs'
-import { tmpdir, homedir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { createRequire } from 'node:module'
@@ -85,101 +85,71 @@ export function cleanPreviewTmpDir(): number {
 // ─── 路径解析 ───
 
 /**
- * 在目录中递归搜索指定文件名
- */
-function searchFileInDir(dir: string, targetName: string, maxDepth = 8): string | null {
-  const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', '.next', '__pycache__', '.venv', 'build', '.cache', 'target'])
-  let scanned = 0
-  const MAX_SCANNED = 500
-
-  function walk(current: string, depth: number): string | null {
-    if (depth > maxDepth || scanned > MAX_SCANNED) return null
-    try {
-      const entries = readdirSync(current, { withFileTypes: true })
-      for (const entry of entries) {
-        if (entry.isFile() && entry.name === targetName) {
-          return join(current, entry.name)
-        }
-      }
-      for (const entry of entries) {
-        if (entry.isDirectory() && !SKIP_DIRS.has(entry.name) && !entry.name.startsWith('.')) {
-          scanned++
-          const found = walk(join(current, entry.name), depth + 1)
-          if (found) return found
-        }
-      }
-    } catch { /* permission denied etc */ }
-    return null
-  }
-
-  return walk(dir, 0)
-}
-
-/**
- * 解析待预览的文件路径
- * - 绝对路径：直接 resolve，不存在时 fallback 搜索
- * - 相对路径：依次尝试 basePaths，返回第一个存在的；都不存在则 fallback 搜索
+ * 解析待预览的文件路径。
+ *
+ * 仅按确定的候选根拼接，不扫描 home、根目录或同名文件。模型输出相对路径时，
+ * 「猜中一个同名文件」比明确提示找不到更危险；最终授权边界由 IPC 层 realpath 校验。
  */
 export function isAbsolutePreviewPath(filePath: string): boolean {
   return filePath.startsWith('/') || filePath.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(filePath)
 }
 
+function isWithinBasePath(candidate: string, basePath: string): boolean {
+  const relativePath = relative(resolve(basePath), candidate)
+  return relativePath === '' || (
+    relativePath !== '..'
+    && !relativePath.startsWith(`..${sep}`)
+    && !isAbsolutePath(relativePath)
+  )
+}
+
+function addCandidateWithinBase(candidates: string[], basePath: string, candidate: string): void {
+  if (!isWithinBasePath(candidate, basePath) || candidates.includes(candidate)) return
+  candidates.push(candidate)
+}
+
+function getRelativePathAfterBasePrefix(filePath: string, basePath: string): string[] | null {
+  const inputParts = filePath.replace(/\\/g, '/').split('/').filter((part) => part !== '' && part !== '.')
+  const baseParts = resolve(basePath).replace(/\\/g, '/').split('/').filter(Boolean)
+  if (inputParts.length === 0 || baseParts.length === 0) return null
+
+  // 输入可能省略了绝对路径前缀，但完整保留了候选根的末段，例如
+  // agent-workspaces/<workspace>/workspace-files/plan/report.md。仅当它严格包含
+  // 某个候选根的连续后缀时才恢复；不会探测祖先目录或按文件名搜索。
+  for (let start = 0; start < baseParts.length; start++) {
+    const baseSuffix = baseParts.slice(start)
+    if (inputParts.length <= baseSuffix.length) continue
+    if (baseSuffix.every((part, index) => part === inputParts[index])) {
+      return inputParts.slice(baseSuffix.length)
+    }
+  }
+  return null
+}
+
+function candidatePathsForRelativeFile(filePath: string, basePaths: readonly string[]): string[] {
+  const candidates: string[] = []
+  for (const basePath of basePaths) {
+    if (!basePath) continue
+    addCandidateWithinBase(candidates, basePath, resolve(basePath, filePath))
+
+    const relativeSuffix = getRelativePathAfterBasePrefix(filePath, basePath)
+    if (relativeSuffix) {
+      addCandidateWithinBase(candidates, basePath, resolve(basePath, ...relativeSuffix))
+    }
+  }
+  return candidates
+}
+
 export function resolveTargetPath(filePath: string, basePaths?: string[]): string {
-  if (isAbsolutePreviewPath(filePath)) {
-    const direct = resolve(filePath)
-    if (existsSync(direct)) return direct
-    const name = basename(direct)
-    if (basePaths) {
-      for (const base of basePaths) {
-        if (!base) continue
-        const found = searchFileInDir(base, name)
-        if (found) return found
-      }
-    }
-    const awIdx = filePath.indexOf('agent-workspaces')
-    if (awIdx !== -1) {
-      const wsRoot = filePath.slice(0, awIdx + 'agent-workspaces'.length)
-      if (existsSync(wsRoot)) {
-        const found = searchFileInDir(wsRoot, name)
-        if (found) return found
-      }
-    }
-    return direct
+  if (filePath.includes('\0')) return ''
+  if (isAbsolutePreviewPath(filePath)) return resolve(filePath)
+
+  const bases = basePaths?.filter(Boolean) ?? []
+  const candidates = candidatePathsForRelativeFile(filePath, bases)
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate
   }
-  if (basePaths && basePaths.length > 0) {
-    const firstSegment = filePath.split('/')[0]
-    if (firstSegment) {
-      for (const base of basePaths) {
-        if (!base) continue
-        if (basename(base) === firstSegment) {
-          const candidate = resolve(dirname(base), filePath)
-          if (existsSync(candidate)) return candidate
-        }
-      }
-    }
-    for (const base of basePaths) {
-      if (!base) continue
-      const candidate = resolve(base, filePath)
-      if (existsSync(candidate)) return candidate
-    }
-    const home = homedir()
-    const homeCandidate = resolve(home, filePath)
-    if (existsSync(homeCandidate)) return homeCandidate
-    const rootCandidate = resolve('/', filePath)
-    if (existsSync(rootCandidate)) return rootCandidate
-    const name = basename(filePath)
-    for (const base of basePaths) {
-      if (!base) continue
-      const found = searchFileInDir(base, name)
-      if (found) return found
-    }
-    return resolve(basePaths[0]!, filePath)
-  }
-  const homeCandidate = resolve(homedir(), filePath)
-  if (existsSync(homeCandidate)) return homeCandidate
-  const rootCandidate = resolve('/', filePath)
-  if (existsSync(rootCandidate)) return rootCandidate
-  return resolve(filePath)
+  return candidates[0] ?? ''
 }
 
 // ─── Office Open XML 预览 ───

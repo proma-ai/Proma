@@ -120,6 +120,7 @@ export function DetachedPreviewApp(): React.ReactElement {
             previewOnly={data.previewOnly}
             readOnly={data.readOnly}
             basePaths={data.basePaths}
+            unrestricted={data.unrestricted}
             workspaceSkillSlug={data.workspaceSkillSlug}
             legacySkillFilePath={data.legacySkillFilePath}
           />
