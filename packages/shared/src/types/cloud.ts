@@ -231,6 +231,8 @@ export interface CloudModelConfig {
   icon: string
   provider: string
   supportsReasoning?: boolean
+  /** Existing model metadata from the Cloud catalog; the desktop only reads modelListHint. */
+  metadata?: { modelListHint?: unknown } | null
   /** Global order for the official Chat model picker. Optional for API rollout compatibility. */
   chatSortOrder?: number
 }

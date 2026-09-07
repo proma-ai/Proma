@@ -276,6 +276,8 @@ export interface ChannelModel {
   name: string
   /** 是否启用 */
   enabled: boolean
+  /** Proma 官方模型选择器中紧接模型名称显示的简短说明。 */
+  modelListHint?: string
   /** 官方 Agent 模型的请求协议；未下发时兼容历史客户端的本地推断。 */
   apiProtocol?: 'anthropic-messages' | 'openai-responses'
   /** 官方 Agent 模型由 Admin 下发的上下文窗口；优先于本地模型 catalog。 */

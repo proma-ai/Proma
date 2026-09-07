@@ -7,6 +7,7 @@ const officialModels: ChannelModel[] = [
     id: 'deepseek-v4-flash',
     name: 'DeepSeek V4 Flash',
     enabled: true,
+    modelListHint: '日常任务 1×',
     apiProtocol: 'anthropic-messages',
     contextWindow: 1_000_000,
     maxOutputTokens: 640_000,

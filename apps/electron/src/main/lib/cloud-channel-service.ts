@@ -70,6 +70,11 @@ export function clearSystemKeyCache(): void {
 
 // ===== 模型转换 =====
 
+function getModelListHint(metadata: CloudModelGroup['models'][number]['metadata']): string | undefined {
+  const hint = metadata?.modelListHint
+  return typeof hint === 'string' && hint.trim() ? hint.trim() : undefined
+}
+
 /**
  * Flatten provider groups into the global Chat picker order. The Cloud API
  * remains grouped for compatibility, so the client applies chatSortOrder here.
@@ -94,11 +99,15 @@ function flattenModels(groups: CloudModelGroup[]): ChannelModel[] {
       if (typeof bOrder === 'number') return 1
       return a.sourceIndex - b.sourceIndex
     })
-    .map(({ model }) => ({
-      id: model.id,
-      name: model.name,
-      enabled: true,
-    }))
+    .map(({ model }) => {
+      const modelListHint = getModelListHint(model.metadata)
+      return {
+        id: model.id,
+        name: model.name,
+        enabled: true,
+        ...(modelListHint ? { modelListHint } : {}),
+      }
+    })
 }
 
 // ===== 广播 =====
@@ -120,6 +129,7 @@ interface AgentModelItem {
   contextWindow?: number
   maxInputTokens?: number
   maxOutputTokens?: number
+  modelListHint?: string
 }
 
 /**
@@ -155,6 +165,9 @@ export async function fetchAndSyncAgentModels(): Promise<void> {
       ...(item.contextWindow ? { contextWindow: item.contextWindow } : {}),
       ...(item.maxInputTokens ? { maxInputTokens: item.maxInputTokens } : {}),
       ...(item.maxOutputTokens ? { maxOutputTokens: item.maxOutputTokens } : {}),
+      ...(typeof item.modelListHint === 'string' && item.modelListHint.trim()
+        ? { modelListHint: item.modelListHint.trim() }
+        : {}),
     }))
 
     // A successful empty response must clear stale local Agent models; only

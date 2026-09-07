@@ -44,6 +44,9 @@ import { getModelSelectorOptionVisualState } from './model-selector-visual-state
 const MODEL_SELECTOR_ROW_LAYOUT =
   'mx-1 grid w-[calc(100%-0.5rem)] grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-x-2 px-3'
 
+const OFFICIAL_MODEL_RATE_NOTE =
+  '倍率以官方原价的 DeepSeek v4 Pro = 1x 为参考；经过后台的长期统计计算出其他模型的消耗速率，实际消耗以真实日志显示为准。'
+
 interface ModelSelectorListIconProps {
   src: string
   imageClassName?: string
@@ -98,6 +101,7 @@ export function buildModelOptions(
         channelName: channel.name,
         modelId: model.id,
         modelName: model.name,
+        ...(model.modelListHint ? { modelListHint: model.modelListHint } : {}),
         provider: channel.provider,
       })
     }
@@ -437,11 +441,21 @@ export function ModelSelector({
                           <ModelSelectorListIcon
                             src={getModelLogo(option.modelId, option.provider)}
                           />
-                          <span className={cn(
-                            'min-w-0 truncate text-sm',
-                            isSelected ? 'font-medium text-foreground' : 'text-foreground/80',
-                          )}>
-                            {option.modelName}
+                          <span className="flex min-w-0 items-baseline gap-1.5 overflow-hidden">
+                            <span className={cn(
+                              'shrink-0 text-sm',
+                              isSelected ? 'font-medium text-foreground' : 'text-foreground/80',
+                            )}>
+                              {option.modelName}
+                            </span>
+                            {option.channelId === PROMA_OFFICIAL_CHANNEL_ID && option.modelListHint ? (
+                              <span
+                                className="min-w-0 truncate text-xs text-muted-foreground"
+                                title={option.modelListHint}
+                              >
+                                {option.modelListHint}
+                              </span>
+                            ) : null}
                           </span>
                           <span className="flex size-5 items-center justify-center justify-self-end" aria-hidden="true">
                             {isSelected ? <Check className="size-4 text-primary" strokeWidth={2.5} /> : null}
@@ -449,6 +463,11 @@ export function ModelSelector({
                         </button>
                       )
                     })}
+                    {channelId === PROMA_OFFICIAL_CHANNEL_ID ? (
+                      <p className="px-4 pb-2 pt-1 text-[10px] leading-relaxed text-muted-foreground/80">
+                        {OFFICIAL_MODEL_RATE_NOTE}
+                      </p>
+                    ) : null}
                   </div>
                 )
               })

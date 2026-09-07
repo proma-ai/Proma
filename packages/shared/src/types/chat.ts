@@ -393,6 +393,8 @@ export interface ModelOption {
   modelId: string
   /** 模型显示名称 */
   modelName: string
+  /** Proma 官方模型选择器中显示的可选简短说明。 */
+  modelListHint?: string
   /** AI 供应商类型 */
   provider: ProviderType
 }
