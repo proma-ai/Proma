@@ -14,6 +14,7 @@ import type {
   AgentThinkingLevel,
   AgentProviderAdapter,
   CodexOAuthCredentials,
+  GithubCopilotOAuthCredentials,
   XaiOAuthCredentials,
   AgentQueryInput,
   JsonSchemaOutputFormat,
@@ -170,6 +171,10 @@ export interface PiAgentQueryOptions extends AgentQueryInput {
   codexOAuthCredentials?: CodexOAuthCredentials
   /** Pi 运行中刷新 OAuth 后，将新凭据回写到 Proma 渠道存储。 */
   onCodexOAuthCredentialsRefreshed?: (credentials: CodexOAuthCredentials) => void | Promise<void>
+  /** GitHub Copilot OAuth credential store 使用真实 expires、模型策略和 refresh，不读取 ~/.pi。 */
+  githubCopilotOAuthCredentials?: GithubCopilotOAuthCredentials
+  /** Pi 运行中刷新 GitHub Copilot OAuth 后，将新凭据及模型策略回写到 Proma 渠道存储。 */
+  onGithubCopilotOAuthCredentialsRefreshed?: (credentials: GithubCopilotOAuthCredentials) => void | Promise<void>
   /** xAI OAuth credential store 使用真实 expires 和 refresh，不读取 ~/.pi。 */
   xaiOAuthCredentials?: XaiOAuthCredentials
   /** Pi 运行中刷新 xAI OAuth 后，将新凭据回写到 Proma 渠道存储。 */

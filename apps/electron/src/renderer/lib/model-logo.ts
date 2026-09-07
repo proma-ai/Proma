@@ -109,6 +109,9 @@ import MiniMaxLogo from '@/assets/models/minimax.png'
 // Xiaomi / MiMo
 import XiaomiLogo from '@/assets/models/xiaomi.png'
 
+// GitHub / Copilot
+import GitHubLogo from '@/assets/models/github.svg'
+
 // Proma
 import PromaLogo from '@/assets/models/proma.png'
 
@@ -258,6 +261,7 @@ const PROVIDER_LOGO_MAP: Record<ProviderType, string> = {
   xiaomi: XiaomiLogo,
   'xiaomi-token-plan': XiaomiLogo,
   'openai-codex': OpenAILogo,
+  'github-copilot': GitHubLogo,
   xai: GrokLogo,
   custom: DefaultLogo,
 }

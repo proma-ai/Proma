@@ -191,10 +191,11 @@ import {
   getChannelPlanQuota,
 } from './lib/channel-manager'
 import { loginCodexOAuth, cancelCodexOAuthLogin } from './lib/codex-oauth-service'
+import { loginGithubCopilotOAuth, cancelGithubCopilotOAuthLogin } from './lib/github-copilot-oauth-service'
 import { loginXaiOAuth, cancelXaiOAuthLogin } from './lib/xai-oauth-service'
 import { resolvePiReasoningCapability } from './lib/adapters/pi-model-registry'
-import { serializeCodexCredentials, serializeXaiCredentials } from '@proma/shared'
-import type { CodexOAuthDeviceCode, CodexOAuthLoginMethod, XaiOAuthDeviceCode } from '@proma/shared'
+import { serializeCodexCredentials, serializeGithubCopilotCredentials, serializeXaiCredentials } from '@proma/shared'
+import type { CodexOAuthDeviceCode, CodexOAuthLoginMethod, GithubCopilotOAuthDeviceCode, XaiOAuthDeviceCode } from '@proma/shared'
 import {
   listConversations,
   createConversation,
@@ -1384,7 +1385,7 @@ function releaseAttachedFileWatchers(filePaths: readonly string[] | undefined): 
   }
 }
 
-async function withOAuthDeviceCodeQr<T extends CodexOAuthDeviceCode | XaiOAuthDeviceCode>(deviceCode: T): Promise<T> {
+async function withOAuthDeviceCodeQr<T extends CodexOAuthDeviceCode | GithubCopilotOAuthDeviceCode | XaiOAuthDeviceCode>(deviceCode: T): Promise<T> {
   try {
     const QRCode = (await import('qrcode')).default
     return { ...deviceCode, qrCodeData: await QRCode.toDataURL(deviceCode.verificationUri, { width: 240, margin: 1 }) }
@@ -1830,6 +1831,36 @@ export function registerIpcHandlers(): void {
     async (): Promise<void> => {
       cancelCodexOAuthLogin()
     }
+  )
+
+  // 发起 GitHub Copilot OAuth device-code 登录。Pi 在完成授权后会同步当前订阅和
+  // 组织策略可用的模型；成功后的凭据沿用 Channel.apiKey 加密存储。
+  ipcMain.handle(
+    CHANNEL_IPC_CHANNELS.GITHUB_COPILOT_OAUTH_LOGIN,
+    async (event, enterpriseUrl?: string): Promise<import('@proma/shared').GithubCopilotOAuthLoginResult> => {
+      try {
+        const credentials = await loginGithubCopilotOAuth({
+          enterpriseUrl,
+          onDeviceCode: (deviceCode) => {
+            void withOAuthDeviceCodeQr(deviceCode).then((payload) => {
+              if (!event.sender.isDestroyed()) {
+                event.sender.send(CHANNEL_IPC_CHANNELS.GITHUB_COPILOT_OAUTH_DEVICE_CODE, payload)
+              }
+            }).catch((error) => console.warn('[OAuth] 发送 GitHub Copilot device code 失败:', error))
+          },
+        })
+        return { success: true, credentials: serializeGithubCopilotCredentials(credentials) }
+      } catch (error) {
+        return { success: false, message: error instanceof Error ? error.message : String(error) }
+      }
+    },
+  )
+
+  ipcMain.handle(
+    CHANNEL_IPC_CHANNELS.GITHUB_COPILOT_OAUTH_CANCEL,
+    async (): Promise<void> => {
+      cancelGithubCopilotOAuthLogin()
+    },
   )
 
   // 发起 xAI（Grok/X 订阅）OAuth device-code 登录。Pi 会通过 device-code 事件给出

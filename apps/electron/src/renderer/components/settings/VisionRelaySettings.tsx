@@ -63,7 +63,7 @@ export function VisionRelaySettings(): React.ReactElement {
           >
             <ModelSelector
               externalSelectedModel={selectedModel}
-              excludedProviders={['openai-codex', 'xai']}
+              excludedProviders={['openai-codex', 'github-copilot', 'xai']}
               showChannelInTrigger
               onModelSelect={(model) => void save({
                 enabled: settings.enabled,

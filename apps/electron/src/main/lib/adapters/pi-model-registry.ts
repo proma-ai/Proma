@@ -16,6 +16,7 @@ import {
   resolveReasoningCapability,
   resolveReasoningProfile,
   type CodexOAuthCredentials,
+  type GithubCopilotOAuthCredentials,
   type XaiOAuthCredentials,
   type ReasoningCapability,
   type ReasoningTransport,
@@ -172,6 +173,13 @@ export interface XaiModelInput {
   onXaiOAuthCredentialsRefreshed?: (credentials: XaiOAuthCredentials) => void | Promise<void>
 }
 
+/** Pi 内置 GitHub Copilot provider 所需的最小模型与 OAuth 输入。 */
+export interface GithubCopilotModelInput {
+  model?: string
+  githubCopilotOAuthCredentials?: GithubCopilotOAuthCredentials
+  onGithubCopilotOAuthCredentialsRefreshed?: (credentials: GithubCopilotOAuthCredentials) => void | Promise<void>
+}
+
 function createCodexRuntimeCredentialStore(
   initial: CodexOAuthCredentials,
   onRefreshed?: PiAgentQueryOptions['onCodexOAuthCredentialsRefreshed'],
@@ -209,6 +217,52 @@ function createCodexRuntimeCredentialStore(
     },
     async delete(providerId: string): Promise<void> {
       if (providerId === 'openai-codex') credential = undefined
+    },
+  }
+}
+
+type GithubCopilotRuntimeCredential = GithubCopilotOAuthCredentials & {
+  type: 'oauth'
+  [key: string]: unknown
+}
+
+function createGithubCopilotRuntimeCredentialStore(
+  initial: GithubCopilotOAuthCredentials,
+  onRefreshed?: PiAgentQueryOptions['onGithubCopilotOAuthCredentialsRefreshed'],
+) {
+  let credential: GithubCopilotRuntimeCredential | undefined = { type: 'oauth', ...initial }
+
+  return {
+    async read(providerId: string): Promise<GithubCopilotRuntimeCredential | undefined> {
+      return providerId === 'github-copilot' ? credential : undefined
+    },
+    async list(): Promise<readonly { providerId: string; type: 'oauth' }[]> {
+      return credential ? [{ providerId: 'github-copilot', type: 'oauth' }] : []
+    },
+    async modify(
+      providerId: string,
+      fn: (current: GithubCopilotRuntimeCredential | undefined) => Promise<GithubCopilotRuntimeCredential | undefined>,
+    ): Promise<GithubCopilotRuntimeCredential | undefined> {
+      if (providerId !== 'github-copilot') return undefined
+      const previous = credential
+      credential = await fn(credential)
+      if (credential && (
+        previous?.access !== credential.access
+        || previous?.refresh !== credential.refresh
+        || previous?.expires !== credential.expires
+        || previous?.enterpriseUrl !== credential.enterpriseUrl
+        || JSON.stringify(previous?.availableModelIds) !== JSON.stringify(credential.availableModelIds)
+      )) {
+        try {
+          await onRefreshed?.(credential)
+        } catch (error) {
+          console.warn('[Pi GitHub Copilot OAuth] 刷新后的凭据回写失败，将在下次执行前重试:', error)
+        }
+      }
+      return credential
+    },
+    async delete(providerId: string): Promise<void> {
+      if (providerId === 'github-copilot') credential = undefined
     },
   }
 }
@@ -498,6 +552,9 @@ async function findPiCatalogModel(provider: ProviderType, modelId: string): Prom
   }
   if (provider === 'xai') {
     return findCatalogModelById(await getXaiCatalogModels(), modelId)
+  }
+  if (provider === 'github-copilot') {
+    return findCatalogModelById(await getGithubCopilotCatalogModels(), modelId)
   }
 
   const preferredProviders = candidatePiProviders(provider)
@@ -854,12 +911,54 @@ export async function listXaiModels(): Promise<{ id: string; name: string }[]> {
   return (await getXaiCatalogModels()).map((m) => ({ id: m.id, name: m.name }))
 }
 
+export async function getGithubCopilotCatalogModels(): Promise<PiCatalogModel[]> {
+  const { getModels } = await loadPiAiCompat()
+  return [...getModels('github-copilot')]
+}
+
+/**
+ * GitHub Copilot 的模型可见性由订阅套餐、组织策略和已启用模型决定。
+ * 因此必须用携带凭据的 ModelRuntime 读取过滤后的目录，不能退回全量 catalog。
+ */
+export async function buildGithubCopilotModel(sdk: PiSdk, input: GithubCopilotModelInput) {
+  if (!input.githubCopilotOAuthCredentials) {
+    throw new Error('GitHub Copilot 登录凭据无效或缺失，请重新登录')
+  }
+  const modelRuntime = await sdk.ModelRuntime.create({
+    credentials: createGithubCopilotRuntimeCredentialStore(
+      input.githubCopilotOAuthCredentials,
+      input.onGithubCopilotOAuthCredentialsRefreshed,
+    ),
+    allowModelNetwork: false,
+  })
+  const resolvedModelId = stripLegacyAgentSdkContextSuffix(input.model)
+  const availableModels = await modelRuntime.getAvailable('github-copilot')
+  const model = resolvedModelId
+    ? availableModels.find((candidate) => candidate.id === resolvedModelId)
+    : availableModels[0]
+  if (!model) {
+    if (resolvedModelId) throw new Error(`GitHub Copilot 当前订阅不支持模型: ${resolvedModelId}`)
+    throw new Error('未找到可用的 GitHub Copilot 模型，请确认订阅已授权且至少启用一个模型')
+  }
+  return { modelRuntime, model }
+}
+
+/** 列出当前 GitHub Copilot 凭据实际允许使用的模型。 */
+export async function listGithubCopilotModels(credentials: GithubCopilotOAuthCredentials): Promise<{ id: string; name: string }[]> {
+  const sdk = await import('@earendil-works/pi-coding-agent')
+  const { modelRuntime } = await buildGithubCopilotModel(sdk, { githubCopilotOAuthCredentials: credentials })
+  return (await modelRuntime.getAvailable('github-copilot')).map((model) => ({ id: model.id, name: model.name }))
+}
+
 export async function buildModel(sdk: PiSdk, input: PiAgentQueryOptions) {
   if (input.provider === 'openai-codex') {
     return buildCodexModel(sdk, input)
   }
   if (input.provider === 'xai') {
     return buildXaiModel(sdk, input)
+  }
+  if (input.provider === 'github-copilot') {
+    return buildGithubCopilotModel(sdk, input)
   }
   const providerName = `proma-${input.provider}-${input.sessionId}`
   const resolvedApiKey = resolvePiApiKey(input.provider, input.apiKey)

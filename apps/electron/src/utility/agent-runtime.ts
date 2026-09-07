@@ -190,6 +190,10 @@ function handleQueryStart(request: RuntimeRequest): void {
       AGENT_RUNTIME_METHODS.CAPABILITY_CODEX_OAUTH_REFRESHED,
       { queryId, sessionId, credentials },
     ),
+    onGithubCopilotOAuthCredentialsRefreshed: (credentials: unknown) => requestParent(
+      AGENT_RUNTIME_METHODS.CAPABILITY_GITHUB_COPILOT_OAUTH_REFRESHED,
+      { queryId, sessionId, credentials },
+    ),
     onXaiOAuthCredentialsRefreshed: (credentials: unknown) => requestParent(
       AGENT_RUNTIME_METHODS.CAPABILITY_XAI_OAUTH_REFRESHED,
       { queryId, sessionId, credentials },

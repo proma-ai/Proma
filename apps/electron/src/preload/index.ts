@@ -337,6 +337,15 @@ export interface ElectronAPI {
   /** 订阅登录期间，接收 Codex device code 与授权链接。返回取消订阅函数。 */
   onCodexOAuthDeviceCode: (callback: (deviceCode: import('@proma/shared').CodexOAuthDeviceCode) => void) => () => void
 
+  /** 发起 GitHub Copilot device-code OAuth 登录。enterpriseUrl 为空时登录 github.com。 */
+  githubCopilotOAuthLogin: (enterpriseUrl?: string) => Promise<import('@proma/shared').GithubCopilotOAuthLoginResult>
+
+  /** 取消进行中的 GitHub Copilot OAuth 登录 */
+  githubCopilotOAuthCancel: () => Promise<void>
+
+  /** 订阅登录期间，接收 GitHub Copilot device code 与授权链接。 */
+  onGithubCopilotOAuthDeviceCode: (callback: (deviceCode: import('@proma/shared').GithubCopilotOAuthDeviceCode) => void) => () => void
+
   /** 发起 xAI（Grok/X 订阅）OAuth 登录 */
   xaiOAuthLogin: () => Promise<XaiOAuthLoginResult>
 
@@ -1560,6 +1569,20 @@ const electronAPI: ElectronAPI = {
     const listener = (_event: Electron.IpcRendererEvent, deviceCode: import('@proma/shared').CodexOAuthDeviceCode) => callback(deviceCode)
     ipcRenderer.on(CHANNEL_IPC_CHANNELS.CODEX_OAUTH_DEVICE_CODE, listener)
     return () => ipcRenderer.removeListener(CHANNEL_IPC_CHANNELS.CODEX_OAUTH_DEVICE_CODE, listener)
+  },
+
+  githubCopilotOAuthLogin: (enterpriseUrl?: string) => {
+    return ipcRenderer.invoke(CHANNEL_IPC_CHANNELS.GITHUB_COPILOT_OAUTH_LOGIN, enterpriseUrl)
+  },
+
+  githubCopilotOAuthCancel: () => {
+    return ipcRenderer.invoke(CHANNEL_IPC_CHANNELS.GITHUB_COPILOT_OAUTH_CANCEL)
+  },
+
+  onGithubCopilotOAuthDeviceCode: (callback: (deviceCode: import('@proma/shared').GithubCopilotOAuthDeviceCode) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, deviceCode: import('@proma/shared').GithubCopilotOAuthDeviceCode) => callback(deviceCode)
+    ipcRenderer.on(CHANNEL_IPC_CHANNELS.GITHUB_COPILOT_OAUTH_DEVICE_CODE, listener)
+    return () => ipcRenderer.removeListener(CHANNEL_IPC_CHANNELS.GITHUB_COPILOT_OAUTH_DEVICE_CODE, listener)
   },
 
   xaiOAuthLogin: () => {
