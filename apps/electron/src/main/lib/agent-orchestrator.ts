@@ -2040,8 +2040,9 @@ export class AgentOrchestrator {
             return
           }
 
-          // Plan 模式：Agent 完成规划后注入"接受计划"建议
-          if (initialPermissionMode === 'plan' && planModeEntered && this.activeSessions.has(sessionId)) {
+          // Plan 模式：仅本地会话在规划完成后注入“接受计划”建议。
+          // 外部 Bridge（例如 Slack）已在其所属渠道提供审批交互，不能在桌面输入框留下残留草稿。
+          if (input.triggeredBy !== 'external' && initialPermissionMode === 'plan' && planModeEntered && this.activeSessions.has(sessionId)) {
             this.eventBus.emit(sessionId, {
               kind: 'sdk_message',
               message: { type: 'prompt_suggestion', suggestion: '请执行该计划' } as unknown as SDKMessage,

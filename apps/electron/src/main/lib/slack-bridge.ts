@@ -644,8 +644,10 @@ export class SlackBridge {
       throw new Error('请先在 Proma 设置中选择有效的默认项目')
     }
     const channelIdForModel = this.botConfig.defaultChannelId ?? settings.agentChannelId ?? ''
+    // 使用默认标题，让首条 Slack 消息走 Agent 编排器的统一自动命名流程，
+    // 而不是长期显示实现细节（频道 ID 与 thread timestamp）。
     const session = createAgentSession(
-      `Slack · ${incoming.channelId} · ${rootThreadTs}`,
+      undefined,
       channelIdForModel,
       workspaceId,
       this.botConfig.defaultModelId ?? settings.agentModelId,
