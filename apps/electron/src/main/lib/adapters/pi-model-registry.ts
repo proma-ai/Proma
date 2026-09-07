@@ -59,8 +59,8 @@ const VOLCENGINE_GLM_MAX_TOKENS = 128_000
 const GLM_53_FAMILY_MAX_TOKENS = 131_072
 const CODEX_BASE_URL = 'https://chatgpt.com/backend-api'
 const CODEX_MAX_TOKENS = 128_000
-// GPT-6 Astra 按 1M 上下文声明，与 Proma 共享上下文推断保持一致。
-const CODEX_GPT_6_ASTRA_CONTEXT_WINDOW = 1_000_000
+// GPT-6 Astra 与 GPT-5.6 系列统一按 372K 上下文注册。
+const CODEX_GPT_6_ASTRA_CONTEXT_WINDOW = CODEX_GPT_56_CONTEXT_WINDOW
 /**
  * 将 Codex 已标记的 GPT-5.x 上下文窗口外推到同名第三方模型。
  *
