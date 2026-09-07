@@ -449,16 +449,20 @@ export function ModelSelector({
                           <ModelSelectorListIcon
                             src={getModelLogo(option.modelId, option.provider)}
                           />
-                          <span className="flex min-w-0 items-baseline gap-1.5 overflow-hidden">
-                            <span className={cn(
-                              'shrink-0 text-sm',
-                              isSelected ? 'font-medium text-foreground' : 'text-foreground/80',
-                            )}>
+                          {/* 固定模型名列，避免不同长度的模型名让官方说明参差不齐。 */}
+                          <span className="grid min-w-0 grid-cols-[minmax(8rem,0.85fr)_minmax(0,1.15fr)] items-baseline gap-x-2.5 overflow-hidden">
+                            <span
+                              className={cn(
+                                'min-w-0 truncate text-sm',
+                                isSelected ? 'font-medium text-foreground' : 'text-foreground/80',
+                              )}
+                              title={option.modelName}
+                            >
                               {option.modelName}
                             </span>
                             {option.channelId === PROMA_OFFICIAL_CHANNEL_ID && option.modelListHint ? (
                               <span
-                                className="min-w-0 truncate text-xs text-muted-foreground"
+                                className="min-w-0 truncate text-right text-xs text-muted-foreground"
                                 title={option.modelListHint}
                               >
                                 {option.modelListHint}
