@@ -10,6 +10,7 @@ import { useSetAtom } from 'jotai'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { PasswordInput } from './PasswordInput'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { LegalAgreement } from './LegalAgreement'
 import {
@@ -162,9 +163,8 @@ export function RegisterPage(): React.ReactElement {
 
         <div className="space-y-2">
           <Label htmlFor="password">密码</Label>
-          <Input
+          <PasswordInput
             id="password"
-            type="password"
             placeholder="8-20位，含大小写字母和数字"
             maxLength={20}
             value={password}
@@ -175,9 +175,8 @@ export function RegisterPage(): React.ReactElement {
 
         <div className="space-y-2">
           <Label htmlFor="confirmPassword">确认密码</Label>
-          <Input
+          <PasswordInput
             id="confirmPassword"
-            type="password"
             placeholder="再次输入密码"
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}

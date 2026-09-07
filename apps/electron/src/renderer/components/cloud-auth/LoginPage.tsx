@@ -10,6 +10,7 @@ import { useSetAtom } from 'jotai'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { PasswordInput } from './PasswordInput'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { LegalAgreement } from './LegalAgreement'
 import {
@@ -149,9 +150,8 @@ export function LoginPage(): React.ReactElement {
               忘记密码？
             </button>
           </div>
-          <Input
+          <PasswordInput
             id="password"
-            type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             disabled={loading}
