@@ -47,6 +47,7 @@ import { isSessionNotFoundError } from './error-patterns'
 import { isPromaBillingErrorText } from './proma-billing-error'
 import { getPromaCloudRecoveryAction } from './proma-cloud-recovery'
 import { AgentEventBus } from './agent-event-bus'
+import { createAgentTurnId } from './agent-turn-id'
 import { isStaleActiveQueueError } from './agent-queue-routing'
 import { decryptApiKey, getChannelById, listChannels, persistCodexOAuthCredentials, persistXaiOAuthCredentials, resolveChannelRuntimeApiKey, resolveCodexOAuthCredentials, resolveXaiOAuthCredentials } from './channel-manager'
 import { getAdapter, fetchTitle } from '@proma/core'
@@ -1675,9 +1676,11 @@ export class AgentOrchestrator {
         })
       }
       const piCustomTools = [...piBuiltinTools, ...piMcpTools, ...(extensions.piCustomTools ?? [])]
-      // This is an opaque correlation key, not a credential. Official Cloud
-      // records it on every model-loop request to aggregate actual deductions.
-      const agentTurnId = channel.id === PROMA_OFFICIAL_CHANNEL_ID ? `${sessionId}:${runGeneration}` : undefined
+      // This opaque correlation key is shared by all model-loop requests in
+      // this outer run. It must not use a session-local counter: that counter
+      // resets when Electron's main process restarts, which would otherwise
+      // merge unrelated historical ledger entries under one turn ID.
+      const agentTurnId = channel.id === PROMA_OFFICIAL_CHANNEL_ID ? createAgentTurnId() : undefined
       const queryOptions: PiAgentQueryOptions = {
         sessionId,
         prompt: finalPrompt,
