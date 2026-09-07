@@ -45,7 +45,7 @@ const MODEL_SELECTOR_ROW_LAYOUT =
   'mx-1 grid w-[calc(100%-0.5rem)] grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-x-2 px-3'
 
 const OFFICIAL_MODEL_RATE_NOTE =
-  '倍率以官方原价的 DeepSeek v4 Pro = 1x 为参考；经过后台的长期统计计算出其他模型的消耗速率，实际消耗以真实日志显示为准。'
+  '消耗速率以官方原价的 DeepSeek v4 Pro = 1x 为参考；经过后台的长期统计计算出其他模型的消耗速率，更贴近真实使用体验，实际消耗以真实日志显示为准。'
 
 interface ModelSelectorListIconProps {
   src: string
