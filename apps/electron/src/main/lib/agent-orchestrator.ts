@@ -20,7 +20,7 @@ import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 import { app } from 'electron'
-import type { AgentSendInput, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, AgentSessionMeta, AgentActiveSessionSnapshot, CodexOAuthCredentials, XaiOAuthCredentials, TypedError, SDKMessage, SDKAssistantMessage, AgentStreamPayload, AgentAssistantDeltaPayload, RewindSessionResult, SkillActivation } from '@proma/shared'
+import type { AgentSendInput, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, AgentSessionMeta, AgentActiveSessionSnapshot, CodexOAuthCredentials, GithubCopilotOAuthCredentials, XaiOAuthCredentials, TypedError, SDKMessage, SDKAssistantMessage, AgentStreamPayload, AgentAssistantDeltaPayload, RewindSessionResult, SkillActivation } from '@proma/shared'
 import {
   PROMA_DEFAULT_PERMISSION_MODE,
   PROMA_OFFICIAL_CHANNEL_ID,
@@ -50,7 +50,7 @@ import { getPromaCloudRecoveryAction } from './proma-cloud-recovery'
 import { AgentEventBus } from './agent-event-bus'
 import { createAgentTurnId } from './agent-turn-id'
 import { isStaleActiveQueueError } from './agent-queue-routing'
-import { decryptApiKey, getChannelById, listChannels, persistCodexOAuthCredentials, persistXaiOAuthCredentials, resolveChannelRuntimeApiKey, resolveCodexOAuthCredentials, resolveXaiOAuthCredentials } from './channel-manager'
+import { decryptApiKey, getChannelById, listChannels, persistCodexOAuthCredentials, persistGithubCopilotOAuthCredentials, persistXaiOAuthCredentials, resolveChannelRuntimeApiKey, resolveCodexOAuthCredentials, resolveGithubCopilotOAuthCredentials, resolveXaiOAuthCredentials } from './channel-manager'
 import { getAdapter, fetchTitle } from '@proma/core'
 import { getCloudApiConfig } from '@proma/cloud'
 import { getSystemApiKey, clearSystemKeyCache } from './cloud-channel-service'
@@ -367,9 +367,9 @@ export class AgentOrchestrator {
       }
     }
 
-    if (channel.provider === 'xai') {
-      // xAI subscription uses Pi's provider-specific OAuth transport; title generation's
-      // generic channel adapter only understands API keys, so retain a local deterministic title.
+    if (channel.provider === 'xai' || channel.provider === 'github-copilot') {
+      // Subscription providers use Pi's provider-specific OAuth transport; the generic channel
+      // adapter only understands API keys, so retain a local deterministic title.
       return createFallbackTitle(userMessage)
     }
 
@@ -885,6 +885,7 @@ export class AgentOrchestrator {
 
     let apiKey: string
     let codexOAuthCredentials: CodexOAuthCredentials | undefined
+    let githubCopilotOAuthCredentials: GithubCopilotOAuthCredentials | undefined
     let xaiOAuthCredentials: XaiOAuthCredentials | undefined
     try {
       // Proma 官方渠道没有本地加密 key；系统 key 由 Cloud service 按登录 token 获取。
@@ -905,6 +906,9 @@ export class AgentOrchestrator {
       } else if (channel.provider === 'openai-codex') {
         codexOAuthCredentials = await resolveCodexOAuthCredentials(channelId)
         apiKey = codexOAuthCredentials.access
+      } else if (channel.provider === 'github-copilot') {
+        githubCopilotOAuthCredentials = await resolveGithubCopilotOAuthCredentials(channelId)
+        apiKey = githubCopilotOAuthCredentials.access
       } else if (channel.provider === 'xai') {
         xaiOAuthCredentials = await resolveXaiOAuthCredentials(channelId)
         apiKey = xaiOAuthCredentials.access
@@ -932,14 +936,18 @@ export class AgentOrchestrator {
         }
         return
       }
-      if (channel.provider === 'openai-codex' || channel.provider === 'xai') {
+      if (channel.provider === 'openai-codex' || channel.provider === 'github-copilot' || channel.provider === 'xai') {
+
         const isXai = channel.provider === 'xai'
+        const isGithubCopilot = channel.provider === 'github-copilot'
         reportPreflightError({
           code: 'expired_oauth_token',
-          title: isXai ? 'xAI 登录已失效' : 'ChatGPT 登录已失效',
+          title: isXai ? 'xAI 登录已失效' : isGithubCopilot ? 'GitHub Copilot 登录已失效' : 'ChatGPT 登录已失效',
           message: isXai
             ? '无法刷新 xAI 登录凭据，登录可能已过期或被撤销。请在设置中重新登录 xAI。'
-            : '无法刷新 ChatGPT 登录凭据，登录可能已过期或被撤销。请在设置中重新登录 ChatGPT。',
+            : isGithubCopilot
+              ? '无法刷新 GitHub Copilot 登录凭据，登录可能已过期、被撤销或不再拥有 Copilot 订阅。请在设置中重新登录。'
+              : '无法刷新 ChatGPT 登录凭据，登录可能已过期或被撤销。请在设置中重新登录 ChatGPT。',
           actions: [
             { key: 's', label: '打开渠道设置', action: 'open_channel_settings' },
           ],
@@ -1709,6 +1717,8 @@ export class AgentOrchestrator {
       // resets when Electron's main process restarts, which would otherwise
       // merge unrelated historical ledger entries under one turn ID.
       const agentTurnId = channel.id === PROMA_OFFICIAL_CHANNEL_ID ? createAgentTurnId() : undefined
+      let githubCopilotCredentialsSnapshot = githubCopilotOAuthCredentials
+
       const queryOptions: PiAgentQueryOptions = {
         sessionId,
         prompt: finalPrompt,
@@ -1756,6 +1766,15 @@ export class AgentOrchestrator {
           codexOAuthCredentials,
           onCodexOAuthCredentialsRefreshed: (credentials: CodexOAuthCredentials) => {
             persistCodexOAuthCredentials(channelId, credentials)
+          },
+        }),
+        ...(githubCopilotOAuthCredentials && {
+          githubCopilotOAuthCredentials,
+          onGithubCopilotOAuthCredentialsRefreshed: (credentials: GithubCopilotOAuthCredentials) => {
+            const expectedCredentials = githubCopilotCredentialsSnapshot
+            if (expectedCredentials && persistGithubCopilotOAuthCredentials(channelId, credentials, expectedCredentials)) {
+              githubCopilotCredentialsSnapshot = credentials
+            }
           },
         }),
         ...(xaiOAuthCredentials && {

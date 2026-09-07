@@ -29,6 +29,8 @@ import { cn } from '@/lib/utils'
 interface SkillFilesPanelProps {
   workspaceSlug: string
   skillSlug: string
+  /** watcher 通知；同一 Skill 只静默刷新资源树，不重置编辑状态。 */
+  contentVersion?: number
   /** 文件总数（不含目录）变化时通知父组件，用于 Tab 徽章 */
   onFileCountChange?: (count: number) => void
 }
@@ -51,7 +53,13 @@ function countTree(nodes: SkillFileNode[]): { files: number; dirs: number } {
   return { files, dirs }
 }
 
-export function SkillFilesPanel({ workspaceSlug, skillSlug, onFileCountChange }: SkillFilesPanelProps): React.ReactElement {
+function hasFile(nodes: SkillFileNode[], path: string): boolean {
+  return nodes.some((node) => node.type === 'file'
+    ? node.relativePath === path
+    : hasFile(node.children ?? [], path))
+}
+
+export function SkillFilesPanel({ workspaceSlug, skillSlug, contentVersion = 0, onFileCountChange }: SkillFilesPanelProps): React.ReactElement {
   const [tree, setTree] = React.useState<SkillFileNode[]>([])
   const [loading, setLoading] = React.useState(true)
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set())
@@ -62,6 +70,16 @@ export function SkillFilesPanel({ workspaceSlug, skillSlug, onFileCountChange }:
   const [editing, setEditing] = React.useState(false)
   const [editText, setEditText] = React.useState('')
   const [saving, setSaving] = React.useState(false)
+  const [missingFile, setMissingFile] = React.useState(false)
+  const [treeError, setTreeError] = React.useState(false)
+  const scopeRef = React.useRef(0)
+  const treeRequestRef = React.useRef(0)
+  const fileRequestRef = React.useRef(0)
+  const treeLoadedRef = React.useRef(false)
+  const selectedRef = React.useRef(selected)
+  selectedRef.current = selected
+  const missingFileRef = React.useRef(missingFile)
+  missingFileRef.current = missingFile
 
   const [creating, setCreating] = React.useState<{ type: 'file' | 'directory'; parent: string } | null>(null)
   const [createName, setCreateName] = React.useState('')
@@ -74,47 +92,106 @@ export function SkillFilesPanel({ workspaceSlug, skillSlug, onFileCountChange }:
     onFileCountChangeRef.current = onFileCountChange
   }, [onFileCountChange])
 
-  const refreshTree = React.useCallback(async (): Promise<void> => {
+  // 身份变化才重置状态；普通 watcher 通知不能卸载树、编辑器或清除草稿。
+  React.useEffect(() => {
+    ++scopeRef.current
+    treeLoadedRef.current = false
+    setTree([])
     setLoading(true)
-    try {
-      const nodes = await window.electronAPI.listSkillFiles(workspaceSlug, skillSlug)
-      setTree(nodes)
-      onFileCountChangeRef.current?.(countTree(nodes).files)
-    } catch (err) {
-      console.error('[SkillFiles] 加载文件树失败:', err)
-      toast.error('加载文件树失败')
-    } finally {
-      setLoading(false)
+    setTreeError(false)
+    setSelected(null)
+    selectedRef.current = null
+    setFileContent(null)
+    setLoadingFile(false)
+    setEditing(false)
+    setEditText('')
+    setSaving(false)
+    setMissingFile(false)
+    missingFileRef.current = false
+    setExpanded(new Set())
+    setCreating(null)
+    setCreateName('')
+    setRenaming(null)
+    setRenameValue('')
+    onFileCountChangeRef.current?.(0)
+    return () => {
+      ++scopeRef.current
+      ++treeRequestRef.current
+      ++fileRequestRef.current
     }
   }, [workspaceSlug, skillSlug])
 
+  const markMissing = React.useCallback((): void => {
+    // 保留已加载内容/草稿；路径重新出现也不能自动解除锁定，须显式重新打开。
+    missingFileRef.current = true
+    setMissingFile(true)
+    ++fileRequestRef.current
+    setLoadingFile(false)
+  }, [])
+
+  const refreshTree = React.useCallback(async (): Promise<void> => {
+    const scope = scopeRef.current
+    const request = ++treeRequestRef.current
+    const isCurrent = (): boolean => scope === scopeRef.current && request === treeRequestRef.current
+    if (!treeLoadedRef.current) setLoading(true)
+    try {
+      const nodes = await window.electronAPI.listSkillFiles(workspaceSlug, skillSlug)
+      if (!isCurrent()) return
+      treeLoadedRef.current = true
+      setTree(nodes)
+      setTreeError(false)
+      onFileCountChangeRef.current?.(countTree(nodes).files)
+      if (selectedRef.current && !hasFile(nodes, selectedRef.current)) markMissing()
+    } catch (err) {
+      if (!isCurrent()) return
+      console.error('[SkillFiles] 加载文件树失败:', err)
+      setTreeError(true)
+      toast.error('加载文件树失败')
+    } finally {
+      if (isCurrent()) setLoading(false)
+    }
+  }, [workspaceSlug, skillSlug, markMissing])
+
   React.useEffect(() => {
     void refreshTree()
-    setSelected(null)
-    setFileContent(null)
-    setEditing(false)
-    setExpanded(new Set())
-  }, [refreshTree])
+    return () => { ++treeRequestRef.current }
+  }, [refreshTree, contentVersion])
 
   const openFile = React.useCallback(
     async (relativePath: string): Promise<void> => {
+      if (saving) return
+      if (editing && editText !== (fileContent?.content ?? '')
+        && !window.confirm('当前文件有未保存的修改，确认放弃并打开文件？')) return
+      const scope = scopeRef.current
+      const request = ++fileRequestRef.current
+      const isCurrent = (): boolean => scope === scopeRef.current && request === fileRequestRef.current
+      selectedRef.current = relativePath
       setSelected(relativePath)
+      setMissingFile(false)
+      missingFileRef.current = false
       setEditing(false)
+      setFileContent(null)
       setLoadingFile(true)
       try {
         const result = await window.electronAPI.readSkillFile(workspaceSlug, skillSlug, relativePath)
+        if (!isCurrent()) return
         setFileContent(result)
         setEditText(result.content ?? '')
       } catch (err) {
+        if (!isCurrent()) return
         console.error('[SkillFiles] 读取文件失败:', err)
         toast.error(err instanceof Error ? err.message : '读取文件失败')
         setFileContent(null)
       } finally {
-        setLoadingFile(false)
+        if (isCurrent()) setLoadingFile(false)
       }
     },
-    [workspaceSlug, skillSlug],
+    [workspaceSlug, skillSlug, saving, editing, editText, fileContent],
   )
+
+  // 创建操作可能跨过一轮编辑；完成后必须使用最新草稿状态判断是否可切换。
+  const openFileRef = React.useRef(openFile)
+  openFileRef.current = openFile
 
   const toggleExpand = (path: string): void => {
     setExpanded((prev) => {
@@ -126,19 +203,33 @@ export function SkillFilesPanel({ workspaceSlug, skillSlug, onFileCountChange }:
   }
 
   const saveFile = async (): Promise<void> => {
-    if (!fileContent) return
+    if (!fileContent || saving || missingFileRef.current) return
+    const scope = scopeRef.current
+    const request = fileRequestRef.current
+    const isCurrent = (): boolean => scope === scopeRef.current && request === fileRequestRef.current
+    const snapshot = editText
     setSaving(true)
     try {
-      await window.electronAPI.writeSkillFile(workspaceSlug, skillSlug, fileContent.relativePath, editText)
-      setFileContent({ ...fileContent, content: editText, size: new Blob([editText]).size })
+      // 先核验以给出明确失效提示；主进程也拒绝创建缺失路径，封住核验后的删除竞态。
+      const nodes = await window.electronAPI.listSkillFiles(workspaceSlug, skillSlug)
+      if (!isCurrent() || missingFileRef.current) return
+      if (!hasFile(nodes, fileContent.relativePath)) {
+        markMissing()
+        void refreshTree()
+        return
+      }
+      await window.electronAPI.writeSkillFile(workspaceSlug, skillSlug, fileContent.relativePath, snapshot)
+      if (!isCurrent() || missingFileRef.current) return
+      setFileContent({ ...fileContent, content: snapshot, size: new Blob([snapshot]).size })
       setEditing(false)
       toast.success('已保存')
       void refreshTree()
     } catch (err) {
+      if (!isCurrent()) return
       console.error('[SkillFiles] 保存文件失败:', err)
       toast.error(err instanceof Error ? err.message : '保存失败')
     } finally {
-      setSaving(false)
+      if (scope === scopeRef.current) setSaving(false)
     }
   }
 
@@ -160,14 +251,19 @@ export function SkillFilesPanel({ workspaceSlug, skillSlug, onFileCountChange }:
       return
     }
     const relativePath = creating.parent ? `${creating.parent}/${name}` : name
+    if (saving) return
+    const scope = scopeRef.current
     try {
       await window.electronAPI.createSkillEntry(workspaceSlug, skillSlug, relativePath, creating.type)
+      if (scope !== scopeRef.current) return
       toast.success(`已创建${creating.type === 'directory' ? '目录' : '文件'}: ${name}`)
       setCreating(null)
       setCreateName('')
       await refreshTree()
-      if (creating.type === 'file') void openFile(relativePath)
+      if (scope !== scopeRef.current) return
+      if (creating.type === 'file') void openFileRef.current(relativePath)
     } catch (err) {
+      if (scope !== scopeRef.current) return
       console.error('[SkillFiles] 创建失败:', err)
       toast.error(err instanceof Error ? err.message : '创建失败')
     }
@@ -176,16 +272,16 @@ export function SkillFilesPanel({ workspaceSlug, skillSlug, onFileCountChange }:
   const deleteEntry = async (node: SkillFileNode): Promise<void> => {
     const label = node.type === 'directory' ? '目录及其内容' : '文件'
     if (!window.confirm(`确认删除${label} "${node.relativePath}"？此操作不可撤销。`)) return
+    if (saving) return
+    const scope = scopeRef.current
     try {
       await window.electronAPI.deleteSkillEntry(workspaceSlug, skillSlug, node.relativePath)
+      if (scope !== scopeRef.current) return
       toast.success('已删除')
-      if (selected === node.relativePath || (node.type === 'directory' && selected?.startsWith(node.relativePath + '/'))) {
-        setSelected(null)
-        setFileContent(null)
-        setEditing(false)
-      }
+      if (selectedRef.current === node.relativePath || selectedRef.current?.startsWith(node.relativePath + '/')) markMissing()
       void refreshTree()
     } catch (err) {
+      if (scope !== scopeRef.current) return
       console.error('[SkillFiles] 删除失败:', err)
       toast.error(err instanceof Error ? err.message : '删除失败')
     }
@@ -208,16 +304,17 @@ export function SkillFilesPanel({ workspaceSlug, skillSlug, onFileCountChange }:
     }
     const parentParts = node.relativePath.split('/').slice(0, -1)
     const newRel = parentParts.length ? `${parentParts.join('/')}/${newName}` : newName
+    if (saving) return
+    const scope = scopeRef.current
     try {
       await window.electronAPI.renameSkillEntry(workspaceSlug, skillSlug, node.relativePath, newRel)
+      if (scope !== scopeRef.current) return
       toast.success('已重命名')
-      if (selected === node.relativePath) {
-        setSelected(newRel)
-        if (fileContent) setFileContent({ ...fileContent, relativePath: newRel })
-      }
+      if (selectedRef.current === node.relativePath || selectedRef.current?.startsWith(node.relativePath + '/')) markMissing()
       setRenaming(null)
       void refreshTree()
     } catch (err) {
+      if (scope !== scopeRef.current) return
       console.error('[SkillFiles] 重命名失败:', err)
       toast.error(err instanceof Error ? err.message : '重命名失败')
     }
@@ -262,6 +359,7 @@ export function SkillFilesPanel({ workspaceSlug, skillSlug, onFileCountChange }:
         </div>
       </div>
 
+      {treeError && <div role="alert" className="px-1 pb-2 text-xs text-destructive">资源列表刷新失败，已保留当前内容。请重试刷新。</div>}
       <SettingsCard divided={false} className="flex-1 min-h-0">
         <div className="grid grid-cols-[minmax(220px,1fr)_2fr] h-full min-h-[420px]">
           {/* Tree */}
@@ -309,6 +407,9 @@ export function SkillFilesPanel({ workspaceSlug, skillSlug, onFileCountChange }:
 
           {/* Editor */}
           <div className="flex flex-col min-w-0">
+            {missingFile && <div role="alert" className="p-3 text-xs text-destructive">
+              文件已被删除或重命名：{selected}。已保留当前内容和草稿，请先复制备份；保存已禁用，重新打开现有文件后才能保存。
+            </div>}
             {!selected ? (
               <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground p-6 text-center">
                 从左侧选择文件以查看或编辑
@@ -338,7 +439,7 @@ export function SkillFilesPanel({ workspaceSlug, skillSlug, onFileCountChange }:
                       {formatSize(fileContent.size)}
                     </span>
                     {!editing ? (
-                      <Button size="sm" variant="ghost" onClick={() => setEditing(true)} className="h-7">
+                      <Button size="sm" variant="ghost" onClick={() => setEditing(true)} disabled={missingFile} className="h-7">
                         <Pencil size={12} /> 编辑
                       </Button>
                     ) : (
@@ -347,6 +448,7 @@ export function SkillFilesPanel({ workspaceSlug, skillSlug, onFileCountChange }:
                           size="sm"
                           variant="ghost"
                           onClick={() => {
+                            if (missingFile && !window.confirm('文件已失效，确认放弃保留的草稿？')) return
                             setEditText(fileContent.content ?? '')
                             setEditing(false)
                           }}
@@ -355,7 +457,7 @@ export function SkillFilesPanel({ workspaceSlug, skillSlug, onFileCountChange }:
                         >
                           <X size={12} /> 取消
                         </Button>
-                        <Button size="sm" onClick={() => void saveFile()} disabled={saving} className="h-7">
+                        <Button size="sm" onClick={() => void saveFile()} disabled={saving || missingFile} className="h-7">
                           <Save size={12} /> {saving ? '保存中...' : '保存'}
                         </Button>
                       </>
@@ -365,6 +467,7 @@ export function SkillFilesPanel({ workspaceSlug, skillSlug, onFileCountChange }:
                 {editing ? (
                   <textarea
                     value={editText}
+                    readOnly={saving}
                     onChange={(e) => setEditText(e.target.value)}
                     className="flex-1 bg-transparent text-xs font-mono resize-none p-3 focus:outline-none border-0"
                     spellCheck={false}

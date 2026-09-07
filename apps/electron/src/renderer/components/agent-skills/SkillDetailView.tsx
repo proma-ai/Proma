@@ -21,7 +21,7 @@ import { extractSkillBody, rebuildSkillMd } from './skillMdUtils'
 export interface SkillDetailViewProps {
   skill: SkillMeta
   workspaceSlug: string
-  /** 外部能力变更后由数据层递增，用于重新读取 SKILL.md。 */
+  /** 外部能力变更后由数据层递增，用于重新读取 SKILL.md 和静默刷新资源树。 */
   contentVersion: number
   isBuiltin: boolean
   updating: boolean
@@ -58,6 +58,8 @@ export function SkillDetailView({
   const skillSlugRef = React.useRef(skill.slug)
   const loadRequestRef = React.useRef(0)
   const saveRequestRef = React.useRef(0)
+  // 写入开始和完成都会使此前发起的读取失效，避免 watcher 的旧快照回滚正文。
+  const writeRevisionRef = React.useRef(0)
   const saveInFlightRef = React.useRef(false)
   const flushPendingRef = React.useRef(false)
   const failedSnapshotRef = React.useRef<{ name: string; description: string; body: string } | null>(null)
@@ -107,10 +109,17 @@ export function SkillDetailView({
 
   React.useEffect(() => {
     const requestId = ++loadRequestRef.current
-    setLoadingContent(true)
+    const writeRevision = writeRevisionRef.current
+    let cancelled = false
+    const isCurrentRead = (): boolean => !cancelled
+      && loadRequestRef.current === requestId
+      && writeRevisionRef.current === writeRevision
+    // 同一文档的 watcher 刷新不能卸载滚动容器和 CodeMirror，否则会丢失
+    // 滚动位置、焦点、选区及撤销历史。仅首次读取使用阻塞式加载占位。
+    if (contentRef.current === null) setLoadingContent(true)
     window.electronAPI.readSkillContent(workspaceSlug, skill.slug)
       .then((text) => {
-        if (loadRequestRef.current !== requestId) return
+        if (!isCurrentRead()) return
         const externalBody = extractSkillBody(text)
         contentRef.current = text
         setContent(text)
@@ -121,14 +130,14 @@ export function SkillDetailView({
         }
       })
       .catch((err) => {
-        if (loadRequestRef.current !== requestId) return
+        if (!isCurrentRead()) return
+        // 后台读取失败不清空已加载内容，让当前草稿仍然可以继续编辑和保存。
         console.error('[SkillDetail] 加载内容失败:', err)
-        contentRef.current = null
-        setContent(null)
       })
       .finally(() => {
-        if (loadRequestRef.current === requestId) setLoadingContent(false)
+        if (!cancelled && loadRequestRef.current === requestId) setLoadingContent(false)
       })
+    return () => { cancelled = true }
   }, [contentVersion, skill.slug, workspaceSlug, updateDraft])
 
   const saveDraft = React.useCallback((): void => {
@@ -157,10 +166,12 @@ export function SkillDetailView({
 
     // 700ms 防抖后串行写入，避免快速连续输入造成写入乱序。
     saveInFlightRef.current = true
+    ++writeRevisionRef.current
     if (mountedRef.current) setSaving(true)
     void window.electronAPI.writeSkillContent(workspaceSlug, skill.slug, nextContent)
       .then(() => {
         if (saveRequestRef.current !== requestId) return
+        ++writeRevisionRef.current
         contentRef.current = nextContent
         savedRef.current = snapshot
         failedSnapshotRef.current = null
@@ -364,6 +375,7 @@ export function SkillDetailView({
                 <SkillFilesPanel
                   workspaceSlug={workspaceSlug}
                   skillSlug={skill.slug}
+                  contentVersion={contentVersion}
                   onFileCountChange={setFileCount}
                 />
               </div>

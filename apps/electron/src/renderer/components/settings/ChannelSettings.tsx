@@ -6,7 +6,8 @@
 
 import * as React from 'react'
 import { useAtom, useSetAtom } from 'jotai'
-import { Pencil, Plus, RefreshCw, Shield, Trash2 } from 'lucide-react'
+import { CheckCircle2, Pencil, Plus, RefreshCw, Shield, Trash2, X } from 'lucide-react'
+
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { PROVIDER_LABELS, PROMA_OFFICIAL_CHANNEL_ID } from '@proma/shared'
@@ -44,6 +45,8 @@ export function ChannelSettings(): React.ReactElement {
   const setHealthLoading = useSetAtom(modelHealthLoadingAtom)
   const setHealthError = useSetAtom(modelHealthErrorAtom)
   const [deleteTarget, setDeleteTarget] = React.useState<Channel | null>(null)
+  /** 新建订阅渠道后保留成功反馈，避免表单自动返回列表时用户错过短暂 toast。 */
+  const [recentlyAuthorizedChannel, setRecentlyAuthorizedChannel] = React.useState<Channel | null>(null)
   const agentChannelIdRef = React.useRef(agentChannelId)
 
   React.useEffect(() => {
@@ -135,10 +138,14 @@ export function ChannelSettings(): React.ReactElement {
   }
 
   /** 表单保存回调 */
-  const handleFormSaved = async (): Promise<void> => {
+  const handleFormSaved = async (savedChannel?: Channel): Promise<void> => {
     setViewMode('list')
     setEditingChannel(null)
-    await loadChannels()
+    const latestChannels = await loadChannels()
+    if (savedChannel?.provider === 'github-copilot') {
+      // 使用落库后的对象，确保模型计数与 enabled 状态和列表完全一致。
+      setRecentlyAuthorizedChannel(latestChannels.find((channel) => channel.id === savedChannel.id) ?? savedChannel)
+    }
   }
 
   /** 取消表单 */
@@ -188,6 +195,18 @@ export function ChannelSettings(): React.ReactElement {
           </>
         )}
 
+        {recentlyAuthorizedChannel && (
+          <AuthorizationSuccessNotice
+            channel={recentlyAuthorizedChannel}
+            onViewModels={() => {
+              setEditingChannel(recentlyAuthorizedChannel)
+              setRecentlyAuthorizedChannel(null)
+              setViewMode('edit')
+            }}
+            onDismiss={() => setRecentlyAuthorizedChannel(null)}
+          />
+        )}
+
         {loading ? (
           <div className="text-sm text-muted-foreground py-8 text-center">加载中...</div>
         ) : userChannels.length === 0 && !officialChannel ? (
@@ -232,6 +251,54 @@ export function ChannelSettings(): React.ReactElement {
     </div>
   )
 }
+
+// ===== 授权成功反馈 =====
+
+function AuthorizationSuccessNotice({
+  channel,
+  onViewModels,
+  onDismiss,
+}: {
+  channel: Channel
+  onViewModels: () => void
+  onDismiss: () => void
+}): React.ReactElement {
+  const enabledModelCount = channel.models.filter((model) => model.enabled).length
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex items-start gap-3 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.08] px-4 py-3 text-emerald-950 shadow-[0_1px_2px_rgba(16,185,129,0.08)] dark:text-emerald-100"
+    >
+      <CheckCircle2 size={20} className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium text-wrap-pretty">GitHub Copilot 已授权并保存</p>
+        <p className="mt-0.5 text-xs leading-5 text-emerald-800/80 dark:text-emerald-200/80">
+          已启用 <span className="font-medium tabular-nums">{enabledModelCount}</span> 个当前订阅可用模型；现在可在 Agent 的模型选择器中使用。
+        </p>
+        <Button
+          type="button"
+          variant="link"
+          size="sm"
+          onClick={onViewModels}
+          className="mt-1 h-7 px-0 text-emerald-800 hover:text-emerald-950 dark:text-emerald-200 dark:hover:text-emerald-50"
+        >
+          查看已启用模型
+        </Button>
+      </div>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="-mr-1 -mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-emerald-800/70 transition-colors hover:bg-emerald-500/10 hover:text-emerald-950 active:scale-[0.96] dark:text-emerald-200/70 dark:hover:text-emerald-50"
+        title="关闭授权成功提示"
+        aria-label="关闭授权成功提示"
+      >
+        <X size={16} />
+      </button>
+    </div>
+  )
+}
+
 
 // ===== 渠道行子组件 =====
 
