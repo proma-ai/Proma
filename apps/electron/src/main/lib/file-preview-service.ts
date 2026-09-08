@@ -16,6 +16,7 @@ import AdmZip from 'adm-zip'
 import { DOMParser } from '@xmldom/xmldom'
 import type { FilePreviewReadResult, OfficePreviewResult } from '@proma/shared'
 import { getBundledOfficeCliPath } from './officecli-manager'
+import { expandHomeDirectory } from './agent-file-path'
 
 const require = createRequire(__filename)
 const PDFJS_PACKAGE = 'pdfjs-dist'
@@ -91,7 +92,8 @@ export function cleanPreviewTmpDir(): number {
  * 「猜中一个同名文件」比明确提示找不到更危险；最终授权边界由 IPC 层 realpath 校验。
  */
 export function isAbsolutePreviewPath(filePath: string): boolean {
-  return filePath.startsWith('/') || filePath.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(filePath)
+  const expandedPath = expandHomeDirectory(filePath)
+  return expandedPath.startsWith('/') || expandedPath.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(expandedPath)
 }
 
 function isWithinBasePath(candidate: string, basePath: string): boolean {
@@ -142,7 +144,7 @@ function candidatePathsForRelativeFile(filePath: string, basePaths: readonly str
 
 export function resolveTargetPath(filePath: string, basePaths?: string[]): string {
   if (filePath.includes('\0')) return ''
-  if (isAbsolutePreviewPath(filePath)) return resolve(filePath)
+  if (isAbsolutePreviewPath(filePath)) return resolve(expandHomeDirectory(filePath))
 
   const bases = basePaths?.filter(Boolean) ?? []
   const candidates = candidatePathsForRelativeFile(filePath, bases)

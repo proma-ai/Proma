@@ -1174,7 +1174,7 @@ export const AgentMessages = React.memo(function AgentMessages({
   }, [structuralGroups])
 
   return (
-    <BasePathsProvider basePaths={messageBasePaths}>
+    <BasePathsProvider basePaths={messageBasePaths} sessionId={sessionId}>
       <AgentBrowserLinkProvider sessionId={sessionId}>
         <div ref={historySelectionRootRef} className="relative flex min-h-0 flex-1 flex-col">
       <style>{`

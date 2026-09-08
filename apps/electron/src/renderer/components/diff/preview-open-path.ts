@@ -3,7 +3,7 @@ import type { PreviewFile } from '@/atoms/preview-atoms'
 import { arePathsEqual } from '@/lib/session-file-changes'
 
 export function isAbsoluteFilePath(filePath: string): boolean {
-  return filePath.startsWith('/') || filePath.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(filePath)
+  return filePath.startsWith('/') || filePath.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(filePath) || /^~(?:[\\/]|$)/.test(filePath)
 }
 
 function joinFilePath(basePath: string, filePath: string): string {
