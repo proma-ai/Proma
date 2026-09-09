@@ -317,13 +317,14 @@ export function ModelSelector({
         <TooltipContent side="top">渠道：{displayModelInfo?.channelName}</TooltipContent>
       </Tooltip>
 
-      {/* 模型选择 Popover — 锚定触发按钮，向上展开（end 对齐，内容向左上延伸） */}
+      {/* 模型选择 Popover — 锚定触发按钮，向上展开（end 对齐，内容向左上延伸）。
+          宽度优先让模型名称完整显示，并在窄窗口内保留 12px 的安全边距。 */}
       <PopoverContent
         side="top"
         align="end"
         sideOffset={8}
         collisionPadding={12}
-        className="w-[320px] p-0"
+        className="w-[min(400px,calc(100vw-24px))] p-0"
         aria-label="选择模型"
       >
         {/* 搜索栏 */}
