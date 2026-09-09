@@ -344,6 +344,7 @@ export const VOLCENGINE_CODING_PLAN_MODELS: readonly ChannelModel[] = [
   { id: 'minimax-m3', name: 'MiniMax M3', enabled: true },
   { id: 'glm-5.3', name: 'GLM-5.3', enabled: true },
   { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true },
+  { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', enabled: true },
   { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', enabled: true },
   { id: 'kimi-k2.7-code', name: 'Kimi K2.7 Code', enabled: true },
 ]
