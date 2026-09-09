@@ -718,7 +718,7 @@ export function saveWorkspaceMcpConfig(workspaceSlug: string, config: WorkspaceM
   const mcpPath = getWorkspaceMcpPath(workspaceSlug)
 
   try {
-    writeFileSync(mcpPath, JSON.stringify(normalizeWorkspaceMcpConfig(config), null, 2), 'utf-8')
+    writeJsonFileAtomic(mcpPath, normalizeWorkspaceMcpConfig(config))
     console.log(`[Agent 工作区] 已保存 MCP 配置: ${workspaceSlug}`)
   } catch (error) {
     console.error('[Agent 工作区] 保存 MCP 配置失败:', error)
@@ -794,7 +794,10 @@ function parseSkillFrontmatter(content: string, slug: string, enabled: boolean):
 
 export function getWorkspaceCapabilities(workspaceSlug: string): WorkspaceCapabilities {
   const mcpConfig = getWorkspaceMcpConfig(workspaceSlug)
-  const skills = getWorkspaceSkills(workspaceSlug)
+  // 能力摘要供 UI 状态展示和变更提示使用；保留 inactive Skill 才能将
+  // skills/ ↔ skills-inactive/ 的移动识别为启用/关闭，而非移除/新增。
+  // Agent 运行时仍只从 skills/ 读取实际启用的 Skill。
+  const skills = getAllWorkspaceSkills(workspaceSlug)
   const builtinMcpServers = listBuiltinMcpServers()
   const memory = getWorkspaceMemorySummary(workspaceSlug)
 

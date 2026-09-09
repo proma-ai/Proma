@@ -10,7 +10,7 @@ import { ArrowLeft, Loader2, CheckCircle2, XCircle, AlertCircle } from 'lucide-r
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import type { McpServerEntry, McpTransportType, WorkspaceMcpConfig } from '@proma/shared'
+import type { McpOAuthConfiguration, McpServerEntry, McpTransportType, WorkspaceMcpConfig } from '@proma/shared'
 import {
   SettingsSection,
   SettingsCard,
@@ -82,6 +82,8 @@ interface McpFormValues {
   enabled: boolean
   testResult: { success: boolean; message: string; timestamp?: number } | null
   isBuiltin: boolean
+  /** OAuth 公开元数据不在此表单编辑，但保存其他字段时必须原样保留。 */
+  oauth?: McpOAuthConfiguration
   command: string
   argsText: string
   envText: string
@@ -96,6 +98,7 @@ function buildEntryFromValues(values: McpFormValues, includeTestResult = false):
     type: values.transportType,
     enabled: values.enabled,
     ...(values.isBuiltin && { isBuiltin: true }),
+    ...(values.oauth && { oauth: values.oauth }),
     ...(includeTestResult && values.testResult && {
       lastTestResult: {
         ...values.testResult,
@@ -127,6 +130,7 @@ function buildEntryFromValues(values: McpFormValues, includeTestResult = false):
 export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCancel, closeRequestId, showHeader = true }: McpServerFormProps): React.ReactElement {
   const isEdit = server !== null
   const isBuiltin = server?.entry.isBuiltin === true
+  const oauth = server?.entry.oauth
 
   // 表单状态
   const [name, setName] = React.useState(server?.name ?? '')
@@ -172,13 +176,13 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
 
   // 保留最新表单值，供 unmount 时 flush 待保存变更
   const latestValuesRef = React.useRef({
-    name, transportType, command, url, argsText, envText, headersText, timeoutStr, enabled, testResult, isBuiltin,
+    name, transportType, command, url, argsText, envText, headersText, timeoutStr, enabled, testResult, isBuiltin, oauth,
   })
   React.useEffect(() => {
     latestValuesRef.current = {
-      name, transportType, command, url, argsText, envText, headersText, timeoutStr, enabled, testResult, isBuiltin,
+      name, transportType, command, url, argsText, envText, headersText, timeoutStr, enabled, testResult, isBuiltin, oauth,
     }
-  }, [name, transportType, command, url, argsText, envText, headersText, timeoutStr, enabled, testResult, isBuiltin])
+  }, [name, transportType, command, url, argsText, envText, headersText, timeoutStr, enabled, testResult, isBuiltin, oauth])
 
   // 监听配置改变，清空测试结果（避免展示过期的测试结果）
   React.useEffect(() => {
@@ -207,6 +211,7 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
         enabled,
         testResult,
         isBuiltin,
+        oauth,
         command,
         argsText,
         envText,

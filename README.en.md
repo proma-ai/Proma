@@ -1,197 +1,175 @@
 # Proma
 
-Proma is a local-first AI desktop app that brings multi-model Chat, general-purpose Agent workflows, workspaces, Skills, MCP, remote bots, and memory into one open-source client.
-
-It is not just another chat box. Proma is meant to become a long-lived Agent workbench for your personal workflows: use Chat for simple answers, use Agent when the task needs to act on files, tools, projects, and longer context.
-
 ![Proma Poster](https://img.erlich.fun/personal-blog/uPic/pb.png)
 
-[中文 README](./README.md) | [Beginner Tutorial](./tutorial/tutorial.md) | [Open-Source Release](https://github.com/proma-ai/Proma/releases) | [Commercial Version](https://proma.cool/download)
+## About Proma
 
-## What Proma Can Do
+Proma is an open-source, general-purpose desktop Agent product built for professional users. It covers the capabilities expected from leading Agent products, including:
 
-- **Chat mode**: multi-model conversations, attachments, image input, Markdown / Mermaid / KaTeX / code highlighting, parallel conversations, system prompts, and context controls.
-- **Agent mode**: the Agent core has fully migrated to Proma's built-in Pi Agent Runtime with no third-party Agent runtime; workspace isolation, permission modes, file operations, streaming output, plan confirmation, and ask-user interactions are all supported.
-- **In-app browser automation**: the Agent can directly operate the built-in managed browser—opening pages, inspecting page structure, clicking / filling controls, switching tabs, and opening `localhost` dev services; in-site search, post-login pages, dynamic content, and local HTML previews can all be handled by the Agent without manual copy-paste.
-- **Collaboration and tasks**: complex work can be split into traceable collaboration sub-agents and tasks, with calls and results shown in the message stream.
-- **Skills, MCP, and project instructions**: each Proma project manages its own Skills and MCP servers. Projects can declare trusted project instructions via `AGENTS.md`, and legacy `CLAUDE.md` configurations are auto-migrated. Project files can use a user-selected local project root or a Proma-managed blank-project directory.
-- **Remote bots**: Lark / Feishu bot bridging is supported, with DingTalk and WeChat bridge entry points also present in the app.
-- **Memory and tools**: Chat and Agent can share workspace memory, with memory changes tracked and refresh prompts shown in the UI; web search, built-in Chat tools, and Agent recommendation helpers are also available.
-- **Local-first data**: conversations, workspaces, attachments, settings, and Skills are stored under `~/.proma/` as JSON / JSONL files, without a local database.
-- **Desktop experience**: auto-update, proxy settings, file preview, global shortcuts, quick task window, Agent Island run states, voice input, and light / dark / system themes.
+- Chat mode
+- Agent mode
+- Plan mode
+- Project isolation
+- Memory
+- An in-app browser
+- An in-app terminal
+- Scheduled tasks
+- Parallel Agent exploration
+- Child sessions and parent sessions
+- Skills / MCP / CLI
+- Remote connectivity: WeChat, Feishu, DingTalk, and Slack
+- Previewing and editing for many file types
 
-## Getting Started
+### Built for professional workflows
 
-### Download
+Proma adds focused capabilities for professional workflows so Agents can operate more smoothly in demanding scenarios. Every capability below is integrated with Agents and designed to work together naturally:
 
-Download the open-source version from [GitHub Releases](https://github.com/proma-ai/Proma/releases), with builds for macOS Apple Silicon, macOS Intel, and Windows.
+- **Todo**: capture unfinished work and later reference it directly from the input box to continue. You can also work with an Agent to create Todos for everyday reminders, and sync them with macOS Reminders.
+- **Calendar**: let Agents create and manage your calendar, avoid conflicts around important events, and collaborate on scheduling. Calendar data can also sync with macOS Calendar.
+- **Obsidian**: deeply integrate Obsidian with a more capable real-time Markdown editing experience, giving knowledge-management, knowledge-creation, and research users a fluid way to work with Agents.
+- **In-app terminal and browser**: give Agents a visible terminal and browser they can sign in to and use directly, making programming and automation workflows smoother.
+- **Agent exploration**: professional work often benefits from diverse, parallel exploration. Rather than polluting the current context, Proma lets you explore other possibilities fully and bring the useful findings back when needed.
+- **Child sessions and parent sessions**: similar to SubAgents, but with cleaner context, persistent session-level deliverables, and room for iterative work. Parent and child sessions enable parallel Agent processing, deep research, adversarial analysis, continuous repairs in a parent session, and ongoing reviews in child sessions—ultimately creating better context for better outcomes.
+- **Automatic worktree workflows**: developers can quickly work through Git worktrees in Proma. The Agent proactively selects the relevant worktree in the right panel, shows the diff against `main`, and lets you enter a visible Proma terminal with one click.
 
-The open-source version can be used independently with self-configured AI provider channels. If you prefer Proma-provided built-in model channels and subscription options, you can optionally explore the [Proma commercial version](https://proma.cool/download). The two versions support different preferences, and you are free to choose the one that best fits your workflow.
+[中文 README](./README.md)
 
-| Comparison | Open-source version | Commercial version |
-| --- | --- | --- |
-| Core desktop experience | Full Proma desktop experience with freedom to configure your workflow | The same core desktop experience |
-| Model channels | Add and manage AI provider channels and API keys yourself | Sign in to use Proma-provided model channels, while keeping the option to configure third-party channels |
-| Model pricing | Use each chosen provider under its own pricing and terms | Selected models have Proma Cloud-exclusive offers, with some priced as low as 20% of the official reference price |
-| Agent security and reliability | Evaluate each provider's security, protocol compatibility, and reliability yourself; third-party relays also add trust and data-handling considerations | Use Proma Cloud's managed official route with unified security and reliability safeguards, Agent protocol compatibility, and model health monitoring—reducing uncertainty from opaque third-party relays |
-| Web-connected and built-in AI capabilities | Configure search, image generation, and their API keys as needed | Get a more complete Proma Cloud web-connected and built-in experience, including WebSearch plus GPT Image 2 image generation and editing |
-| Public API and services | Primarily use the provider APIs that you configure yourself | Create dedicated, quota-limited Proma Cloud API keys to bring LLM, tool, and multimodal capabilities into your own apps or services |
-| Team credit management | Build your own member, credit-allocation, and usage-management processes | Team admins can allocate or reclaim shared team credits for members, automate monthly allocation, and review member usage and credit transactions |
-| Skills distribution & collaboration | Skills are workspace-local; distribution and sharing across your team need to be self-organized | The enterprise version adds org-level Skills distribution and team collaboration: admins can push team-built Skills to members in one click, members use them without manual installation, and versions, updates, and usage scope are managed centrally |
-| Subscription and usage | Manage provider accounts, balances, and usage yourself | Manage subscriptions and balance in the app, with detailed model, Agent, and tool usage |
-| Switching from open source | — | Install over the existing app and continue using your local Proma data |
+## Download and Installation
 
-> Available models, prices, and benefits may change; refer to the current in-app information.
+### Download the Open-Source Edition
 
-### Enterprise licensing
+Download the open-source edition from [GitHub Releases](https://github.com/proma-ai/Proma/releases). Builds are available for macOS Apple Silicon, macOS Intel, Windows, Ubuntu/Debian x86_64 (`.deb`), and Linux x86_64 AppImage. For Linux installation, security boundaries, and support scope, see the [Linux guide](./docs/linux.md).
 
-If your organization plans to deploy Proma for hundreds or thousands of employees, enterprise licenses are available. We can also provide scoped, lightweight customization around your deployment needs. The enterprise version offers org-level Skills distribution and team collaboration, so best practices your team builds can be pushed to members in one click and maintained centrally. Contact us on WeChat: `geekthings`.
+### Download the Commercial Edition
 
-### First Setup
+The [Proma Commercial Edition](https://proma.cool/download) provides stable, secure, and competitive access to frontier models. It also lets you configure your own Codex, Kimi Coding Plan, and dozens of other mainstream Coding Plans and Agent Plans, while Proma Cloud substantially expands what the Commercial Edition can do. **Open-source users can install the Commercial Edition over their existing installation; their data is preserved and carried forward.**
 
-1. Open Proma and finish the environment check. Agent mode depends on local tooling, especially Git, Node.js / Bun, and a usable shell.
-2. Go to **Settings > Channels**, add at least one AI provider channel, and fill in Base URL, API Key, and model list.
-3. Chat mode can use OpenAI, Anthropic, Google, or OpenAI-compatible channels.
-4. Agent uses the Pi Runtime and can use any enabled model channel.
-5. Go to **Settings > Agent** and choose the default Agent channel, model, and workspace.
-6. Configure memory, web search, or Feishu / DingTalk / WeChat bridges from their corresponding settings tabs if needed.
+Download: [Proma Commercial Edition](https://proma.cool/download)
 
-## Choosing A Mode
+### Open Source vs. Commercial Edition
 
-### Use Chat For
+| Comparison | Open-source edition | Commercial edition |
+| ------------------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| Core desktop capabilities | Complete Proma desktop experience with freely configurable workflows | The same core desktop experience |
+| Model channels | Add and manage AI provider channels and API keys yourself | Use Proma's official built-in model channels after signing in, while retaining the option to configure third-party channels |
+| Model pricing | Governed by the terms and pricing of your chosen providers | Selected models receive Proma Cloud-exclusive offers, with some priced as low as 10% of the official reference price |
+| Agent security and reliability | You assess each provider's security, protocol compatibility, and reliability; using third-party relays also requires your own assessment of their trust and data-handling risks | Proma Cloud's official managed route provides unified security and reliability safeguards, Agent protocol compatibility, and model health monitoring, reducing uncertainty from opaque third-party relays |
+| Web-connected and built-in AI capabilities | Configure services such as search and image generation, along with their API keys, as needed | A more complete Proma Cloud connected and built-in experience, including WebSearch and GPT Image 2 image generation and editing |
+| Public API and services | Primarily use provider APIs that you configure | Create standalone Proma Cloud API keys with quota caps to bring LLM, tools, and multimodal capabilities into your own apps or services |
+| Team credit management | Build your own member, credit-allocation, and usage-management process | Team administrators can allocate or reclaim shared credits, distribute them monthly, and review member usage and credit transactions |
+| Skills distribution and collaboration | Skills are local workspace capabilities; you organize distribution and sharing across your team | The enterprise edition supports organization-level Skills distribution and team collaboration: administrators can push team-developed Skills to members in one click, who can use them without installation; versions, updates, and usage scope are managed centrally |
+| Subscription and usage | Manage provider accounts, balances, and usage yourself | Manage subscriptions and balances in the app, with detailed model, Agent, and tool usage |
+| Moving from open source | — | Install over the existing app and continue using your local Proma data |
 
-- Everyday Q&A, explanation, translation, rewriting, and lightweight code discussion.
-- Reading attachments and summarizing or comparing their content.
-- One-off conversations enhanced by web search or memory tools.
-- Comparing outputs from multiple models or exploring different system prompts.
+> Available models, prices, and benefits may change over time. Refer to the current in-app information.
 
-### Use Agent For
+## Proma's Core Capabilities and Design Philosophy
 
-- Creating, editing, or organizing local files.
-- Research, report writing, and multi-step tasks.
-- Work that needs MCP, Skills, Shell, Git, project files, or external context.
-- Tasks that benefit from permissions, plan mode, background execution, or remote bot follow-up.
+Proma is one of the few Agent products built specifically for professional users. For heavy Agent users in particular, it offers more transparent Agent execution, more visible configuration, better separation of projects, memory, and Skills, a simpler and more coherent preview-and-editing experience, and rich built-in capabilities such as a browser and terminal.
 
-In short: **use Chat when you need an answer; use Agent when you need work to be done.**
+Proma completely rethinks the interaction and UX system. The left side manages conversations and provides access to primary features. The middle is the main Agent-output area, where you and the Agent interact. The right side is the supporting workspace: project files, Agent file changes, document previews, child-session interactions, the in-app browser, terminal, Obsidian, calendar, Todos, Skills, and more—all there to help the Agent in the middle produce better results.
 
-## Screenshots
+For today's Agents and large language models, better intelligence starts with better context. Our central work is helping you organize that context. The capabilities below explain both this principle and how Proma is designed from a professional user's perspective to create better context.
 
-### Chat Analysis
+![Proma context-centered workspace](https://img.erlich.fun/personal-blog/proma/image-20260908110801716.png)
 
-Use Chat for lightweight but practical analysis: compare audience needs, generate a table, and shape first-screen README copy quickly.
+## Feature Highlights
 
-![Proma Chat analysis](./docs/assets/screenshots/proma-chat-demo.png)
+### Child Sessions and Parent Sessions
 
-### Agent Workbench
+The left side shows the parent session. When you need to conduct deep research in parallel, increase efficiency and information density, or perform adversarial checks, child sessions are a better choice. You can even view parent and child sessions side by side. Compared with traditional SubAgents, child sessions have cleaner context, a persistent and interactive environment for iterative work, more freedom in model selection, and better performance.
 
-Agent works across the project root and session workspace, reads project files, progresses through tasks, outputs structured findings, and keeps reusable files visible in the right-side file panel.
+![Proma child and parent sessions](https://img.erlich.fun/personal-blog/proma/image-20260908112300711.png)
 
-![Proma Agent workbench](./docs/assets/screenshots/proma-agent-demo.png)
+### Exploration Mode
 
-### Skills
+This is exploration, not merely branching. After an Agent finishes responding, click **Explore** to create as many parallel paths as you need while retaining the preceding context. Use them simultaneously for research or curiosity. When you finish, use the button in the upper-right corner of an exploration to bring its findings back to the parent session. This gives the main thread richer context without allowing uncertain decisions or edge cases to disrupt it prematurely.
 
-Each workspace can keep its own reusable Skills. The `feedback-synthesis` Skill shown here turns scattered feedback, interviews, and issues into themes, evidence, and priority suggestions.
+![Proma exploration mode](https://img.erlich.fun/personal-blog/proma/image-20260908112614345.png)
 
-![Proma workspace Skills](./docs/assets/screenshots/proma-skills-demo.png)
+### File Changes
 
-### Skills & MCP
+Many products refer to all file operations performed by an Agent as Artifacts. At their core, though, they are file changes. Proma groups file changes by turn; it shows diffs for programming workflows; and in worktree-based development it proactively selects the relevant worktree and places a terminal button next to it. One click takes you into development, and the Agent can operate this workflow too.
 
-The same workspace can manage stdio and HTTP MCP servers, enabling or disabling external context per project.
+![Proma file changes](https://img.erlich.fun/personal-blog/proma/image-20260908113333692.png)
 
-![Proma MCP settings](./docs/assets/screenshots/proma-mcp-demo.png)
+### Skills / MCP / CLI
 
-### Streaming Voice Input
+Proma supports all three. But the best Skills do not come from the internet or from someone else—they come from your real workflows. We recommend walking an Agent through a real process once, then having it turn that process into a Skill and iterating through real use. Proma includes several Skills we consider essential and supports one-click installation for common MCP servers and CLIs. The Commercial Edition also supports team-wide Skill sharing and iterative management.
 
-Proma supports Doubao-powered streaming voice input, both inside Proma and across the desktop:
+Skills and MCP servers are scoped by project. Too many of them can reduce Agent effectiveness; keeping them per-project reduces unnecessary context and can naturally improve real-world results, though it does require more deliberate attention from the user.
 
-- Inside Proma: press Ctrl + Backtick to start recognition, then press it again to finish and insert the transcript into the active Proma input box.
-- Outside Proma: press Ctrl + Backtick to start recognition, then press it again to finish and insert the transcript at the current cursor position. If there is no active cursor, Proma writes the transcript to the clipboard.
+![Proma Skills](https://img.erlich.fun/personal-blog/proma/image-20260908113623429.png)
 
-![Proma voice input](./docs/assets/screenshots/proma-typeless-input.png)
+![Proma MCP and CLI](https://img.erlich.fun/personal-blog/proma/image-20260908113638780.png)
 
-## Agent Runtime and Providers
+### In-App Browser
 
-Proma's Agent mode is driven by a single **Pi Agent Runtime**, powered by `@earendil-works/pi-coding-agent`, `pi-agent-core`, and `pi-ai`, with no third-party Agent runtime. Enabled Proma channels are dynamically registered as Pi providers, supporting OpenAI Chat Completions / Responses, Google Generative AI, Anthropic Messages, and compatible endpoints. Historical sessions from the early Claude runtime are retained as read-only records: they can be viewed, but not continued, forked, or rewound.
+Agents can actively use Proma's in-app browser. It is suited to browser automation, filling gaps left by web search, and research or cross-checking on automation-sensitive websites. For example, part of my own Xiaohongshu workflow is managed through Proma's in-app browser: replying in group chats and to comments, collecting feedback, and automatically recording it as Todos. Agents also use the browser frequently when you develop websites. It is a powerful capability whose full potential we are still exploring.
 
-| Channel type | Chat | Pi Agent |
-| --- | --- | --- |
-| Anthropic / Anthropic-compatible | Supported | Supported |
-| Anthropic-protocol channels such as DeepSeek, Kimi API / Coding Plan, Zhipu Coding Plan, MiniMax, and Xiaomi MiMo | Supported | Supported |
-| OpenAI, OpenAI Responses, Google, Zhipu AI, Doubao, and Qwen | Supported | Supported |
-| Custom OpenAI-compatible endpoints | Supported | Supported |
-| ChatGPT subscription (Codex OAuth) | — | Supported |
-| xAI subscription (Grok OAuth) | — | Supported |
+![Proma in-app browser](https://img.erlich.fun/personal-blog/proma/image-20260908113724838.png)
 
-## Tech Stack
+### Memory
 
-| Layer | Technology |
-| --- | --- |
-| Runtime | Bun |
-| Desktop | Electron 39 |
-| Frontend | React 18 + TypeScript |
-| State | Jotai |
-| Styling | Tailwind CSS + Radix UI |
-| Rich text input | TipTap |
-| Markdown / diagrams / math | React Markdown + Beautiful Mermaid + KaTeX |
-| Code highlighting | Shiki |
-| Build | Vite + esbuild |
-| Distribution | electron-builder |
-| Agent runtime | Pi: `@earendil-works/pi-* @0.82.1` |
+Proma's memory is also separated by project. Every project can have its own `AGENTS.md`, which operates at the project level and guides Agent behavior across that project: the layout of project files, interaction rules, essential information, and conventions that must be followed.
 
-## Architecture
+For more specific memory, `MEMORY.md` serves as the index, with additional files organized by topic. If you have used Proma for a while but have not yet built these resources, open a new session and ask the Agent to create the current project's `AGENTS.md` and explore your recent two weeks or month of sessions to form memory about you and the project.
 
-Proma's core communication path is:
+![Proma project memory](https://img.erlich.fun/personal-blog/proma/image-20260908114118777.png)
 
-```text
-shared types and IPC constants
-  -> main/ipc.ts handlers
-  -> preload/index.ts window.electronAPI bridge
-  -> renderer Jotai atoms and React components
-```
+### File Preview and Editing
 
-Main-process services live in `apps/electron/src/main/lib/`:
+Proma supports previewing and editing common file types. For Markdown, we use a Live Markdown approach that gives you a simple, practical editing experience similar to Typora or Obsidian. Proma also previews PDFs, DOCX files, presentations, Excel files, and more. You can do more than preview: highlight parts of a document, discuss specific passages with the Agent across multiple turns, or open Q&A to get quick answers to simpler questions.
 
-- `agent-orchestrator.ts`: Pi Agent orchestration, environment variables, event streams, and error handling.
-- `adapters/pi-agent-adapter.ts`: Pi runtime adapter and session management.
-- `agent-session-manager.ts`: Agent session index and JSONL message persistence.
-- `agent-workspace-manager.ts`: Proma workspaces, project roots, MCP, and Skills.
-- `chat-service.ts`: Chat streaming, Provider Adapters, tool activity.
-- `conversation-manager.ts`: Chat session index and message storage.
-- `channel-manager.ts`: channel CRUD, API key encryption, connection tests, model fetching.
-- `feishu-bridge.ts` / `dingtalk-bridge.ts` / `wechat-bridge.ts`: remote bot bridges.
-- `chat-tool-*`, `document-parser.ts`, `workspace-watcher.ts`: tools, document parsing, and file watching.
+![Proma file preview and editing](https://img.erlich.fun/personal-blog/proma/image-20260908114657248.png)
 
-Renderer state is managed with Jotai. Key atoms live in `apps/electron/src/renderer/atoms/`. Agent IPC listeners are mounted globally at the app root so streaming events, permission requests, and background tasks survive view changes.
+### Projects, Project Files, Session Files, and Sessions
 
-## Packaging Notes
+For Proma, good context requires a clear separation between projects and project files. For a category of work, you may create different projects and add the files that project might need to its project directory. Or you can create a project in an existing folder and work with an Agent to build an `AGENTS.md` that guides that project.
 
-The Pi Agent runtime runs as an esbuild external dependency in the main process. Before invoking `electron-builder`, the Electron packaging scripts run `bun run sync:runtime-deps` to copy these runtime dependency closures into the app directory:
+A session is each individual conversation. Each session should focus on a specific, small task; splitting work into appropriate tasks remains a core responsibility for every Agent user. One-off reference files and material for the current task are best placed in the session folder—anything you drag into the input box goes there.
 
-- `@earendil-works/pi-coding-agent`, `pi-agent-core`, and `pi-ai`
-- Pi runtime native modules and `pdfjs-dist`
+If you are concerned that a new session will not know what you are working on or need context from a prior session, build the habit of converting useful knowledge into the project's `AGENTS.md`, memory, Skills, and documents. You can also take the quick route: drag the prior session from the left sidebar into the input box to reference it, or type `&` to add a reference. When you want to reference a specific file already in the current project or session folder, you can drag it from the right panel and add a brief instruction—or use `@` if that is your preferred workflow.
 
-When changing packaging, verify that:
+![Proma project and session organization](https://img.erlich.fun/personal-blog/proma/image-20260908114818028.png)
 
-- `build:main` / `watch:main` keep Pi runtime dependencies external.
-- `scripts/sync-runtime-deps.ts` stays aligned with the external runtime dependency list.
-- `electron-builder.yml` retains the `asarUnpack` rules required by Pi native add-ons.
-- After `bun run dist:fast` on a target platform, verify that Pi Agent can start, call tools, and resume sessions.
+### Scheduled Tasks
 
-See [AGENTS.md](./AGENTS.md) for the full engineering conventions.
+Agents can create and iteratively improve scheduled tasks for you. The more routine the work, the more likely it can become a scheduled task. Proma supports not only one-time runs and fixed intervals, but also complex schedules such as running every 20 minutes between 10:00 AM and 12:00 PM on weekdays.
+
+![Proma scheduled tasks](https://img.erlich.fun/personal-blog/proma/image-20260908112055273.png)
+
+### Built-In Calendar and Todo
+
+Agents can operate every calendar event and Todo, and you can edit them manually as well. Agents can help you record them, understand your schedule when appropriate, and plan your work around it. Voice input can be especially helpful for this, and Proma includes it too.
+
+![Proma calendar](https://img.erlich.fun/personal-blog/proma/image-20260908111504034.png)
+
+![Proma Todo](https://img.erlich.fun/personal-blog/proma/image-20260908111521550.png)
+
+### Obsidian
+
+We built an Obsidian-inspired Markdown editor to better organize your personal knowledge and the knowledge created by Agents. It also makes note-taking and writing convenient, while letting you manage and edit content in Obsidian as usual.
+
+![Proma Obsidian integration](https://img.erlich.fun/personal-blog/proma/image-20260908111956671.png)
 
 ## Contributing
 
-Bug fixes, documentation improvements, tests, UX polish, Skills, MCP configs, and real-world Agent workflows are all welcome.
+Bug fixes, documentation, tests, experience improvements, and new Skills, MCP configurations, or Agent workflows based on real scenarios are all welcome.
 
-Before opening a PR, please check:
+Before submitting a PR, please check the following:
 
-- Use Bun scripts and do not mix npm / pnpm lockfiles.
+- Use Bun to run scripts; do not mix npm or pnpm lockfiles.
 - Use Jotai for state management.
-- Keep the app local-first and prefer config files plus JSON / JSONL storage.
+- Keep the app local-first and prefer configuration files plus JSON / JSONL.
 - Do not use TypeScript `any`; prefer `interface` for object shapes.
-- When adding IPC, update shared types, main handler, preload bridge, and renderer calls together.
+- When adding IPC, update the shared types, main handler, preload bridge, and renderer call together.
 - Bump the patch version of affected packages when behavior changes.
-- Add focused tests where possible, especially for shared logic, IPC contracts, and persistence formats.
+- Add tests where practical, especially for shared logic, IPC contracts, and persistence formats.
+
+## Author
+
+- Personal website: [erlich.fun](https://erlich.fun)
 
 ## Star History
 
@@ -203,19 +181,14 @@ Before opening a PR, please check:
  </picture>
 </a>
 
-## Credits
-
-- [Shiki](https://shiki.style/): code highlighting.
-- [Beautiful Mermaid](https://github.com/lukilabs/beautiful-mermaid): Mermaid diagram rendering.
-
 ## License
 
-The Proma Community Edition is licensed under the [GNU Affero General Public License v3.0 (AGPL-3.0)](./LICENSE). The full license text is available in the `LICENSE` file at the repository root.
+The Proma Community Edition is open-sourced under the [GNU Affero General Public License v3.0 (AGPL-3.0)](./LICENSE). See the root `LICENSE` file for the full terms.
 
-**Personal / non-commercial use**: free to use, modify, and distribute, subject to the terms of AGPL-3.0.
+**Personal / non-commercial use**: you may freely use, modify, and distribute Proma, subject to AGPL-3.0.
 
-**Commercial use**: permitted as long as you fully comply with AGPL-3.0, including (but not limited to) releasing the complete corresponding source code of any modified version you distribute or make available over a network, and licensing all derivative works under AGPL-3.0.
+**Commercial use**: commercial use is permitted if you fully comply with AGPL-3.0. This includes, but is not limited to, making the complete modified source code public when distributing the software in source or modified form, when providing a network-facing service (including its network-interaction layer), and licensing derivative works under AGPL-3.0.
 
-**Commercial license (exemption from AGPL-3.0 obligations)**: if you want to integrate Proma into a closed-source product, offer it as a SaaS service without releasing your modifications, or use it in any way that cannot meet AGPL-3.0 requirements, please contact us by email to obtain a commercial license: [erlichliu@gmail.com](mailto:erlichliu@gmail.com).
+**Commercial license (exempt from AGPL-3.0 obligations)**: if you want to integrate Proma into a closed-source product, offer a SaaS service without disclosing derivative code, or have another commercial use case that cannot meet AGPL-3.0 requirements, contact us for commercial licensing: [erlichliu@gmail.com](mailto:erlichliu@gmail.com).
 
-By submitting a Pull Request to this project, you agree to license your contribution under AGPL-3.0 and to grant the maintainer the right to relicense it under future commercial license terms.
+By submitting a Pull Request to this project, you agree to license your contribution to the maintainer under AGPL-3.0 and future commercial licenses.

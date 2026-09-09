@@ -60,7 +60,7 @@ export function parseLiveMarkdownTable(source: string): LiveMarkdownTable | null
 }
 
 function escapeCell(value: string): string {
-  return value.replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>')
+  return value.replace(/\|/g, '\\|').replace(/\r\n?|\n/g, '<br>')
 }
 
 function serializeSeparator(alignment: LiveMarkdownTableAlignment): string {
@@ -89,6 +89,19 @@ export function isLikelyLiveMarkdownLatex(value: string): boolean {
   // form. Requiring braces for subscripts avoids rendering ordinary code such as
   // `file_name` and `v1_2` as math.
   return /^[A-Za-z](?:\^(?:\{[^}\n]+\}|[A-Za-z0-9+\-=()])|_\{[^}\n]+\})$/.test(trimmed)
+}
+
+export function liveMarkdownTableCellKeyAction(
+  key: string,
+  shiftKey: boolean,
+  isComposing: boolean,
+  keyCode: number,
+): 'commit' | 'cancel' | 'next' | 'previous' | 'newline' | null {
+  if (isComposing || keyCode === 229) return null
+  if (key === 'Enter') return shiftKey ? 'newline' : 'commit'
+  if (key === 'Escape') return 'cancel'
+  if (key === 'Tab') return shiftKey ? 'previous' : 'next'
+  return null
 }
 
 export function shouldCommitLiveMarkdownTableCell(currentValue: string, draft: string): boolean {

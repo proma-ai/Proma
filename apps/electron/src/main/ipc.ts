@@ -365,7 +365,7 @@ import {
 import { movePathSafely } from './lib/file-move-service'
 import { subscribeWorkspaceMemoryChanges } from './lib/workspace-memory-change-watcher'
 import { confirmWorkspaceMemoryWindowClose, markWorkspaceMemoryWindowReady } from './lib/workspace-memory-window'
-import { deleteMcpCredential, startMcpOAuth, saveMcpApiKey } from './lib/mcp-oauth-service'
+import { deleteMcpCredential, startMcpOAuth, saveMcpApiKey, saveMcpOAuthClientSecret } from './lib/mcp-oauth-service'
 
 /** Renderer-scoped subscriptions; disposed on explicit tab cleanup or renderer destruction. */
 const workspaceMemoryWatchSubscriptions = new Map<number, Map<string, () => void>>()
@@ -3231,6 +3231,13 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.START_MCP_OAUTH,
     async (_, input: import('@proma/shared').StartMcpOAuthInput): Promise<import('@proma/shared').McpOAuthStartResult> => {
       return startMcpOAuth(input)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.SAVE_MCP_OAUTH_CLIENT_SECRET,
+    (_, input: import('@proma/shared').SaveMcpOAuthClientSecretInput): void => {
+      saveMcpOAuthClientSecret(input)
     }
   )
 

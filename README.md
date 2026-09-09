@@ -1,189 +1,206 @@
 # Proma
 
-Proma 是一个本地优先的 AI 桌面应用，把多模型 Chat、通用 Agent、工作区、Skills、MCP、远程机器人和记忆能力放在同一个开源客户端里。
+![image-20260909165815654](https://img.erlich.fun/personal-blog/proma/image-20260909165815654.png)
 
-它不是只面向闲聊的聊天框，而是一个可以长期沉淀个人工作流的 Agent 工作台：简单问题用 Chat，复杂任务交给 Agent，数据和配置尽量留在本地。
 
-![Proma 海报](https://img.erlich.fun/personal-blog/uPic/pb.png)
 
-<video width="560" controls>
-  <source src="https://img.erlich.fun/personal-blog/uPic/%E7%AE%80%E5%8D%95%E4%BB%8B%E7%BB%8D%20Proma.mp4" type="video/mp4">
-</video>
+## Proma 简介
 
-[English README](./README.en.md) | [新手教程](./tutorial/tutorial.md) | [下载开源版](https://github.com/proma-ai/Proma/releases) | [下载商业版](https://proma.cool/download)
 
-> **最新思考 ｜ 2026 Q2–Q3**：[勇敢地解决真实的问题 — Proactive · 个人注意力 · 团队协作](./proma-thinking/proma-2026-q2-q3-thinking.md) ｜ 往期思考：[2026 Q1](./proma-thinking/proma-2026-q1-thinking.md)
 
-## 现在能做什么
+欢迎访问 https://proma.cool 查看更完整的介绍。
 
-- **Chat 模式**：多模型对话、附件解析、图片输入、Markdown / Mermaid / KaTeX / 代码高亮、并排对话、系统提示词、上下文管理。
-- **Agent 模式**：Agent 内核已全面迁移至 Proma 内置 Pi Agent Runtime，不再依赖第三方 Agent 运行时；支持工作区隔离、权限模式、文件操作、长任务流式输出、计划确认和用户追问。
-- **内嵌浏览器自动化**：Agent 可以直接操作内置受管浏览器——打开网页、观察页面结构、点击 / 填写控件、切换标签页，并支持打开 `localhost` 本地开发服务；站内搜索、登录后页面、动态内容和本地 HTML 预览都能交给 Agent 完成，无需手动复制粘贴。
-- **协作与任务**：复杂任务可拆分为可追踪的协作子 Agent / Task，并在消息流中展示调用过程和结果。
-- **Skills、MCP 与项目指令**：每个 Proma 项目独立配置 Skills 与 MCP Server；项目可通过 `AGENTS.md` 声明受信项目指令，旧 `CLAUDE.md` 配置自动迁移。项目文件可使用用户选择的本地项目根目录，也可使用 Proma 托管的空白项目目录。
-- **远程机器人**：支持飞书 / Lark 机器人桥接，并已提供钉钉、微信桥接入口，用手机或群聊触发本机 Agent 工作流。
-- **记忆与工具**：Chat 和 Agent 可共享工作区记忆，记忆变更自动追踪并在界面提示刷新；支持联网搜索、内置 Chat 工具、Agent 推荐等辅助能力。
-- **本地优先**：会话、工作区、附件、配置、Skills 等默认存储在 `~/.proma/`，使用 JSON / JSONL 文件组织，不依赖本地数据库。
-- **桌面体验**：自动更新、代理设置、文件预览、全局快捷键、快速任务窗口、Agent 灵动岛运行状态、语音输入、亮色 / 暗色 / 跟随系统主题。
 
-## 快速开始
 
-### 下载安装
+Proma 是一款为专业用户打造的开源通用的桌面端 Agent 产品。功能涵盖了主流 Agent 具备的所有功能，包括
+
+- Chat 模式
+- Agent 模式
+- 计划模式
+- 项目分区
+- 记忆能力
+- 内嵌浏览器
+- 内嵌终端
+- 定时任务
+- Agent 平行探索
+- 子会话 & 主会话
+- Skills / MCP / CLI
+- 远程链接支持：微信、飞书、钉钉、Slack
+- 各种文件的预览和编辑能力
+
+
+
+### 专业用户场景
+
+并为专业用户场景增加了很多专门适配的功能，辅助 Agent 可以更顺畅地完成对专业场景的支持，以下的所有功能都是跟 Agent 打通并且丝滑适配：
+
+- Todo：方便任务在完成一半时先记一下，后续可以直接在输入框引用继续工作；或通过 Agent 一起创办 Todo 完成日常提醒，还可以跟 macOS 的提醒事项相互同步
+- 日程：方便 Agent 也可以帮助你创建和管理日程，避免重要事件在日程上的冲突，同样可以跟 Agent 协作，并且也一样跟 macOS 的日历相互同步
+- Obsidian：深度集成了 Obsidian，比 Obsidian 更好的 markdown 实时编辑体验，为专业的知识管理、知识创造和研究型用户提供最丝滑的 Agent  交互体验
+- 内嵌终端与浏览器：可以允许 Agent 直接登录并使用的可见终端和浏览器，丝滑应对编程场景和自动化任务等场景
+- Agent 探索能力：对于专业用户来说，Agent 的回复总是充满多样性和并行性，很多时候我们并不想污染当前的上下文，并希望能充分探索其他的可能，并在必要时带回这些探索，Proma 专门设计了 Agent 探索功能来实现这一点
+- 子会话 & 主会话：这是一个类似 SubAgent 的概念，但比 SubAgent 具备更干净的上文、可持续迭代的会话级交付，你可以通过子会话和父会话实现多 Agent 并行处理、深度研究、对抗性分析、连续的主会话修复 & 子会话持续审核的交互，实现更高质量的上下文获得更高质量的最终输出
+- 自动 worktree 工作：对于开发者群体而言，可以快速通过 Proma 实现基于 worktree 的开发，并且在当前会话的右侧 Agent 会主动选择这个 worktree，直接查看基于 main 的 diff ，点击一次即可进入 Proma 可见终端，开发体验非常丝滑
+
+
+
+[English README](./README.en.md)
+
+
+
+## 下载安装
+
+### 开源版下载
 
 从 [GitHub Releases](https://github.com/proma-ai/Proma/releases) 下载开源版本，提供 macOS Apple Silicon、macOS Intel、Windows、Ubuntu/Debian x86_64 的 `.deb` 安装包和 Linux x86_64 AppImage。Linux 的安装、安全边界和支持范围见 [Linux 说明](./docs/linux.md)。
 
-开源版可独立使用，并支持自行配置 AI 供应商渠道。如果你更希望使用 Proma 提供的内置模型渠道和订阅方案，也可以按需了解 [Proma 商业版](https://proma.cool/download)。两个版本面向不同的使用偏好，你可以自由选择适合自己的版本。
 
-| 对比项 | 开源版 | 商业版 |
-| --- | --- | --- |
-| 核心桌面能力 | 完整的 Proma 桌面体验，可自由配置工作流 | 保留同样的核心桌面体验 |
-| 模型渠道 | 自行添加和管理 AI 供应商渠道与 API Key | 登录后可使用 Proma 官方内置模型渠道，也仍可自行配置第三方渠道 |
-| 模型价格 | 按所选供应商的规则和价格使用 | 精选模型提供 Proma Cloud 专属优惠，部分模型最高可低至官方参考价 2 折 |
-| Agent 安全与稳定 | 需自行评估供应商的安全、协议兼容与稳定性；使用第三方中转站时也需自行判断额外的信任与数据处理风险 | 使用 Proma Cloud 官方托管链路，提供统一的安全与稳定性保障、Agent 协议兼容和模型健康监控，减少不透明第三方中转带来的不确定性 |
-| 联网与内嵌 AI 能力 | 按需自行配置搜索、生图等服务及对应 API Key | 提供更完整的 Proma Cloud 联网与内嵌能力，包括 WebSearch，以及 GPT Image 2 生图和编辑 |
-| 对外 API 与服务 | 主要使用你自行配置的供应商 API | 可创建独立、可设额度上限的 Proma Cloud API Key，将 LLM、工具和多模态能力接入自己的应用或服务 |
-| 团队额度管理 | 需自行搭建成员、额度分配与用量管理机制 | 团队管理员可向成员分配或回收共享团队额度，支持按月自动分配，并查看成员用量与额度流水 |
-| Skills 分发与协作 | Skills 为工作区本地能力，团队内分发与共享需自行组织 | 企业版支持 Skills 的组织级分发与团队协作：管理员可将团队沉淀的 Skills 一键下发到成员，成员侧免安装直接使用，并统一管理版本、更新与使用范围 |
-| 订阅与用量 | 自行管理供应商账号、余额与用量 | 在应用内管理订阅与余额，并查看模型、Agent 和工具的用量明细 |
-| 从开源版切换 | — | 直接覆盖安装即可，继续使用已有的本地 Proma 数据 |
+
+### 商业版下载
+
+ [Proma 商业版](https://proma.cool/download) 提供稳定、安全、并具备竞争力的前沿模型访问能力，同时允许用户配置自己的 Codex、Kimi Coding Plan 等数十种市面主流 Coding Plan/ Agent Plan，并利用 Proma Cloud 能力大幅扩展 Proma 商业版实际的能力边界。**开源版本用户可直接下载商业版覆盖安装即可，数据均会被保留和继承**。由于我们的能力和时间太过有限，被迫只能选择降低开源版的功能更新和迭代节奏，更专注开发商业版本，欢迎体验我们的商业版。
+
+点击下载： [Proma 商业版](https://proma.cool/download)
+
+
+
+### 开源 vs 商业版
+
+| 对比项             | 开源版                                                       | 商业版                                                       |
+| ------------------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| 更新和修复         | 必要的更新和修复                                             | 更快的更新节奏，及时的修复以及更新和更丝滑的功能体验         |
+| 核心桌面能力       | 完整的 Proma 桌面体验，可自由配置工作流                      | 保留同样的核心桌面体验                                       |
+| 模型渠道           | 自行添加和管理 AI 供应商渠道与 API Key                       | 登录后可使用 Proma 官方内置模型渠道，也仍可自行配置第三方渠道 |
+| 模型价格           | 按所选供应商的规则和价格使用                                 | 精选模型提供 Proma Cloud 专属优惠，部分模型最高可低至官方参考价 1 折 |
+| Agent 安全与稳定   | 需自行评估供应商的安全、协议兼容与稳定性；使用第三方中转站时也需自行判断额外的信任与数据处理风险 | 使用 Proma Cloud 官方托管链路，提供统一的安全与稳定性保障、Agent 协议兼容和模型健康监控，减少不透明第三方中转带来的不确定性 |
+| 联网与内嵌 AI 能力 | 按需自行配置搜索、生图等服务及对应 API Key                   | 提供更完整的 Proma Cloud 联网与内嵌能力，包括 WebSearch，以及 GPT Image 2 生图和编辑 |
+| 对外 API 与服务    | 主要使用你自行配置的供应商 API                               | 可创建独立、可设额度上限的 Proma Cloud API Key，将 LLM、工具和多模态能力接入自己的应用或服务 |
+| 团队额度管理       | 需自行搭建成员、额度分配与用量管理机制                       | 团队管理员可向成员分配或回收共享团队额度，支持按月自动分配，并查看成员用量与额度流水 |
+| Skills 分发与协作  | Skills 为工作区本地能力，团队内分发与共享需自行组织          | 企业版支持 Skills 的组织级分发与团队协作：管理员可将团队沉淀的 Skills 一键下发到成员，成员侧免安装直接使用，并统一管理版本、更新与使用范围 |
+| 订阅与用量         | 自行管理供应商账号、余额与用量                               | 在应用内管理订阅与余额，并查看模型、Agent 和工具的用量明细   |
+| 从开源版切换       | —                                                            | 直接覆盖安装即可，继续使用已有的本地 Proma 数据              |
 
 > 可用模型、价格和权益会随时间调整，以应用内当期展示为准。
 
-### 企业版与商业授权
 
-如果你的组织计划面向数百至数千名员工规模部署 Proma，可以采购企业版授权；我们也可围绕实际部署需求提供范围明确的轻量定制服务。企业版提供组织级 Skills 分发与团队协作能力，让团队沉淀的最佳实践可以一键下发、统一维护。欢迎通过微信联系：`geekthings`。
 
-### 首次配置
+## Proma 的核心能力 & 理念
 
-1. 打开 Proma，先完成环境检查。Agent 模式依赖本机基础环境，尤其是 Git、Node.js / Bun 以及可用的 Shell。
-2. 进入 **设置 > 渠道**，添加至少一个 AI 供应商渠道，填写 Base URL、API Key 和模型列表。
-3. Chat 模式可以使用 OpenAI、Anthropic、Google 或 OpenAI 兼容协议的渠道。
-4. Agent 使用 Pi Runtime，可使用任意已启用的模型渠道。
-5. 进入 **设置 > Agent**，选择默认 Agent 渠道、模型和工作区。
-6. 如需记忆、联网搜索、飞书 / 钉钉 / 微信桥接，在设置页对应 Tab 中继续配置。
+Proma 是少数为专业用户打造的 Agent 产品，尤其对于 Agent 重度用户，Proma 拥有更透明的 Agent 运行环节、更多的可见配置、更合理的项目工作分区/记忆/Skills 等分区处理、拥有更简单符合逻辑的预览和编辑体验，丰富的内嵌功能包括浏览器和终端等。
 
-## 模式选择
 
-### Chat 适合
 
-- 日常问答、解释、翻译、润色、轻量代码讨论。
-- 读取附件内容后做总结、改写、比较。
-- 使用联网搜索或记忆工具增强一次性对话。
-- 同时对比多个模型输出，或用不同系统提示词做探索。
+Proma 完全重构了交互体验和 UX 系统，我们认为左侧部分是会话区域的管理和部分主要功能的入口；中间都部分是 Agent 的主要输出区域，负责人和 Agent 的交互；右侧是一切的辅助区域，整个项目的文件、Agent 对文件的改动、打开不同的文档预览、查看子会话交互、使用内嵌浏览器、终端、Obsidian、日程、Todo、Skills 等等，一切都在辅助中间的 Agent 获得更好的结果。
 
-### Agent 适合
 
-- 修改、创建、整理本地文件。
-- 调研、编写报告、处理多步骤任务。
-- 使用 MCP、Skills、Shell、Git、项目文件等外部上下文。
-- 需要权限确认、计划模式、后台任务或远程机器人持续跟进的工作。
 
-简单说：**只需要回答时用 Chat，需要行动和交付结果时用 Agent。**
+对于今天的 Agent 和大语言模型来说，更智能的前提是更好的上下文，我们的核心工作就是帮助你组织更好的上下文。下面所有的功能都在解释这一点，也在解释 Proma 是如何站在为专业用户的角度来设计这种更好的上下文的。
 
-## 截图
+![image-20260908110801716](https://img.erlich.fun/personal-blog/proma/image-20260908110801716.png)
 
-### Chat 快速分析
 
-用 Chat 处理轻量但真实的分析任务：整理读者关注点、生成对比表，并把首屏文案快速定稿。
 
-![Proma Chat 快速分析](./docs/assets/screenshots/proma-chat-demo.png)
+## 功能截图
 
-### Agent 工作台
+### 子会话 & 主会话
 
-Agent 在项目根目录与会话工作台中读取文件、推进任务、输出表格化结论，并把可复用文件保留在右侧文件面板中。
+左侧是主会话，当你需要并行做深度研究，提高效率和信息密度时，或者对抗性检查等，子会话都是更好的选择，你甚至可以并行查看主会话和子会话。子会话比传统的 Subagent 有更干净的上下文，可以持续迭代和交互的环境，拥有更自由的模型选择和更好的性能。
 
-![Proma Agent 工作台](./docs/assets/screenshots/proma-agent-demo.png)
+![image-20260908112300711](https://img.erlich.fun/personal-blog/proma/image-20260908112300711.png)
 
-### Skills
 
-每个工作区都可以沉淀专属 Skills。截图中的 `feedback-synthesis` 用于把用户反馈、访谈记录和 issue 聚合成主题、证据与优先级建议。
 
-![Proma 工作区 Skills](./docs/assets/screenshots/proma-skills-demo.png)
+### 探索模式
 
-### Skills & MCP
+是探索，而不是分叉。你可以在 Agent 输出结束后点击探索按钮，探索允许你利用前序上下文的同时可以创建无限多个分叉，你可以并行利用上下文，满足一切你的研究需求或者好奇心。之所以是探索而不是分叉，当你完成这些研究后，点击探索右上角的带回到主会话按钮，可以让所有的探索都回到主线继续，这样你将会获得到更优质的主会话上下文，无需担心自己拿捏不定的判断或边缘的问题影响到主会话的上下文。
 
-同一个工作区可以管理 stdio / HTTP MCP Server，按需启用或关闭，让 Agent 在不同项目里获得不同的外部上下文。
+![image-20260908112614345](https://img.erlich.fun/personal-blog/proma/image-20260908112614345.png)
 
-![Proma MCP 配置](./docs/assets/screenshots/proma-mcp-demo.png)
 
-### 流式语音输入(支持全局输入)
-Proma 支持豆包的流式语音输入功能，并且支持在 Proma 内使用和 Proma 外部使用：
-- Proma 内部使用：Ctrl + ` 触发识别，再次按下结束自动输入到 Proma 内对应的输入框
-- Proma 外部使用：Ctrl + ` 触发识别，再次按下结束自动输入到当前的光标所在处，如无光标则默认写入到剪贴板
-- 
-![Proma 语音输入](./docs/assets/screenshots/proma-typeless-input.png)
 
-## Agent 运行时与模型渠道
+### 文件改动
 
-Proma 的 Agent 模式由 **Pi Agent Runtime** 单一驱动，内核来自 `@earendil-works/pi-coding-agent`、`pi-agent-core` 和 `pi-ai`，不再依赖任何第三方 Agent 运行时。已启用的 Proma 渠道会动态注册为 Pi provider，支持 OpenAI Chat Completions / Responses、Google Generative AI、Anthropic Messages 及其兼容端点。早期基于 Claude runtime 的历史会话保留为只读记录，可查看但不能继续、分叉或回退。
+对于很多产品来说，Agent 对所有文件的操作产生的改动都叫 Artifacts 产出物，但核心就是文件改动。Proma 的文件改动支持划分轮次显示；对于编程场景会展示 Diff；对于 worktree 的开发模式 Agent 会主动选择对应的 worktree 并在对应的 worktree 后面放一个终端按钮，你可以点击一次就进入到开发。当然，Agent 也可以操作这一切。
 
-| 渠道类型 | Chat | Pi Agent |
-| --- | --- | --- |
-| Anthropic / Anthropic 兼容 | 支持 | 支持 |
-| DeepSeek、Kimi API / Coding Plan、智谱 Coding Plan、MiniMax、小米 MiMo 等 Anthropic 协议渠道 | 支持 | 支持 |
-| OpenAI、OpenAI Responses、Google、智谱 AI、豆包、通义千问 | 支持 | 支持 |
-| OpenAI 兼容自定义端点 | 支持 | 支持 |
-| ChatGPT 订阅（Codex OAuth） | — | 支持 |
-| xAI 订阅（Grok OAuth） | — | 支持 |
+![image-20260908113333692](https://img.erlich.fun/personal-blog/proma/image-20260908113333692.png)
 
-## 技术栈
 
-| 层级 | 技术 |
-| --- | --- |
-| 运行时 | Bun |
-| 桌面框架 | Electron 39 |
-| 前端 | React 18 + TypeScript |
-| 状态管理 | Jotai |
-| 样式 | Tailwind CSS + Radix UI |
-| 富文本输入 | TipTap |
-| Markdown / 图表 / 公式 | React Markdown + Beautiful Mermaid + KaTeX |
-| 代码高亮 | Shiki |
-| 构建 | Vite + esbuild |
-| 分发 | electron-builder |
-| Agent Runtime | Pi: `@earendil-works/pi-* @0.82.1` |
 
-## 架构概览
+### Skills / MCP / CLI
 
-Proma 的核心通信路径是：
+Proma 一样支持这三种，但对于 Proma 来说，最好的 Skills 都不来自互联网和他人，它来自你的真实场景，我们推荐你可以手把手带着 Agent 做一次你真实的处理流程，然后让 Agent 沉淀成 Skills，这会是更加的方案，再通过实际的使用迭代。Proma 内嵌了一些我们认为必要的 Skills、并支持常见的 MCP 和 CLI 的一键安装。最后商业版还支持团队 Skills 的共享和迭代管理。对于 Skills 和 MCP 来说，Proma 都是分项目的，因为过多的 Skills 和 MCP 也会导致 Agent 能力的下降，按项目区分可以更好的精简这类上下文，可以自然提高 Agent 的实际表现，缺点是需要人本身的关注更多。
 
-```text
-shared 类型和 IPC 常量
-  -> main/ipc.ts 注册处理器
-  -> preload/index.ts 暴露 window.electronAPI
-  -> renderer Jotai atoms 和 React 组件调用
-```
+![image-20260908113623429](https://img.erlich.fun/personal-blog/proma/image-20260908113623429.png)
 
-主进程服务集中在 `apps/electron/src/main/lib/`：
+![image-20260908113638780](https://img.erlich.fun/personal-blog/proma/image-20260908113638780.png)
 
-- `agent-orchestrator.ts`：Pi Agent 编排、环境变量、事件流、错误处理。
-- `adapters/pi-agent-adapter.ts`：Pi 运行时适配与会话管理。
-- `agent-session-manager.ts`：Agent 会话索引和 JSONL 消息持久化。
-- `agent-workspace-manager.ts`：Proma 工作区、项目根目录、MCP 与 Skills 管理。
-- `browser-controller.ts`：内置受管浏览器控制、跨会话视图隔离与本地预览。
-- `agent-memory-refresh-service.ts`：工作区记忆变更追踪与刷新。
-- `chat-service.ts`：Chat 流式调用、Provider Adapter、工具活动。
-- `conversation-manager.ts`：Chat 会话索引和消息存储。
-- `channel-manager.ts`：渠道 CRUD、API Key 加密、连接测试、模型获取。
-- `feishu-bridge.ts` / `dingtalk-bridge.ts` / `wechat-bridge.ts`：远程机器人桥接。
-- `chat-tool-*`、`document-parser.ts`、`workspace-watcher.ts`：工具、文档解析和文件监听。
 
-渲染进程以 Jotai 管理状态，关键 atoms 位于 `apps/electron/src/renderer/atoms/`。Agent IPC 监听器在应用顶层全局挂载，避免切换页面时丢失流式事件、权限请求或后台任务状态。
 
-## 打包注意事项
+### 内嵌浏览器
 
-Pi 运行时在主进程中作为 esbuild external 依赖运行。`apps/electron` 的打包脚本会在 `electron-builder` 前执行 `bun run sync:runtime-deps`，把下列依赖及其运行时闭包复制到应用目录：
+Proma 的内嵌浏览器可以主动地被 Agent 使用，它适合于浏览器自动化场景、补充联网搜索的不足、甚至是在一些自动化敏感的网站上做一些研究和信息对照。今天我自己的小红书有一部分就是 Proma 通过内嵌浏览器来打理的，做群聊和评价的回复，回收用户的反馈自动计入 Todo。当你开发网站时也会经常遇到 Agent 使用浏览器，这是个强大的功能，我们对完整的浏览器功能的开发可能也完全不足，推荐你来深度探索。
 
-- `@earendil-works/pi-coding-agent`、`pi-agent-core`、`pi-ai`
-- Pi 运行时所需的原生模块和 `pdfjs-dist`
+![image-20260908113724838](https://img.erlich.fun/personal-blog/proma/image-20260908113724838.png)
 
-修改打包配置时，请确认：
 
-- `build:main` / `watch:main` 将 Pi runtime 依赖标记为 external。
-- `scripts/sync-runtime-deps.ts` 的 external runtime 清单与实际依赖一致。
-- `electron-builder.yml` 保留 Pi native addon 所需的 `asarUnpack` 规则。
-- 在目标平台测试 `bun run dist:fast` 后，验证 Pi Agent 可以启动、调用工具和恢复会话。
 
-更完整的工程约定见 [AGENTS.md](./AGENTS.md)。
+### 记忆能力
+
+Proma  的记忆也是区分项目的，每个项目会有一个自己的 AGENTS.md 文件，这是项目层级的，核心是约束整个项目下 Agent 的表现，包括但不限于引导 Agent 项目文件的分布、交互的规则、必备的信息或者需要遵守约定的部分等。
+
+然后是更具体的记忆，MEMORY.md 是整个记忆的索引，下面更多的部分是具体类目下的记忆。如果你已经用了一小段时间了，但是还没形成这些内容，不妨新开个会话跟 Agent 说：请帮我形成当前项目下的 AGENTS.md 文件，并探索最近半个月或者一个月的会话来形成一些关于我和项目的记忆。
+
+![image-20260908114118777](https://img.erlich.fun/personal-blog/proma/image-20260908114118777.png)
+
+
+
+### 文件预览和编辑
+
+Proma 支持主流的文件预览和编辑，比如 markdown，我们采用了 Live Markdown 方案，你可以像在 Typora 或者 Obsidian 里类似的编辑体验，简约实用。并且也支持 PDF、Docx、PPT、Excel 等文档的预览。你不但可以预览，还可以划线这些部分，多次的跟 Agent 对具体的部分进行描述，甚至你还可以打开问答，快速获得一些简单问题的答案。
+
+![image-20260908114657248](https://img.erlich.fun/personal-blog/proma/image-20260908114657248.png)
+
+
+
+### 项目、项目文件/会话、会话文件
+
+对于 Proma 来说，好的上下文是一定要区分好项目和项目文件的，对于一类工作，你可能需要创建不同的项目，并在对应的项目文件下添加这些项目可能会用到的文件，或者你也可以直接在已经存在的文件夹下创建项目，然后跟 Agent 一起形成一份 AGENTS.md 文件用于对这个项目的引导。
+
+会话是每次你新建的一个对话框，一个会话只负责处理一个具体的小任务，对于任务本身的分割仍然是几天 Agent 使用者的核心工作；对于当前小任务而言你会用到的一次性的参考文件和内容，最好是添加在会话文件夹下，你拖动进输入框的一切都会进入到会话文件夹下。
+
+如果你担心新建会话会导致 Agent 并不知晓你正在做什么工作，你需要上一份会话的记忆？那么最好的方式是逐渐养成习惯，把这些“记忆”合适地转换成这个项目下的 AGENTS.md、记忆、Skills 以及文档等。当然，你也可以偷懒直接把上个会话从左侧拖到输入框实现引用，也可以输入 & 来引用，这都可以。
+
+哦对了，说到拖动，你想引用具体的文件告知 Agent 时，如果它已经存在在当前的项目或者会话文件夹下了，也可以直接从右侧拖过来，然后简单补充几句话即可，或者你更擅长用 @ 也可以引用。
+
+![image-20260908114818028](https://img.erlich.fun/personal-blog/proma/image-20260908114818028.png)
+
+
+
+### 定时任务
+
+定时任务均可以由 Agent 来为你创建和迭代，越是日程的工作，越有可能会成为定时任务。我们的定时任务不但支持单次运行，还支持间隔一定时间执行，甚至支持工作日上午的十点到十二点，每二十分钟一次这样的复杂要求。
+
+![image-20260908112055273](https://img.erlich.fun/personal-blog/proma/image-20260908112055273.png)
+
+
+
+### 内嵌的日程和 Todo
+
+所有的日程和 Todo 均可以通过 Agent 进行操作，也可以人工编辑，Agent 不但可以帮助你记录这些，还可以在合适的时候知晓你的安排并帮助你安排工作，这时候可能语音输入更适合，Proma 也内嵌语音输入
+
+![image-20260908111504034](https://img.erlich.fun/personal-blog/proma/image-20260908111504034.png)
+
+![image-20260908111521550](https://img.erlich.fun/personal-blog/proma/image-20260908111521550.png)
+
+
+
+### Obsidian
+
+我们写了一个建议的 Obsidian 样式的 markdown 编辑器，这样可以更好的组织个人的知识以及 Agent 生产的知识，还可以顺手记录或者创作，打开 Obsidian 一样可以进行管理和编辑。
+
+![image-20260908111956671](https://img.erlich.fun/personal-blog/proma/image-20260908111956671.png)
+
+
 
 ## 贡献
 
@@ -212,12 +229,6 @@ Pi 运行时在主进程中作为 esbuild external 依赖运行。`apps/electron
    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=proma-ai/proma&type=date&legend=top-left&sealed_token=0cHFGjNPPe5hd2uxpF1cy35N2kYGSIEnTvyIbHlGjkrrtH9rnKcBMkqA8wDWltJIlPRKFZoYyPjXItri9HhQXE1TM1rwdIe91fqTqXVcPwK6OMzGEJ9yNw" />
  </picture>
 </a>
-
-
-## 致谢
-
-- [Shiki](https://shiki.style/)：代码高亮。
-- [Beautiful Mermaid](https://github.com/lukilabs/beautiful-mermaid) 与 [Mermaid](https://mermaid.js.org/)：Mermaid 图表渲染与官方兜底渲染。
 
 ## 许可证
 

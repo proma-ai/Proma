@@ -1,45 +1,14 @@
 import * as React from 'react'
-import type { Channel, ChannelPlanQuotaResult, ChannelPlanQuotaWindow } from '@proma/shared'
+import type { Channel } from '@proma/shared'
 import { cn } from '@/lib/utils'
 import { supportsChannelPlanQuota, fetchChannelPlanQuota } from '@/lib/channel-plan-quota'
-
-function formatWindow(window: ChannelPlanQuotaWindow): string {
-  const label = window.type === '5h'
-    ? '5H'
-    : window.type === 'weekly'
-      ? '周'
-      : window.label.replace(/\s+/g, '')
-  return `${label} ${window.remainingLabel ?? `${window.remainingPercent}%`}`
-}
-
-function buildSummary(result: ChannelPlanQuotaResult): string {
-  const fiveHour = result.windows.find((window) => window.type === '5h')
-  const weekly = result.windows.find((window) => window.type === 'weekly')
-  const custom = result.windows.find((window) => window.type === 'custom')
-  const primary = [fiveHour, weekly].filter(Boolean) as ChannelPlanQuotaWindow[]
-  const windows = primary.length > 0 ? primary : result.windows.slice(0, 2)
-  if (windows.length === 0 && custom) return formatWindow(custom)
-  return windows.map(formatWindow).join(' · ')
-}
-
-function buildTitle(result: ChannelPlanQuotaResult): string {
-  if (!result.supported) return result.message ?? '订阅额度不可用'
-  const detail = result.windows.map((window) => {
-    const reset = window.resetAt
-      ? `，重置 ${new Intl.DateTimeFormat(undefined, {
-        month: 'numeric',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      }).format(new Date(window.resetAt))}`
-      : ''
-    return `${window.label}: 剩余 ${window.remainingLabel ?? `${window.remainingPercent}%`}${reset}`
-  }).join('\n')
-  return `${result.planName ?? '订阅额度'}\n${detail}`
-}
+import { currentPlanQuota, getPlanQuotaDisplay, planQuotaChannelKey } from '@/lib/channel-plan-quota-display'
+import type { LoadedPlanQuota } from '@/lib/channel-plan-quota-display'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 export function ChannelPlanQuotaBadge({ channel }: { channel: Channel }): React.ReactElement | null {
-  const [quota, setQuota] = React.useState<ChannelPlanQuotaResult | null>(null)
+  const [loaded, setLoaded] = React.useState<LoadedPlanQuota | null>(null)
+  const channelKey = planQuotaChannelKey(channel)
 
   React.useEffect(() => {
     if (!supportsChannelPlanQuota(channel)) return
@@ -47,33 +16,34 @@ export function ChannelPlanQuotaBadge({ channel }: { channel: Channel }): React.
     let cancelled = false
     fetchChannelPlanQuota(channel.id, channel.updatedAt)
       .then((result) => {
-        if (!cancelled) setQuota(result)
+        if (!cancelled) setLoaded({ channelKey, result })
       })
 
-    return () => {
-      cancelled = true
-    }
-  }, [channel.id, channel.provider, channel.baseUrl])
+    return () => { cancelled = true }
+  }, [channel.id, channel.provider, channel.baseUrl, channel.updatedAt, channelKey])
 
   if (!supportsChannelPlanQuota(channel)) return null
-
-  const isUsable = quota?.supported && quota.windows.length > 0
-  if (!isUsable) return null
-
-  const summary = buildSummary(quota)
-  const title = quota ? buildTitle(quota) : '正在读取订阅额度'
+  const quota = currentPlanQuota(loaded, channelKey)
+  const display = getPlanQuotaDisplay(quota, channel.provider)
+  if (!display) return null
 
   return (
-    <span
-      title={title}
-      className={cn(
-        'ml-auto shrink-0 rounded border px-1.5 py-0.5 text-[10px] leading-none',
-        isUsable
-          ? 'border-foreground/10 bg-background/70 text-foreground/70'
-          : 'border-transparent bg-transparent text-muted-foreground/50',
-      )}
-    >
-      {summary}
-    </span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          tabIndex={0}
+          aria-label={display.title}
+          className={cn(
+            'ml-auto shrink-0 rounded border px-1.5 py-0.5 text-[10px] leading-none outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            display.muted
+              ? 'border-transparent bg-transparent text-muted-foreground/70'
+              : 'border-foreground/10 bg-background/70 text-foreground/70',
+          )}
+        >
+          {display.summary}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-sm whitespace-pre-line">{display.title}</TooltipContent>
+    </Tooltip>
   )
 }

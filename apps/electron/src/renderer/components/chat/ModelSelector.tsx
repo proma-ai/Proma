@@ -355,13 +355,14 @@ export function ModelSelector({
         <TooltipContent side="top">渠道：{displayModelInfo?.channelName}</TooltipContent>
       </Tooltip>
 
-      {/* 模型选择 Popover — 锚定触发按钮，向上展开（end 对齐，内容向左上延伸） */}
+      {/* 模型选择 Popover — 锚定触发按钮，向上展开（end 对齐，内容向左上延伸）。
+          宽度优先让模型名称完整显示，并在窄窗口内保留 12px 的安全边距。 */}
       <PopoverContent
         side="top"
         align="end"
         sideOffset={8}
         collisionPadding={12}
-        className="w-[420px] max-w-[calc(100vw-2rem)] p-0"
+        className="w-[min(480px,calc(100vw-24px))] p-0"
         aria-label="选择模型"
       >
         {/* 搜索栏 */}
@@ -449,11 +450,16 @@ export function ModelSelector({
                           <ModelSelectorListIcon
                             src={getModelLogo(option.modelId, option.provider)}
                           />
-                          {/* 固定模型名列，避免不同长度的模型名让官方说明参差不齐。 */}
-                          <span className="grid min-w-0 grid-cols-[minmax(8rem,0.85fr)_minmax(0,1.15fr)] items-baseline gap-x-2.5 overflow-hidden">
+                          {/* 官方模型有说明时保留双列；其他渠道不再为不存在的说明预留列。 */}
+                          <span className={cn(
+                            'min-w-0 overflow-hidden',
+                            option.channelId === PROMA_OFFICIAL_CHANNEL_ID && option.modelListHint
+                              ? 'grid grid-cols-[minmax(10rem,1fr)_minmax(0,1fr)] items-baseline gap-x-2.5'
+                              : 'block',
+                          )}>
                             <span
                               className={cn(
-                                'min-w-0 truncate text-sm',
+                                'block min-w-0 truncate text-sm',
                                 isSelected ? 'font-medium text-foreground' : 'text-foreground/80',
                               )}
                               title={option.modelName}

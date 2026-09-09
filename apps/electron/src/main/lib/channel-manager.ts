@@ -53,6 +53,7 @@ import { refreshXaiOAuth } from './xai-oauth-service'
 import { refreshXaiOAuthCredentialsSerial, rememberXaiOAuthCredentials } from './xai-oauth-credentials'
 import { parseCodexPlanQuotaResponse } from './codex-plan-quota'
 import { getBilling } from './cloud-billing-service'
+import { queryGithubCopilotPlanQuota } from './github-copilot-plan-quota'
 import { listCodexModels, listGithubCopilotModels, listXaiModels } from './adapters/pi-model-registry'
 
 import { getFetchFn } from './proxy-fetch'
@@ -120,6 +121,7 @@ function assertCommercialChannelInputAllowed(input: Pick<ChannelCreateInput, 'pr
 const DEEPSEEK_PRESET_MODELS: ChannelModel[] = [
   { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', enabled: true },
   { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true },
+  { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', enabled: true },
   { id: 'deepseek-v4-flash-vision-exp', name: 'DeepSeek V4 Flash Vision Exp', enabled: true },
 ]
 const KIMI_PRESET_MODELS: ChannelModel[] = [
@@ -148,6 +150,7 @@ const ARK_CODING_PLAN_MODELS: ChannelModel[] = [
   { id: 'kimi-k2.7-code', name: 'Kimi K2.7 Code', enabled: true },
   { id: 'minimax-m3', name: 'MiniMax M3', enabled: true },
   { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true },
+  { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', enabled: true },
   { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', enabled: true },
 ]
 
@@ -164,6 +167,17 @@ const PRESET_MODEL_CANDIDATE_UPDATES: readonly {
     to: string
   }[]>>
 }[] = [
+  {
+    id: 'deepseek-v41-flash-v1',
+    candidates: {
+      deepseek: [
+        { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', enabled: false },
+      ],
+      'ark-coding-plan': [
+        { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', enabled: false },
+      ],
+    },
+  },
   {
     id: 'model-candidates-v3',
     candidates: {
@@ -1060,14 +1074,16 @@ export async function testChannel(channelId: string): Promise<ChannelTestResult>
     return { success: false, message: '渠道不存在' }
   }
 
+  const provider = inferProviderFromBaseUrl(channel.provider, channel.baseUrl)
+  // 官方渠道使用 Cloud token，不存储可解密的 API Key，也无需发起连接测试。
+  if (provider === 'proma') {
+    return { success: true, message: '官方渠道无需测试' }
+  }
   const apiKey = decryptKey(channel.apiKey)
   const proxyUrl = await getEffectiveProxyUrl()
-  const provider = inferProviderFromBaseUrl(channel.provider, channel.baseUrl)
 
   try {
     switch (provider) {
-      case 'proma':
-        return { success: true, message: '官方渠道无需测试' }
       case 'anthropic':
       case 'anthropic-compatible':
       case 'deepseek':
@@ -2068,7 +2084,11 @@ export async function getChannelPlanQuota(channelId: string): Promise<ChannelPla
   } catch {
     provider = channel.provider
   }
-  const proxyUrl = await getEffectiveProxyUrl()
+  // 官方渠道使用 Cloud token，不依赖 channels.json 中的空 API Key。
+  if (provider === 'proma') {
+    return await queryPromaPlanQuota()
+  }
+
   let apiKey: string
   try {
     apiKey = decryptKey(channel.apiKey)
@@ -2077,8 +2097,9 @@ export async function getChannelPlanQuota(channelId: string): Promise<ChannelPla
   }
 
   try {
-    if (provider === 'proma') {
-      return await queryPromaPlanQuota()
+    const proxyUrl = await getEffectiveProxyUrl()
+    if (provider === 'github-copilot') {
+      return await queryGithubCopilotPlanQuota(apiKey, proxyUrl)
     }
     if (provider === 'openai-codex') {
       return await queryCodexPlanQuota(channelId, apiKey, proxyUrl)
@@ -2097,7 +2118,9 @@ export async function getChannelPlanQuota(channelId: string): Promise<ChannelPla
     }
     return createUnsupportedPlanQuota(provider, '当前渠道不支持订阅 Plan 额度查询')
   } catch (error) {
-    const message = error instanceof Error ? error.message : '订阅额度查询失败'
+    const message = provider === 'github-copilot'
+      ? 'GitHub Copilot 额度查询失败，请检查网络或代理后重试'
+      : error instanceof Error ? error.message : '订阅额度查询失败'
     return createUnsupportedPlanQuota(provider, message)
   }
 }

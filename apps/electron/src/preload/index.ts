@@ -766,6 +766,8 @@ export interface ElectronAPI {
   /** 原子新增 MCP，并在初始启用时条件持久化验证结果。 */
   installMcpAndValidate: (workspaceSlug: string, name: string, entry: import('@proma/shared').McpServerEntry) => Promise<import('@proma/shared').McpInstallMutationResult>
   startMcpOAuth: (input: import('@proma/shared').StartMcpOAuthInput) => Promise<import('@proma/shared').McpOAuthStartResult>
+  /** 将 OAuth client secret 加密保存到系统 Keychain；不会回传给渲染器或 Agent。 */
+  saveMcpOAuthClientSecret: (input: import('@proma/shared').SaveMcpOAuthClientSecretInput) => Promise<void>
 
   /** 将静态 MCP API Key / Token 加密保存到系统 Keychain。 */
   saveMcpApiKey: (input: import('@proma/shared').SaveMcpApiKeyInput) => Promise<void>
@@ -2273,6 +2275,10 @@ const electronAPI: ElectronAPI = {
 
   startMcpOAuth: (input: import('@proma/shared').StartMcpOAuthInput) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.START_MCP_OAUTH, input)
+  },
+
+  saveMcpOAuthClientSecret: (input: import('@proma/shared').SaveMcpOAuthClientSecretInput) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SAVE_MCP_OAUTH_CLIENT_SECRET, input)
   },
 
   saveMcpApiKey: (input: import('@proma/shared').SaveMcpApiKeyInput) => {

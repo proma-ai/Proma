@@ -1,15 +1,16 @@
 import * as React from 'react'
-import { renderMarkdownMath } from '@/lib/markdown-math'
+import { liveMarkdownTableCellDraft, renderLiveMarkdownTableInline } from './live-markdown-table-inline'
 import {
   type LiveMarkdownTable,
-  isLikelyLiveMarkdownLatex,
+  liveMarkdownTableCellKeyAction,
   nextLiveMarkdownTableCell,
   shouldCommitLiveMarkdownTableCell,
   updateLiveMarkdownTableCell,
 } from './live-markdown-table'
 import type { LiveMarkdownFindController, LiveMarkdownFindOptions, LiveMarkdownFindState } from './LiveMarkdownPreview'
 
-const { useEffect, useRef, useState } = React
+const { useEffect, useLayoutEffect, useRef, useState } = React
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
 export interface LiveMarkdownTableCell {
   row: number
@@ -82,37 +83,6 @@ export function findLiveMarkdownTableCellSourceRange(source: string | undefined,
   return cells[cell.column] ?? null
 }
 
-function renderInlineMath(value: string): React.ReactNode[] {
-  const parts: React.ReactNode[] = []
-  const pattern = /(^|[^\\])(?:\$([^$\n]+)\$|\\\((.+?)\\\)|\\\[([\s\S]+?)\\\]|`([^`\n]+)`)/g
-  let cursor = 0
-  let match: RegExpExecArray | null
-
-  while ((match = pattern.exec(value)) !== null) {
-    const prefix = match[1] ?? ''
-    const start = match.index
-    if (start > cursor) parts.push(value.slice(cursor, start))
-    if (prefix) parts.push(prefix)
-    const code = match[5]
-    const latex = match[2] ?? match[3] ?? match[4] ?? (code && isLikelyLiveMarkdownLatex(code) ? code : null)
-    const displayMode = Boolean(match[4])
-    if (latex !== null) {
-      parts.push(
-        <span
-          key={`${start}:${latex}`}
-          className={displayMode ? 'live-markdown-table-math is-display' : 'live-markdown-table-math'}
-          dangerouslySetInnerHTML={{ __html: renderMarkdownMath(latex, displayMode) }}
-        />,
-      )
-    } else if (code !== undefined) {
-      parts.push(<code key={`${start}:code:${code}`}>{code}</code>)
-    }
-    cursor = start + match[0].length
-  }
-  if (cursor < value.length) parts.push(value.slice(cursor))
-  return parts.length ? parts : [value]
-}
-
 /**
  * An editable GFM table embedded inside Live Markdown's CodeMirror widget.
  * It owns cell-level edit state so the surrounding document never has to
@@ -130,13 +100,14 @@ export function LiveMarkdownTableEditor({
 }: LiveMarkdownTableEditorProps): React.ReactElement {
   const [activeCell, setActiveCell] = useState<LiveMarkdownTableCell | null>(autoFocusCell)
   const [findState, setFindState] = useState<LiveMarkdownFindState>(() => findController?.getState() ?? EMPTY_FIND_STATE)
-  const [draft, setDraft] = useState(() => autoFocusCell ? cellValue(table, autoFocusCell) : '')
-  const inputRef = useRef<HTMLInputElement>(null)
+  const [draft, setDraft] = useState(() => autoFocusCell ? liveMarkdownTableCellDraft(cellValue(table, autoFocusCell)) : '')
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const minimumHeightRef = useRef(0)
 
   useEffect(() => {
     if (!autoFocusCell) return
     setActiveCell(autoFocusCell)
-    setDraft(cellValue(table, autoFocusCell))
+    setDraft(liveMarkdownTableCellDraft(cellValue(table, autoFocusCell)))
   }, [autoFocusCell, table])
 
   useEffect(() => {
@@ -155,30 +126,59 @@ export function LiveMarkdownTableEditor({
     onMeasure()
   }, [activeCell, onMeasure])
 
-  const activate = (cell: LiveMarkdownTableCell) => {
+  // 首次激活、输入和列宽变化时都重新测量，长文本无需在单行框内横向滚动。
+  useIsomorphicLayoutEffect(() => {
+    const input = inputRef.current
+    if (!input) return
+    const resize = () => {
+      input.style.height = '0px'
+      input.style.height = `${Math.max(input.scrollHeight, minimumHeightRef.current)}px`
+      onMeasure()
+    }
+    resize()
+    let width = input.getBoundingClientRect().width
+    const observer = new ResizeObserver(() => {
+      const nextWidth = input.getBoundingClientRect().width
+      if (nextWidth === width) return
+      width = nextWidth
+      minimumHeightRef.current = 0
+      resize()
+    })
+    observer.observe(input)
+    return () => observer.disconnect()
+  }, [activeCell, draft, onMeasure])
+
+  const activate = (cell: LiveMarkdownTableCell, element: HTMLButtonElement) => {
     if (readOnly) return
     if (activeCell?.row === cell.row && activeCell.column === cell.column) return
+    minimumHeightRef.current = element.getBoundingClientRect().height
     if (activeCell) {
-      const original = cellValue(table, activeCell)
+      const original = liveMarkdownTableCellDraft(cellValue(table, activeCell))
       if (shouldCommitLiveMarkdownTableCell(original, draft)) {
         onCommit(updateLiveMarkdownTableCell(table, activeCell.row, activeCell.column, draft), cell)
         return
       }
       setActiveCell(cell)
-      setDraft(cellValue(table, cell))
+      setDraft(liveMarkdownTableCellDraft(cellValue(table, cell)))
       return
     }
     setActiveCell(cell)
-    setDraft(cellValue(table, cell))
+    setDraft(liveMarkdownTableCellDraft(cellValue(table, cell)))
   }
 
   const commit = (focusCell?: LiveMarkdownTableCell) => {
     if (!activeCell) return
-    const original = cellValue(table, activeCell)
+    if (focusCell) {
+      const target = inputRef.current?.closest('table')?.querySelector<HTMLButtonElement>(
+        `[data-live-markdown-table-cell="${focusCell.row}:${focusCell.column}"]`,
+      )
+      minimumHeightRef.current = target?.getBoundingClientRect().height ?? 0
+    }
+    const original = liveMarkdownTableCellDraft(cellValue(table, activeCell))
     if (!shouldCommitLiveMarkdownTableCell(original, draft)) {
       if (focusCell) {
         setActiveCell(focusCell)
-        setDraft(cellValue(table, focusCell))
+        setDraft(liveMarkdownTableCellDraft(cellValue(table, focusCell)))
       } else {
         setActiveCell(null)
         setDraft('')
@@ -202,7 +202,7 @@ export function LiveMarkdownTableEditor({
   const renderCell = (row: number, column: number, header: boolean) => {
     const cell = { row, column }
     const value = cellValue(table, cell)
-    const isActive = activeCell?.row === row && activeCell.column === column
+    const isActive = !readOnly && activeCell?.row === row && activeCell.column === column
     const matchesFind = doesLiveMarkdownTableCellMatch(value, findState.query, findState.options)
     const sourceCellRange = findLiveMarkdownTableCellSourceRange(source, sourceRange, cell)
     const hasActiveFindMatch = matchesFind
@@ -221,10 +221,12 @@ export function LiveMarkdownTableEditor({
     return (
       <Cell key={column} className={className}>
         {isActive ? (
-          <input
+          <textarea
             ref={inputRef}
             className="live-markdown-table-input"
             aria-label={`编辑${ariaLabel}`}
+            rows={1}
+            title="Enter 保存，Shift+Enter 换行，Tab 切换单元格，Esc 取消"
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             onBlur={(event) => {
@@ -232,20 +234,26 @@ export function LiveMarkdownTableEditor({
               commit()
             }}
             onKeyDown={(event) => {
-              if (event.key === 'Enter') {
+              const action = liveMarkdownTableCellKeyAction(
+                event.key,
+                event.shiftKey,
+                event.nativeEvent.isComposing,
+                event.keyCode,
+              )
+              if (action === 'commit') {
                 event.preventDefault()
                 commit()
-              } else if (event.key === 'Escape') {
+              } else if (action === 'cancel') {
                 event.preventDefault()
                 cancel()
-              } else if (event.key === 'Tab') {
+              } else if (action === 'next' || action === 'previous') {
                 event.preventDefault()
-                commit(nextCell(cell, event.shiftKey))
+                commit(nextCell(cell, action === 'previous'))
               }
             }}
           />
         ) : readOnly ? (
-          <span className="live-markdown-table-value">{renderInlineMath(value)}</span>
+          <span className="live-markdown-table-value" dangerouslySetInnerHTML={{ __html: renderLiveMarkdownTableInline(value) }} />
         ) : (
           <button
             type="button"
@@ -254,11 +262,14 @@ export function LiveMarkdownTableEditor({
             onMouseDown={(event) => {
               event.preventDefault()
               event.stopPropagation()
-              activate(cell)
+              activate(cell, event.currentTarget)
             }}
-            onClick={(event) => event.preventDefault()}
+            onClick={(event) => {
+              event.preventDefault()
+              if (event.detail === 0) activate(cell, event.currentTarget)
+            }}
           >
-            <span className="live-markdown-table-value">{renderInlineMath(value)}</span>
+            <span className="live-markdown-table-value" dangerouslySetInnerHTML={{ __html: renderLiveMarkdownTableInline(value) }} />
           </button>
         )}
       </Cell>

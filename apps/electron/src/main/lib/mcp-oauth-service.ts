@@ -9,7 +9,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
 import { existsSync, readFileSync } from 'node:fs'
 import { safeStorage, shell } from 'electron'
-import type { McpOAuthProvider, McpOAuthStartResult, StartMcpOAuthInput } from '@proma/shared'
+import type { McpOAuthConfiguration, McpOAuthProvider, McpOAuthStartResult, StartMcpOAuthInput } from '@proma/shared'
 import { getMcpOAuthCredentialsPath } from './config-paths'
 import { writeJsonFileAtomic } from './safe-file'
 import { runWithOAuthProxyScope } from './oauth-proxy-scope'
@@ -47,8 +47,16 @@ interface McpOAuthCredential {
   clientId: string
   tokenEndpoint: string
   accessToken: string
+  /** OAuth client secret is optional and always Keychain-encrypted. */
+  clientSecret?: string
   refreshToken?: string
   expiresAt?: number
+}
+
+interface McpOAuthClientSecretCredential {
+  kind: 'oauth-client-secret'
+  serverUrl: string
+  clientSecret: string
 }
 
 interface McpApiKeyCredential {
@@ -63,7 +71,7 @@ interface McpApiKeyCredential {
   value: string
 }
 
-type McpCredential = McpOAuthCredential | McpApiKeyCredential
+type McpCredential = McpOAuthCredential | McpOAuthClientSecretCredential | McpApiKeyCredential
 
 interface McpOAuthCredentialFile {
   version: 1
@@ -73,7 +81,8 @@ interface McpOAuthCredentialFile {
 interface AuthorizationConfiguration {
   authorizationEndpoint: string
   tokenEndpoint: string
-  registrationEndpoint: string
+  registrationEndpoint?: string
+  clientId?: string
   scopes: string[]
 }
 
@@ -145,12 +154,40 @@ async function discoverAuthorizationConfiguration(serverUrl: string): Promise<Au
   )
   const metadataUrl = authorizationServerMetadataUrl(authorizationServer)
   const metadata = await fetchJson<OAuthAuthorizationServerMetadata>(metadataUrl, '无法读取 OAuth 授权服务器元数据')
+  const registrationEndpoint = typeof metadata.registration_endpoint === 'string' && metadata.registration_endpoint
+    ? ensureHttpsUrl(metadata.registration_endpoint, 'registration_endpoint')
+    : undefined
 
   return {
     authorizationEndpoint: ensureHttpsUrl(parseString(metadata.authorization_endpoint, 'authorization_endpoint'), 'authorization_endpoint'),
     tokenEndpoint: ensureHttpsUrl(parseString(metadata.token_endpoint, 'token_endpoint'), 'token_endpoint'),
-    registrationEndpoint: ensureHttpsUrl(parseString(metadata.registration_endpoint, 'registration_endpoint'), 'registration_endpoint'),
+    ...(registrationEndpoint ? { registrationEndpoint } : {}),
     scopes: parseStringArray(protectedResource.scopes_supported),
+  }
+}
+
+/**
+ * 优先使用工作区配置中由 Agent 根据官方文档写入的公开 OAuth 元数据；缺失字段时
+ * 回退到 RFC 9728 protected-resource discovery。没有 clientId 时仅能使用 DCR。
+ */
+async function resolveAuthorizationConfiguration(
+  serverUrl: string,
+  configured: McpOAuthConfiguration | undefined,
+): Promise<AuthorizationConfiguration> {
+  const hasConfiguredEndpoints = Boolean(configured?.authorizationEndpoint && configured?.tokenEndpoint)
+  const discovered = hasConfiguredEndpoints ? undefined : await discoverAuthorizationConfiguration(serverUrl)
+  const authorizationEndpoint = configured?.authorizationEndpoint ?? discovered?.authorizationEndpoint
+  const tokenEndpoint = configured?.tokenEndpoint ?? discovered?.tokenEndpoint
+  if (!authorizationEndpoint || !tokenEndpoint) {
+    throw new Error('OAuth 缺少 authorizationEndpoint 或 tokenEndpoint；请让 Agent 依据官方文档补全公开 OAuth 参数')
+  }
+  const scopes = configured?.scopes?.filter(Boolean) ?? discovered?.scopes ?? []
+  return {
+    authorizationEndpoint: ensureHttpsUrl(authorizationEndpoint, 'authorizationEndpoint'),
+    tokenEndpoint: ensureHttpsUrl(tokenEndpoint, 'tokenEndpoint'),
+    ...(configured?.registrationEndpoint ? { registrationEndpoint: ensureHttpsUrl(configured.registrationEndpoint, 'registrationEndpoint') } : discovered?.registrationEndpoint ? { registrationEndpoint: discovered.registrationEndpoint } : {}),
+    ...(configured?.clientId?.trim() ? { clientId: configured.clientId.trim() } : {}),
+    scopes,
   }
 }
 
@@ -248,6 +285,7 @@ export async function exchangeAuthorizationCode(input: {
   code: string
   verifier: string
   resource?: string
+  clientSecret?: string
 }): Promise<Pick<McpOAuthCredential, 'accessToken' | 'refreshToken' | 'expiresAt'>> {
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
@@ -257,6 +295,7 @@ export async function exchangeAuthorizationCode(input: {
     code_verifier: input.verifier,
   })
   if (input.resource) body.set('resource', input.resource)
+  if (input.clientSecret) body.set('client_secret', input.clientSecret)
   const response = await fetch(input.tokenEndpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
@@ -292,6 +331,9 @@ function decryptCredential(encrypted: string): McpCredential | undefined {
   if (!safeStorage.isEncryptionAvailable()) return undefined
   try {
     const parsed = JSON.parse(safeStorage.decryptString(Buffer.from(encrypted, 'base64'))) as Record<string, unknown>
+    if (parsed.kind === 'oauth-client-secret' && typeof parsed.serverUrl === 'string' && typeof parsed.clientSecret === 'string' && parsed.clientSecret) {
+      return { kind: 'oauth-client-secret', serverUrl: parsed.serverUrl, clientSecret: parsed.clientSecret }
+    }
     if (
       parsed.kind === 'api-key' &&
       typeof parsed.serverUrl === 'string' &&
@@ -322,6 +364,7 @@ function decryptCredential(encrypted: string): McpCredential | undefined {
       tokenEndpoint: parsed.tokenEndpoint,
       accessToken: parsed.accessToken,
       ...(typeof parsed.resource === 'string' && parsed.resource ? { resource: parsed.resource } : {}),
+      ...(typeof parsed.clientSecret === 'string' && parsed.clientSecret ? { clientSecret: parsed.clientSecret } : {}),
       ...(typeof parsed.refreshToken === 'string' && parsed.refreshToken ? { refreshToken: parsed.refreshToken } : {}),
       ...(typeof parsed.expiresAt === 'number' ? { expiresAt: parsed.expiresAt } : {}),
     }
@@ -334,6 +377,14 @@ function isMcpApiKeyCredential(credential: McpCredential): credential is McpApiK
   return 'kind' in credential && credential.kind === 'api-key'
 }
 
+function isMcpOAuthClientSecretCredential(credential: McpCredential): credential is McpOAuthClientSecretCredential {
+  return 'kind' in credential && credential.kind === 'oauth-client-secret'
+}
+
+function isMcpOAuthCredential(credential: McpCredential): credential is McpOAuthCredential {
+  return !('kind' in credential)
+}
+
 function saveCredential(workspaceSlug: string, serverName: string, credential: McpCredential): void {
   const file = readCredentialFile()
   file.credentials[credentialKey(workspaceSlug, serverName)] = encryptCredential(credential)
@@ -343,6 +394,20 @@ function saveCredential(workspaceSlug: string, serverName: string, credential: M
 function readCredential(workspaceSlug: string, serverName: string): McpCredential | undefined {
   const encrypted = readCredentialFile().credentials[credentialKey(workspaceSlug, serverName)]
   return encrypted ? decryptCredential(encrypted) : undefined
+}
+
+export function saveMcpOAuthClientSecret(input: {
+  workspaceSlug: string
+  serverName: string
+  serverUrl: string
+  clientSecret: string
+}): void {
+  if (!input.clientSecret.trim()) throw new Error('请输入 OAuth Client Secret')
+  saveCredential(input.workspaceSlug, input.serverName, {
+    kind: 'oauth-client-secret',
+    serverUrl: normalizeMcpResource(input.serverUrl),
+    clientSecret: input.clientSecret.trim(),
+  })
 }
 
 export function deleteMcpCredential(workspaceSlug: string, serverName: string): void {
@@ -361,6 +426,7 @@ export async function refreshCredential(credential: McpOAuthCredential): Promise
     body: (() => {
       const body = new URLSearchParams({ grant_type: 'refresh_token', client_id: credential.clientId, refresh_token: credential.refreshToken })
       if (credential.resource) body.set('resource', credential.resource)
+      if (credential.clientSecret) body.set('client_secret', credential.clientSecret)
       return body
     })(),
   })
@@ -380,11 +446,28 @@ export async function startMcpOAuth(input: StartMcpOAuthInput): Promise<McpOAuth
   const state = base64Url(randomBytes(32))
   const { verifier, challenge } = createPkcePair()
   const callback = await startCallbackServer(state)
+  const storedCredential = readCredential(input.workspaceSlug, input.serverName)
+  const storedClientSecret = storedCredential && isMcpOAuthClientSecretCredential(storedCredential)
+    && storedCredential.serverUrl === normalizeMcpResource(input.serverUrl)
+    ? storedCredential.clientSecret
+    : storedCredential && isMcpOAuthCredential(storedCredential)
+      && storedCredential.serverUrl === normalizeMcpResource(input.serverUrl)
+      ? storedCredential.clientSecret
+      : undefined
 
   try {
     const result = await runWithOAuthProxyScope(async () => {
-      const configuration = await discoverAuthorizationConfiguration(input.serverUrl)
-      const clientId = await registerClient(configuration.registrationEndpoint, callback.redirectUri)
+      const configuration = await resolveAuthorizationConfiguration(input.serverUrl, input.oauth)
+      const clientId = configuration.clientId
+        ?? (configuration.registrationEndpoint
+          ? await registerClient(configuration.registrationEndpoint, callback.redirectUri)
+          : undefined)
+      if (!clientId) {
+        throw new Error('OAuth 服务未提供动态客户端注册；请让 Agent 依据官方文档写入公开 clientId，或在 MCP 卡片中补全 OAuth 配置后重试')
+      }
+      if (input.oauth?.clientSecretRequired && !storedClientSecret) {
+        throw new Error('OAuth 授权码交换需要 Client Secret；请先通过 MCP 卡片安全保存后重试')
+      }
       const authorizationUrl = new URL(configuration.authorizationEndpoint)
       authorizationUrl.searchParams.set('response_type', 'code')
       authorizationUrl.searchParams.set('client_id', clientId)
@@ -405,6 +488,7 @@ export async function startMcpOAuth(input: StartMcpOAuthInput): Promise<McpOAuth
         code,
         verifier,
         resource,
+        clientSecret: storedClientSecret,
       })
       return { configuration, clientId, resource, token }
     })
@@ -414,6 +498,7 @@ export async function startMcpOAuth(input: StartMcpOAuthInput): Promise<McpOAuth
       resource: result.resource,
       clientId: result.clientId,
       tokenEndpoint: result.configuration.tokenEndpoint,
+      ...(storedClientSecret ? { clientSecret: storedClientSecret } : {}),
       ...result.token,
     })
     return { provider: input.provider, serverName: input.serverName, expiresAt: result.token.expiresAt }
@@ -482,6 +567,7 @@ export async function getMcpOAuthHeaders(workspaceSlug: string, serverName: stri
   if (isMcpApiKeyCredential(credential)) {
     return credential.headerName ? { [credential.headerName]: credential.value } : undefined
   }
+  if (!isMcpOAuthCredential(credential)) return undefined
   const oauthCredential = credential
   if (oauthCredential.expiresAt && oauthCredential.expiresAt <= Date.now() + EXPIRY_SKEW_MS) {
     const refreshedCredential = await runWithOAuthProxyScope(() => refreshCredential(oauthCredential))

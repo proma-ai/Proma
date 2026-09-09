@@ -302,6 +302,7 @@ export class AgentOrchestrator {
           url: entry.url,
           ...(Object.keys(headers).length > 0 && { headers }),
           ...(proxyUrl && { proxyUrl }),
+          startup_timeout_sec: entry.timeout ?? 30,
           required: true,
         }
       } else {

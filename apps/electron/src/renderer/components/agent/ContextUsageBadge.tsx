@@ -20,10 +20,12 @@ import { agentSessionViewStreamStateAtomFamily } from '@/atoms/agent-atoms'
 import { cn } from '@/lib/utils'
 import {
   calculatePiAutoCompactionThresholdTokens,
-  type ChannelPlanQuotaResult,
   type ChannelPlanQuotaWindow,
+  type ProviderType,
 } from '@proma/shared'
 import { fetchChannelPlanQuota } from '@/lib/channel-plan-quota'
+import { currentPlanQuota, formatPlanQuotaWindowValue, planQuotaAccountKey } from '@/lib/channel-plan-quota-display'
+import type { LoadedPlanQuota } from '@/lib/channel-plan-quota-display'
 
 /** 显示警告的阈值（压缩阈值的 80%） */
 const WARNING_RATIO = 0.80
@@ -132,25 +134,14 @@ function DetailRow({ label, value, emphasized }: DetailRowProps): React.ReactEle
   )
 }
 
-function formatResetTime(timestamp?: number): string | undefined {
-  if (!timestamp) return undefined
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'numeric',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(timestamp))
-}
-
-function PlanQuotaRow({ quotaWindow }: { quotaWindow: ChannelPlanQuotaWindow }): React.ReactElement {
-  const resetText = formatResetTime(quotaWindow.resetAt)
-  const value = `${quotaWindow.remainingLabel ?? `${quotaWindow.remainingPercent}%`} 剩余${resetText ? ` · ${resetText}` : ''}`
+function PlanQuotaRow({ quotaWindow, provider }: { quotaWindow: ChannelPlanQuotaWindow; provider: ProviderType }): React.ReactElement {
+  const value = formatPlanQuotaWindowValue(quotaWindow, provider)
   return (
     <div className="space-y-1">
       <DetailRow
         label={quotaWindow.label}
         value={value}
-        emphasized={quotaWindow.remainingPercent <= 20}
+        emphasized={quotaWindow.showProgress !== false && quotaWindow.remainingPercent <= 20}
       />
       {quotaWindow.showProgress !== false ? (
         <div className="h-1 overflow-hidden rounded-full bg-foreground/10">
@@ -224,8 +215,10 @@ export function ContextUsageBadge({
   const [open, setOpen] = React.useState(false)
   const closeTimerRef = React.useRef<number | null>(null)
   const popoverReceivedFocusRef = React.useRef(false)
-  // 保留上次成功/失败结果；悬浮刷新期间继续展示旧值，直到新结果到达后原位替换。
-  const [quota, setQuota] = React.useState<ChannelPlanQuotaResult | null>(null)
+  // 同账号刷新可保留旧值；切换账号或清空渠道时立即隐藏旧结果。
+  const [loadedQuota, setLoadedQuota] = React.useState<LoadedPlanQuota | null>(null)
+  const quotaKey = planQuotaAccountKey(channelId, channelUpdatedAt)
+  const quota = currentPlanQuota(loadedQuota, quotaKey)
 
   const cancelClose = React.useCallback(() => {
     if (closeTimerRef.current != null) {
@@ -258,19 +251,19 @@ export function ContextUsageBadge({
   }
 
   React.useEffect(() => {
-    if (!open || !channelId) return
+    if (!open || !channelId || !quotaKey) return
 
     let cancelled = false
 
     fetchChannelPlanQuota(channelId, channelUpdatedAt)
       .then((result) => {
-        if (!cancelled) setQuota(result)
+        if (!cancelled) setLoadedQuota({ channelKey: quotaKey, result })
       })
 
     return () => {
       cancelled = true
     }
-  }, [open, channelId, channelUpdatedAt])
+  }, [open, channelId, channelUpdatedAt, quotaKey])
 
   // 压缩中 → 按钮位置显示 spinner
   if (displayIsCompacting) {
@@ -396,7 +389,7 @@ export function ContextUsageBadge({
               {quota?.supported && quota.windows.length > 0 ? (
                 <div className="flex flex-col gap-1.5">
                   {quota.windows.map((quotaWindow) => (
-                    <PlanQuotaRow key={`${quotaWindow.type}-${quotaWindow.label}`} quotaWindow={quotaWindow} />
+                    <PlanQuotaRow key={`${quotaWindow.type}-${quotaWindow.label}`} quotaWindow={quotaWindow} provider={quota.provider} />
                   ))}
                 </div>
               ) : (

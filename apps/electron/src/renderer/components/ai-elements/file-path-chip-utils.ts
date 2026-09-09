@@ -26,6 +26,7 @@ const MAX_FILE_REFERENCE_LENGTH = 4096
 const PATH_SEP_RE = /[\\/]/
 const WIN_DRIVE_RE = /^[A-Za-z]:[\\/]/
 const UNC_PATH_RE = /^\\\\/
+const HOME_DIRECTORY_RE = /^~(?:[\\/]|$)/
 
 function getExtension(filename: string): string {
   const dot = filename.lastIndexOf('.')
@@ -48,7 +49,7 @@ export function stripLineCol(filePath: string): { path: string; suffix: string }
 
 /** 与主进程 file-preview-service.ts 的绝对路径规则保持一致。 */
 export function isAbsolutePreviewPath(filePath: string): boolean {
-  return filePath.startsWith('/') || UNC_PATH_RE.test(filePath) || WIN_DRIVE_RE.test(filePath)
+  return filePath.startsWith('/') || UNC_PATH_RE.test(filePath) || WIN_DRIVE_RE.test(filePath) || HOME_DIRECTORY_RE.test(filePath)
 }
 
 export function isImageFilePath(filePath: string): boolean {

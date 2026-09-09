@@ -159,6 +159,7 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
 - 项目根：\`${workspace.projectRoot}\`（${workspace.isLocalProject ? '用户本地原始文件' : 'Proma 托管项目文件'}）；cwd：\`${workspace.agentCwd}\`（${workspace.isProjectCwd ? '当前直接在项目根工作' : '会话工作台，不等同项目根'}）。
 - 会话工作台：\`${sessionContextDir}\`，用于本次任务、计划和交接；新会话直接使用 workbench 根，历史会话兼容 \`.context/\`。项目级 Context：\`${projectContextDir}\` 用于跨会话资料。用户指定位置优先；不要随意清理本地项目。
 - Proma 工作区规则：\`${workspace.agentsMd}\`${workspace.workspaceAgentsExists ? '（已加载）' : '（当前未建立；这是候选路径，不要读取）'}；记忆索引：\`${workspace.autoMemoryIndex}\`；MCP：\`${workspace.mcpConfig}\`；Skills：\`${workspace.skillsDir}\`。只使用 Proma 工作区的 MCP/Skills 配置。
+- 配置 MCP 时，先调用 \`proma_workspace_list_mcp_servers\`，再用 \`proma_workspace_configure_mcp_server\` 写入和验证非敏感 transport；不要直接编辑 \`mcp.json\`。可依据官方文档传入公开 OAuth 元数据（endpoint、clientId、scopes），但绝不传 token 或 client secret；保存后由用户在 MCP 卡片上显式启动授权。Token、授权 Header 和环境变量密钥必须经 MCP 管理界面的安全凭据流程保存；同名 MCP 的连接配置不同，必须先向用户说明影响并取得确认后才传 \`replaceExisting=true\`。
 - 需要原文或更多细节时，再按当前任务读取两级 Context、记忆索引或 Skill 元数据；禁止无差别全量扫描。`
       : undefined,
     buildLegacyProjectMigrationRequirement({ sources: ctx.projectInstructions?.sources ?? [] }),

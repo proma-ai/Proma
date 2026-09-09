@@ -5,7 +5,7 @@
  */
 
 import * as React from 'react'
-import { Plug, CheckCircle2, XCircle, Trash2, CircleDashed } from 'lucide-react'
+import { Plug, CheckCircle2, XCircle, Trash2, CircleDashed, KeyRound } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
@@ -18,6 +18,8 @@ interface McpCardProps {
   entry: McpServerEntry
   onOpen: () => void
   onToggle?: (enabled: boolean) => void
+  /** 仅 OAuth 元数据完整/待补全的远程 MCP 提供用户显式授权入口。 */
+  onAuthorize?: () => void
   onRequestDelete?: () => void
   description?: string
   targetLabel?: string
@@ -31,6 +33,7 @@ export function McpCard({
   entry,
   onOpen,
   onToggle,
+  onAuthorize,
   onRequestDelete,
   description,
   targetLabel,
@@ -85,6 +88,17 @@ export function McpCard({
         )}
       </div>
 
+      {entry.oauth && !entry.enabled && (
+        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <KeyRound size={12} className="shrink-0" />
+          {!(entry.oauth.clientId || entry.oauth.registrationEndpoint)
+            ? 'OAuth 还需要公开 clientId 或 registrationEndpoint'
+            : entry.oauth.clientSecretRequired
+              ? 'OAuth 还需要用户安全保存 Client Secret 后授权'
+              : '完成 OAuth 授权并验证后即可在 Agent 中使用'}
+        </div>
+      )}
+
       <div className="flex items-center gap-2 border-t border-border/50 pt-2.5">
         {statusLabel && (
           <span
@@ -116,6 +130,16 @@ export function McpCard({
           <span className="rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
             内置托管
           </span>
+        )}
+        {!isBuiltin && !readOnly && onAuthorize && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onAuthorize() }}
+            className="ml-auto inline-flex h-7 items-center gap-1 rounded-md bg-primary/10 px-2 text-[11px] font-medium text-primary transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            <KeyRound size={12} />
+            {entry.oauth?.clientId || entry.oauth?.registrationEndpoint ? 'OAuth 授权' : '补全 OAuth'}
+          </button>
         )}
         {!isBuiltin && !readOnly && onRequestDelete && (
           <Tooltip>

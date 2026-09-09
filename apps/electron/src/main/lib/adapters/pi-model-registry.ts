@@ -1092,7 +1092,10 @@ export async function buildGithubCopilotModel(sdk: PiSdk, input: GithubCopilotMo
 /** 列出当前 GitHub Copilot 凭据实际允许使用的模型。 */
 export async function listGithubCopilotModels(credentials: GithubCopilotOAuthCredentials): Promise<{ id: string; name: string }[]> {
   const sdk = await import('@earendil-works/pi-coding-agent')
-  const { modelRuntime } = await buildGithubCopilotModel(sdk, { githubCopilotOAuthCredentials: credentials })
+  const modelRuntime = await sdk.ModelRuntime.create({
+    credentials: createGithubCopilotRuntimeCredentialStore(credentials),
+    allowModelNetwork: false,
+  })
   return (await modelRuntime.getAvailable('github-copilot')).map((model) => ({ id: model.id, name: model.name }))
 }
 

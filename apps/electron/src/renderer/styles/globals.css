@@ -114,6 +114,8 @@ body {
   :root {
     --background: 0 0% 100%;
     --foreground: 0 0% 3.9%;
+    /* 侧栏主文字：中性炭黑，避免特色浅色主题将密集列表染成低对比色。 */
+    --sidebar-primary-foreground: 0 0% 17%;
     --muted: 0 0% 96.1%;
     --muted-foreground: 0 0% 45.1%;
     --border: 0 0% 89.8%;
@@ -159,6 +161,7 @@ body {
   .dark {
     --background: 0 0% 10%;                /* 侧栏锚点，略亮于内容区 */
     --foreground: 0 0% 98%;
+    --sidebar-primary-foreground: 0 0% 96%;
     --muted: 0 0% 17%;
     --muted-foreground: 0 0% 63.9%;
     --border: 0 0% 22%;
@@ -483,6 +486,8 @@ body {
     /* 基础色 — 现代布局会让内容区铺满屏幕，避免沿用极暗底导致整体发黑 */
     --background: 100 6% 5%;              /* #0d0e0c 侧边栏 */
     --foreground: 90 20% 65%;             /* #acb09f 暖黄绿白 */
+    /* 保持侧栏新主文字 token 与 CRT 磷光色和现有侧栏文字一致。 */
+    --sidebar-primary-foreground: 90 25% 75%;
     --content-area: 100 6% 6%;            /* #0f100e 内容区：比旧版回调再提亮 1% */
     --sidebar-surface: 100 6% 5%;
     --tabbar-surface: 100 6% 5%;
@@ -2119,6 +2124,7 @@ body {
   .theme-terminal-dark [class*="text-foreground"],
   .theme-terminal-dark .crt-sidebar .text-foreground,
   .theme-terminal-dark .crt-sidebar [class*="text-foreground"],
+  .theme-terminal-dark .crt-sidebar [class*="sidebar-primary-foreground"],
   .theme-terminal-dark .model-selector-trigger,
   .theme-terminal-dark .text-primary,
   .theme-terminal-dark [class*="text-primary"] {
@@ -2134,7 +2140,8 @@ body {
 
 /* 侧边栏文字提亮 + 独立辉光 */
 .theme-terminal-dark .crt-sidebar .text-foreground,
-.theme-terminal-dark .crt-sidebar [class*="text-foreground"] {
+.theme-terminal-dark .crt-sidebar [class*="text-foreground"],
+.theme-terminal-dark .crt-sidebar [class*="sidebar-primary-foreground"] {
   color: hsl(90 25% 75%);
   text-shadow: 0 0 3.3px hsl(90 25% 55% / 0.18), 0 0 1.5px hsl(90 25% 55% / 0.28);
 }
@@ -2701,28 +2708,37 @@ body {
   outline-offset: -2px;
 }
 .live-markdown-table-editor .is-editing {
-  padding: 0.2rem 0.25rem;
   background: hsl(var(--muted) / 0.38);
 }
 .live-markdown-table-input {
+  display: block;
   box-sizing: border-box;
-  width: 100%;
+  width: calc(100% + 1.4rem);
   min-width: 0;
+  min-height: 2.35rem;
+  margin: -0.5rem -0.7rem;
+  resize: none;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   border: 0;
   border-radius: 0.25rem;
   background: hsl(var(--background));
   color: hsl(var(--foreground));
-  padding: 0.3rem 0.45rem;
+  padding: 0.5rem 0.7rem;
   font: inherit;
   line-height: inherit;
   outline: 2px solid hsl(var(--ring));
-  outline-offset: 0;
+  outline-offset: -2px;
 }
 .live-markdown-table-value {
   display: block;
   min-height: 1.35rem;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+.live-markdown-table-value strong {
+  font-weight: 700;
 }
 .live-markdown-table-math {
   display: inline-block;

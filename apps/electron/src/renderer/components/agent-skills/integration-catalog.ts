@@ -221,7 +221,6 @@ const HIDDEN_UNTIL_TESTED_INTEGRATION_IDS = new Set([
   'google-calendar-mcp',
   'vercel-mcp',
   'github-cli',
-  'github-mcp',
   'stripe-mcp',
 ])
 
@@ -231,11 +230,20 @@ export function isCatalogIntegrationVisible(integration: CatalogIntegration): bo
 
 export const MCP_INTEGRATION_CATALOG: CatalogIntegration[] = [
   {
-    id: 'github-mcp', name: 'GitHub', iconSlug: 'github', kind: 'mcp', authentication: 'oauth', serverName: 'github',
+    id: 'github-mcp', name: 'GitHub', iconSlug: 'github', kind: 'mcp', authentication: 'oauth', oauthProvider: 'github', serverName: 'github',
     description: '让 Agent 在你的 GitHub 上读取代码上下文，并处理协作与代码质量工作流。',
     capabilities: ['仓库与文件', 'Issue / PR', 'Actions 与安全扫描'],
     setupUrl: 'https://docs.github.com/en/copilot/how-tos/provide-context/use-mcp-in-your-ide/set-up-the-github-mcp-server',
-    entry: remoteMcp('https://api.githubcopilot.com/mcp/'),
+    entry: {
+      ...remoteMcp('https://api.githubcopilot.com/mcp/'),
+      oauth: {
+        provider: 'github',
+        authorizationEndpoint: 'https://github.com/login/oauth/authorize',
+        tokenEndpoint: 'https://github.com/login/oauth/access_token',
+        clientSecretRequired: true,
+        scopes: ['repo', 'read:org', 'read:user', 'user:email', 'read:packages', 'write:packages', 'read:project', 'project', 'gist', 'notifications'],
+      },
+    },
   },
   {
     id: 'notion-mcp', name: 'Notion', iconSlug: 'notion', kind: 'mcp', authentication: 'oauth', oauthProvider: 'notion', serverName: 'notion',
@@ -402,8 +410,14 @@ export const MCP_INTEGRATION_CATALOG: CatalogIntegration[] = [
   },
 ]
 
+/**
+ * 只有实际渲染的目录卡才能占用“目录服务器名”。被暂时隐藏的目录项不能吞掉
+ * Agent 已写入的同名工作区 MCP，否则待 OAuth 的通用连接会既不在目录、也不在“我的 MCP”。
+ */
 export function getCatalogServerNames(): Set<string> {
-  return new Set(MCP_INTEGRATION_CATALOG.flatMap((integration) => 'serverName' in integration && integration.serverName ? [integration.serverName] : []))
+  return new Set(MCP_INTEGRATION_CATALOG
+    .filter(isCatalogIntegrationVisible)
+    .flatMap((integration) => 'serverName' in integration && integration.serverName ? [integration.serverName] : []))
 }
 export function matchesCatalogSearch(integration: CatalogIntegration, query: string): boolean {
   if (!query) return true

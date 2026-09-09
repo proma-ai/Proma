@@ -43,6 +43,7 @@ import { downloadInstaller, launchInstaller } from '../installer-downloader'
 import { fetchInstallerManifest, findInstallerSource } from '../installer-manifest'
 import { shouldOfferWindowsShellInstaller } from './windows-shell-installer'
 import { buildPiCollaborationTools } from '../agent-collaboration-tools'
+import { configureWorkspaceMcp, listWorkspaceMcpServers } from '../mcp-configuration-service'
 import { getVisionRelayRouteLabel, inspectImageWithVisionRelay, isVisionRelayConfigured, isVisionRelayEligibleForModel } from '../vision-relay-service'
 import {
   createPromaAppKey,
@@ -157,6 +158,82 @@ function defaultTodoDueAt(): number {
   const date = new Date()
   date.setHours(23, 59, 59, 999)
   return date.getTime()
+}
+
+// ===== 工作区 MCP 管理工具 =====
+
+/**
+ * Agent 只能通过受控工具写入无凭据 MCP transport；敏感 headers/env/OAuth 始终由
+ * 现有 UI + Keychain 流程处理。每次启用都会执行真实握手和 listTools 验证。
+ */
+function buildWorkspaceMcpManagementTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinition[] {
+  if (!ctx.workspaceSlug || ctx.triggeredBy === 'automation' || ctx.triggeredBy === 'delegation') return []
+
+  return [
+    sdk.defineTool({
+      name: 'proma_workspace_list_mcp_servers',
+      label: '列出工作区 MCP',
+      description: 'List the current workspace MCP servers and their safe connection status. No credentials, headers, environment values, or endpoint details are returned.',
+      promptSnippet: 'Use this before adding or updating an MCP to avoid overwriting an existing server. If the same server exists with a different connection, ask the user before retrying with replaceExisting=true.',
+      parameters: Type.Object({}),
+      async execute() {
+        return jsonToolResult({ servers: listWorkspaceMcpServers(ctx.workspaceSlug!) })
+      },
+    }),
+    sdk.defineTool({
+      name: 'proma_workspace_configure_mcp_server',
+      label: '配置工作区 MCP',
+      description: 'Create or update a non-sensitive workspace MCP transport and validate it with a real handshake and listTools call. Credentials, authorization headers, and environment secrets are intentionally not accepted; guide the user to the MCP UI for those.',
+      promptSnippet: 'Use only after confirming the official MCP transport. A successful server becomes available in the next user message or new run; tools cannot be hot-added to the current run.',
+      parameters: Type.Object({
+        name: Type.String({ minLength: 1, maxLength: 120, description: 'Stable MCP server name. Reuses and updates an existing server with this exact name.' }),
+        type: Type.Union([Type.Literal('stdio'), Type.Literal('http'), Type.Literal('sse')]),
+        command: Type.Optional(Type.String({ description: 'Required for stdio MCP.' })),
+        args: Type.Optional(Type.Array(Type.String(), { description: 'Optional stdio command arguments.' })),
+        url: Type.Optional(Type.String({ description: 'Required for HTTP or SSE MCP.' })),
+        timeout: Type.Optional(Type.Number({ minimum: 1, maximum: 300, description: 'Optional handshake timeout in seconds for any MCP transport.' })),
+        enabled: Type.Optional(Type.Boolean({ description: 'Defaults to true. When true, Proma enables the server only after handshake and listTools succeed.' })),
+        oauth: Type.Optional(Type.Object({
+          provider: Type.Optional(Type.String({ description: 'Stable, non-secret OAuth provider label, for example github.' })),
+          authorizationEndpoint: Type.Optional(Type.String({ description: 'Public HTTPS OAuth authorization endpoint from official documentation.' })),
+          tokenEndpoint: Type.Optional(Type.String({ description: 'Public HTTPS OAuth token endpoint from official documentation.' })),
+          registrationEndpoint: Type.Optional(Type.String({ description: 'Public HTTPS Dynamic Client Registration endpoint, when the provider supports it.' })),
+          clientId: Type.Optional(Type.String({ description: 'Public OAuth client ID. Never pass a client secret or token.' })),
+          clientSecretRequired: Type.Optional(Type.Boolean({ description: 'Set true only when official documentation requires a client secret; the user will enter it through the encrypted MCP card UI.' })),
+          scopes: Type.Optional(Type.Array(Type.String(), { description: 'Optional OAuth scopes. Never include credentials.' })),
+        }, { description: 'Optional non-sensitive OAuth metadata. After saving, the MCP card lets the user explicitly authorize it in the browser.' })),
+        replaceExisting: Type.Optional(Type.Boolean({ description: 'Set true only after the user explicitly confirms replacing an existing server connection.' })),
+      }),
+      async execute(_toolCallId, params) {
+        const args = params as {
+          name: string
+          type: 'stdio' | 'http' | 'sse'
+          command?: string
+          args?: string[]
+          url?: string
+          timeout?: number
+          enabled?: boolean
+          oauth?: {
+            provider?: string
+            authorizationEndpoint?: string
+            tokenEndpoint?: string
+            registrationEndpoint?: string
+            clientId?: string
+            clientSecretRequired?: boolean
+            scopes?: string[]
+          }
+          replaceExisting?: boolean
+        }
+        const server = await configureWorkspaceMcp(ctx.workspaceSlug!, args)
+        return jsonToolResult({
+          server,
+          nextStep: server.availableNextRun
+            ? `${server.updatedExisting ? 'MCP 已更新' : 'MCP 已创建'}并验证启用；它会在下一条用户消息或新会话中作为工具可用。本轮工具集不会热更新。`
+            : 'MCP 已保存但未启用。请检查连接配置，或在 MCP 管理界面完成凭据配置后重新验证。',
+        })
+      },
+    }),
+  ] as ToolDefinition[]
 }
 
 // ===== Automation 工具 =====
@@ -1547,6 +1624,13 @@ export async function buildPiBuiltinTools(
   })
 
   const tools: ToolDefinition[] = []
+
+  // MCP 管理通过受控工具写入并验证；不要求 Agent 直接编辑 mcp.json。
+  try {
+    tools.push(...buildWorkspaceMcpManagementTools(sdk, ctx))
+  } catch (error) {
+    console.error('[Pi 桥接] 注入 MCP 管理工具失败:', error)
+  }
 
   // 自动化是 Proma 基础运行时能力，不作为可配置 MCP 展示或开关。
   try {

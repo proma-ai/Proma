@@ -293,7 +293,7 @@ export function createMcpMentionSuggestion(
     {
       char: '#',
       headerLabel: 'MCP 服务',
-      emptyText: '无匹配 MCP 服务',
+      emptyText: '没有可引用的 MCP；请先在 MCP 管理中完成启用和连接验证。',
       fetchItems: async (slug, q) => {
         const caps = await window.electronAPI.getWorkspaceCapabilities(slug)
         return getMcpMentionItems(caps.mcpServers, q)

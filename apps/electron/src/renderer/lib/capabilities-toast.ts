@@ -10,7 +10,7 @@ const CHANGE_LABELS: Record<CapabilityChange['type'], string> = {
   skill_added: 'Skill 已添加',
   skill_removed: 'Skill 已移除',
   skill_enabled: 'Skill 已启用',
-  skill_disabled: 'Skill 已禁用',
+  skill_disabled: 'Skill 已关闭',
 }
 
 /**

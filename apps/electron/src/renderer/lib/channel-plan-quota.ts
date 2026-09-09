@@ -9,6 +9,7 @@ const PLAN_QUOTA_PROVIDERS = new Set<ProviderType>([
   'zhipu-coding',
   'zhipu-coding-team',
   'openai-codex',
+  'github-copilot',
 ])
 
 export function supportsChannelPlanQuota(channel: Pick<Channel, 'provider' | 'baseUrl'> | null | undefined): boolean {
@@ -28,6 +29,7 @@ interface CachedPlanQuota {
 
 const quotaCache = new Map<string, CachedPlanQuota>()
 const inflightRequests = new Map<string, Promise<ChannelPlanQuotaResult>>()
+const currentVersions = new Map<string, number | undefined>()
 
 /**
  * 清除全部渠道额度缓存。
@@ -55,29 +57,35 @@ export async function fetchChannelPlanQuota(
   channelId: string,
   channelUpdatedAt?: number,
 ): Promise<ChannelPlanQuotaResult> {
+  currentVersions.set(channelId, channelUpdatedAt)
   const cached = getCachedPlanQuota(channelId, channelUpdatedAt)
   if (cached) return cached
+  quotaCache.delete(channelId)
 
   // 同一渠道换号后不能复用旧凭据发起的 in-flight 请求。
   const requestKey = `${channelId}:${channelUpdatedAt ?? ''}`
   const inflight = inflightRequests.get(requestKey)
   if (inflight) return inflight
 
-  const request = window.electronAPI.getChannelPlanQuota(channelId)
-    .then((result) => {
+  const cacheIfCurrent = (result: ChannelPlanQuotaResult): ChannelPlanQuotaResult => {
+    if (currentVersions.get(channelId) === channelUpdatedAt) {
       quotaCache.set(channelId, { result, channelUpdatedAt })
-      return result
-    })
-    .catch((error: unknown) => {
+    }
+    return result
+  }
+
+  const request = Promise.resolve()
+    .then(() => window.electronAPI.getChannelPlanQuota(channelId))
+    .then(cacheIfCurrent)
+    .catch(() => {
       const result: ChannelPlanQuotaResult = {
         supported: false,
         provider: 'custom',
         windows: [],
         updatedAt: Date.now(),
-        message: error instanceof Error ? error.message : '订阅额度查询失败',
+        message: '订阅额度查询失败，请稍后重试',
       }
-      quotaCache.set(channelId, { result, channelUpdatedAt })
-      return result
+      return cacheIfCurrent(result)
     })
     .finally(() => {
       inflightRequests.delete(requestKey)
