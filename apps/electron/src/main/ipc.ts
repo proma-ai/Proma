@@ -49,6 +49,8 @@ import type {
   RecentMessagesResult,
   AgentSessionMeta,
   AgentActiveSessionSnapshot,
+  DeleteDelegatedSessionsInput,
+  DeleteDelegatedSessionsResult,
   SetAgentSessionActiveWorktreeInput,
   AgentSendInput,
   AgentThinkingLevel,
@@ -290,6 +292,7 @@ import {
   getAgentSessionSDKMessages,
   updateAgentSessionMeta,
   deleteAgentSession,
+  deleteAgentSessions,
   migrateChatToAgentSession,
   moveSessionToWorkspace,
   forkAgentSession,
@@ -299,6 +302,8 @@ import {
   searchAgentSessionReferences,
   resolveAgentCwd,
 } from './lib/agent-session-manager'
+import { deleteDelegatedSessions } from './lib/agent-session-delete-service'
+import { forgetDeletedDelegatedSessions } from './lib/agent-collaboration-tools'
 import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive, isAgentSessionBusy, listActiveAgentSessionSnapshots, listQueuedAgentMessages, reserveAgentSessionStart, queueAgentMessage, submitOrEnqueueAgentMessage, enqueueAgentQueuedMessage, cancelAgentQueuedMessage, moveAgentQueuedMessage, clearAgentQueuedMessages, updateAgentPermissionMode, rewindAgentSession, setVisibleAgentSession } from './lib/agent-service'
 import { permissionService } from './lib/agent-permission-service'
 import { resolvePathAgainstAgentCwd } from './lib/agent-file-path'
@@ -1383,6 +1388,22 @@ function releaseAttachedFileWatchers(filePaths: readonly string[] | undefined): 
   for (const dirPath of new Set((filePaths ?? []).map((filePath) => dirname(filePath)))) {
     releaseDirectoryWatcherIfUnreferenced(dirPath)
   }
+}
+
+/** metadata 提交删除后清理仅属于该会话的运行时引用与 watcher。 */
+function cleanupDeletedAgentSessionRuntime(session: AgentSessionMeta): void {
+  permissionService.clearSessionWhitelist(session.id)
+  permissionService.clearSessionPending(session.id)
+  askUserService.clearSessionPending(session.id)
+  exitPlanService.clearSessionPending(session.id)
+  clearAgentQueuedMessages(session.id)
+  clearVaultUserContext(session.id)
+  forgetDeletedDelegatedSessions([session.id])
+
+  for (const directoryPath of new Set(session.attachedDirectories ?? [])) {
+    releaseDirectoryWatcherIfUnreferenced(directoryPath)
+  }
+  releaseAttachedFileWatchers(session.attachedFiles)
 }
 
 async function withOAuthDeviceCodeQr<T extends CodexOAuthDeviceCode | GithubCopilotOAuthDeviceCode | XaiOAuthDeviceCode>(deviceCode: T): Promise<T> {
@@ -2710,20 +2731,38 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.DELETE_SESSION,
     async (_, id: string): Promise<void> => {
-      const attachedFiles = getAgentSessionMeta(id)?.attachedFiles
-      // 清理权限服务中该会话的白名单
-      permissionService.clearSessionWhitelist(id)
-      permissionService.clearSessionPending(id)
-      // 清理 AskUser 服务中的待处理请求
-      askUserService.clearSessionPending(id)
-      // 清理 ExitPlanMode 服务中的待处理请求
-      exitPlanService.clearSessionPending(id)
-      clearAgentQueuedMessages(id)
+      if (isAgentSessionBusy(id)) {
+        throw new Error('会话正在启动、运行、等待处理或仍有排队消息，请先停止后再删除')
+      }
+      const session = getAgentSessionMeta(id)
+      if (!session) return
+
       await browserController.close(id)
+      // Browser teardown 是异步的；提交 metadata 前再次确认状态没有变化。
+      if (isAgentSessionBusy(id)) {
+        throw new Error('会话状态已变化，请先停止后再删除')
+      }
       closeTerminalsForSession(id)
-      deleteAgentSession(id)
-      releaseAttachedFileWatchers(attachedFiles)
+      await deleteAgentSession(id)
+      cleanupDeletedAgentSessionRuntime(session)
     }
+  )
+
+  // 删除指定父会话下明确选中的委派子会话
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.DELETE_DELEGATED_SESSIONS,
+    async (_, input: DeleteDelegatedSessionsInput): Promise<DeleteDelegatedSessionsResult> => {
+      return deleteDelegatedSessions(input, {
+        listSessions: listAgentSessions,
+        isBusy: isAgentSessionBusy,
+        teardown: async (sessionId) => {
+          await browserController.close(sessionId)
+          closeTerminalsForSession(sessionId)
+        },
+        deleteRecords: deleteAgentSessions,
+        afterDelete: cleanupDeletedAgentSessionRuntime,
+      })
+    },
   )
 
   // 迁移 Chat 对话记录到 Agent 会话
@@ -2990,7 +3029,7 @@ export function registerIpcHandlers(): void {
           stopAgent(sessionId)
         }
         closeTerminalsForSession(sessionId)
-        deleteAgentSession(sessionId)
+        await deleteAgentSession(sessionId)
       }
       for (const automationId of affectedAutomationIds) {
         deleteAutomation(automationId)

@@ -6,6 +6,7 @@
  */
 
 import { rmSync, renameSync, cpSync, existsSync, type RmOptions } from 'node:fs'
+import { rm } from 'node:fs/promises'
 
 /**
  * Windows 上 fs.watch 递归监听持有的句柄释放是毫秒级延迟，
@@ -34,6 +35,10 @@ function sleepSync(ms: number): void {
     const start = Date.now()
     while (Date.now() - start < ms) { /* busy wait fallback */ }
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 /**
@@ -72,6 +77,32 @@ export function rmSyncWithRetry(
       // 指数退避: 50ms, 100ms, 200ms, 400ms — 累计 750ms 内重试 5 次
       const delayMs = 50 * Math.pow(2, attempt - 1)
       sleepSync(delayMs)
+    }
+  }
+  throw lastErr
+}
+
+/**
+ * 异步版本的带退避重试删除。
+ *
+ * 适用于 IPC 请求中的大目录清理，避免同步重试阻塞 Electron 主进程事件循环。
+ */
+export async function rmWithRetry(
+  target: string,
+  options: RmOptions,
+  maxAttempts = 5,
+): Promise<void> {
+  let lastErr: unknown
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await rm(target, options)
+      return
+    } catch (err) {
+      lastErr = err
+      const code = (err as NodeJS.ErrnoException)?.code
+      if (!code || !RETRYABLE_FS_CODES.has(code)) throw err
+      if (attempt === maxAttempts) break
+      await sleep(50 * Math.pow(2, attempt - 1))
     }
   }
   throw lastErr

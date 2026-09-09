@@ -1707,6 +1707,36 @@ export function migratePermissionMode(mode: string): PromaPermissionMode {
   return PROMA_DEFAULT_PERMISSION_MODE
 }
 
+/** 删除指定父会话下明确选中的委派子会话。 */
+export interface DeleteDelegatedSessionsInput {
+  parentSessionId: string
+  sessionIds: string[]
+}
+
+/** 单个委派子会话的批量删除结果。 */
+export type DeleteDelegatedSessionResultCode =
+  | 'deleted'
+  | 'not_found'
+  | 'wrong_parent'
+  | 'not_delegated_child'
+  | 'busy'
+  | 'failed'
+
+export interface DeleteDelegatedSessionItemResult {
+  sessionId: string
+  code: DeleteDelegatedSessionResultCode
+  message?: string
+  warnings?: string[]
+}
+
+/** 批量删除按请求 ID 顺序返回逐项结果。 */
+export interface DeleteDelegatedSessionsResult {
+  parentSessionId: string
+  requestedIds: string[]
+  deletedIds: string[]
+  items: DeleteDelegatedSessionItemResult[]
+}
+
 /** 危险等级 */
 export type DangerLevel = 'safe' | 'normal' | 'dangerous'
 
@@ -1783,6 +1813,8 @@ export const AGENT_IPC_CHANNELS = {
   ACTIVE_WORKTREE_UPDATED: 'agent:active-worktree-updated',
   /** 删除会话 */
   DELETE_SESSION: 'agent:delete-session',
+  /** 删除指定父会话下明确选中的委派子会话 */
+  DELETE_DELEGATED_SESSIONS: 'agent:delete-delegated-sessions',
   /** 迁移 Chat 对话记录到 Agent 会话 */
   MIGRATE_CHAT_TO_AGENT: 'agent:migrate-chat-to-agent',
   /** 切换会话置顶状态 */

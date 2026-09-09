@@ -207,6 +207,24 @@ function pruneFinishedDelegations(): void {
     .forEach((item) => delegations.delete(item.delegationId))
 }
 
+/** 删除会话后同步移除内存中的委派与阻塞记录，避免父会话看到幽灵子会话。 */
+export function forgetDeletedDelegatedSessions(sessionIds: readonly string[]): void {
+  const deletedIds = new Set(sessionIds)
+  const deletedDelegationIds = new Set<string>()
+
+  for (const [delegationId, delegation] of delegations) {
+    if (!deletedIds.has(delegation.childSessionId)) continue
+    deletedDelegationIds.add(delegationId)
+    delegations.delete(delegationId)
+  }
+
+  for (const [blockedEventId, blockedEvent] of blockedEvents) {
+    if (deletedIds.has(blockedEvent.childSessionId) || deletedDelegationIds.has(blockedEvent.delegationId)) {
+      blockedEvents.delete(blockedEventId)
+    }
+  }
+}
+
 
 function normalizeTitle(input: string | undefined, fallback: string): string {
   const trimmed = input?.trim()

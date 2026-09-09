@@ -8,11 +8,12 @@
  * 照搬 conversation-manager.ts 的模式。
  */
 
-import { readFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, readdirSync, createReadStream, createWriteStream, statSync, type WriteStream } from 'node:fs'
+import { readFileSync, appendFileSync, existsSync, mkdirSync, readdirSync, createReadStream, createWriteStream, statSync, type WriteStream } from 'node:fs'
+import { unlink } from 'node:fs/promises'
 import { createInterface } from 'node:readline'
 import { writeJsonFileAtomic, writeTextFileAtomic, readJsonFileSafe } from './safe-file'
 import { randomUUID } from 'node:crypto'
-import { rmSyncWithRetry, renameWithRetry } from './fs-retry'
+import { rmSyncWithRetry, rmWithRetry, renameWithRetry } from './fs-retry'
 import { isAbsolute, join } from 'node:path'
 import {
   getAgentSessionsIndexPath,
@@ -622,49 +623,111 @@ export function updateAgentSessionMeta(
   return updated
 }
 
-/**
- * 删除会话
- */
-export function deleteAgentSession(id: string): void {
-  const index = readIndex()
-  const idx = index.sessions.findIndex((s) => s.id === id)
+export interface DeletedAgentSessionRecord {
+  session: AgentSessionMeta
+  warnings: string[]
+}
 
-  if (idx === -1) {
-    console.warn(`[Agent 会话] 会话不存在，跳过删除: ${id}`)
-    return
-  }
+export interface DeleteAgentSessionsResult {
+  deleted: DeletedAgentSessionRecord[]
+  notFoundIds: string[]
+}
 
-  const removed = index.sessions.splice(idx, 1)[0]!
-  writeIndex(index)
+const MAX_CONCURRENT_SESSION_CLEANUPS = 4
 
-  // 删除消息文件
-  const filePath = getAgentSessionMessagesPath(id)
-  if (existsSync(filePath)) {
-    try {
-      unlinkSync(filePath)
-    } catch (error) {
-      console.warn(`[Agent 会话] 删除消息文件失败 (${id}):`, error)
+async function cleanDeletedAgentSession(session: AgentSessionMeta): Promise<DeletedAgentSessionRecord> {
+  const warnings: string[] = []
+  const sessionId = session.id
+
+  try {
+    await unlink(getAgentSessionMessagesPath(sessionId))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+      const message = `删除消息文件失败: ${error instanceof Error ? error.message : String(error)}`
+      warnings.push(message)
+      console.warn(`[Agent 会话] ${message} (${sessionId})`)
     }
   }
 
-  // 清理 session 工作目录
-  if (removed.workspaceId) {
-    const ws = getAgentWorkspace(removed.workspaceId)
-    if (ws) {
-      try {
-        const sessionDir = getAgentSessionWorkspacePath(ws.slug, id)
-        if (existsSync(sessionDir)) {
-          rmSyncWithRetry(sessionDir, { recursive: true, force: true })
+  if (session.workspaceId) {
+    const workspace = getAgentWorkspace(session.workspaceId)
+    if (workspace) {
+      const sessionDir = getAgentSessionWorkspacePath(workspace.slug, sessionId)
+      if (existsSync(sessionDir)) {
+        try {
+          await rmWithRetry(sessionDir, { recursive: true, force: true })
           console.log(`[Agent 会话] 已清理 session 工作目录: ${sessionDir}`)
+        } catch (error) {
+          const message = `清理 session 工作目录失败: ${error instanceof Error ? error.message : String(error)}`
+          warnings.push(message)
+          console.warn(`[Agent 会话] ${message} (${sessionId})`)
         }
-      } catch (error) {
-        console.warn(`[Agent 会话] 清理 session 工作目录失败 (${id}):`, error)
       }
     }
   }
 
-  console.log(`[Agent 会话] 已删除会话: ${removed.title} (${removed.id})`)
+  console.log(`[Agent 会话] 已删除会话: ${session.title} (${session.id})`)
+  return { session, warnings }
+}
 
+async function cleanDeletedAgentSessions(sessions: readonly AgentSessionMeta[]): Promise<DeletedAgentSessionRecord[]> {
+  const results = new Array<DeletedAgentSessionRecord>(sessions.length)
+  let nextIndex = 0
+  const workerCount = Math.min(MAX_CONCURRENT_SESSION_CLEANUPS, sessions.length)
+
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < sessions.length) {
+      const index = nextIndex++
+      const session = sessions[index]
+      if (session) results[index] = await cleanDeletedAgentSession(session)
+    }
+  }))
+
+  return results
+}
+
+/**
+ * 一次提交多个会话的索引删除，再以有限并发 best-effort 清理消息与工作目录。
+ * 索引写入失败时不会提前删除任何会话文件；索引提交后异步清理避免阻塞主进程事件循环。
+ */
+export async function deleteAgentSessions(ids: readonly string[]): Promise<DeleteAgentSessionsResult> {
+  const requestedIds = [...new Set(ids)]
+  if (requestedIds.length === 0) return { deleted: [], notFoundIds: [] }
+
+  const index = readIndex()
+  const requestedSet = new Set(requestedIds)
+  const removedById = new Map(
+    index.sessions
+      .filter((session) => requestedSet.has(session.id))
+      .map((session) => [session.id, session] as const),
+  )
+  const notFoundIds = requestedIds.filter((id) => !removedById.has(id))
+
+  if (removedById.size === 0) {
+    for (const id of notFoundIds) console.warn(`[Agent 会话] 会话不存在，跳过删除: ${id}`)
+    return { deleted: [], notFoundIds }
+  }
+
+  const nextIndex: AgentSessionsIndex = {
+    ...index,
+    sessions: index.sessions.filter((session) => !removedById.has(session.id)),
+  }
+  writeIndex(nextIndex)
+
+  const deleted = await cleanDeletedAgentSessions(
+    requestedIds.flatMap((id) => {
+      const session = removedById.get(id)
+      return session ? [session] : []
+    }),
+  )
+
+  for (const id of notFoundIds) console.warn(`[Agent 会话] 会话不存在，跳过删除: ${id}`)
+  return { deleted, notFoundIds }
+}
+
+/** 删除单个会话。 */
+export async function deleteAgentSession(id: string): Promise<void> {
+  await deleteAgentSessions([id])
 }
 
 /**
@@ -918,7 +981,7 @@ async function forkPiAgentSession(sourceMeta: AgentSessionMeta, input: ForkSessi
     return newMeta
   } catch (error) {
     // 尚未对外返回的新 session 可安全清理，避免留下会被侧栏打开的半成品。
-    try { deleteAgentSession(newMeta.id) } catch { /* 保留原始错误 */ }
+    try { await deleteAgentSession(newMeta.id) } catch { /* 保留原始错误 */ }
     throw error
   }
 }

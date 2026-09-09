@@ -40,6 +40,8 @@ import type {
   SessionMessageSearchResponse,
   AgentSessionMeta,
   AgentActiveSessionSnapshot,
+  DeleteDelegatedSessionsInput,
+  DeleteDelegatedSessionsResult,
   SetAgentSessionActiveWorktreeInput,
   SDKMessage,
   AgentSendInput,
@@ -612,6 +614,9 @@ export interface ElectronAPI {
 
   /** 删除 Agent 会话 */
   deleteAgentSession: (id: string) => Promise<void>
+
+  /** 删除指定父会话下明确选中的委派子会话 */
+  deleteDelegatedSessions: (input: DeleteDelegatedSessionsInput) => Promise<DeleteDelegatedSessionsResult>
 
   /** 迁移 Chat 对话记录到 Agent 会话 */
   migrateChatToAgent: (conversationId: string, agentSessionId: string) => Promise<void>
@@ -1927,6 +1932,10 @@ const electronAPI: ElectronAPI = {
 
   deleteAgentSession: (id: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.DELETE_SESSION, id)
+  },
+
+  deleteDelegatedSessions: (input: DeleteDelegatedSessionsInput) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.DELETE_DELEGATED_SESSIONS, input)
   },
 
   migrateChatToAgent: (conversationId: string, agentSessionId: string) => {

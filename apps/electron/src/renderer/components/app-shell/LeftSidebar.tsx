@@ -11,7 +11,7 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Star, Settings, Plus, CirclePlus, Trash2, Pencil, PanelLeft, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, FolderInput, FolderPlus, GripVertical, Clock, CalendarDays, ChevronRight, ChevronDown, ChevronUp, ChevronsDownUp, Blocks, Brain, ListTodo, GitBranch, Download, Loader2, RotateCw, Info } from 'lucide-react'
+import { Pin, PinOff, Star, Settings, Plus, CirclePlus, Trash2, Pencil, PanelLeft, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, FolderInput, FolderPlus, GripVertical, Clock, CalendarDays, ChevronRight, ChevronDown, ChevronUp, ChevronsDownUp, Blocks, Brain, ListTodo, GitBranch, Download, Loader2, RotateCw, Info, Check, ListChecks, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
@@ -68,14 +68,34 @@ import {
   agentSessionViewStreamStateAtomFamily,
   agentSessionInputStreamStateAtomFamily,
   agentLiveMessagesAtomFamily,
+  agentSessionDraftsAtom,
   agentSessionDraftAtomFamily,
+  agentSessionDraftSyncVersionsAtom,
+  agentSessionDraftSyncVersionAtomFamily,
+  agentSessionDraftHtmlAtom,
   agentSessionDraftHtmlAtomFamily,
+  agentAttachedDirectoriesMapAtom,
+  agentAttachedFilesMapAtom,
+  agentSessionMessageQueueAtom,
+  agentMessageQueueAtomFamily,
+  agentTerminalTabsAtom,
+  allPendingPermissionRequestsAtom,
+  allPendingAskUserRequestsAtom,
+  allPendingExitPlanRequestsAtom,
+  agentPlanModeSessionsAtom,
   agentPendingFilesAtomFamily,
   sessionPersistedPermissionModeAtom,
   sessionExistsAtom,
   automationGroupOrderAtom,
 } from '@/atoms/agent-atoms'
 import type { SessionIndicatorStatus, WorkspaceComponentTab } from '@/atoms/agent-atoms'
+import {
+  browserPanelOpenMapAtom,
+  browserPanelMinimizedMapAtom,
+  browserStateMapAtom,
+  browserFocusRequestMapAtom,
+  browserPendingNavigationMapAtom,
+} from '@/atoms/browser-atoms'
 import {
   previewPanelOpenMapAtom,
   previewFileMapAtom,
@@ -145,6 +165,16 @@ import {
 } from '@/lib/agent-session-list'
 import { clearSessionReferenceDragState, insertSessionReferenceMention, setSessionReferenceDragData } from '@/lib/session-reference-drag'
 import {
+  createDelegatedSessionBulkSelection,
+  getDelegatedSessionBulkDeleteActionTarget,
+  getSelectableDelegatedSessionIds,
+  reconcileDelegatedSessionBulkSelection,
+  selectAllDelegatedSessions,
+  shouldShowDelegatedSessionBulkDeleteAction,
+  toggleDelegatedSessionBulkSelection,
+  type DelegatedSessionBulkSelection,
+} from '@/lib/delegated-session-bulk-delete'
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -154,6 +184,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { Button } from '@/components/ui/button'
+import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -512,6 +544,27 @@ function getDirectDelegatedChildren(
   ))
 }
 
+function isDelegatedSessionBusyInSidebar(
+  session: AgentSessionMeta,
+  agentIndicatorMap: Map<string, SessionIndicatorStatus>,
+): boolean {
+  const status = getDelegatedChildStatus(session, agentIndicatorMap)
+  return status === 'running' || status === 'blocked'
+}
+
+function orderDelegatedChildrenForBulkSelection(
+  childSessions: AgentSessionMeta[],
+  selection: DelegatedSessionBulkSelection | null,
+  parentSessionId: string,
+): AgentSessionMeta[] {
+  if (!selection || selection.parentSessionId !== parentSessionId) return childSessions
+  const byId = new Map(childSessions.map((session) => [session.id, session] as const))
+  return selection.childOrder.flatMap((id) => {
+    const session = byId.get(id)
+    return session ? [session] : []
+  })
+}
+
 function collectDelegatedSessionTreeIds(sessions: AgentSessionMeta[], rootSessionId: string): Set<string> {
   const ids = new Set<string>([rootSessionId])
   let changed = true
@@ -598,6 +651,66 @@ function deleteSetEntry<T>(prev: Set<T>, value: T): Set<T> {
   return next
 }
 
+interface DelegatedSessionBulkActionsProps {
+  selectedCount: number
+  selectableCount: number
+  allSelectableSelected: boolean
+  onCancel: () => void
+  onSelectAll: () => void
+  onDelete: () => void
+}
+
+function DelegatedSessionBulkActions({
+  selectedCount,
+  selectableCount,
+  allSelectableSelected,
+  onCancel,
+  onSelectAll,
+  onDelete,
+}: DelegatedSessionBulkActionsProps): React.ReactElement {
+  return (
+    <div className="rounded-xl bg-card p-2.5 shadow-[0_6px_22px_-12px_rgba(0,0,0,0.45)] titlebar-no-drag">
+      <div className="mb-2 flex items-center gap-2 px-1">
+        <ListChecks size={14} className="shrink-0 text-primary" />
+        <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground/75">
+          已选 {selectedCount} 个子会话
+        </span>
+        <button
+          type="button"
+          aria-label="退出批量删除子会话"
+          onClick={onCancel}
+          className="flex size-6 items-center justify-center rounded-md text-foreground/40 hover:bg-foreground/[0.06] hover:text-foreground/70"
+        >
+          <X size={13} />
+        </button>
+      </div>
+      <div className="flex items-center gap-1.5">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          aria-label={`全选 ${selectableCount} 个可删除子会话`}
+          disabled={selectableCount === 0 || allSelectableSelected}
+          onClick={onSelectAll}
+          className="h-8 flex-1 rounded-lg px-2 text-[11px] text-foreground/75"
+        >
+          全选
+        </Button>
+        <Button
+          type="button"
+          variant="destructive"
+          size="sm"
+          disabled={selectedCount === 0}
+          onClick={onDelete}
+          className="h-8 flex-1 rounded-lg px-2 text-[11px]"
+        >
+          删除 {selectedCount} 个
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.ReactElement {
   const [activeView, setActiveView] = useAtom(activeViewAtom)
   const setAutomationForm = useSetAtom(automationFormAtom)
@@ -618,6 +731,14 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
 
   /** 待删除对话 ID，非空时显示确认弹窗 */
   const [pendingDeleteId, setPendingDeleteId] = React.useState<string | null>(null)
+  /** Agent 父会话级联范围必须来自主进程完整索引，不能只依赖当前 active/archived 侧栏切片。 */
+  const [pendingDeleteAgentChildIds, setPendingDeleteAgentChildIds] = React.useState<string[]>([])
+  const deleteScopeRequestTokenRef = React.useRef(0)
+  /** 当前父会话内的子会话多选状态；同一时间只允许一个父级。 */
+  const [delegatedBulkSelection, setDelegatedBulkSelection] = React.useState<DelegatedSessionBulkSelection | null>(null)
+  const delegatedBulkParentWorkspaceIdRef = React.useRef<string | undefined>(undefined)
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = React.useState(false)
+  const [bulkDeleting, setBulkDeleting] = React.useState(false)
   /** 待删除项目 ID，非空时显示项目删除确认弹窗 */
   const [pendingDeleteWorkspaceId, setPendingDeleteWorkspaceId] = React.useState<string | null>(null)
   const [deletingWorkspaceId, setDeletingWorkspaceId] = React.useState<string | null>(null)
@@ -793,6 +914,22 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   const setLiveMessagesMap = useSetAtom(liveMessagesMapAtom)
   const setSessionPendingFiles = useSetAtom(agentSessionPendingFilesAtom)
   const setSessionViewStateMap = useSetAtom(sessionViewStateMapAtom)
+  const setAgentSessionDrafts = useSetAtom(agentSessionDraftsAtom)
+  const setAgentSessionDraftSyncVersions = useSetAtom(agentSessionDraftSyncVersionsAtom)
+  const setAgentSessionDraftHtml = useSetAtom(agentSessionDraftHtmlAtom)
+  const setAgentAttachedDirectories = useSetAtom(agentAttachedDirectoriesMapAtom)
+  const setAgentAttachedFiles = useSetAtom(agentAttachedFilesMapAtom)
+  const setAgentMessageQueue = useSetAtom(agentSessionMessageQueueAtom)
+  const setAgentTerminalTabs = useSetAtom(agentTerminalTabsAtom)
+  const setPendingPermissions = useSetAtom(allPendingPermissionRequestsAtom)
+  const setPendingAskUser = useSetAtom(allPendingAskUserRequestsAtom)
+  const setPendingExitPlan = useSetAtom(allPendingExitPlanRequestsAtom)
+  const setPlanModeSessions = useSetAtom(agentPlanModeSessionsAtom)
+  const setBrowserPanelOpen = useSetAtom(browserPanelOpenMapAtom)
+  const setBrowserPanelMinimized = useSetAtom(browserPanelMinimizedMapAtom)
+  const setBrowserState = useSetAtom(browserStateMapAtom)
+  const setBrowserFocusRequest = useSetAtom(browserFocusRequestMapAtom)
+  const setBrowserPendingNavigation = useSetAtom(browserPendingNavigationMapAtom)
 
   /** 清理 per-conversation/session Map atoms 条目 */
   const cleanupMapAtoms = React.useCallback((id: string) => {
@@ -886,6 +1023,35 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     clearPreviewCacheForSession(id)
   }, [setConvModels, setConvContextLength, setConvThinking, setConvParallel, setConvPromptId, setPreviewPanelOpen, setPreviewFile, setPreviewFiles, setPreviewContentRefreshVersion, setPreviewResolvedPaths, setConversationQuotedSelections, setAgentSideChatMap, setDiffPanelTab, setDiffRefreshVersion, setDiffUnseen, setDiffUnseenFiles, setNonGitFileChanges, setFileChangesCurrentRun, setDiffData, setAgentSidePanelOpenMap, setSessionChannelMap, setSessionModelMap, setSessionPathMap, setSessionViewStateMap, setStreamingStates, setLiveMessagesMap, setSessionPendingFiles, store])
 
+  /** 物理删除专用清理；归档仍保留可恢复的附件、Browser、Terminal 与请求状态。 */
+  const cleanupDeletedSessionAtoms = React.useCallback((id: string): void => {
+    cleanupMapAtoms(id)
+    const deleteKey = <T,>(prev: Map<string, T>): Map<string, T> => {
+      if (!prev.has(id)) return prev
+      const next = new Map(prev)
+      next.delete(id)
+      return next
+    }
+    setAgentSessionDrafts(deleteKey)
+    setAgentSessionDraftSyncVersions(deleteKey)
+    setAgentSessionDraftHtml(deleteKey)
+    setAgentAttachedDirectories(deleteKey)
+    setAgentAttachedFiles(deleteKey)
+    setAgentMessageQueue(deleteKey)
+    setAgentTerminalTabs(deleteKey)
+    setPendingPermissions(deleteKey)
+    setPendingAskUser(deleteKey)
+    setPendingExitPlan(deleteKey)
+    setBrowserPanelOpen(deleteKey)
+    setBrowserPanelMinimized(deleteKey)
+    setBrowserState(deleteKey)
+    setBrowserFocusRequest(deleteKey)
+    setBrowserPendingNavigation(deleteKey)
+    setPlanModeSessions((prev) => deleteSetEntry(prev, id))
+    agentSessionDraftSyncVersionAtomFamily.remove(id)
+    agentMessageQueueAtomFamily.remove(id)
+  }, [cleanupMapAtoms, setAgentAttachedDirectories, setAgentAttachedFiles, setAgentMessageQueue, setAgentSessionDraftHtml, setAgentSessionDrafts, setAgentSessionDraftSyncVersions, setAgentTerminalTabs, setBrowserFocusRequest, setBrowserPanelMinimized, setBrowserPanelOpen, setBrowserPendingNavigation, setBrowserState, setPendingAskUser, setPendingExitPlan, setPendingPermissions, setPlanModeSessions])
+
   const currentWorkspaceSlug = React.useMemo(() => {
     if (!currentWorkspaceId) return null
     return workspaces.find((w) => w.id === currentWorkspaceId)?.slug ?? null
@@ -906,11 +1072,143 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     [pendingRestoreProjectRootId, workspaces],
   )
 
-  /** 待删除 Agent 会话下的委派子会话数量，用于删除确认弹窗提示是否级联删除 */
-  const pendingDeleteChildCount = React.useMemo<number>(() => {
-    if (!pendingDeleteId || mode !== 'agent') return 0
-    return getDirectDelegatedChildren(agentSessions, pendingDeleteId).length
-  }, [agentSessions, mode, pendingDeleteId])
+  /** 待删除 Agent 会话下的完整委派子会话数量，用于删除确认弹窗提示是否级联删除。 */
+  const pendingDeleteChildCount = pendingDeleteId && mode === 'agent'
+    ? pendingDeleteAgentChildIds.length
+    : 0
+
+  const delegatedBulkBusyIds = React.useMemo(() => {
+    const ids = new Set<string>()
+    for (const session of agentSessions) {
+      if (session.sourceDelegationId && isDelegatedSessionBusyInSidebar(session, agentIndicatorMap)) {
+        ids.add(session.id)
+      }
+    }
+    return ids
+  }, [agentIndicatorMap, agentSessions])
+
+  const delegatedBulkVisibleChildren = React.useMemo(() => {
+    if (!delegatedBulkSelection) return []
+    return getDirectDelegatedChildren(agentSessions, delegatedBulkSelection.parentSessionId)
+      .filter((session) => viewMode === 'archived' ? !!session.archived : !session.archived)
+  }, [agentSessions, delegatedBulkSelection, viewMode])
+
+  const delegatedBulkSelectableIds = React.useMemo(
+    () => delegatedBulkSelection
+      ? getSelectableDelegatedSessionIds(delegatedBulkSelection, delegatedBulkBusyIds)
+      : [],
+    [delegatedBulkBusyIds, delegatedBulkSelection],
+  )
+  const delegatedBulkSelectedSet = React.useMemo(
+    () => new Set(delegatedBulkSelection?.selectedIds ?? []),
+    [delegatedBulkSelection],
+  )
+  const delegatedBulkAllSelectableSelected = delegatedBulkSelectableIds.length > 0
+    && delegatedBulkSelectableIds.every((id) => delegatedBulkSelectedSet.has(id))
+  const delegatedBulkSelectedSessions = React.useMemo(() => {
+    if (!delegatedBulkSelection) return []
+    const selected = new Set(delegatedBulkSelection.selectedIds)
+    return delegatedBulkVisibleChildren.filter((session) => selected.has(session.id))
+  }, [delegatedBulkSelection, delegatedBulkVisibleChildren])
+  const delegatedBulkParent = React.useMemo(
+    () => delegatedBulkSelection
+      ? agentSessions.find((session) => session.id === delegatedBulkSelection.parentSessionId) ?? null
+      : null,
+    [agentSessions, delegatedBulkSelection],
+  )
+
+  const cancelDelegatedBulkSelection = React.useCallback((): void => {
+    delegatedBulkParentWorkspaceIdRef.current = undefined
+    setBulkDeleteConfirmOpen(false)
+    setDelegatedBulkSelection(null)
+  }, [])
+
+  const handleStartDelegatedBulkSelection = React.useCallback((
+    parentSessionId: string,
+    preselectedSessionId?: string,
+  ): void => {
+    const visibleChildren = getDirectDelegatedChildren(agentSessions, parentSessionId)
+      .filter((session) => viewMode === 'archived' ? !!session.archived : !session.archived)
+    if (!shouldShowDelegatedSessionBulkDeleteAction(visibleChildren.length)) return
+    const safePreselection = preselectedSessionId && !delegatedBulkBusyIds.has(preselectedSessionId)
+      ? preselectedSessionId
+      : undefined
+    delegatedBulkParentWorkspaceIdRef.current = agentSessions.find((session) => session.id === parentSessionId)?.workspaceId
+    setDelegatedBulkSelection(createDelegatedSessionBulkSelection(
+      parentSessionId,
+      visibleChildren,
+      safePreselection,
+    ))
+    setExpandedDelegationParentIds((prev) => new Set(prev).add(parentSessionId))
+    setCollapsedDelegationParentIds((prev) => deleteSetEntry(prev, parentSessionId))
+    setSidebarCollapsed(false)
+  }, [agentSessions, delegatedBulkBusyIds, setSidebarCollapsed, viewMode])
+
+  const handleToggleDelegatedBulkSelection = React.useCallback((sessionId: string): void => {
+    setDelegatedBulkSelection((current) => current
+      ? toggleDelegatedSessionBulkSelection(current, sessionId, delegatedBulkBusyIds)
+      : current)
+  }, [delegatedBulkBusyIds])
+
+  const handleSelectAllDelegatedSessions = React.useCallback((): void => {
+    setDelegatedBulkSelection((current) => current
+      ? selectAllDelegatedSessions(current, delegatedBulkBusyIds)
+      : current)
+  }, [delegatedBulkBusyIds])
+  const delegatedBulkActions = React.useMemo<DelegatedSessionBulkActionsProps | undefined>(() => (
+    delegatedBulkSelection
+      ? {
+        selectedCount: delegatedBulkSelection.selectedIds.length,
+        selectableCount: delegatedBulkSelectableIds.length,
+        allSelectableSelected: delegatedBulkAllSelectableSelected,
+        onCancel: cancelDelegatedBulkSelection,
+        onSelectAll: handleSelectAllDelegatedSessions,
+        onDelete: () => setBulkDeleteConfirmOpen(true),
+      }
+      : undefined
+  ), [cancelDelegatedBulkSelection, delegatedBulkAllSelectableSelected, delegatedBulkSelectableIds.length, delegatedBulkSelection, handleSelectAllDelegatedSessions])
+  const getDelegatedBulkChildSelection = React.useCallback((parentSessionId: string, sessionId: string) => (
+    delegatedBulkSelection?.parentSessionId === parentSessionId
+      ? {
+        selected: delegatedBulkSelectedSet.has(sessionId),
+        disabled: delegatedBulkBusyIds.has(sessionId),
+        onToggle: () => handleToggleDelegatedBulkSelection(sessionId),
+      }
+      : undefined
+  ), [delegatedBulkBusyIds, delegatedBulkSelectedSet, delegatedBulkSelection, handleToggleDelegatedBulkSelection])
+
+  React.useEffect(() => {
+    setDelegatedBulkSelection((current) => current
+      ? reconcileDelegatedSessionBulkSelection(current, delegatedBulkVisibleChildren, delegatedBulkBusyIds)
+      : current)
+  }, [delegatedBulkBusyIds, delegatedBulkVisibleChildren])
+
+  React.useEffect(() => {
+    if (mode !== 'agent' || sidebarCollapsed) cancelDelegatedBulkSelection()
+  }, [cancelDelegatedBulkSelection, mode, sidebarCollapsed])
+
+  React.useEffect(() => {
+    cancelDelegatedBulkSelection()
+  }, [cancelDelegatedBulkSelection, currentWorkspaceId, viewMode])
+
+  React.useEffect(() => {
+    if (!delegatedBulkSelection) return
+    const parentRemainsInScope = delegatedBulkParent
+      && delegatedBulkParent.workspaceId === delegatedBulkParentWorkspaceIdRef.current
+      && (viewMode === 'archived' ? !!delegatedBulkParent.archived : !delegatedBulkParent.archived)
+    if (!parentRemainsInScope) cancelDelegatedBulkSelection()
+  }, [cancelDelegatedBulkSelection, delegatedBulkParent, delegatedBulkSelection, viewMode])
+
+  React.useEffect(() => {
+    if (!delegatedBulkSelection || bulkDeleteConfirmOpen) return
+    const handleEscape = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      cancelDelegatedBulkSelection()
+    }
+    window.addEventListener('keydown', handleEscape)
+    return () => window.removeEventListener('keydown', handleEscape)
+  }, [bulkDeleteConfirmOpen, cancelDelegatedBulkSelection, delegatedBulkSelection])
 
   React.useEffect(() => {
     if (!currentWorkspaceSlug || mode !== 'agent') {
@@ -1062,10 +1360,27 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     setActiveView('conversations')
   }, [openSession, setActiveView])
 
-  /** 请求删除对话（弹出确认框） */
+  /** 请求删除对话（弹出确认框）；Agent 会话先从主进程完整索引固定级联范围。 */
   const handleRequestDelete = React.useCallback((id: string): void => {
-    setPendingDeleteId(id)
-  }, [])
+    if (mode !== 'agent') {
+      setPendingDeleteId(id)
+      return
+    }
+
+    const requestToken = deleteScopeRequestTokenRef.current + 1
+    deleteScopeRequestTokenRef.current = requestToken
+    void window.electronAPI.listAgentSessions()
+      .then((sessions) => {
+        if (deleteScopeRequestTokenRef.current !== requestToken) return
+        setPendingDeleteAgentChildIds(getDirectDelegatedChildren(sessions, id).map((child) => child.id))
+        setPendingDeleteId(id)
+      })
+      .catch((error) => {
+        if (deleteScopeRequestTokenRef.current !== requestToken) return
+        console.error('[侧边栏] 读取完整级联删除范围失败:', error)
+        toast.error('无法确认完整子会话范围，请重试')
+      })
+  }, [mode])
 
   /** 重命名对话标题 */
   const handleRename = React.useCallback(async (id: string, newTitle: string): Promise<void> => {
@@ -1139,27 +1454,28 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       const deletingActiveSession = activeSessionId === sessionId
       // 级联删除时在发起 IPC 前固定子会话快照，确保删除范围与弹窗展示一致，
       // 避免弹窗打开期间新增的子会话被意外删除。
-      const childIds = cascade
-        ? getDirectDelegatedChildren(store.get(agentSessionsAtom), sessionId).map((child) => child.id)
-        : []
+      const childIds = cascade ? [...pendingDeleteAgentChildIds] : []
 
       try {
         // 先删子后删父：若子会话删除中途失败，父会话仍在，UI 一致性更好。
         if (childIds.length > 0) {
+          const deletedChildIds: string[] = []
           const failedChildIds: string[] = []
           for (const childId of childIds) {
             try {
               await window.electronAPI.deleteAgentSession(childId)
+              deletedChildIds.push(childId)
             } catch (error) {
               console.error(`[侧边栏] 级联删除子会话失败 (${childId}):`, error)
               failedChildIds.push(childId)
             }
           }
-          if (failedChildIds.length > 0) {
-            toast.error(`部分子会话删除失败（${failedChildIds.length} 个），请手动清理`)
+          if (deletedChildIds.length > 0) {
+            const deletedChildSet = new Set(deletedChildIds)
+            setAgentSessions((prev) => prev.filter((session) => !deletedChildSet.has(session.id)))
           }
-          closeArchivedAgentTabs(childIds)
-          for (const childId of childIds) {
+          closeArchivedAgentTabs(deletedChildIds, true)
+          for (const childId of deletedChildIds) {
             setExpandedDelegationParentIds((prev) => deleteSetEntry(prev, childId))
             setAgentMessagesCache((prev) => {
               if (!prev.has(childId)) return prev
@@ -1168,10 +1484,16 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
               return next
             })
           }
+          if (failedChildIds.length > 0) {
+            await refreshAgentSidebarSessions(viewMode === 'archived').catch(console.error)
+            toast.error(`部分子会话删除失败（${failedChildIds.length} 个），父会话已保留`)
+            return
+          }
         }
 
         // 先由主进程确认删除成功，再清理本地状态；失败时保留当前会话与输入，避免假删除。
         await window.electronAPI.deleteAgentSession(sessionId)
+        setAgentSessions((prev) => prev.filter((session) => session.id !== sessionId))
         // 刷新失败不应中断已成功删除会话的本地收尾，否则会残留一个指向已删除数据的 Tab。
         await refreshAgentSidebarSessions(viewMode === 'archived').catch((refreshError) => {
           console.error('[侧边栏] 刷新 Agent 会话列表失败:', refreshError)
@@ -1191,7 +1513,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
           next.delete(sessionId)
           return next
         })
-        cleanupMapAtoms(sessionId)
+        cleanupDeletedSessionAtoms(sessionId)
         setExpandedDelegationParentIds((prev) => deleteSetEntry(prev, sessionId))
         setAgentMessagesCache((prev) => {
           if (!prev.has(sessionId)) return prev
@@ -1214,9 +1536,10 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
         }
       } catch (error) {
         console.error('[侧边栏] 删除 Agent 会话失败:', error)
-        toast.error('删除 Agent 会话失败，请重试')
+        toast.error(error instanceof Error ? error.message : '删除 Agent 会话失败，请重试')
       } finally {
         setPendingDeleteId(null)
+        setPendingDeleteAgentChildIds([])
       }
       return
     }
@@ -1387,7 +1710,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       await window.electronAPI.deleteAgentWorkspace(workspaceId)
 
       for (const sessionId of deletedSessionIds) {
-        cleanupMapAtoms(sessionId)
+        cleanupDeletedSessionAtoms(sessionId)
       }
 
       setDraftSessionIds((prev: Set<string>) => {
@@ -1469,7 +1792,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     workspaces,
     canDeleteWorkspace,
     agentSessions,
-    cleanupMapAtoms,
+    cleanupDeletedSessionAtoms,
     setDraftSessionIds,
     setAgentMessagesCache,
     setAutomations,
@@ -2021,7 +2344,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     }
   }, [setAgentSessions, setTabs])
 
-  const closeArchivedAgentTabs = React.useCallback((sessionIds: string[]): void => {
+  const closeArchivedAgentTabs = React.useCallback((sessionIds: string[], permanentlyDeleted = false): void => {
     const ids = new Set(sessionIds)
     const currentTabs = store.get(tabsAtom)
     const currentActiveTabId = store.get(activeTabIdAtom)
@@ -2034,9 +2357,76 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
 
     setTabs(nextTabs)
     setActiveTabId(nextActiveTabId)
-    for (const sessionId of ids) cleanupMapAtoms(sessionId)
+    for (const sessionId of ids) {
+      if (permanentlyDeleted) cleanupDeletedSessionAtoms(sessionId)
+      else cleanupMapAtoms(sessionId)
+    }
     syncActiveTabSideEffects(nextActiveTabId ? nextTabs.find((tab) => tab.id === nextActiveTabId) ?? null : null)
-  }, [cleanupMapAtoms, setActiveTabId, setTabs, store, syncActiveTabSideEffects])
+  }, [cleanupDeletedSessionAtoms, cleanupMapAtoms, setActiveTabId, setTabs, store, syncActiveTabSideEffects])
+
+  const handleConfirmDelegatedBulkDelete = React.useCallback(async (): Promise<void> => {
+    const selection = delegatedBulkSelection
+    if (!selection || selection.selectedIds.length === 0 || bulkDeleting) return
+
+    setBulkDeleting(true)
+    try {
+      const result = await window.electronAPI.deleteDelegatedSessions({
+        parentSessionId: selection.parentSessionId,
+        sessionIds: selection.selectedIds,
+      })
+      const deletedIds = result.deletedIds
+      const rejectedIds = result.items
+        .filter((item) => item.code !== 'deleted')
+        .map((item) => item.sessionId)
+      const warningCount = result.items.reduce((count, item) => count + (item.warnings?.length ?? 0), 0)
+
+      if (deletedIds.length > 0) {
+        closeArchivedAgentTabs(deletedIds, true)
+        const deletedSet = new Set(deletedIds)
+        // 主进程结果已是删除事实；先本地移除，刷新失败时也不能留下可再次点击的幽灵条目。
+        setAgentSessions((prev) => prev.filter((session) => !deletedSet.has(session.id)))
+        setDraftSessionIds((prev) => {
+          const next = new Set([...prev].filter((id) => !deletedSet.has(id)))
+          return next.size === prev.size ? prev : next
+        })
+        setExpandedDelegationParentIds((prev) => {
+          const next = new Set([...prev].filter((id) => !deletedSet.has(id)))
+          return next.size === prev.size ? prev : next
+        })
+        setAgentMessagesCache((prev) => {
+          const next = new Map(prev)
+          let changed = false
+          for (const id of deletedSet) changed = next.delete(id) || changed
+          return changed ? next : prev
+        })
+      }
+
+      try {
+        await refreshAgentSidebarSessions(viewMode === 'archived')
+      } catch (refreshError) {
+        console.warn('[侧边栏] 批量删除后刷新会话列表失败，已按删除结果完成本地收尾:', refreshError)
+      }
+      setBulkDeleteConfirmOpen(false)
+      if (rejectedIds.length === 0) {
+        cancelDelegatedBulkSelection()
+        toast.success(`已删除 ${deletedIds.length} 个子会话`, warningCount > 0
+          ? { description: `${warningCount} 项外围资源清理需要应用后续重试` }
+          : undefined)
+      } else {
+        setDelegatedBulkSelection((current) => current && current.parentSessionId === selection.parentSessionId
+          ? { ...current, selectedIds: rejectedIds }
+          : current)
+        toast.error(`已删除 ${deletedIds.length} 个，${rejectedIds.length} 个未删除`, {
+          description: '未删除项已保留，可处理状态后重试。',
+        })
+      }
+    } catch (error) {
+      console.error('[侧边栏] 批量删除委派子会话失败:', error)
+      toast.error(error instanceof Error ? error.message : '批量删除子会话失败，请重试')
+    } finally {
+      setBulkDeleting(false)
+    }
+  }, [bulkDeleting, cancelDelegatedBulkSelection, closeArchivedAgentTabs, delegatedBulkSelection, refreshAgentSidebarSessions, setAgentMessagesCache, setAgentSessions, setDraftSessionIds, viewMode])
 
   /** 切换 Agent 会话置顶状态 */
   const handleTogglePinAgent = React.useCallback(async (
@@ -2391,7 +2781,12 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   const deleteDialog = (
     <AlertDialog
       open={pendingDeleteId !== null}
-      onOpenChange={(open) => { if (!open) setPendingDeleteId(null) }}
+      onOpenChange={(open) => {
+        if (open) return
+        deleteScopeRequestTokenRef.current += 1
+        setPendingDeleteId(null)
+        setPendingDeleteAgentChildIds([])
+      }}
     >
       <AlertDialogContent
         onKeyDown={(e) => {
@@ -2437,6 +2832,34 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
               删除
             </AlertDialogAction>
           )}
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+
+  const delegatedBulkDeleteDialog = (
+    <AlertDialog
+      open={bulkDeleteConfirmOpen}
+      onOpenChange={(open) => {
+        if (!bulkDeleting) setBulkDeleteConfirmOpen(open)
+      }}
+    >
+      <AlertDialogContent onCloseAutoFocus={(event) => event.preventDefault()}>
+        <AlertDialogHeader>
+          <AlertDialogTitle>确认删除子会话</AlertDialogTitle>
+          <AlertDialogDescription>
+            删除后将无法恢复，确定要删除选中的 {delegatedBulkSelectedSessions.length} 个子会话吗？
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={bulkDeleting}>取消</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={bulkDeleting || delegatedBulkSelectedSessions.length === 0}
+            onClick={() => { void handleConfirmDelegatedBulkDelete() }}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            {bulkDeleting ? '删除中…' : '删除'}
+          </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
@@ -2718,8 +3141,14 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
         const rowStatus = getSessionTreeStatus(item, agentIndicatorMap)
         const treeActive = treeContainsSessionId(item, activeSessionId)
         const activeChildVisible = item.childSessions.some((child) => child.id === activeSessionId)
-        const expandedChildren = expandedDelegationParentIds.has(item.session.id)
+        const expandedChildren = delegatedBulkSelection?.parentSessionId === item.session.id
+          || expandedDelegationParentIds.has(item.session.id)
           || (activeChildVisible && !collapsedDelegationParentIds.has(item.session.id))
+        const displayedChildSessions = orderDelegatedChildrenForBulkSelection(
+          item.childSessions,
+          delegatedBulkSelection,
+          item.session.id,
+        )
         rows.push({
           id: `agent-archived-${item.session.id}`,
           estimateSize: 34,
@@ -2741,6 +3170,9 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                   : undefined}
                 leftAccent={getSessionLeftAccent(rowStatus)}
                 workspaceName={item.session.workspaceId ? workspaceNameMap.get(item.session.workspaceId) : undefined}
+                delegatedBulkActions={delegatedBulkSelection?.parentSessionId === item.session.id
+                  ? delegatedBulkActions
+                  : undefined}
                 relativeTimeNow={relativeTimeNow}
                 onSelect={handleSelectAgentSession}
                 onRequestDelete={handleRequestDelete}
@@ -2749,12 +3181,13 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                 onTogglePin={handleTogglePinAgent}
                 onToggleStar={handleToggleStarAgent}
                 onToggleArchive={handleToggleArchiveAgent}
+                onStartDelegatedBulkSelection={handleStartDelegatedBulkSelection}
               />
             </div>
           ),
         })
         if (expandedChildren) {
-          for (const [childIndex, childSession] of item.childSessions.entries()) {
+          for (const [childIndex, childSession] of displayedChildSessions.entries()) {
             rows.push({
               id: `agent-archived-child-${childSession.id}`,
               estimateSize: childIndex === 0 ? 36 : 34,
@@ -2770,6 +3203,8 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                     agentIndicatorMap={agentIndicatorMap}
                     relativeTimeNow={relativeTimeNow}
                     workspaceName={childSession.workspaceId ? workspaceNameMap.get(childSession.workspaceId) : undefined}
+                    delegatedSiblingCount={childCount}
+                    bulkSelection={getDelegatedBulkChildSelection(item.session.id, childSession.id)}
                     onSelect={handleSelectAgentSession}
                     onRequestDelete={handleRequestDelete}
                     onRequestMove={handleRequestMove}
@@ -2777,6 +3212,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                     onTogglePin={handleTogglePinAgent}
                     onToggleStar={handleToggleStarAgent}
                     onToggleArchive={handleToggleArchiveAgent}
+                    onStartDelegatedBulkSelection={handleStartDelegatedBulkSelection}
                   />
                 </div>
               ),
@@ -2786,7 +3222,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       }
     }
     return rows
-  }, [activeDelegationSessionId, activeSessionId, agentIndicatorMap, archivedAgentSessionProjectGroups, collapsedDelegationParentIds, currentWorkspaceId, expandedArchivedProjectIds, expandedDelegationParentIds, handleAgentRename, handleRequestDelete, handleRequestMove, handleSelectAgentSession, handleToggleArchiveAgent, handleToggleArchivedProject, handleToggleDelegationParent, handleTogglePinAgent, handleToggleStarAgent, relativeTimeNow, sessionHoverPreviewEnabled, workspaceNameMap])
+  }, [activeDelegationSessionId, activeSessionId, agentIndicatorMap, archivedAgentSessionProjectGroups, collapsedDelegationParentIds, currentWorkspaceId, delegatedBulkActions, delegatedBulkSelection, expandedArchivedProjectIds, expandedDelegationParentIds, getDelegatedBulkChildSelection, handleAgentRename, handleRequestDelete, handleRequestMove, handleSelectAgentSession, handleStartDelegatedBulkSelection, handleToggleArchiveAgent, handleToggleArchivedProject, handleToggleDelegationParent, handleTogglePinAgent, handleToggleStarAgent, relativeTimeNow, sessionHoverPreviewEnabled, workspaceNameMap])
 
   const agentActiveVirtualRows = React.useMemo<VirtualSidebarRow[]>(() => {
     if (viewMode !== 'active') return []
@@ -2803,8 +3239,14 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       const rowStatus = getSessionTreeStatus(item, agentIndicatorMap)
       const treeActive = treeContainsSessionId(item, activeSessionId)
       const activeChildVisible = item.childSessions.some((child) => child.id === activeSessionId)
-      const expandedChildren = expandedDelegationParentIds.has(item.session.id)
+      const expandedChildren = delegatedBulkSelection?.parentSessionId === item.session.id
+        || expandedDelegationParentIds.has(item.session.id)
         || (activeChildVisible && !collapsedDelegationParentIds.has(item.session.id))
+      const displayedChildSessions = orderDelegatedChildrenForBulkSelection(
+        item.childSessions,
+        delegatedBulkSelection,
+        item.session.id,
+      )
 
       rows.push({
         id: `agent-${item.session.id}`,
@@ -2832,6 +3274,9 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                 : undefined}
               leftAccent={getSessionLeftAccent(rowStatus)}
               workspaceName={isAutomationGroup && item.session.workspaceId ? workspaceNameMapForRow?.get(item.session.workspaceId) : undefined}
+              delegatedBulkActions={delegatedBulkSelection?.parentSessionId === item.session.id
+                ? delegatedBulkActions
+                : undefined}
               relativeTimeNow={relativeTimeNow}
               onSelect={handleSelectAgentSession}
               onRequestDelete={handleRequestDelete}
@@ -2840,13 +3285,14 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
               onTogglePin={handleTogglePinAgent}
               onToggleStar={handleToggleStarAgent}
               onToggleArchive={handleToggleArchiveAgent}
+              onStartDelegatedBulkSelection={handleStartDelegatedBulkSelection}
             />
           </div>
         ),
       })
 
       if (childCount > 0 && expandedChildren) {
-        for (const [childIndex, childSession] of item.childSessions.entries()) {
+        for (const [childIndex, childSession] of displayedChildSessions.entries()) {
           rows.push({
             id: `agent-child-${childSession.id}`,
             estimateSize: childIndex === 0 ? 36 : 34,
@@ -2867,6 +3313,8 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                   agentIndicatorMap={agentIndicatorMap}
                   relativeTimeNow={relativeTimeNow}
                   workspaceName={isAutomationGroup && childSession.workspaceId ? workspaceNameMapForRow?.get(childSession.workspaceId) : undefined}
+                  delegatedSiblingCount={childCount}
+                  bulkSelection={getDelegatedBulkChildSelection(item.session.id, childSession.id)}
                   onSelect={handleSelectAgentSession}
                   onRequestDelete={handleRequestDelete}
                   onRequestMove={handleRequestMove}
@@ -2874,6 +3322,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                   onTogglePin={handleTogglePinAgent}
                   onToggleStar={handleToggleStarAgent}
                   onToggleArchive={handleToggleArchiveAgent}
+                  onStartDelegatedBulkSelection={handleStartDelegatedBulkSelection}
                 />
               </div>
             ),
@@ -3104,6 +3553,9 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     createAgentSessionInWorkspace,
     displayProjectGroups,
     dragProjectId,
+    delegatedBulkActions,
+    delegatedBulkSelection,
+    getDelegatedBulkChildSelection,
     expandedDelegationParentIds,
     expandedExtraCountMap,
     handleAgentRename,
@@ -3122,6 +3574,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     handleSelectAgentSession,
     handleSelectProject,
     handleShowMoreSessions,
+    handleStartDelegatedBulkSelection,
     handleStartCreateProject,
     handleToggleArchiveAgent,
     handleToggleDelegationParent,
@@ -3410,6 +3863,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
         </div>
 
         {deleteDialog}
+        {delegatedBulkDeleteDialog}
         {projectDeleteDialog}
         {restoreProjectRootDialog}
         {moveDialog}
@@ -3680,6 +4134,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       </div>
 
       {deleteDialog}
+      {delegatedBulkDeleteDialog}
       {projectDeleteDialog}
       {restoreProjectRootDialog}
       {moveDialog}
@@ -4133,6 +4588,15 @@ interface AgentSessionItemProps {
     expanded: boolean
     onToggle: () => void
   }
+  /** 子会话所属父级在当前视图中的直接子会话数量，用于控制子行批量删除入口。 */
+  delegatedSiblingCount?: number
+  /** 当前父会话已进入批量删除模式时，显示在父行右侧的操作浮层。 */
+  delegatedBulkActions?: DelegatedSessionBulkActionsProps
+  bulkSelection?: {
+    selected: boolean
+    disabled: boolean
+    onToggle: () => void
+  }
   /** 行左侧状态色块；未传则不显示 */
   leftAccent?: SessionLeftAccent
   /** 是否禁用悬浮 Mini 地图 */
@@ -4148,6 +4612,7 @@ interface AgentSessionItemProps {
   onTogglePin: (id: string, cascade: boolean) => Promise<void>
   onToggleStar: (id: string) => Promise<void>
   onToggleArchive: (id: string) => Promise<void>
+  onStartDelegatedBulkSelection?: (parentSessionId: string, preselectedSessionId?: string) => void
 }
 
 const AgentSessionItem = React.memo(function AgentSessionItem({
@@ -4156,6 +4621,9 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
   indicatorStatus,
   showPinIcon,
   delegationSummary,
+  delegatedSiblingCount,
+  delegatedBulkActions,
+  bulkSelection,
   leftAccent,
   disableMiniMap,
   workspaceName,
@@ -4167,6 +4635,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
   onTogglePin,
   onToggleStar,
   onToggleArchive,
+  onStartDelegatedBulkSelection,
 }: AgentSessionItemProps): React.ReactElement {
   const [editing, setEditing] = React.useState(false)
   const [editTitle, setEditTitle] = React.useState('')
@@ -4176,7 +4645,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
   const inputRef = React.useRef<HTMLInputElement>(null)
   const justStartedEditing = React.useRef(false)
   // 菜单打开时关闭迷你地图预览，避免预览面板盖住菜单项导致点不动
-  const preview = useSessionMiniMapHover(600, disableMiniMap || menuOpen)
+  const preview = useSessionMiniMapHover(600, disableMiniMap || menuOpen || !!bulkSelection)
 
   const startEdit = (): void => {
     setEditTitle(session.title)
@@ -4236,6 +4705,11 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
 
   const childCount = delegationSummary?.total ?? 0
   const hasChildren = childCount > 0
+  const delegatedBulkDeleteTarget = getDelegatedSessionBulkDeleteActionTarget(
+    session,
+    childCount,
+    delegatedSiblingCount,
+  )
   const pinLabel = session.pinned ? '取消置顶' : '置顶会话'
   const cascadePinLabel = session.pinned
     ? `取消置顶(含 ${childCount} 个子会话)`
@@ -4290,6 +4764,18 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
           {pinLabel}
         </MenuItem>
       )}
+      {onStartDelegatedBulkSelection && delegatedBulkDeleteTarget && (
+        <MenuItem
+          className="text-xs py-1 [&>svg]:size-3.5"
+          onSelect={() => onStartDelegatedBulkSelection(
+            delegatedBulkDeleteTarget.parentSessionId,
+            delegatedBulkDeleteTarget.preselectedSessionId,
+          )}
+        >
+          <ListChecks size={14} />
+          批量删除子会话
+        </MenuItem>
+      )}
       {canMove && (
         <MenuItem className="text-xs py-1 [&>svg]:size-3.5" onSelect={() => onRequestMove(session.id)}>
           <ArrowRightLeft size={14} />
@@ -4314,15 +4800,23 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
 
   return (
     <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <div
-          ref={preview.setAnchorRef}
-          role="button"
-          tabIndex={0}
-          data-session-switch-id={session.id}
-          data-session-switch-title={session.title}
-          data-session-switch-type="agent"
-          draggable={!editing}
+      <Popover open={!!delegatedBulkActions}>
+        <PopoverAnchor asChild>
+          <ContextMenuTrigger asChild>
+            <div
+              ref={preview.setAnchorRef}
+              role={bulkSelection ? 'checkbox' : 'button'}
+              tabIndex={0}
+              aria-checked={bulkSelection ? bulkSelection.selected : undefined}
+              aria-disabled={bulkSelection ? bulkSelection.disabled : undefined}
+              aria-label={bulkSelection
+                ? `${bulkSelection.selected ? '取消选择' : '选择'}子会话「${session.title}」`
+                : undefined}
+              data-session-switch-id={session.id}
+              data-session-switch-title={session.title}
+              data-session-switch-type="agent"
+              title={bulkSelection?.disabled ? '运行中或等待处理的子会话需先停止才能删除' : undefined}
+          draggable={!editing && !bulkSelection}
           onDragStart={(event) => {
             const target = event.target as HTMLElement
             if (target.closest('button, input')) {
@@ -4337,7 +4831,21 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
             })
           }}
           onDragEnd={clearSessionReferenceDragState}
-          onClick={() => onSelect(session.id, session.title)}
+          onClick={() => {
+            if (bulkSelection) {
+              if (!bulkSelection.disabled) bulkSelection.onToggle()
+            } else {
+              onSelect(session.id, session.title)
+            }
+          }}
+          onKeyDown={(event) => {
+            if (!bulkSelection || (event.key !== ' ' && event.key !== 'Enter')) return
+            event.preventDefault()
+            if (!bulkSelection.disabled) bulkSelection.onToggle()
+          }}
+          onContextMenu={(event) => {
+            if (bulkSelection) event.preventDefault()
+          }}
           onMouseEnter={() => { setRowHovered(true); preview.handleMouseEnter() }}
           onMouseLeave={() => { setRowHovered(false); preview.handleMouseLeave() }}
           style={active ? undefined : {
@@ -4346,7 +4854,8 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
           }}
           className={cn(
             'session-quick-switch-row group relative w-full flex items-center gap-1.5 rounded-md py-1.5 pl-2.5 pr-1.5 transition-colors duration-100 titlebar-no-drag text-left',
-            !editing && 'cursor-grab active:cursor-grabbing',
+            !editing && !bulkSelection && 'cursor-grab active:cursor-grabbing',
+            bulkSelection && (bulkSelection.disabled ? 'cursor-not-allowed opacity-55' : 'cursor-pointer'),
             active && 'agent-session-item-active',
             leftAccent
               ? SESSION_ACCENT_ROW_CLASS[leftAccent]
@@ -4363,6 +4872,19 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
                 leftAccent ? SESSION_ACCENT_INDICATOR_CLASS[leftAccent] : 'bg-primary',
               )}
             />
+          )}
+          {bulkSelection && (
+            <span
+              aria-hidden="true"
+              className={cn(
+                'flex size-4 shrink-0 items-center justify-center rounded border transition-colors',
+                bulkSelection.selected
+                  ? 'border-primary bg-primary text-primary-foreground'
+                  : 'border-foreground/25 bg-background/60 text-transparent',
+              )}
+            >
+              <Check size={11} strokeWidth={3} />
+            </span>
           )}
           <div className="flex-1 min-w-0">
             {editing ? (
@@ -4394,12 +4916,13 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
                   className="truncate"
                   onDoubleClick={(event) => {
                     event.stopPropagation()
-                    startEdit()
+                    if (!bulkSelection) startEdit()
                   }}
                 >
                   {session.title}
                 </span>
-                <SafeTooltip content={session.starred ? '取消星标' : '添加星标'} side="top">
+                {!bulkSelection && (
+                  <SafeTooltip content={session.starred ? '取消星标' : '添加星标'} side="top">
                   <button
                     type="button"
                     aria-label={session.starred ? '取消星标' : '添加星标'}
@@ -4429,7 +4952,8 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
                   >
                     <Star size={13} fill={session.starred ? 'currentColor' : 'none'} />
                   </button>
-                </SafeTooltip>
+                  </SafeTooltip>
+                )}
                 {workspaceName && (
                   <span className="flex-shrink-0 px-1.5 py-0 rounded-full bg-primary/10 text-[10px] leading-4 workspace-badge font-medium truncate max-w-[80px]">
                     {workspaceName}
@@ -4444,7 +4968,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
             )}
           </div>
 
-          {!editing && (
+          {!editing && !bulkSelection && (
             <>
               {delegationSummary && (
                 <SafeTooltip content={delegationSummary.expanded ? '收起子会话' : '展开子会话'} side="top">
@@ -4489,8 +5013,22 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
               <SessionQuickSwitchKeycap />
             </>
           )}
-        </div>
-      </ContextMenuTrigger>
+            </div>
+          </ContextMenuTrigger>
+        </PopoverAnchor>
+        {delegatedBulkActions && (
+          <PopoverContent
+            side="right"
+            align="start"
+            sideOffset={12}
+            collisionPadding={12}
+            onOpenAutoFocus={(event) => event.preventDefault()}
+            className="z-[110] w-64 border-0 bg-transparent p-0 shadow-none"
+          >
+            <DelegatedSessionBulkActions {...delegatedBulkActions} />
+          </PopoverContent>
+        )}
+      </Popover>
       <ContextMenuContent className="w-40 z-[9999] min-w-0 p-0.5">
         {menuItems(ContextMenuItem, ContextMenuSeparator)}
       </ContextMenuContent>
@@ -4520,6 +5058,8 @@ interface DelegatedChildSessionItemProps {
   agentIndicatorMap: Map<string, SessionIndicatorStatus>
   relativeTimeNow: number
   workspaceName?: string
+  delegatedSiblingCount: number
+  bulkSelection?: AgentSessionItemProps['bulkSelection']
   onSelect: (id: string, title: string) => void
   onRequestDelete: (id: string) => void
   onRequestMove: (id: string) => void
@@ -4527,6 +5067,7 @@ interface DelegatedChildSessionItemProps {
   onTogglePin: (id: string, cascade: boolean) => Promise<void>
   onToggleStar: (id: string) => Promise<void>
   onToggleArchive: (id: string) => Promise<void>
+  onStartDelegatedBulkSelection?: (parentSessionId: string, preselectedSessionId?: string) => void
 }
 
 const DelegatedChildSessionItem = React.memo(function DelegatedChildSessionItem({
@@ -4536,6 +5077,8 @@ const DelegatedChildSessionItem = React.memo(function DelegatedChildSessionItem(
   agentIndicatorMap,
   relativeTimeNow,
   workspaceName,
+  delegatedSiblingCount,
+  bulkSelection,
   onSelect,
   onRequestDelete,
   onRequestMove,
@@ -4543,18 +5086,21 @@ const DelegatedChildSessionItem = React.memo(function DelegatedChildSessionItem(
   onTogglePin,
   onToggleStar,
   onToggleArchive,
+  onStartDelegatedBulkSelection,
 }: DelegatedChildSessionItemProps): React.ReactElement {
   const sessionHoverPreviewEnabled = useAtomValue(sessionHoverPreviewEnabledAtom)
   const status = getDelegatedChildStatus(session, agentIndicatorMap)
   const highlighted = session.id === activeSessionId
     || (session.parentSessionId === activeSessionId && session.id === activeDelegationSessionId)
 
-  return (
+  const item = (
     <AgentSessionItem
       session={session}
       active={highlighted}
       indicatorStatus={status}
       disableMiniMap={!sessionHoverPreviewEnabled}
+      delegatedSiblingCount={delegatedSiblingCount}
+      bulkSelection={bulkSelection}
       relativeTimeNow={relativeTimeNow}
       workspaceName={workspaceName}
       onSelect={onSelect}
@@ -4564,7 +5110,20 @@ const DelegatedChildSessionItem = React.memo(function DelegatedChildSessionItem(
       onTogglePin={onTogglePin}
       onToggleStar={onToggleStar}
       onToggleArchive={onToggleArchive}
+      onStartDelegatedBulkSelection={onStartDelegatedBulkSelection}
     />
+  )
+
+  if (!bulkSelection?.disabled) return item
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div>{item}</div>
+      </TooltipTrigger>
+      <TooltipContent side="right">
+        {status === 'blocked' ? '正在等待处理的子会话需先停止才能删除' : '运行中的子会话需先停止才能删除'}
+      </TooltipContent>
+    </Tooltip>
   )
 })
 
@@ -5016,6 +5575,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
                             agentIndicatorMap={agentIndicatorMap}
                             relativeTimeNow={relativeTimeNow}
                             workspaceName={isAutomationGroup && childSession.workspaceId ? workspaceNameMap?.get(childSession.workspaceId) : undefined}
+                            delegatedSiblingCount={childCount}
                             onSelect={onSelectSession}
                             onRequestDelete={onRequestDelete}
                             onRequestMove={onRequestMove}
