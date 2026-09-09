@@ -4438,49 +4438,45 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
 
           {!editing && (
             <>
-              <div
-                className="flex w-9 shrink-0 items-center justify-end gap-1 text-[11px] leading-4 text-foreground/55"
-                aria-label={delegationSummary ? `子会话：${delegationSummary.settled}/${delegationSummary.total}` : undefined}
-              >
-                {delegationSummary && (
+              {delegationSummary && (
+                <div
+                  className="flex shrink-0 items-center justify-end gap-1 text-[11px] leading-4 text-foreground/55"
+                  aria-label={`子会话：${delegationSummary.settled}/${delegationSummary.total}`}
+                >
                   <span className="shrink-0 tabular-nums">
                     {delegationSummary.settled}/{delegationSummary.total}
                   </span>
-                )}
-              </div>
-              {delegationSummary ? (
-                <SafeTooltip content={delegationSummary.expanded ? '收起子会话' : '展开子会话'} side="top">
-                  <button
-                    type="button"
-                    aria-label={`${delegationSummary.expanded ? '收起' : '展开'}子会话`}
-                    onMouseEnter={preview.closeNow}
-                    onFocus={preview.closeNow}
-                    onMouseDown={(event) => {
-                      event.stopPropagation()
-                      preview.closeNow()
-                    }}
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      preview.closeNow()
-                      delegationSummary.onToggle()
-                    }}
-                    onDoubleClick={(event) => {
-                      event.stopPropagation()
-                      preview.closeNow()
-                    }}
-                    className="session-delegation-toggle flex-shrink-0 inline-flex size-6 -my-1 items-center justify-center rounded text-foreground/45 hover:bg-foreground/[0.055] hover:text-foreground/70 transition-colors"
-                  >
-                    <ChevronRight
-                      size={11}
-                      className={cn(
-                        'transition-transform duration-150',
-                        delegationSummary.expanded && 'rotate-90',
-                      )}
-                    />
-                  </button>
-                </SafeTooltip>
-              ) : (
-                <span className="size-6 shrink-0" aria-hidden="true" />
+                  <SafeTooltip content={delegationSummary.expanded ? '收起子会话' : '展开子会话'} side="top">
+                    <button
+                      type="button"
+                      aria-label={`${delegationSummary.expanded ? '收起' : '展开'}子会话`}
+                      onMouseEnter={preview.closeNow}
+                      onFocus={preview.closeNow}
+                      onMouseDown={(event) => {
+                        event.stopPropagation()
+                        preview.closeNow()
+                      }}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        preview.closeNow()
+                        delegationSummary.onToggle()
+                      }}
+                      onDoubleClick={(event) => {
+                        event.stopPropagation()
+                        preview.closeNow()
+                      }}
+                      className="session-delegation-toggle inline-flex size-6 -my-1 items-center justify-center rounded text-foreground/45 hover:bg-foreground/[0.055] hover:text-foreground/70 transition-colors"
+                    >
+                      <ChevronRight
+                        size={11}
+                        className={cn(
+                          'transition-transform duration-150',
+                          delegationSummary.expanded && 'rotate-90',
+                        )}
+                      />
+                    </button>
+                  </SafeTooltip>
+                </div>
               )}
               <SessionItemActions
                 updatedAt={session.updatedAt}
