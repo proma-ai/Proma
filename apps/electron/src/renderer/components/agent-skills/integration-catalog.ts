@@ -309,6 +309,23 @@ export const MCP_INTEGRATION_CATALOG: CatalogIntegration[] = [
     agentPrompt: cliSetupPrompt('钉钉 CLI', 'https://open.dingtalk.com/document/development/dingtalk-cli-performing-tasks-within', '设置 → 远程连接 → 配置钉钉 CLI'),
   },
   {
+    id: 'exa-search-mcp', name: 'Exa Search', iconSlug: 'asset:exa', kind: 'credential', priority: 6,
+    description: '接入 Exa 官方远程 MCP，提供语义网页搜索与页面内容提取能力。',
+    capabilities: ['语义网页搜索', '页面内容提取'],
+    setupUrl: 'https://dashboard.exa.ai/api-keys',
+    serverName: 'exa',
+    entry: remoteMcp('https://mcp.exa.ai/mcp'),
+    credential: {
+      label: 'Exa API Key',
+      placeholder: '粘贴 Exa API Key',
+      helpText: '仅需填写 API Key。Proma 会加密保存到系统 Keychain，并通过 x-api-key 请求头连接 Exa 官方远程 MCP。',
+      acquisitionUrl: 'https://dashboard.exa.ai/api-keys',
+      acquisitionLabel: '打开 Exa API Console',
+      headerName: 'x-api-key',
+      credentialStorageUrl: 'https://mcp.exa.ai/mcp',
+    },
+  },
+  {
     id: 'brave-search-mcp', name: 'Brave Search', iconSlug: 'asset:brave', kind: 'credential', priority: 5,
     description: '接入 Brave 官方搜索 MCP，提供网页、新闻、图片、视频、本地和地点搜索。',
     capabilities: ['网页与新闻搜索', '图片与视频搜索', '地点与本地搜索'],
