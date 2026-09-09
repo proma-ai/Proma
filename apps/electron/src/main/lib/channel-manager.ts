@@ -69,10 +69,11 @@ import {
 import { normalizeHttpResponse, normalizeRequestError } from './channel-test-error'
 import { applyOfficialModelEnabledStates, preserveOfficialModelEnabledStates } from './official-channel-models'
 import { migrateVolcengineOfficialEndpoint } from './volcengine-channel-migration'
+import { disableUnconfiguredDeepSeekChannel } from './deepseek-channel-migration'
 import pkg from '../../../package.json' with { type: 'json' }
 
 /** 当前配置版本 */
-const CONFIG_VERSION = 10
+const CONFIG_VERSION = 11
 
 /** 连接测试 / 模型拉取的统一超时时间 */
 const CHANNEL_TEST_TIMEOUT_MS = 15_000
@@ -328,6 +329,9 @@ function inferProviderFromBaseUrl(provider: ProviderType, baseUrl: string): Prov
  * v9 → v10：修复已写入高版本 schema 的火山方舟 Coding Plan 旧端点。该端点是火山方舟
  * 官方地址的历史变体，必须先规范化，不能被第三方中转站清理误删。
  *
+ * v10 → v11：关闭已启用但没有可用 API Key 的遗留 DeepSeek 直连渠道，避免用户误选后才发现
+ * 未配置凭据。正常配置的 DeepSeek 渠道、已关闭渠道及其他供应商均保持原状。
+ *
  * @returns 迁移后的配置；`changed` 标记是否发生实际变更（决定是否需要回写文件）
  */
 function migrateConfig(config: ChannelsConfig): { config: ChannelsConfig; changed: boolean; removed: Channel[] } {
@@ -377,6 +381,25 @@ function migrateConfig(config: ChannelsConfig): { config: ChannelsConfig; change
       changed = true
       const planName = channel.provider === 'doubao' ? 'Coding Plan' : 'Agent Plan'
       console.log(`[渠道管理] v${version}→v10 迁移渠道 ${channel.name}：火山方舟 ${planName} 旧端点 → 官方端点`)
+      return migratedChannel
+    })
+  }
+
+  if (version < 11) {
+    channels = channels.map((channel) => {
+      if (channel.provider !== 'deepseek' || !channel.enabled) return channel
+
+      let apiKey = ''
+      try {
+        apiKey = decryptKey(channel.apiKey)
+      } catch {
+        console.warn(`[渠道管理] v${version}→v11 无法读取 DeepSeek 渠道 ${channel.name} 的 API Key，按未配置处理`)
+      }
+
+      const migratedChannel = disableUnconfiguredDeepSeekChannel(channel, apiKey)
+      if (migratedChannel === channel) return channel
+      changed = true
+      console.log(`[渠道管理] v${version}→v11 关闭未配置 API Key 的 DeepSeek 渠道：${channel.name}`)
       return migratedChannel
     })
   }
