@@ -122,7 +122,7 @@ function assertCommercialChannelInputAllowed(input: Pick<ChannelCreateInput, 'pr
 const DEEPSEEK_PRESET_MODELS: ChannelModel[] = [
   { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', enabled: true },
   { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true },
-  { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', enabled: true },
+  { id: 'deepseek-flash', name: 'DeepSeek Flash', enabled: true },
   { id: 'deepseek-v4-flash-vision-exp', name: 'DeepSeek V4 Flash Vision Exp', enabled: true },
 ]
 const KIMI_PRESET_MODELS: ChannelModel[] = [
@@ -151,7 +151,7 @@ const ARK_CODING_PLAN_MODELS: ChannelModel[] = [
   { id: 'kimi-k2.7-code', name: 'Kimi K2.7 Code', enabled: true },
   { id: 'minimax-m3', name: 'MiniMax M3', enabled: true },
   { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true },
-  { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', enabled: true },
+  { id: 'deepseek-flash', name: 'DeepSeek Flash', enabled: true },
   { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', enabled: true },
 ]
 
@@ -169,13 +169,13 @@ const PRESET_MODEL_CANDIDATE_UPDATES: readonly {
   }[]>>
 }[] = [
   {
-    id: 'deepseek-v41-flash-v1',
+    id: 'deepseek-flash-v1',
     candidates: {
       deepseek: [
-        { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', enabled: false },
+        { id: 'deepseek-flash', name: 'DeepSeek Flash', enabled: false },
       ],
       'ark-coding-plan': [
-        { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', enabled: false },
+        { id: 'deepseek-flash', name: 'DeepSeek Flash', enabled: false },
       ],
     },
   },
