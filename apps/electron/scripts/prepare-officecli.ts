@@ -16,6 +16,8 @@ import { join, resolve } from 'node:path'
 const OFFICECLI_VERSION = 'v1.0.145'
 const RELEASE_BASE_URL = `https://github.com/iOfficeAI/OfficeCLI/releases/download/${OFFICECLI_VERSION}`
 const MAX_DOWNLOAD_SIZE = 50 * 1024 * 1024
+const MAX_FETCH_ATTEMPTS = 3
+const RETRY_DELAYS_MS = [1_000, 2_000]
 const OUTPUT_DIR = join(resolve(import.meta.dir, '..'), 'resources', 'officecli')
 const targetPlatform = process.env.OFFICECLI_PLATFORM || process.platform
 const targetArch = process.env.OFFICECLI_ARCH || process.arch
@@ -61,8 +63,7 @@ const assets: Record<string, Asset> = {
 }
 
 function fail(message: string): never {
-  console.error(`[prepare:officecli] ${message}`)
-  process.exit(1)
+  throw new Error(`[prepare:officecli] ${message}`)
 }
 
 function isAllowedDownloadUrl(url: URL): boolean {
@@ -75,11 +76,47 @@ function isAllowedDownloadUrl(url: URL): boolean {
   )
 }
 
+function isRetryableStatus(status: number): boolean {
+  return status === 408 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504
+}
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, milliseconds))
+}
+
+function describeError(error: unknown): string {
+  if (error && typeof error === 'object' && 'code' in error) {
+    return String((error as { code?: unknown }).code ?? 'unknown error')
+  }
+  return error instanceof Error ? error.message : String(error)
+}
+
+async function fetchWithRetry(target: URL): Promise<Response> {
+  for (let attempt = 1; attempt <= MAX_FETCH_ATTEMPTS; attempt++) {
+    try {
+      const response = await fetch(target, { redirect: 'manual' })
+      if (!isRetryableStatus(response.status) || attempt === MAX_FETCH_ATTEMPTS) return response
+
+      const delay = RETRY_DELAYS_MS[attempt - 1] ?? RETRY_DELAYS_MS.at(-1)!
+      console.warn(`[prepare:officecli] ${target.hostname} 返回 HTTP ${response.status}，${delay}ms 后重试（${attempt}/${MAX_FETCH_ATTEMPTS}）`)
+      await sleep(delay)
+    } catch (error) {
+      if (attempt === MAX_FETCH_ATTEMPTS) throw error
+
+      const delay = RETRY_DELAYS_MS[attempt - 1] ?? RETRY_DELAYS_MS.at(-1)!
+      console.warn(`[prepare:officecli] 请求 ${target.hostname} 失败（${describeError(error)}），${delay}ms 后重试（${attempt}/${MAX_FETCH_ATTEMPTS}）`)
+      await sleep(delay)
+    }
+  }
+
+  fail('下载重试次数耗尽')
+}
+
 async function fetchOfficialAsset(url: string): Promise<Response> {
   let target = new URL(url)
   for (let redirectsLeft = 5; redirectsLeft >= 0; redirectsLeft--) {
     if (!isAllowedDownloadUrl(target)) fail(`下载地址不受信任：${target.hostname}`)
-    const response = await fetch(target, { redirect: 'manual' })
+    const response = await fetchWithRetry(target)
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get('location')
       if (!location || redirectsLeft === 0) fail('下载重定向无效或次数过多')
@@ -132,28 +169,37 @@ async function downloadAndVerify(asset: Asset, destination: string): Promise<voi
   if (actual.toLowerCase() !== asset.sha256) fail(`SHA-256 校验失败：预期 ${asset.sha256}，实际 ${actual}`)
 }
 
-const key = `${targetPlatform}-${targetArch}`
-const asset = assets[key]
-if (!asset) fail(`当前构建目标不受支持：${key}`)
-const outputPath = join(OUTPUT_DIR, outputName)
+async function main(): Promise<void> {
+  const key = `${targetPlatform}-${targetArch}`
+  const asset = assets[key]
+  if (!asset) fail(`当前构建目标不受支持：${key}`)
+  const outputPath = join(OUTPUT_DIR, outputName)
 
-if (targetPlatform !== process.platform) {
-  fail(`OfficeCLI 资源必须在目标平台 Runner 上准备：目标 ${targetPlatform}，当前 ${process.platform}`)
+  if (targetPlatform !== process.platform) {
+    fail(`OfficeCLI 资源必须在目标平台 Runner 上准备：目标 ${targetPlatform}，当前 ${process.platform}`)
+  }
+
+  await mkdir(OUTPUT_DIR, { recursive: true })
+  if (await verifyExisting(outputPath, asset)) {
+    if (targetPlatform !== 'win32') await chmod(outputPath, 0o755)
+    console.log(`[prepare:officecli] 已验证 ${OFFICECLI_VERSION}（${key}）`)
+  } else {
+    const temporaryPath = `${outputPath}.download-${process.pid}-${Date.now()}`
+    try {
+      console.log(`[prepare:officecli] 下载并校验 ${OFFICECLI_VERSION}（${key}）`)
+      await downloadAndVerify(asset, temporaryPath)
+      if (targetPlatform !== 'win32') await chmod(temporaryPath, 0o755)
+      await rename(temporaryPath, outputPath)
+    } catch (error) {
+      await rm(temporaryPath, { force: true }).catch(() => {})
+      throw error
+    }
+  }
 }
 
-await mkdir(OUTPUT_DIR, { recursive: true })
-if (await verifyExisting(outputPath, asset)) {
-  if (targetPlatform !== 'win32') await chmod(outputPath, 0o755)
-  console.log(`[prepare:officecli] 已验证 ${OFFICECLI_VERSION}（${key}）`)
-} else {
-  const temporaryPath = `${outputPath}.download-${process.pid}-${Date.now()}`
-  try {
-    console.log(`[prepare:officecli] 下载并校验 ${OFFICECLI_VERSION}（${key}）`)
-    await downloadAndVerify(asset, temporaryPath)
-    if (targetPlatform !== 'win32') await chmod(temporaryPath, 0o755)
-    await rename(temporaryPath, outputPath)
-  } catch (error) {
-    await rm(temporaryPath, { force: true }).catch(() => {})
-    throw error
-  }
+if (import.meta.main) {
+  await main().catch(error => {
+    console.error(error)
+    process.exitCode = 1
+  })
 }
