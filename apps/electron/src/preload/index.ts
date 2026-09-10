@@ -678,7 +678,14 @@ export interface ElectronAPI {
   createAgentProject: (input: CreateAgentWorkspaceInput, channelId?: string, modelId?: string) => Promise<CreateAgentProjectResult>
 
   /** 更新 Agent 工作区 */
-  updateAgentWorkspace: (id: string, updates: { name: string }) => Promise<AgentWorkspace>
+  updateAgentWorkspace: (id: string, updates: import('@proma/shared').UpdateAgentWorkspaceInput) => Promise<AgentWorkspace>
+  /** 分区仅用于一级项目组织。 */
+  listAgentWorkspaceSections: () => Promise<import('@proma/shared').AgentWorkspaceSection[]>
+  listAgentWorkspaceSectionOrder: () => Promise<string[]>
+  createAgentWorkspaceSection: (name: string) => Promise<import('@proma/shared').AgentWorkspaceSection>
+  updateAgentWorkspaceSection: (id: string, name: string) => Promise<import('@proma/shared').AgentWorkspaceSection>
+  deleteAgentWorkspaceSection: (id: string, destinationSectionId?: string) => Promise<import('@proma/shared').AgentWorkspace[]>
+  reorderAgentWorkspaceSections: (orderedIds: string[]) => Promise<string[]>
 
   /** 将本地项目关联到一个已存在的目录，保留项目和会话。 */
   relinkAgentWorkspaceProjectRoot: (id: string, projectRootPath: string) => Promise<AgentWorkspace>
@@ -2021,9 +2028,16 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.CREATE_PROJECT, input, channelId, modelId)
   },
 
-  updateAgentWorkspace: (id: string, updates: { name: string }) => {
+  updateAgentWorkspace: (id: string, updates: import('@proma/shared').UpdateAgentWorkspaceInput) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.UPDATE_WORKSPACE, id, updates)
   },
+
+  listAgentWorkspaceSections: () => ipcRenderer.invoke(AGENT_IPC_CHANNELS.LIST_WORKSPACE_SECTIONS),
+  listAgentWorkspaceSectionOrder: () => ipcRenderer.invoke(AGENT_IPC_CHANNELS.LIST_WORKSPACE_SECTION_ORDER),
+  createAgentWorkspaceSection: (name: string) => ipcRenderer.invoke(AGENT_IPC_CHANNELS.CREATE_WORKSPACE_SECTION, name),
+  updateAgentWorkspaceSection: (id: string, name: string) => ipcRenderer.invoke(AGENT_IPC_CHANNELS.UPDATE_WORKSPACE_SECTION, id, name),
+  deleteAgentWorkspaceSection: (id: string, destinationSectionId?: string) => ipcRenderer.invoke(AGENT_IPC_CHANNELS.DELETE_WORKSPACE_SECTION, id, destinationSectionId),
+  reorderAgentWorkspaceSections: (orderedIds: string[]) => ipcRenderer.invoke(AGENT_IPC_CHANNELS.REORDER_WORKSPACE_SECTIONS, orderedIds),
 
   relinkAgentWorkspaceProjectRoot: (id: string, projectRootPath: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.RELINK_WORKSPACE_PROJECT_ROOT, id, projectRootPath)

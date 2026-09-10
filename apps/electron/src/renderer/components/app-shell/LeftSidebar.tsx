@@ -11,10 +11,11 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Star, Settings, Plus, CirclePlus, Trash2, Pencil, PanelLeft, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, FolderInput, FolderPlus, Clock, CalendarDays, ChevronRight, ChevronDown, ChevronUp, ChevronsDownUp, Blocks, Brain, ListTodo, GitBranch, Download, Loader2, RotateCw, Info } from 'lucide-react'
+import { Pin, PinOff, Star, Settings, Plus, CirclePlus, Trash2, Pencil, PanelLeft, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, FolderInput, FolderPlus, Clock, CalendarDays, ChevronRight, ChevronDown, ChevronUp, ChevronsDownUp, Blocks, SquarePlus, Brain, ListTodo, GitBranch, Download, Loader2, RotateCw, Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
+import { createSectionOperationGate, getWorkspaceSectionTargets, resolveSectionTarget } from './sidebar-section-operations'
 import { SearchDialog } from './SearchDialog'
 import { UserAvatar } from '@/components/chat/UserAvatar'
 import { activeViewAtom, agentSkillsTabAtom } from '@/atoms/active-view'
@@ -169,7 +170,18 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
-import type { ConversationMeta, AgentSessionMeta, AgentWorkspace, WorkspaceCapabilities } from '@proma/shared'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import type { ConversationMeta, AgentSessionMeta, AgentWorkspace, AgentWorkspaceSection, WorkspaceCapabilities } from '@proma/shared'
 
 function formatAutomationCount(count: number): string {
   return count > 99 ? '99+' : String(count)
@@ -271,12 +283,12 @@ function WorkspaceComponentSidebarEntry({ label, icon, active, onClick, badge }:
       className={cn(
         'group flex w-full items-center justify-between rounded-md px-3 py-2 text-[13px] transition-colors duration-100 titlebar-no-drag',
         active
-          ? 'bg-accent-foreground/[0.10] text-[hsl(var(--sidebar-primary-foreground))] shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
-          : 'text-[hsl(var(--sidebar-primary-foreground))] hover:bg-accent-foreground/[0.08] hover:text-[hsl(var(--sidebar-primary-foreground))]',
+          ? 'bg-accent-foreground/[0.10] text-[hsl(var(--sidebar-primary-foreground))] dark:text-[hsl(var(--sidebar-primary-foreground)/0.90)] shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
+          : 'text-[hsl(var(--sidebar-primary-foreground))] dark:text-[hsl(var(--sidebar-primary-foreground)/0.82)] hover:bg-accent-foreground/[0.08] hover:text-[hsl(var(--sidebar-primary-foreground))] dark:hover:text-[hsl(var(--sidebar-primary-foreground)/0.92)]',
       )}
     >
       <span className="flex min-w-0 items-center gap-3">
-        <span className={cn('flex size-[18px] shrink-0 items-center justify-center', active ? 'text-accent-foreground' : 'text-[hsl(var(--sidebar-primary-foreground))]')}>
+        <span className={cn('flex size-[18px] shrink-0 items-center justify-center', active ? 'text-accent-foreground' : 'text-[hsl(var(--sidebar-primary-foreground))] dark:text-[hsl(var(--sidebar-primary-foreground)/0.76)]')}>
           {icon}
         </span>
         <span className="truncate">{label}</span>
@@ -333,8 +345,14 @@ interface AgentProjectGroup {
   sessions: AgentSessionMeta[]
 }
 
+type SidebarProjectEntry =
+  | { kind: 'default-section' }
+  | { kind: 'section'; section: AgentWorkspaceSection }
+  | { kind: 'project'; group: AgentProjectGroup; sectionId?: string }
+
 /** 合成「自动任务」虚拟项目组的工作区 ID（不对应真实 workspace，仅用于聚合自动任务会话） */
 const AUTOMATION_GROUP_ID = '__automations__'
+const DEFAULT_PROJECTS_DROP_TARGET = '__default-projects__'
 /** 供合成组复用 AgentProjectGroupItem 时填充无意义的 workspace 专属回调 */
 const noopVoid = (): void => {}
 const noopAsync = async (): Promise<void> => {}
@@ -622,6 +640,17 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   /** 待删除项目 ID，非空时显示项目删除确认弹窗 */
   const [pendingDeleteWorkspaceId, setPendingDeleteWorkspaceId] = React.useState<string | null>(null)
   const [deletingWorkspaceId, setDeletingWorkspaceId] = React.useState<string | null>(null)
+  /** 待解散分区及其成员项目的去向。 */
+  const [pendingDissolveSectionId, setPendingDissolveSectionId] = React.useState<string | null>(null)
+  const [sectionDissolveDestinationId, setSectionDissolveDestinationId] = React.useState('')
+  const [pendingMoveWorkspaceId, setPendingMoveWorkspaceId] = React.useState<string | null>(null)
+  const [moveWorkspaceTargetId, setMoveWorkspaceTargetId] = React.useState<string | null>(null)
+  /** 删除分区内全部项目必须经过独立的二次确认。 */
+  const [pendingDeleteSectionProjectsId, setPendingDeleteSectionProjectsId] = React.useState<string | null>(null)
+  const [deletingSectionProjects, setDeletingSectionProjects] = React.useState(false)
+  const [sectionDeleteFeedback, setSectionDeleteFeedback] = React.useState<string | null>(null)
+  const organizationGateRef = React.useRef(createSectionOperationGate())
+  const [organizationBusy, setOrganizationBusy] = React.useState(false)
   /** 待在原路径重建根目录的本地项目 ID。 */
   const [pendingRestoreProjectRootId, setPendingRestoreProjectRootId] = React.useState<string | null>(null)
   const [restoringProjectRootId, setRestoringProjectRootId] = React.useState<string | null>(null)
@@ -641,10 +670,14 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   const [collapsedDelegationParentIds, setCollapsedDelegationParentIds] = React.useState<Set<string>>(new Set())
   /** 项目拖拽排序状态 */
   const [dragProjectId, setDragProjectId] = React.useState<string | null>(null)
+  const [sectionDropTargetId, setSectionDropTargetId] = React.useState<string | null>(null)
+  const [dragSectionId, setDragSectionId] = React.useState<string | null>(null)
+  const [sectionDropIndicator, setSectionDropIndicator] = React.useState<{ id: string; position: 'before' | 'after' } | null>(null)
   const [projectDropIndicator, setProjectDropIndicator] = React.useState<{ id: string; position: 'before' | 'after' } | null>(null)
   const [automationGroupOrder, setAutomationGroupOrder] = useAtom(automationGroupOrderAtom)
   /** 新建项目输入状态 */
   const [creatingProject, setCreatingProject] = React.useState(false)
+  const [creatingProjectSectionId, setCreatingProjectSectionId] = React.useState<string | null>(null)
   const [newProjectName, setNewProjectName] = React.useState('')
   const newProjectInputRef = React.useRef<HTMLInputElement>(null)
   const [relativeTimeNow, setRelativeTimeNow] = React.useState(() => Date.now())
@@ -695,6 +728,17 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   const setSessionPathMap = useSetAtom(agentSessionPathMapAtom)
   const [currentWorkspaceId, setCurrentWorkspaceId] = useAtom(currentAgentWorkspaceIdAtom)
   const [workspaces, setWorkspaces] = useAtom(agentWorkspacesAtom)
+  const [workspaceSections, setWorkspaceSections] = React.useState<AgentWorkspaceSection[]>([])
+  /** 默认分区与自定义分区共用的持久化展示顺序。 */
+  const [sidebarSectionOrder, setSidebarSectionOrder] = React.useState<string[]>([DEFAULT_PROJECTS_DROP_TARGET])
+  /** 默认分区与自定义分区使用相同的仅 UI 折叠状态。 */
+  const [defaultProjectsCollapsed, setDefaultProjectsCollapsed] = React.useState(false)
+  const [collapsedSectionIds, setCollapsedSectionIds] = React.useState<Set<string>>(new Set())
+  const [creatingSection, setCreatingSection] = React.useState(false)
+  const [editingSectionId, setEditingSectionId] = React.useState<string | null>(null)
+  const [editingSectionName, setEditingSectionName] = React.useState('')
+  const sectionRenameCancelledRef = React.useRef(false)
+  const [newSectionName, setNewSectionName] = React.useState('')
   const setMode = useSetAtom(appModeAtom)
 
   // 当前项目能力（MCP + Skill 计数）
@@ -748,6 +792,68 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     if (mode !== 'agent') return
     refreshAgentSidebarSessions(viewMode === 'archived').catch(console.error)
   }, [mode, refreshAgentSidebarSessions, viewMode])
+
+  /** 所有侧栏组织写操作共用同步锁；失败后也必须重读，不能回滚旧闭包数组。 */
+  const beginOrganizationOperation = React.useCallback((): (() => void) | null => {
+    const release = organizationGateRef.current.acquire()
+    if (!release) {
+      toast.info('正在更新项目或分区，请稍后重试', { id: 'sidebar-organization-busy' })
+      return null
+    }
+    setOrganizationBusy(true)
+    return release
+  }, [])
+
+  const refreshOrganization = React.useCallback(async (): Promise<void> => {
+    // 侧栏以外也可能更新 Jotai 项目列表；读取期间有新写入则重读，不用旧快照覆盖。
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const before = store.get(agentWorkspacesAtom)
+      const [latestWorkspaces, sections, order] = await Promise.all([
+        window.electronAPI.listAgentWorkspaces(),
+        window.electronAPI.listAgentWorkspaceSections(),
+        window.electronAPI.listAgentWorkspaceSectionOrder(),
+      ])
+      if (store.get(agentWorkspacesAtom) !== before) continue
+      setWorkspaces(latestWorkspaces)
+      setWorkspaceSections(sections)
+      setSidebarSectionOrder(order)
+      return
+    }
+    throw new Error('项目列表仍在更新，请稍后重试')
+  }, [store, setWorkspaces])
+
+  const finishOrganizationOperation = React.useCallback(async (release: () => void): Promise<void> => {
+    try {
+      await refreshOrganization()
+    } catch (error) {
+      console.error('[侧边栏] 刷新组织状态失败:', error)
+      toast.error('项目或分区状态刷新失败，请刷新后核对；已完成的操作不会撤销')
+    } finally {
+      release()
+      setOrganizationBusy(false)
+    }
+  }, [refreshOrganization])
+
+  const expandDestinationSection = React.useCallback((sectionId: string | null): void => {
+    if (sectionId) setCollapsedSectionIds((prev) => deleteSetEntry(prev, sectionId))
+    else setDefaultProjectsCollapsed(false)
+  }, [])
+
+  React.useEffect(() => {
+    let cancelled = false
+    const revision = organizationGateRef.current.revision
+    Promise.all([
+      window.electronAPI.listAgentWorkspaceSections(),
+      window.electronAPI.listAgentWorkspaceSectionOrder(),
+    ]).then(([sections, order]) => {
+      if (cancelled || revision !== organizationGateRef.current.revision) return
+      setWorkspaceSections(sections)
+      setSidebarSectionOrder(order)
+    }).catch((error) => {
+      console.error('[侧边栏] 读取分区失败:', error)
+    })
+    return () => { cancelled = true }
+  }, [])
 
   const handleUpdateButtonClick = React.useCallback((): void => {
     setSettingsTab('about')
@@ -906,6 +1012,49 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     () => workspaces.find((workspace) => workspace.id === pendingRestoreProjectRootId) ?? null,
     [pendingRestoreProjectRootId, workspaces],
   )
+  const pendingDissolveSection = React.useMemo(
+    () => workspaceSections.find((section) => section.id === pendingDissolveSectionId) ?? null,
+    [pendingDissolveSectionId, workspaceSections],
+  )
+  const pendingDissolveProjects = React.useMemo(
+    () => pendingDissolveSectionId ? workspaces.filter((workspace) => workspace.sectionId === pendingDissolveSectionId) : [],
+    [pendingDissolveSectionId, workspaces],
+  )
+  const dissolveDestinationSections = React.useMemo(
+    () => workspaceSections.filter((section) => section.id !== pendingDissolveSectionId),
+    [pendingDissolveSectionId, workspaceSections],
+  )
+  const pendingDeleteSectionProjects = React.useMemo(
+    () => pendingDeleteSectionProjectsId
+      ? workspaces.filter((workspace) => workspace.sectionId === pendingDeleteSectionProjectsId)
+      : [],
+    [pendingDeleteSectionProjectsId, workspaces],
+  )
+  const pendingDeleteSection = React.useMemo(
+    () => workspaceSections.find((section) => section.id === pendingDeleteSectionProjectsId) ?? null,
+    [pendingDeleteSectionProjectsId, workspaceSections],
+  )
+  const pendingMoveWorkspace = React.useMemo(
+    () => workspaces.find((workspace) => workspace.id === pendingMoveWorkspaceId) ?? null,
+    [pendingMoveWorkspaceId, workspaces],
+  )
+  const moveWorkspaceTargets = React.useMemo(
+    () => pendingMoveWorkspace ? getWorkspaceSectionTargets(pendingMoveWorkspace.sectionId, workspaceSections) : [],
+    [pendingMoveWorkspace, workspaceSections],
+  )
+  const validMoveWorkspaceTargetId = resolveSectionTarget(moveWorkspaceTargetId, moveWorkspaceTargets)
+  React.useEffect(() => {
+    setMoveWorkspaceTargetId(validMoveWorkspaceTargetId)
+  }, [validMoveWorkspaceTargetId])
+
+  const handleRequestMoveWorkspaceToSection = React.useCallback((workspaceId: string): void => {
+    const workspace = store.get(agentWorkspacesAtom).find((item) => item.id === workspaceId)
+    if (!workspace) return
+    const targets = getWorkspaceSectionTargets(workspace.sectionId, workspaceSections)
+    if (targets.length === 0) return
+    setMoveWorkspaceTargetId(targets[0]!.id)
+    setPendingMoveWorkspaceId(workspaceId)
+  }, [store, workspaceSections])
 
   /** 待删除 Agent 会话下的委派子会话数量，用于删除确认弹窗提示是否级联删除 */
   const pendingDeleteChildCount = React.useMemo<number>(() => {
@@ -1364,113 +1513,77 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     setPendingDeleteWorkspaceId(workspaceId)
   }, [])
 
-  /** 确认删除项目及其绑定资源 */
-  const handleConfirmDeleteWorkspace = React.useCallback(async (): Promise<void> => {
-    const workspaceId = pendingDeleteWorkspaceId
-    const workspace = workspaces.find((item) => item.id === workspaceId)
-    if (!workspaceId || !workspace) return
+  /** 同步清理已删除项目在渲染层中的会话、标签页与折叠状态。 */
+  const finalizeDeletedWorkspaceState = React.useCallback(async (
+    deletedWorkspaceIds: Set<string>,
+    deletedSessionIds: Set<string>,
+  ): Promise<AgentWorkspace[]> => {
+    for (const sessionId of deletedSessionIds) cleanupMapAtoms(sessionId)
 
-    if (!canDeleteWorkspace(workspace)) {
-      toast.error(workspace.slug === 'default' ? '默认项目不能删除' : '至少需要保留一个项目')
-      setPendingDeleteWorkspaceId(null)
-      return
+    setDraftSessionIds((prev: Set<string>) => {
+      const next = new Set(prev)
+      let changed = false
+      for (const sessionId of deletedSessionIds) if (next.delete(sessionId)) changed = true
+      return changed ? next : prev
+    })
+    setAgentMessagesCache((prev) => {
+      const next = new Map(prev)
+      let changed = false
+      for (const sessionId of deletedSessionIds) if (next.delete(sessionId)) changed = true
+      return changed ? next : prev
+    })
+    setAutomations((prev) => prev.filter((automation) => !automation.workspaceId || !deletedWorkspaceIds.has(automation.workspaceId)))
+
+    const currentTabs = store.get(tabsAtom)
+    const currentActiveTabId = store.get(activeTabIdAtom)
+    const nextTabs = currentTabs.filter((tab) => (
+      (tab.type !== 'agent' && tab.type !== 'preview') || !deletedSessionIds.has(tab.sessionId)
+    ))
+    const nextActiveTabId = currentActiveTabId && nextTabs.some((tab) => tab.id === currentActiveTabId)
+      ? currentActiveTabId
+      : nextTabs[0]?.id ?? null
+    setTabs(nextTabs)
+    setActiveTabId(nextActiveTabId)
+    syncActiveTabSideEffects(nextActiveTabId ? nextTabs.find((tab) => tab.id === nextActiveTabId) ?? null : null)
+
+    await refreshOrganization()
+    const remainingWorkspaces = store.get(agentWorkspacesAtom)
+    await refreshAgentSidebarSessions(viewMode === 'archived')
+
+    setExpandedExtraCountMap((prev) => {
+      const next = new Map(prev)
+      let changed = false
+      for (const workspaceId of deletedWorkspaceIds) if (next.delete(workspaceId)) changed = true
+      return changed ? next : prev
+    })
+    setCollapsedWorkspaceIds((prev) => {
+      const next = new Set(prev)
+      for (const workspaceId of deletedWorkspaceIds) next.delete(workspaceId)
+      return next
+    })
+    setExpandedArchivedProjectIds((prev) => {
+      const next = new Set(prev)
+      for (const workspaceId of deletedWorkspaceIds) next.delete(workspaceId)
+      return next
+    })
+    setExpandedDelegationParentIds((prev) => {
+      const next = new Set(prev)
+      let changed = false
+      for (const sessionId of deletedSessionIds) if (next.delete(sessionId)) changed = true
+      return changed ? next : prev
+    })
+
+    const selectedWorkspaceId = store.get(currentAgentWorkspaceIdAtom)
+    if (selectedWorkspaceId && deletedWorkspaceIds.has(selectedWorkspaceId)) {
+      const latestWorkspaces = store.get(agentWorkspacesAtom)
+      const fallback = latestWorkspaces.find((item) => item.slug === 'default') ?? latestWorkspaces[0] ?? null
+      setCurrentWorkspaceId(fallback?.id ?? null)
+      if (fallback) window.electronAPI.updateSettings({ agentWorkspaceId: fallback.id }).catch(console.error)
     }
-
-    const deletedSessionIds = new Set(
-      agentSessions
-        .filter((session) => session.workspaceId === workspaceId)
-        .map((session) => session.id),
-    )
-
-    try {
-      setDeletingWorkspaceId(workspaceId)
-
-      await window.electronAPI.deleteAgentWorkspace(workspaceId)
-
-      for (const sessionId of deletedSessionIds) {
-        cleanupMapAtoms(sessionId)
-      }
-
-      setDraftSessionIds((prev: Set<string>) => {
-        let changed = false
-        const next = new Set(prev)
-        for (const sessionId of deletedSessionIds) {
-          if (next.delete(sessionId)) changed = true
-        }
-        return changed ? next : prev
-      })
-
-      setAgentMessagesCache((prev) => {
-        let changed = false
-        const next = new Map(prev)
-        for (const sessionId of deletedSessionIds) {
-          if (next.delete(sessionId)) changed = true
-        }
-        return changed ? next : prev
-      })
-      setAutomations((prev) => prev.filter((automation) => automation.workspaceId !== workspaceId))
-
-      const currentTabs = store.get(tabsAtom)
-      const currentActiveTabId = store.get(activeTabIdAtom)
-      const nextTabs = currentTabs.filter((tab) => (
-        (tab.type !== 'agent' && tab.type !== 'preview') || !deletedSessionIds.has(tab.sessionId)
-      ))
-      const nextActiveTabId = currentActiveTabId && nextTabs.some((tab) => tab.id === currentActiveTabId)
-        ? currentActiveTabId
-        : nextTabs[0]?.id ?? null
-
-      setTabs(nextTabs)
-      setActiveTabId(nextActiveTabId)
-      syncActiveTabSideEffects(nextActiveTabId ? nextTabs.find((tab) => tab.id === nextActiveTabId) ?? null : null)
-
-      const remainingWorkspaces = await window.electronAPI.listAgentWorkspaces()
-
-      setWorkspaces(remainingWorkspaces)
-      await refreshAgentSidebarSessions(viewMode === 'archived')
-
-      setExpandedExtraCountMap((prev) => {
-        if (!prev.has(workspaceId)) return prev
-        const next = new Map(prev)
-        next.delete(workspaceId)
-        return next
-      })
-
-      setCollapsedWorkspaceIds((prev) => deleteSetEntry(prev, workspaceId))
-      setExpandedArchivedProjectIds((prev) => deleteSetEntry(prev, workspaceId))
-      setExpandedDelegationParentIds((prev) => {
-        let changed = false
-        const next = new Set(prev)
-        for (const sessionId of deletedSessionIds) {
-          if (next.delete(sessionId)) changed = true
-        }
-        return changed ? next : prev
-      })
-
-      if (workspaceId === currentWorkspaceId) {
-        const fallback = remainingWorkspaces.find((item) => item.slug === 'default') ?? remainingWorkspaces[0] ?? null
-        setCurrentWorkspaceId(fallback?.id ?? null)
-        if (fallback) {
-          window.electronAPI.updateSettings({ agentWorkspaceId: fallback.id }).catch(console.error)
-        }
-      }
-
-      toast.success('项目已删除', {
-        description: `已删除「${workspace.name}」及其绑定资源`,
-      })
-    } catch (error) {
-      console.error('[侧边栏] 删除项目失败:', error)
-      const msg = error instanceof Error ? error.message : '删除项目失败'
-      toast.error(msg)
-    } finally {
-      setDeletingWorkspaceId(null)
-      setPendingDeleteWorkspaceId(null)
-    }
+    return remainingWorkspaces
   }, [
-    pendingDeleteWorkspaceId,
-    workspaces,
-    canDeleteWorkspace,
-    agentSessions,
     cleanupMapAtoms,
+    refreshOrganization,
     setDraftSessionIds,
     setAgentMessagesCache,
     setAutomations,
@@ -1479,11 +1592,55 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     setActiveTabId,
     syncActiveTabSideEffects,
     setWorkspaces,
-    setAgentSessions,
     refreshAgentSidebarSessions,
     viewMode,
     currentWorkspaceId,
     setCurrentWorkspaceId,
+  ])
+
+  /** 确认删除项目及其绑定资源。 */
+  const handleConfirmDeleteWorkspace = React.useCallback(async (): Promise<void> => {
+    const workspaceId = pendingDeleteWorkspaceId
+    const latestWorkspaces = store.get(agentWorkspacesAtom)
+    const workspace = latestWorkspaces.find((item) => item.id === workspaceId)
+    if (!workspaceId || !workspace) return
+
+    if (workspace.slug === 'default' || latestWorkspaces.length <= 1) {
+      toast.error(workspace.slug === 'default' ? '默认项目不能删除' : '至少需要保留一个项目')
+      setPendingDeleteWorkspaceId(null)
+      return
+    }
+
+    const release = beginOrganizationOperation()
+    if (!release) return
+    const deletedSessionIds = new Set(
+      store.get(agentSessionsAtom).filter((session) => session.workspaceId === workspaceId).map((session) => session.id),
+    )
+    let workspaceDeleted = false
+    try {
+      setDeletingWorkspaceId(workspaceId)
+      await window.electronAPI.deleteAgentWorkspace(workspaceId)
+      workspaceDeleted = true
+      await finalizeDeletedWorkspaceState(new Set([workspaceId]), deletedSessionIds)
+      toast.success('项目已删除', { description: `已删除「${workspace.name}」及其绑定资源` })
+    } catch (error) {
+      console.error('[侧边栏] 删除项目失败:', error)
+      const detail = error instanceof Error ? error.message : '删除项目失败'
+      toast.error(workspaceDeleted ? `项目已删除，但界面清理未完成：${detail}。请刷新后核对。` : detail)
+    } finally {
+      await finishOrganizationOperation(release)
+      setDeletingWorkspaceId(null)
+      setPendingDeleteWorkspaceId(null)
+    }
+  }, [
+    pendingDeleteWorkspaceId,
+    store,
+    beginOrganizationOperation,
+    finishOrganizationOperation,
+    workspaces,
+    canDeleteWorkspace,
+    agentSessions,
+    finalizeDeletedWorkspaceState,
   ])
 
   const handleConfigureProject = React.useCallback((workspaceId: string): void => {
@@ -1528,6 +1685,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       return
     }
 
+    setSectionDropTargetId(null)
     const rect = e.currentTarget.getBoundingClientRect()
     const ratio = (e.clientY - rect.top) / rect.height
     const position: 'before' | 'after' = ratio < 0.5 ? 'before' : 'after'
@@ -1568,7 +1726,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     [agentSessions, draftSessionIds],
   )
 
-  /** 完成项目排序并持久化（合成「自动任务」组与真实项目一起排序，二者分别持久化） */
+  /** 完成项目排序并持久化；落到另一分区的项目行时同时改变 sectionId。 */
   const handleProjectDrop = React.useCallback((e: React.DragEvent, targetWorkspaceId: string): void => {
     e.preventDefault()
     const indicator = projectDropIndicator
@@ -1578,8 +1736,9 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       return
     }
 
-    // 构造当前显示顺序的 id 列表（真实项目 + 按当前索引插入的合成组）
-    const baseIds = workspaces.map((workspace) => workspace.id)
+    const currentWorkspaces = store.get(agentWorkspacesAtom)
+    // 构造当前显示顺序的 id 列表（真实项目 + 按当前索引插入的合成组）。
+    const baseIds = currentWorkspaces.map((workspace) => workspace.id)
     const oldAutoIndex = automationGroup
       ? Math.min(Math.max(automationGroupOrder, 0), baseIds.length)
       : -1
@@ -1605,43 +1764,298 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     const insertIndex = indicator.position === 'after' ? adjustedToIndex + 1 : adjustedToIndex
     reordered.splice(insertIndex, 0, moved)
 
-    setDragProjectId(null)
-    setProjectDropIndicator(null)
-
-    // 拆分：合成组的新索引 → settings；真实项目的新顺序 → 后端
+    const draggedWorkspace = currentWorkspaces.find((workspace) => workspace.id === dragProjectId)
+    const targetWorkspace = currentWorkspaces.find((workspace) => workspace.id === targetWorkspaceId)
+    const targetSectionId = workspaceSections.some((section) => section.id === targetWorkspace?.sectionId)
+      ? targetWorkspace!.sectionId! : null
+    const sectionChanged = Boolean(
+      draggedWorkspace
+      && targetWorkspace
+      && (draggedWorkspace.sectionId ?? null) !== targetSectionId,
+    )
     const newAutoIndex = reordered.indexOf(AUTOMATION_GROUP_ID)
     const newWorkspaceIds = reordered.filter((id) => id !== AUTOMATION_GROUP_ID)
+    const workspaceOrderChanged = newWorkspaceIds.some((id, index) => id !== baseIds[index])
+    const optimisticWorkspaces = newWorkspaceIds
+      .map((id) => currentWorkspaces.find((workspace) => workspace.id === id))
+      .filter((workspace): workspace is AgentWorkspace => !!workspace)
+      .map((workspace) => sectionChanged && workspace.id === dragProjectId
+        ? { ...workspace, sectionId: targetSectionId ?? undefined }
+        : workspace)
 
+    setDragProjectId(null)
+    setSectionDropTargetId(null)
+    setProjectDropIndicator(null)
+    const release = beginOrganizationOperation()
+    if (!release) return
     if (oldAutoIndex >= 0 && newAutoIndex !== oldAutoIndex) {
       setAutomationGroupOrder(newAutoIndex)
       window.electronAPI.updateSettings({ agentAutomationGroupOrder: newAutoIndex }).catch(console.error)
     }
+    setWorkspaces(optimisticWorkspaces)
 
-    const workspaceOrderChanged = newWorkspaceIds.some((id, i) => id !== baseIds[i])
-    if (workspaceOrderChanged) {
-      const reorderedWorkspaces = newWorkspaceIds
-        .map((id) => workspaces.find((w) => w.id === id))
-        .filter((w): w is AgentWorkspace => !!w)
-      setWorkspaces(reorderedWorkspaces)
-      window.electronAPI
-        .reorderAgentWorkspaces(newWorkspaceIds)
-        .then(setWorkspaces)
-        .catch((error) => {
-          console.error('[侧边栏] 项目排序失败:', error)
-          setWorkspaces(workspaces)
-          toast.error('项目排序失败')
-        })
-    }
-  }, [dragProjectId, projectDropIndicator, automationGroup, automationGroupOrder, setWorkspaces, workspaces])
+    void (async () => {
+      try {
+        if (sectionChanged && draggedWorkspace) {
+          await window.electronAPI.updateAgentWorkspace(draggedWorkspace.id, { sectionId: targetSectionId })
+          expandDestinationSection(targetSectionId)
+        }
+        if (workspaceOrderChanged) {
+          await window.electronAPI.reorderAgentWorkspaces(newWorkspaceIds)
+        }
+      } catch (error) {
+        console.error('[侧边栏] 移动项目失败:', error)
+        toast.error('项目移动或排序未全部完成，正在重新读取实际状态')
+      } finally {
+        await finishOrganizationOperation(release)
+      }
+    })()
+  }, [dragProjectId, projectDropIndicator, automationGroup, automationGroupOrder, setAutomationGroupOrder, setWorkspaces, workspaces, workspaceSections, store, beginOrganizationOperation, finishOrganizationOperation, expandDestinationSection])
 
   const handleProjectDragEnd = React.useCallback((): void => {
     setDragProjectId(null)
+    setSectionDropTargetId(null)
     setProjectDropIndicator(null)
   }, [])
 
+  const handleSectionDragStart = React.useCallback((event: React.DragEvent, sectionId: string): void => {
+    setDragSectionId(sectionId)
+    setSectionDropIndicator(null)
+    setDragProjectId(null)
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', sectionId)
+  }, [])
+
+  const handleSectionDragOverForReorder = React.useCallback((event: React.DragEvent, sectionId: string): void => {
+    if (!dragSectionId || dragSectionId === sectionId) {
+      setSectionDropIndicator(null)
+      return
+    }
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+    const rect = event.currentTarget.getBoundingClientRect()
+    const position: 'before' | 'after' = (event.clientY - rect.top) / rect.height < 0.5 ? 'before' : 'after'
+    setSectionDropIndicator((previous) => (
+      previous?.id === sectionId && previous.position === position ? previous : { id: sectionId, position }
+    ))
+  }, [dragSectionId])
+
+  const handleSectionDropForReorder = React.useCallback((event: React.DragEvent, targetId: string): void => {
+    if (!dragSectionId || !sectionDropIndicator || sectionDropIndicator.id !== targetId) return
+    event.preventDefault()
+    const currentOrder = [
+      ...sidebarSectionOrder.filter((id, index) => (
+        (id === DEFAULT_PROJECTS_DROP_TARGET || workspaceSections.some((section) => section.id === id))
+        && sidebarSectionOrder.indexOf(id) === index
+      )),
+      ...(sidebarSectionOrder.includes(DEFAULT_PROJECTS_DROP_TARGET) ? [] : [DEFAULT_PROJECTS_DROP_TARGET]),
+      ...workspaceSections.filter((section) => !sidebarSectionOrder.includes(section.id)).map((section) => section.id),
+    ]
+    const fromIndex = currentOrder.indexOf(dragSectionId)
+    const targetIndex = currentOrder.indexOf(targetId)
+    if (fromIndex === -1 || targetIndex === -1) return
+    const orderedIds = [...currentOrder]
+    const [moved] = orderedIds.splice(fromIndex, 1)
+    if (!moved) return
+    const adjustedTargetIndex = fromIndex < targetIndex ? targetIndex - 1 : targetIndex
+    orderedIds.splice(sectionDropIndicator.position === 'after' ? adjustedTargetIndex + 1 : adjustedTargetIndex, 0, moved)
+    setDragSectionId(null)
+    setSectionDropIndicator(null)
+    const release = beginOrganizationOperation()
+    if (!release) return
+    setSidebarSectionOrder(orderedIds)
+    void window.electronAPI.reorderAgentWorkspaceSections(orderedIds).catch((error) => {
+      console.error('[侧边栏] 分区排序失败:', error)
+      toast.error('分区排序失败')
+    }).finally(() => finishOrganizationOperation(release))
+  }, [dragSectionId, sectionDropIndicator, sidebarSectionOrder, workspaceSections, beginOrganizationOperation, finishOrganizationOperation])
+
+
+  /** 将项目拖到分区标题即改变归属；默认「项目」区的 sectionId 为 null。 */
+  const handleSectionDragOver = React.useCallback((event: React.DragEvent, sectionId: string | null): void => {
+    if (!dragProjectId || dragProjectId === AUTOMATION_GROUP_ID) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+    setProjectDropIndicator(null)
+    setSectionDropTargetId(sectionId ?? DEFAULT_PROJECTS_DROP_TARGET)
+  }, [dragProjectId])
+
+  const handleMoveWorkspaceToSection = React.useCallback(async (workspaceId: string, sectionId: string | null): Promise<void> => {
+    const workspace = store.get(agentWorkspacesAtom).find((item) => item.id === workspaceId)
+    if (!workspace || !getWorkspaceSectionTargets(workspace.sectionId, workspaceSections).some((target) => target.id === (sectionId ?? ''))) {
+      toast.error('目标分区已变化，请重新选择')
+      return
+    }
+    const release = beginOrganizationOperation()
+    if (!release) return
+    try {
+      await window.electronAPI.updateAgentWorkspace(workspaceId, { sectionId })
+      expandDestinationSection(sectionId)
+      setPendingMoveWorkspaceId(null)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '移动项目失败')
+    } finally {
+      await finishOrganizationOperation(release)
+    }
+  }, [store, workspaceSections, beginOrganizationOperation, finishOrganizationOperation, expandDestinationSection])
+
+  const handleSectionDrop = React.useCallback((event: React.DragEvent, sectionId: string | null): void => {
+    event.preventDefault()
+    const workspaceId = dragProjectId
+    setDragProjectId(null)
+    setSectionDropTargetId(null)
+    setProjectDropIndicator(null)
+    if (!workspaceId || workspaceId === AUTOMATION_GROUP_ID) return
+    void handleMoveWorkspaceToSection(workspaceId, sectionId)
+  }, [dragProjectId, handleMoveWorkspaceToSection])
+
+  const handleCreateSection = React.useCallback(async (): Promise<void> => {
+    const trimmed = newSectionName.trim()
+    if (!trimmed) return
+    const release = beginOrganizationOperation()
+    if (!release) return
+    try {
+      const section = await window.electronAPI.createAgentWorkspaceSection(trimmed)
+      setWorkspaceSections((prev) => [...prev, section])
+      setSidebarSectionOrder((prev) => [...prev.filter((id) => id !== section.id), section.id])
+      setCollapsedSectionIds((prev) => deleteSetEntry(prev, section.id))
+      setCreatingSection(false)
+      setNewSectionName('')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '创建分区失败')
+    } finally {
+      await finishOrganizationOperation(release)
+    }
+  }, [beginOrganizationOperation, finishOrganizationOperation, newSectionName])
+
+  const handleRenameSection = React.useCallback(async (): Promise<void> => {
+    if (sectionRenameCancelledRef.current) {
+      sectionRenameCancelledRef.current = false
+      return
+    }
+    const sectionId = editingSectionId
+    if (!sectionId) return
+    const existing = workspaceSections.find((section) => section.id === sectionId)
+    const trimmed = editingSectionName.trim()
+    if (!existing || !trimmed || trimmed === existing.name) {
+      setEditingSectionId(null)
+      return
+    }
+    const release = beginOrganizationOperation()
+    if (!release) return
+    try {
+      const updated = await window.electronAPI.updateAgentWorkspaceSection(sectionId, trimmed)
+      setWorkspaceSections((prev) => prev.map((section) => section.id === updated.id ? updated : section))
+      setEditingSectionId(null)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '重命名分区失败')
+    } finally {
+      await finishOrganizationOperation(release)
+    }
+  }, [beginOrganizationOperation, finishOrganizationOperation, editingSectionId, editingSectionName, workspaceSections])
+
+  const handleRequestDissolveSection = React.useCallback((sectionId: string): void => {
+    setPendingDissolveSectionId(sectionId)
+    setSectionDissolveDestinationId('')
+  }, [])
+
+  const handleConfirmDissolveSection = React.useCallback(async (): Promise<void> => {
+    const sectionId = pendingDissolveSectionId
+    if (!sectionId || !workspaceSections.some((section) => section.id === sectionId)) return
+    const destinationSectionId = sectionDissolveDestinationId || undefined
+    if (destinationSectionId && (destinationSectionId === sectionId || !workspaceSections.some((section) => section.id === destinationSectionId))) {
+      toast.error('目标分区已变化，请重新选择')
+      return
+    }
+    const release = beginOrganizationOperation()
+    if (!release) return
+    try {
+      await window.electronAPI.deleteAgentWorkspaceSection(sectionId, destinationSectionId)
+      expandDestinationSection(destinationSectionId ?? null)
+      setPendingDissolveSectionId(null)
+      toast.success(destinationSectionId ? '分区已解散，项目已移至目标分区末尾' : '分区已解散，项目已回到项目')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '解散分区失败')
+    } finally {
+      await finishOrganizationOperation(release)
+    }
+  }, [pendingDissolveSectionId, sectionDissolveDestinationId, workspaceSections, beginOrganizationOperation, finishOrganizationOperation, expandDestinationSection])
+
+  const handleRequestDeleteSectionProjects = React.useCallback((): void => {
+    if (!pendingDissolveSectionId) return
+    if (organizationGateRef.current.busy) return
+    setSectionDeleteFeedback(null)
+    setPendingDeleteSectionProjectsId(pendingDissolveSectionId)
+    setPendingDissolveSectionId(null)
+  }, [pendingDissolveSectionId])
+
+  const handleConfirmDeleteSectionProjects = React.useCallback(async (): Promise<void> => {
+    const sectionId = pendingDeleteSectionProjectsId
+    if (!sectionId) return
+    const latestWorkspaces = store.get(agentWorkspacesAtom)
+    const projects = latestWorkspaces.filter((workspace) => workspace.sectionId === sectionId)
+    if (projects.some((workspace) => workspace.slug === 'default')) {
+      toast.error('默认项目不能删除，请先将它移出该分区')
+      setPendingDeleteSectionProjectsId(null)
+      return
+    }
+    if (projects.length >= latestWorkspaces.length) {
+      toast.error('至少需要保留一个项目')
+      setPendingDeleteSectionProjectsId(null)
+      return
+    }
+
+    const release = beginOrganizationOperation()
+    if (!release) return
+    setSectionDeleteFeedback(null)
+    const deletedWorkspaceIds = new Set<string>()
+    const deletedSessionIds = new Set<string>()
+    let sectionDeleted = false
+    try {
+      setDeletingSectionProjects(true)
+      for (const project of projects) {
+        const projectSessionIds = store.get(agentSessionsAtom).filter((session) => session.workspaceId === project.id).map((session) => session.id)
+        await window.electronAPI.deleteAgentWorkspace(project.id)
+        deletedWorkspaceIds.add(project.id)
+        for (const sessionId of projectSessionIds) deletedSessionIds.add(sessionId)
+      }
+      await window.electronAPI.deleteAgentWorkspaceSection(sectionId)
+      sectionDeleted = true
+      await finalizeDeletedWorkspaceState(deletedWorkspaceIds, deletedSessionIds)
+      setPendingDeleteSectionProjectsId(null)
+      toast.success(`已删除分区及 ${projects.length} 个项目`)
+    } catch (error) {
+      console.error('[侧边栏] 删除分区项目失败:', error)
+      if (deletedWorkspaceIds.size > 0) {
+        await finalizeDeletedWorkspaceState(deletedWorkspaceIds, deletedSessionIds).catch(console.error)
+      }
+      const detail = error instanceof Error ? error.message : '删除失败'
+      const feedback = sectionDeleted
+        ? `分区与 ${deletedWorkspaceIds.size} 个项目已删除，但界面清理未完成：${detail}。请刷新后核对。`
+        : `已删除 ${deletedWorkspaceIds.size}/${projects.length} 个项目；分区尚未删除。${detail}。已完成的删除无法撤销，请核对剩余项目后重试。`
+      setSectionDeleteFeedback(feedback)
+      if (sectionDeleted) setPendingDeleteSectionProjectsId(null)
+      toast.error(feedback)
+    } finally {
+      await finishOrganizationOperation(release)
+      setDeletingSectionProjects(false)
+    }
+  }, [
+    pendingDeleteSectionProjectsId,
+    store,
+    beginOrganizationOperation,
+    finishOrganizationOperation,
+    workspaces,
+    agentSessions,
+    finalizeDeletedWorkspaceState,
+  ])
+
   /** 开始创建新项目 */
-  const handleStartCreateProject = React.useCallback((): void => {
+  const handleStartCreateProject = React.useCallback((sectionId: string | null = null): void => {
+    if (sectionId) setCollapsedSectionIds((prev) => deleteSetEntry(prev, sectionId))
+    else setDefaultProjectsCollapsed(false)
     setCreatingProject(true)
+    setCreatingProjectSectionId(sectionId)
     setNewProjectName('')
     requestAnimationFrame(() => {
       newProjectInputRef.current?.focus()
@@ -1653,12 +2067,15 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     const trimmed = newProjectName.trim()
     if (!trimmed) {
       setCreatingProject(false)
+      setCreatingProjectSectionId(null)
       return
     }
 
+    const release = beginOrganizationOperation()
+    if (!release) return
     try {
       const { workspace, session } = await window.electronAPI.createAgentProject(
-        { name: trimmed },
+        { name: trimmed, ...(creatingProjectSectionId ? { sectionId: creatingProjectSectionId } : {}) },
         agentChannelId || undefined,
         agentModelId || undefined,
       )
@@ -1668,12 +2085,15 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       openSession('agent', session.id, session.title)
       window.electronAPI.updateSettings({ agentWorkspaceId: workspace.id }).catch(console.error)
       setCreatingProject(false)
+      setCreatingProjectSectionId(null)
       setNewProjectName('')
     } catch (error) {
       const msg = error instanceof Error ? error.message : '创建项目失败'
       toast.error(msg)
+    } finally {
+      await finishOrganizationOperation(release)
     }
-  }, [agentChannelId, agentModelId, newProjectName, openSession, setAgentSessions, setCurrentWorkspaceId, setWorkspaces])
+  }, [beginOrganizationOperation, finishOrganizationOperation, agentChannelId, agentModelId, creatingProjectSectionId, newProjectName, openSession, setAgentSessions, setCurrentWorkspaceId, setWorkspaces])
 
   const handleCreateProjectKeyDown = React.useCallback((e: React.KeyboardEvent): void => {
     if (e.key === 'Enter') {
@@ -1683,11 +2103,14 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     } else if (e.key === 'Escape') {
       e.preventDefault()
       setCreatingProject(false)
+      setCreatingProjectSectionId(null)
       setNewProjectName('')
     }
   }, [handleCreateProject])
 
-  const handleCreateProjectFromFolder = React.useCallback(async (): Promise<void> => {
+  const handleCreateProjectFromFolder = React.useCallback(async (sectionId: string | null = null): Promise<void> => {
+    const release = beginOrganizationOperation()
+    if (!release) return
     try {
       const folder = await window.electronAPI.openFolderDialog()
       if (!folder) return
@@ -1695,6 +2118,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
         {
           name: folder.name,
           projectRootPath: folder.path,
+          ...(sectionId ? { sectionId } : {}),
         },
         agentChannelId || undefined,
         agentModelId || undefined,
@@ -1707,8 +2131,10 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     } catch (error) {
       const msg = error instanceof Error ? error.message : '从文件夹创建项目失败'
       toast.error(msg)
+    } finally {
+      await finishOrganizationOperation(release)
     }
-  }, [agentChannelId, agentModelId, openSession, setAgentSessions, setCurrentWorkspaceId, setWorkspaces])
+  }, [beginOrganizationOperation, finishOrganizationOperation, agentChannelId, agentModelId, openSession, setAgentSessions, setCurrentWorkspaceId, setWorkspaces])
 
   /** 选择 Agent 会话（打开或聚焦标签页）。协作子 Agent 保持左侧树形条目，但在父会话右侧查看。 */
   const handleSelectAgentSession = React.useCallback((id: string, title: string): void => {
@@ -1967,6 +2393,8 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
 
   /** 重命名工作区（项目）名称 */
   const handleWorkspaceRename = React.useCallback(async (workspaceId: string, newName: string): Promise<void> => {
+    const release = beginOrganizationOperation()
+    if (!release) return
     try {
       const updated = await window.electronAPI.updateAgentWorkspace(workspaceId, { name: newName })
       setWorkspaces((prev) => prev.map((w) => (w.id === updated.id ? updated : w)))
@@ -1974,11 +2402,15 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       console.error('[侧边栏] 重命名工作区失败:', error)
       const msg = error instanceof Error ? error.message : '重命名失败'
       toast.error(msg)
+    } finally {
+      await finishOrganizationOperation(release)
     }
-  }, [setWorkspaces])
+  }, [beginOrganizationOperation, finishOrganizationOperation, setWorkspaces])
 
   /** 重新选择已有文件夹作为本地项目根，保留该项目的会话和设置。 */
   const handleRelinkProjectRoot = React.useCallback(async (workspaceId: string): Promise<void> => {
+    const release = beginOrganizationOperation()
+    if (!release) return
     try {
       const folder = await window.electronAPI.openFolderDialog()
       if (!folder) return
@@ -1988,14 +2420,18 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     } catch (error) {
       console.error('[侧边栏] 重新关联本地项目根失败:', error)
       toast.error(error instanceof Error ? error.message : '重新关联项目文件夹失败')
+    } finally {
+      await finishOrganizationOperation(release)
     }
-  }, [setWorkspaces])
+  }, [beginOrganizationOperation, finishOrganizationOperation, setWorkspaces])
 
   /** 确认在原路径新建空目录。 */
   const handleConfirmRestoreProjectRoot = React.useCallback(async (): Promise<void> => {
     const workspaceId = pendingRestoreProjectRootId
     if (!workspaceId) return
 
+    const release = beginOrganizationOperation()
+    if (!release) return
     try {
       setRestoringProjectRootId(workspaceId)
       const updated = await window.electronAPI.restoreAgentWorkspaceProjectRoot(workspaceId)
@@ -2006,9 +2442,10 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       console.error('[侧边栏] 恢复本地项目根失败:', error)
       toast.error(error instanceof Error ? error.message : '恢复项目文件夹失败')
     } finally {
+      await finishOrganizationOperation(release)
       setRestoringProjectRootId(null)
     }
-  }, [pendingRestoreProjectRootId, setWorkspaces])
+  }, [pendingRestoreProjectRootId, setWorkspaces, beginOrganizationOperation, finishOrganizationOperation])
 
   /** 重命名 Agent 会话标题 */
   const handleAgentRename = React.useCallback(async (id: string, newTitle: string): Promise<void> => {
@@ -2254,6 +2691,40 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     [agentProjectGroups, automationGroup, automationGroupOrder],
   )
 
+  const sidebarProjectEntries = React.useMemo<SidebarProjectEntry[]>(() => {
+    const entries: SidebarProjectEntry[] = []
+    const sectionsById = new Map(workspaceSections.map((section) => [section.id, section]))
+    const orderedIds = [
+      ...sidebarSectionOrder.filter((id, index) => (
+        (id === DEFAULT_PROJECTS_DROP_TARGET || sectionsById.has(id)) && sidebarSectionOrder.indexOf(id) === index
+      )),
+      ...(sidebarSectionOrder.includes(DEFAULT_PROJECTS_DROP_TARGET) ? [] : [DEFAULT_PROJECTS_DROP_TARGET]),
+      ...workspaceSections.filter((section) => !sidebarSectionOrder.includes(section.id)).map((section) => section.id),
+    ]
+    const groupsBySection = new Map<string, AgentProjectGroup[]>()
+    for (const group of displayProjectGroups) {
+      const sectionId = group.workspace.id !== AUTOMATION_GROUP_ID
+        && group.workspace.sectionId && sectionsById.has(group.workspace.sectionId)
+        ? group.workspace.sectionId : DEFAULT_PROJECTS_DROP_TARGET
+      const bucket = groupsBySection.get(sectionId)
+      if (bucket) bucket.push(group)
+      else groupsBySection.set(sectionId, [group])
+    }
+    for (const sectionId of orderedIds) {
+      if (sectionId === DEFAULT_PROJECTS_DROP_TARGET) {
+        entries.push({ kind: 'default-section' })
+        for (const group of groupsBySection.get(sectionId) ?? []) entries.push({ kind: 'project', group })
+      } else {
+        const section = sectionsById.get(sectionId)
+        if (!section) continue
+        entries.push({ kind: 'section', section })
+        for (const group of groupsBySection.get(sectionId) ?? []) entries.push({ kind: 'project', group, sectionId })
+      }
+    }
+    return entries
+  }, [displayProjectGroups, sidebarSectionOrder, workspaceSections])
+
+
   /** Agent 归档会话按项目分组；归档列表仍只在进入该视图后按需加载。 */
   const archivedAgentSessionProjectGroups = React.useMemo(() => {
     if (viewMode !== 'archived') return []
@@ -2448,13 +2919,13 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     <AlertDialog
       open={pendingDeleteWorkspaceId !== null}
       onOpenChange={(open) => {
-        if (!open && !deletingWorkspaceId) setPendingDeleteWorkspaceId(null)
+        if (!open && !organizationGateRef.current.busy) setPendingDeleteWorkspaceId(null)
       }}
     >
       <AlertDialogContent
         onCloseAutoFocus={(event) => event.preventDefault()}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && !deletingWorkspaceId) {
+          if (e.key === 'Enter' && !organizationGateRef.current.busy && !(e.target as HTMLElement).closest('button')) {
             e.preventDefault()
             void handleConfirmDeleteWorkspace()
           }
@@ -2467,17 +2938,176 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={!!deletingWorkspaceId}>取消</AlertDialogCancel>
-          <AlertDialogAction
-            disabled={!!deletingWorkspaceId}
+          <AlertDialogCancel disabled={organizationBusy}>取消</AlertDialogCancel>
+          <Button type="button"
+            disabled={organizationBusy}
             onClick={handleConfirmDeleteWorkspace}
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
             {deletingWorkspaceId ? '删除中...' : '删除项目'}
-          </AlertDialogAction>
+          </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  )
+
+  const sectionCreationDialog = (
+    <Dialog
+      open={creatingSection}
+      onOpenChange={(open) => {
+        if (organizationGateRef.current.busy) return
+        setCreatingSection(open)
+        if (!open) {
+          setNewSectionName('')
+        }
+      }}
+    >
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>新建分区</DialogTitle>
+          <DialogDescription>
+            使用分区整理项目；不会移动项目文件或改变项目级配置。
+          </DialogDescription>
+        </DialogHeader>
+        <Input
+          autoFocus
+          disabled={organizationBusy}
+          value={newSectionName}
+          onChange={(event) => setNewSectionName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+              event.preventDefault()
+              void handleCreateSection()
+            }
+          }}
+          placeholder="分区名称"
+          maxLength={50}
+          className="h-10"
+        />
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={organizationBusy}
+            onClick={() => { setCreatingSection(false); setNewSectionName('') }}
+          >
+            取消
+          </Button>
+          <Button
+            type="button"
+            disabled={organizationBusy || !newSectionName.trim()}
+            onClick={() => void handleCreateSection()}
+          >
+            新建分区
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+
+  const sectionDissolveDialog = (
+    <AlertDialog
+      open={pendingDissolveSectionId !== null}
+      onOpenChange={(open) => { if (!open && !organizationGateRef.current.busy) setPendingDissolveSectionId(null) }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>解散「{pendingDissolveSection?.name ?? '该分区'}」？</AlertDialogTitle>
+          <AlertDialogDescription>
+            {pendingDissolveProjects.length > 0
+              ? `该分区包含 ${pendingDissolveProjects.length} 个项目。请选择如何处理。`
+              : '该分区没有项目。'}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        {pendingDissolveProjects.length > 0 && (
+          <div className="space-y-2">
+            <div className="text-sm font-medium text-foreground">统一移到</div>
+            {dissolveDestinationSections.length > 0 ? (
+              <Select disabled={organizationBusy} value={sectionDissolveDestinationId || '__default__'} onValueChange={(value) => setSectionDissolveDestinationId(value === '__default__' ? '' : value)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__default__">项目</SelectItem>
+                  {dissolveDestinationSections.map((section) => (
+                    <SelectItem key={section.id} value={section.id}>{section.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <div className="flex h-9 items-center rounded-md bg-muted/60 px-3 text-sm text-foreground">项目</div>
+            )}
+          </div>
+        )}
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={organizationBusy}>取消</AlertDialogCancel>
+          {pendingDissolveProjects.length > 0 && (
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={organizationBusy}
+              onClick={handleRequestDeleteSectionProjects}
+            >
+              删除全部项目
+            </Button>
+          )}
+          <Button type="button" disabled={organizationBusy} onClick={() => void handleConfirmDissolveSection()}>
+            {pendingDissolveProjects.length > 0 ? '解散并移动' : '解散分区'}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+
+  const sectionProjectsDeleteDialog = (
+    <AlertDialog
+      open={pendingDeleteSectionProjectsId !== null}
+      onOpenChange={(open) => { if (!open && !organizationGateRef.current.busy) { setPendingDeleteSectionProjectsId(null); setSectionDeleteFeedback(null) } }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除「{pendingDeleteSection?.name ?? '该分区'}」中的全部项目？</AlertDialogTitle>
+          <AlertDialogDescription>
+            这会永久删除 {pendingDeleteSectionProjects.length} 个项目及其在 Proma 中保存的全部内容。外部本地文件夹不会被删除。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        {sectionDeleteFeedback && <p role="status" className="text-sm text-destructive">{sectionDeleteFeedback}</p>}
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={organizationBusy}>取消</AlertDialogCancel>
+          <Button type="button"
+            disabled={organizationBusy}
+            onClick={() => void handleConfirmDeleteSectionProjects()}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            {deletingSectionProjects ? '删除中...' : '确认全部删除'}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+
+  const moveWorkspaceDialog = (
+    <Dialog
+      open={pendingMoveWorkspaceId !== null}
+      onOpenChange={(open) => { if (!open && !organizationGateRef.current.busy) setPendingMoveWorkspaceId(null) }}
+    >
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>移动项目</DialogTitle>
+          <DialogDescription>选择项目「{pendingMoveWorkspace?.name ?? ''}」要移动到的分区。</DialogDescription>
+        </DialogHeader>
+        <Select disabled={organizationBusy || validMoveWorkspaceTargetId === null} value={validMoveWorkspaceTargetId === null ? '' : validMoveWorkspaceTargetId || '__default__'} onValueChange={(value) => setMoveWorkspaceTargetId(value === '__default__' ? '' : value)}>
+          <SelectTrigger><SelectValue placeholder="没有可移动的分区" /></SelectTrigger>
+          <SelectContent>
+            {moveWorkspaceTargets.map((target) => <SelectItem key={target.id || '__default__'} value={target.id || '__default__'}>{target.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <DialogFooter>
+          <Button variant="outline" disabled={organizationBusy} onClick={() => setPendingMoveWorkspaceId(null)}>取消</Button>
+          <Button disabled={organizationBusy || !pendingMoveWorkspace || validMoveWorkspaceTargetId === null} onClick={() => { if (!pendingMoveWorkspace || validMoveWorkspaceTargetId === null) return; void handleMoveWorkspaceToSection(pendingMoveWorkspace.id, validMoveWorkspaceTargetId || null) }}>移动</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 
   const restoreProjectRootDialog = (
@@ -2668,7 +3298,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                   onClick={() => handleToggleArchivedProject(group.id)}
                   className={cn(
                     'relative flex-1 min-w-0 flex h-[34px] items-center gap-2 pl-[10px] pr-1 py-1.5 rounded-md text-left transition-[color,background-color] titlebar-no-drag hover:bg-foreground/[0.025]',
-                    'text-[hsl(var(--sidebar-primary-foreground))] hover:text-[hsl(var(--sidebar-primary-foreground))]',
+                    'text-[hsl(var(--sidebar-primary-foreground))] dark:text-[hsl(var(--sidebar-primary-foreground)/0.78)] hover:text-[hsl(var(--sidebar-primary-foreground))] dark:hover:text-[hsl(var(--sidebar-primary-foreground)/0.90)]',
                   )}
                 >
                   {group.kind === 'automation' ? (
@@ -2778,9 +3408,46 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     return rows
   }, [activeDelegationSessionId, activeSessionId, agentIndicatorMap, archivedAgentSessionProjectGroups, collapsedDelegationParentIds, currentWorkspaceId, expandedArchivedProjectIds, expandedDelegationParentIds, handleAgentRename, handleRequestDelete, handleRequestMove, handleSelectAgentSession, handleToggleArchiveAgent, handleToggleArchivedProject, handleToggleDelegationParent, handleTogglePinAgent, handleToggleStarAgent, relativeTimeNow, sessionHoverPreviewEnabled, workspaceNameMap])
 
+  const projectWorkspaceIds = React.useMemo(
+    () => displayProjectGroups.map((group) => group.workspace.id).filter((id) => id !== AUTOMATION_GROUP_ID),
+    [displayProjectGroups],
+  )
+  const allProjectsCollapsed = projectWorkspaceIds.length > 0
+    && projectWorkspaceIds.every((workspaceId) => collapsedWorkspaceIds.has(workspaceId))
+  const handleToggleAllProjectsCollapsed = React.useCallback((): void => {
+    setCollapsedWorkspaceIds(allProjectsCollapsed ? new Set() : new Set(projectWorkspaceIds))
+  }, [allProjectsCollapsed, projectWorkspaceIds])
+
   const agentActiveVirtualRows = React.useMemo<VirtualSidebarRow[]>(() => {
     if (viewMode !== 'active') return []
     const rows: VirtualSidebarRow[] = []
+
+    const pushProjectCreationRow = (sectionId: string | null): void => {
+      if (!creatingProject || creatingProjectSectionId !== sectionId) return
+      rows.push({
+        id: `agent-project-create-${sectionId ?? 'default'}`,
+        estimateSize: 36,
+        content: (
+          <div className="flex items-center gap-2 px-2 py-1.5 mb-1 rounded-md bg-foreground/[0.04]">
+            <FolderOpen size={14} className="flex-shrink-0 text-foreground/40" />
+            <input
+              ref={newProjectInputRef}
+              value={newProjectName}
+              onChange={(event) => setNewProjectName(event.target.value)}
+              onKeyDown={handleCreateProjectKeyDown}
+              onBlur={() => {
+                setCreatingProject(false)
+                setCreatingProjectSectionId(null)
+                setNewProjectName('')
+              }}
+              placeholder="项目名称..."
+              className="flex-1 min-w-0 bg-transparent text-[13px] text-foreground border-b border-primary/50 outline-none px-0.5"
+              maxLength={50}
+            />
+          </div>
+        ),
+      })
+    }
 
     const pushSessionTreeRows = (
       item: AgentSessionTreeItem,
@@ -2885,92 +3552,141 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       }
     }
 
-    const hasExpandedProject = displayProjectGroups.some((group) => !collapsedWorkspaceIds.has(group.workspace.id))
+    const toggleDefaultProjectsCollapsed = (): void => {
+      setDefaultProjectsCollapsed((collapsed) => !collapsed)
+    }
 
-    rows.push({
-      id: 'agent-project-heading',
-      estimateSize: 40,
-      content: (
-        <div className="px-2 pt-2 pb-1 flex items-center justify-between">
-          <span className="px-2 text-[15px] font-medium leading-5 text-foreground/45 select-none">项目</span>
-          <div className="flex items-center gap-0.5">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  disabled={!hasExpandedProject}
-                  onClick={() => {
-                    setCollapsedWorkspaceIds((prev) => {
-                      const next = new Set(prev)
-                      for (const group of displayProjectGroups) next.add(group.workspace.id)
-                      return next
-                    })
-                  }}
-                  className="size-7 flex items-center justify-center rounded-md text-[hsl(var(--sidebar-primary-foreground)/0.65)] hover:bg-foreground/[0.06] hover:text-[hsl(var(--sidebar-primary-foreground))] transition-colors titlebar-no-drag disabled:opacity-30 disabled:pointer-events-none"
-                  aria-label="折叠所有项目"
-                >
-                  <ChevronsDownUp size={15} />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top">折叠所有项目</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => void handleCreateProjectFromFolder()}
-                  className="size-7 flex items-center justify-center rounded-md text-[hsl(var(--sidebar-primary-foreground)/0.65)] hover:bg-foreground/[0.06] hover:text-[hsl(var(--sidebar-primary-foreground))] transition-colors titlebar-no-drag"
-                  aria-label="从本地文件夹创建项目"
-                >
-                  <FolderInput size={15} />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top">从本地文件夹创建项目</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={handleStartCreateProject}
-                  className="size-7 flex items-center justify-center rounded-md text-[hsl(var(--sidebar-primary-foreground)/0.65)] hover:bg-foreground/[0.06] hover:text-[hsl(var(--sidebar-primary-foreground))] transition-colors titlebar-no-drag"
-                  aria-label="新建空白项目"
-                >
-                  <Plus size={15} />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top">新建空白项目</TooltipContent>
-            </Tooltip>
-          </div>
-        </div>
-      ),
-    })
-
-    if (creatingProject) {
+    const pushDefaultProjectsHeading = (): void => {
       rows.push({
-        id: 'agent-project-create',
-        estimateSize: 36,
+        id: 'agent-project-heading',
+        estimateSize: 40,
         content: (
-          <div className="flex items-center gap-2 px-2 py-1.5 mb-1 rounded-md bg-foreground/[0.04]">
-            <FolderOpen size={14} className="flex-shrink-0 text-foreground/40" />
-            <input
-              ref={newProjectInputRef}
-              value={newProjectName}
-              onChange={(e) => setNewProjectName(e.target.value)}
-              onKeyDown={handleCreateProjectKeyDown}
-              onBlur={() => {
-                setCreatingProject(false)
-                setNewProjectName('')
-              }}
-              placeholder="项目名称..."
-              className="flex-1 min-w-0 bg-transparent text-[13px] text-foreground border-b border-primary/50 outline-none px-0.5"
-              maxLength={50}
-            />
+          <div
+            role="button"
+            tabIndex={0}
+            draggable
+            aria-expanded={!defaultProjectsCollapsed}
+            className={cn('group/project-section relative px-2 pt-2 pb-1 flex items-center rounded-md transition-colors titlebar-no-drag', sectionDropTargetId === DEFAULT_PROJECTS_DROP_TARGET && 'bg-primary/10')}
+            onClick={toggleDefaultProjectsCollapsed}
+            onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); toggleDefaultProjectsCollapsed() } }}
+            onDragStart={(event) => handleSectionDragStart(event, DEFAULT_PROJECTS_DROP_TARGET)}
+            onDragEnd={() => { setDragSectionId(null); setSectionDropIndicator(null) }}
+            onDragOver={(event) => { handleSectionDragOverForReorder(event, DEFAULT_PROJECTS_DROP_TARGET); handleSectionDragOver(event, null) }}
+            onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) { setSectionDropTargetId(null); setSectionDropIndicator(null) } }}
+            onDrop={(event) => { if (dragSectionId) handleSectionDropForReorder(event, DEFAULT_PROJECTS_DROP_TARGET); else handleSectionDrop(event, null) }}
+          >
+            {sectionDropIndicator?.id === DEFAULT_PROJECTS_DROP_TARGET && (
+              <div className={cn('absolute left-3 right-3 z-10 h-0.5 rounded-full bg-primary', sectionDropIndicator.position === 'before' ? '-top-0.5' : '-bottom-0.5')} />
+            )}
+            <span className="flex min-w-0 items-center rounded-md px-2 py-1 text-[15px] font-medium leading-5 text-foreground/45">
+              项目
+              <ChevronRight
+                size={15}
+                className={cn(
+                  'ml-1 transition-all',
+                  defaultProjectsCollapsed
+                    ? 'opacity-100'
+                    : 'rotate-90 opacity-0 group-hover/project-section:opacity-100',
+                )}
+              />
+            </span>
+            <div className="ml-auto flex items-center gap-0.5">
+              <Tooltip><TooltipTrigger asChild><button type="button" onClick={(event) => { event.stopPropagation(); setCreatingSection(true); setNewSectionName('') }} className="size-7 flex items-center justify-center rounded-md text-[hsl(var(--sidebar-primary-foreground)/0.65)] transition-colors hover:bg-foreground/[0.06] hover:text-[hsl(var(--sidebar-primary-foreground))] titlebar-no-drag" aria-label="新建分区"><SquarePlus size={15} /></button></TooltipTrigger><TooltipContent side="top">新建分区</TooltipContent></Tooltip>
+              <Tooltip><TooltipTrigger asChild><button type="button" onClick={(event) => { event.stopPropagation(); handleToggleAllProjectsCollapsed() }} className="size-7 flex items-center justify-center rounded-md text-[hsl(var(--sidebar-primary-foreground)/0.65)] transition-colors hover:bg-foreground/[0.06] hover:text-[hsl(var(--sidebar-primary-foreground))] titlebar-no-drag" aria-label={allProjectsCollapsed ? '展开所有项目' : '折叠所有项目'}><ChevronsDownUp size={15} /></button></TooltipTrigger><TooltipContent side="top">{allProjectsCollapsed ? '展开所有项目' : '折叠所有项目'}</TooltipContent></Tooltip>
+              <Tooltip><TooltipTrigger asChild><button type="button" onClick={(event) => { event.stopPropagation(); void handleCreateProjectFromFolder() }} className="size-7 flex items-center justify-center rounded-md text-[hsl(var(--sidebar-primary-foreground)/0.65)] transition-colors hover:bg-foreground/[0.06] hover:text-[hsl(var(--sidebar-primary-foreground))] titlebar-no-drag" aria-label="从本地文件夹创建项目"><FolderInput size={15} /></button></TooltipTrigger><TooltipContent side="top">从本地文件夹创建项目</TooltipContent></Tooltip>
+              <Tooltip><TooltipTrigger asChild><button type="button" onClick={(event) => { event.stopPropagation(); handleStartCreateProject() }} className="size-7 flex items-center justify-center rounded-md text-[hsl(var(--sidebar-primary-foreground)/0.65)] transition-colors hover:bg-foreground/[0.06] hover:text-[hsl(var(--sidebar-primary-foreground))] titlebar-no-drag" aria-label="新建空白项目"><Plus size={15} /></button></TooltipTrigger><TooltipContent side="top">新建空白项目</TooltipContent></Tooltip>
+            </div>
           </div>
         ),
       })
     }
 
-    for (const group of displayProjectGroups) {
+
+    for (const entry of sidebarProjectEntries) {
+      if (entry.kind === 'default-section') {
+        pushDefaultProjectsHeading()
+        if (!defaultProjectsCollapsed) pushProjectCreationRow(null)
+        continue
+      }
+      if (entry.kind === 'project' && !entry.sectionId && defaultProjectsCollapsed) continue
+      if (entry.kind === 'section') {
+        const collapsed = collapsedSectionIds.has(entry.section.id)
+        rows.push({
+          id: `agent-section-${entry.section.id}`, estimateSize: 38,
+          content: (
+            <div
+              role="button" tabIndex={0} aria-expanded={!collapsed} draggable={editingSectionId !== entry.section.id}
+              className={cn('group/section relative mt-1 flex h-[34px] items-center px-2 rounded-md transition-colors titlebar-no-drag', sectionDropTargetId === entry.section.id && 'bg-primary/10')}
+              onDragStart={(event) => handleSectionDragStart(event, entry.section.id)}
+              onDragEnd={() => { setDragSectionId(null); setSectionDropIndicator(null) }}
+              onDragOver={(event) => { handleSectionDragOverForReorder(event, entry.section.id); handleSectionDragOver(event, entry.section.id) }}
+              onDrop={(event) => { if (dragSectionId) handleSectionDropForReorder(event, entry.section.id); else handleSectionDrop(event, entry.section.id) }}
+              onClick={() => { if (editingSectionId !== entry.section.id) setCollapsedSectionIds((prev) => toggleSetEntry(prev, entry.section.id)) }}
+              onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ') && editingSectionId !== entry.section.id) { event.preventDefault(); setCollapsedSectionIds((prev) => toggleSetEntry(prev, entry.section.id)) } }}
+              onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) { setSectionDropTargetId(null); setSectionDropIndicator(null) } }}>
+              {sectionDropIndicator?.id === entry.section.id && (
+                <div className={cn('absolute left-3 right-3 z-10 h-0.5 rounded-full bg-primary', sectionDropIndicator.position === 'before' ? '-top-0.5' : '-bottom-0.5')} />
+              )}
+              {editingSectionId === entry.section.id ? (
+                <input autoFocus value={editingSectionName} onChange={(event) => setEditingSectionName(event.target.value)}
+                  onKeyDown={(event) => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.blur() } else if (event.key === 'Escape') { sectionRenameCancelledRef.current = true; setEditingSectionId(null) } }}
+                  onBlur={() => void handleRenameSection()} maxLength={50}
+                  className="min-w-0 flex-1 border-b border-primary/50 bg-transparent px-2 text-[15px] font-medium leading-5 text-foreground outline-none" />
+              ) : (
+                <span className="flex min-w-0 items-center rounded-md px-2 py-1 text-left text-[15px] font-medium leading-5 text-foreground/45">
+                  <span className="truncate">{entry.section.name}</span>
+                  <ChevronRight
+                    size={15}
+                    className={cn(
+                      'ml-1 shrink-0 transition-all',
+                      collapsed
+                        ? 'opacity-100'
+                        : 'rotate-90 opacity-0 group-hover/section:opacity-100',
+                    )}
+                  />
+                </span>
+              )}
+              {editingSectionId !== entry.section.id && (
+                <>
+                  <div className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover/section:opacity-100 has-[:focus-visible]:opacity-100">
+                    <Tooltip>
+                      <TooltipTrigger asChild><button type="button" aria-label="折叠或展开此分区中的所有项目" onClick={(event) => { event.stopPropagation(); const ids = displayProjectGroups.filter((group) => group.workspace.sectionId === entry.section.id).map((group) => group.workspace.id); setCollapsedWorkspaceIds((prev) => { const allCollapsed = ids.length > 0 && ids.every((id) => prev.has(id)); const next = new Set(prev); ids.forEach((id) => allCollapsed ? next.delete(id) : next.add(id)); return next }) }} className="size-7 flex items-center justify-center rounded-md text-[hsl(var(--sidebar-primary-foreground)/0.65)] transition-colors hover:bg-foreground/[0.06] hover:text-[hsl(var(--sidebar-primary-foreground))] titlebar-no-drag"><ChevronsDownUp size={15} /></button></TooltipTrigger>
+                      <TooltipContent side="top">折叠或展开此分区中的所有项目</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild><button type="button" aria-label="从本地文件夹创建项目" onClick={(event) => { event.stopPropagation(); void handleCreateProjectFromFolder(entry.section.id) }} className="size-7 flex items-center justify-center rounded-md text-[hsl(var(--sidebar-primary-foreground)/0.65)] transition-colors hover:bg-foreground/[0.06] hover:text-[hsl(var(--sidebar-primary-foreground))] titlebar-no-drag"><FolderInput size={15} /></button></TooltipTrigger>
+                      <TooltipContent side="top">从本地文件夹创建项目</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild><button type="button" aria-label="新建空白项目" onClick={(event) => { event.stopPropagation(); handleStartCreateProject(entry.section.id) }} className="size-7 flex items-center justify-center rounded-md text-[hsl(var(--sidebar-primary-foreground)/0.65)] transition-colors hover:bg-foreground/[0.06] hover:text-[hsl(var(--sidebar-primary-foreground))] titlebar-no-drag"><Plus size={15} /></button></TooltipTrigger>
+                      <TooltipContent side="top">新建空白项目</TooltipContent>
+                    </Tooltip>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button type="button" aria-label={`打开「${entry.section.name}」分区菜单`} onClick={(event) => event.stopPropagation()}
+                          className="flex size-7 items-center justify-center rounded-md text-[hsl(var(--sidebar-primary-foreground)/0.65)] transition-colors hover:bg-foreground/[0.06] hover:text-[hsl(var(--sidebar-primary-foreground))] titlebar-no-drag"><MoreHorizontal size={15} /></button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-36 z-[9999] min-w-0 p-0.5">
+                        <DropdownMenuItem onSelect={() => { sectionRenameCancelledRef.current = false; setEditingSectionId(entry.section.id); setEditingSectionName(entry.section.name) }}>
+                          <Pencil size={14} />重命名分区
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator className="my-0.5" />
+                        <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => handleRequestDissolveSection(entry.section.id)}>
+                          <Trash2 size={14} />解散分区
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </>
+              )}
+            </div>
+          ),
+        })
+        if (!collapsed) pushProjectCreationRow(entry.section.id)
+        continue
+      }
+      if (entry.sectionId && collapsedSectionIds.has(entry.sectionId)) continue
+      const group = entry.group
       const isAuto = group.workspace.id === AUTOMATION_GROUP_ID
       const collapsed = collapsedWorkspaceIds.has(group.workspace.id)
       const extraCount = expandedExtraCountMap.get(group.workspace.id) ?? 0
@@ -3017,6 +3733,8 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
               onRelinkProjectRoot={isAuto ? noopAsync : handleRelinkProjectRoot}
               onRequestRestoreProjectRoot={isAuto ? noopVoid : setPendingRestoreProjectRootId}
               onRequestDeleteWorkspace={isAuto ? noopVoid : handleRequestDeleteWorkspace}
+              sections={workspaceSections}
+              onRequestMoveWorkspaceToSection={isAuto ? noopVoid : handleRequestMoveWorkspaceToSection}
               canDeleteWorkspace={isAuto ? false : canDeleteWorkspace(group.workspace)}
               onSelectSession={handleSelectAgentSession}
               onRequestDelete={handleRequestDelete}
@@ -3095,6 +3813,15 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     creatingProject,
     createAgentSessionInWorkspace,
     displayProjectGroups,
+    sidebarProjectEntries,
+    sidebarSectionOrder,
+    collapsedSectionIds,
+    defaultProjectsCollapsed,
+    allProjectsCollapsed,
+    editingSectionId,
+    editingSectionName,
+    sectionDropTargetId,
+    workspaceSections,
     dragProjectId,
     expandedDelegationParentIds,
     expandedExtraCountMap,
@@ -3103,7 +3830,20 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     handleConfigureProject,
     handleCreateProjectFromFolder,
     handleCreateProjectKeyDown,
+    handleCreateSection,
+    handleToggleAllProjectsCollapsed,
+    handleRequestDissolveSection,
+    handleRenameSection,
+    handleMoveWorkspaceToSection,
+    handleRequestMoveWorkspaceToSection,
     handleProjectDragEnd,
+    handleSectionDragOver,
+    handleSectionDrop,
+    handleSectionDragStart,
+    handleSectionDragOverForReorder,
+    handleSectionDropForReorder,
+    dragSectionId,
+    sectionDropIndicator,
     handleProjectDragLeave,
     handleProjectDragOver,
     handleProjectDragStart,
@@ -3403,6 +4143,10 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
 
         {deleteDialog}
         {projectDeleteDialog}
+        {sectionCreationDialog}
+        {sectionDissolveDialog}
+        {sectionProjectsDeleteDialog}
+        {moveWorkspaceDialog}
         {restoreProjectRootDialog}
         {moveDialog}
         <SearchDialog />
@@ -3457,7 +4201,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
               type="button"
               aria-label={mode === 'agent' ? '新建任务' : '新建对话'}
               onClick={() => { void (mode === 'agent' ? createAgentSessionInWorkspace() : createChat()) }}
-              className="group flex h-9 min-w-0 flex-1 items-center gap-3 rounded-lg px-3 text-[13px] text-[hsl(var(--sidebar-primary-foreground))] transition-[background-color,color,transform] hover:bg-foreground/[0.055] hover:text-[hsl(var(--sidebar-primary-foreground))] active:scale-[0.96] titlebar-no-drag"
+              className="group flex h-9 min-w-0 flex-1 items-center gap-3 rounded-lg px-3 text-[13px] text-[hsl(var(--sidebar-primary-foreground))] dark:text-[hsl(var(--sidebar-primary-foreground)/0.84)] transition-[background-color,color,transform] hover:bg-foreground/[0.055] hover:text-[hsl(var(--sidebar-primary-foreground))] dark:hover:text-[hsl(var(--sidebar-primary-foreground)/0.92)] active:scale-[0.96] titlebar-no-drag"
             >
               <CirclePlus size={16} className="shrink-0" />
               <span>{mode === 'agent' ? '新建任务' : '新建对话'}</span>
@@ -3483,7 +4227,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
               type="button"
               onClick={() => setSearchDialogOpen(true)}
               aria-label="搜索"
-              className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-[hsl(var(--sidebar-primary-foreground))] transition-[background-color,color,transform] hover:bg-foreground/[0.055] hover:text-[hsl(var(--sidebar-primary-foreground))] active:scale-[0.96] titlebar-no-drag"
+              className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-[hsl(var(--sidebar-primary-foreground))] dark:text-[hsl(var(--sidebar-primary-foreground)/0.78)] transition-[background-color,color,transform] hover:bg-foreground/[0.055] hover:text-[hsl(var(--sidebar-primary-foreground))] dark:hover:text-[hsl(var(--sidebar-primary-foreground)/0.90)] active:scale-[0.96] titlebar-no-drag"
             >
               <Search size={16} />
             </button>
@@ -3681,6 +4425,10 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
 
       {deleteDialog}
       {projectDeleteDialog}
+      {sectionCreationDialog}
+      {sectionDissolveDialog}
+      {sectionProjectsDeleteDialog}
+      {moveWorkspaceDialog}
       {restoreProjectRootDialog}
       {moveDialog}
       <SearchDialog />
@@ -4377,7 +5125,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
                 maxLength={100}
               />
             ) : (
-              <div className="truncate text-[13px] leading-[18px] flex items-center gap-1.5 text-[hsl(var(--sidebar-primary-foreground))]">
+              <div className="truncate text-[13px] leading-[18px] flex items-center gap-1.5 text-[hsl(var(--sidebar-primary-foreground))] dark:text-[hsl(var(--sidebar-primary-foreground)/0.82)]">
                 {showPinIcon && (
                   <Pin size={11} className="flex-shrink-0 text-primary/60" />
                 )}
@@ -4666,6 +5414,8 @@ interface AgentProjectGroupItemProps {
   onRelinkProjectRoot: (workspaceId: string) => Promise<void>
   onRequestRestoreProjectRoot: (workspaceId: string) => void
   onRequestDeleteWorkspace: (workspaceId: string) => void
+  sections: AgentWorkspaceSection[]
+  onRequestMoveWorkspaceToSection: (workspaceId: string) => void
   canDeleteWorkspace: boolean
   onSelectSession: (id: string, title: string) => void
   onRequestDelete: (id: string) => void
@@ -4709,6 +5459,8 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
   onRelinkProjectRoot,
   onRequestRestoreProjectRoot,
   onRequestDeleteWorkspace,
+  sections,
+  onRequestMoveWorkspaceToSection,
   canDeleteWorkspace,
   onSelectSession,
   onRequestDelete,
@@ -4792,7 +5544,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
           <div
             className={cn(
               'relative flex-1 min-w-0 flex h-[34px] items-center gap-2 pl-[10px] pr-1 py-1.5 rounded-md text-left titlebar-no-drag',
-              'text-[hsl(var(--sidebar-primary-foreground))]',
+              'text-[hsl(var(--sidebar-primary-foreground))] dark:text-[hsl(var(--sidebar-primary-foreground)/0.78)]',
             )}
           >
             <FolderOpen size={14} className="flex-shrink-0 text-[hsl(var(--sidebar-primary-foreground)/0.78)] dark:text-[hsl(var(--sidebar-primary-foreground)/0.65)]" />
@@ -4820,7 +5572,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
             className={cn(
               'relative flex-1 min-w-0 flex h-[34px] cursor-grab items-center gap-2 pl-[10px] py-1.5 rounded-md text-left transition-[color,background-color] titlebar-no-drag active:cursor-grabbing hover:bg-foreground/[0.025]',
               isAutomationGroup ? 'pr-1' : 'pr-12',
-              'text-[hsl(var(--sidebar-primary-foreground))] hover:text-[hsl(var(--sidebar-primary-foreground))]',
+              'text-[hsl(var(--sidebar-primary-foreground))] dark:text-[hsl(var(--sidebar-primary-foreground)/0.78)] hover:text-[hsl(var(--sidebar-primary-foreground))] dark:hover:text-[hsl(var(--sidebar-primary-foreground)/0.90)]',
             )}
           >
             {isAutomationGroup ? (
@@ -4931,6 +5683,13 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
                   </DropdownMenuItem>
                 )}
               </>
+            )}
+            <DropdownMenuSeparator className="my-0.5" />
+            {getWorkspaceSectionTargets(group.workspace.sectionId, sections).length > 0 && (
+              <DropdownMenuItem className="text-xs py-1 [&>svg]:size-3.5" onSelect={() => onRequestMoveWorkspaceToSection(group.workspace.id)}>
+                <ArrowRightLeft size={14} />
+                移到其他分区
+              </DropdownMenuItem>
             )}
             <DropdownMenuSeparator className="my-0.5" />
             <DropdownMenuItem
