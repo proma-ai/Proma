@@ -87,7 +87,7 @@ const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'anthropic-compatible', '
 
 /** 需要用 messages 端点测试的供应商预设模型 */
 const PROVIDER_TEST_MODEL_PRESETS: Partial<Record<ProviderType, string[]>> = {
-  deepseek: ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4.1-flash', 'deepseek-v4-flash-vision-exp'],
+  deepseek: ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-flash', 'deepseek-v4-flash-vision-exp'],
   'kimi-api': ['kimi-k3', 'kimi-k2.6'],
   'opencode-go-openai': ['grok-4.5', 'kimi-k3'],
   xiaomi: ['mimo-v2.5-pro', 'mimo-v2-pro', 'mimo-v2.5', 'mimo-v2-omni', 'mimo-v2-flash'],
@@ -428,7 +428,7 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
         setModels([
           { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', enabled: true },
           { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true },
-          { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', enabled: true },
+          { id: 'deepseek-flash', name: 'DeepSeek Flash', enabled: true },
           { id: 'deepseek-v4-flash-vision-exp', name: 'DeepSeek V4 Flash Vision Exp', enabled: true },
         ])
       } else if (p === 'kimi-api') {
@@ -451,7 +451,7 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
           { id: 'kimi-k2.6', name: 'Kimi K2.6', enabled: true },
           { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', enabled: true },
           { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true },
-          { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', enabled: true },
+          { id: 'deepseek-flash', name: 'DeepSeek Flash', enabled: true },
           { id: 'mimo-v2.5', name: 'MiMo V2.5', enabled: true },
           { id: 'mimo-v2.5-pro', name: 'MiMo V2.5 Pro', enabled: true },
         ])
@@ -473,7 +473,7 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
           { id: 'kimi-k2.7-code', name: 'Kimi K2.7 Code', enabled: true },
           { id: 'minimax-m3', name: 'MiniMax M3', enabled: true },
           { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true },
-          { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', enabled: true },
+          { id: 'deepseek-flash', name: 'DeepSeek Flash', enabled: true },
           { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', enabled: true },
         ])
       } else if (p === 'doubao') {
