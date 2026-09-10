@@ -511,14 +511,14 @@ export function AboutSettings(): React.ReactElement {
             AGPL-3.0
           </a>
         </SettingsRow>
-        <SettingsRow label="项目地址">
+        <SettingsRow label="Proma 官网">
           <a
-            href="https://github.com/ErlichLiu/Proma.git"
+            href="https://proma.cool"
             target="_blank"
             rel="noopener noreferrer"
             className="text-sm text-primary hover:underline"
           >
-            github.com/ErlichLiu/Proma
+            proma.cool
           </a>
         </SettingsRow>
       </SettingsCard>
