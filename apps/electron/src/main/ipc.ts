@@ -451,6 +451,7 @@ import { syncFeishuSyncSleepBlocker } from './lib/feishu-sleep-blocker'
 import { presenceService } from './lib/feishu-presence'
 import { getDingTalkConfig, saveDingTalkConfig, getDecryptedClientSecret, getDingTalkMultiBotConfig, saveDingTalkBotConfig, removeDingTalkBot, getDecryptedBotClientSecret } from './lib/dingtalk-config'
 import { listShallowDirectory } from './lib/directory-listing'
+import { shouldStopWorkspaceFileSearchScan } from './lib/workspace-file-search-limits'
 import { dingtalkBridgeManager } from './lib/dingtalk-bridge-manager'
 import { redactSensitiveLogValue } from './lib/bridge-log-redaction'
 import {
@@ -4578,7 +4579,6 @@ export function registerIpcHandlers(): void {
       const ignoreFiles = new Set(['.DS_Store', '.Spotlight-V100', '.Trashes', 'Thumbs.db', 'desktop.ini'])
       const BROWSE_LIMIT_PER_GROUP = 2000
       const BROWSE_TOTAL_CAP = 3000
-      const INDEX_ENTRY_CAP_PER_GROUP = 10_000
 
       // 按来源分组收集文件
       type Entry = WorkspaceFileSearchEntry
@@ -4593,11 +4593,11 @@ export function registerIpcHandlers(): void {
         useAbsPath: boolean,
         source: 'session' | 'workspace',
       ): void {
-        if (depth > 10 || target.length >= INDEX_ENTRY_CAP_PER_GROUP) return
+        if (shouldStopWorkspaceFileSearchScan(depth, target.length)) return
         try {
           const items = readdirSync(dir, { withFileTypes: true })
           for (const item of items) {
-            if (target.length >= INDEX_ENTRY_CAP_PER_GROUP) break
+            if (shouldStopWorkspaceFileSearchScan(depth, target.length)) break
             if (ignoreFiles.has(item.name)) continue
             if (item.isDirectory() && ignoreDirs.has(item.name)) continue
 
@@ -4620,7 +4620,7 @@ export function registerIpcHandlers(): void {
       }
 
       function addAttachedPath(pathValue: string, target: Entry[], source: 'session' | 'workspace'): void {
-        if (target.length >= INDEX_ENTRY_CAP_PER_GROUP) return
+        if (shouldStopWorkspaceFileSearchScan(0, target.length)) return
         try {
           const attachedPath = resolve(pathValue)
           const name = basename(attachedPath)
@@ -4628,7 +4628,7 @@ export function registerIpcHandlers(): void {
 
           const stats = statSync(attachedPath)
           if (stats.isFile()) {
-            if (target.length >= INDEX_ENTRY_CAP_PER_GROUP) return
+            if (shouldStopWorkspaceFileSearchScan(0, target.length)) return
             target.push({
               name,
               path: attachedPath,
@@ -4641,7 +4641,7 @@ export function registerIpcHandlers(): void {
           if (!stats.isDirectory()) return
           if (ignoreDirs.has(name)) return
 
-          if (target.length >= INDEX_ENTRY_CAP_PER_GROUP) return
+          if (shouldStopWorkspaceFileSearchScan(0, target.length)) return
           target.push({
             name: name === 'workspace-files' ? '项目文件' : name,
             path: attachedPath,
