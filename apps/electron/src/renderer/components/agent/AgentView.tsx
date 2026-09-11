@@ -32,6 +32,7 @@ import { ModelSelector } from '@/components/chat/ModelSelector'
 import { AttachmentPreviewItem } from '@/components/chat/AttachmentPreviewItem'
 import { QuotedSelectionChip } from '@/components/diff/QuotedSelectionChip'
 import { RichTextInput, type RichTextInputHandle } from '@/components/ai-elements/rich-text-input'
+import { useComposerResize } from '@/components/ai-elements/resizable-composer'
 import { SpeechButton } from '@/components/ai-elements/speech-button'
 import { InputToolbarOverflow, type ToolbarItem } from '@/components/ai-elements/InputToolbarOverflow'
 import {
@@ -722,6 +723,7 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
   const pendingFilesRef = React.useRef(pendingFiles)
   // RichTextInput 命令接口 ref（右侧文件面板拖入时插入 @file 引用）
   const richTextInputRef = React.useRef<RichTextInputHandle>(null)
+  const composerResize = useComposerResize(`agent:${sessionId}`)
   const historyQuoteNavigationRequestIdRef = React.useRef(0)
   const [historyQuoteNavigation, setHistoryQuoteNavigation] = React.useState<AgentHistoryQuoteNavigationRequest | null>(null)
   const handleAddHistoryQuote = React.useCallback((quote: QuotedSelection): boolean => {
@@ -2981,32 +2983,37 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
         {/* 临时 Agent 已由右侧 Tab 表明归属，避免在窄面板重复渲染全局标题栏。 */}
         {!embedded && <AgentHeader sessionId={sessionId} />}
 
-        <div className={cn(
-          'flex min-h-0 flex-1 w-full flex-col overflow-hidden',
-          embedded ? 'max-w-none' : 'max-w-[min(72rem,100%)] mx-auto',
-        )}>
+        <div
+          className={cn(
+            'flex min-h-0 flex-1 w-full flex-col overflow-hidden',
+            embedded ? 'max-w-none' : 'max-w-[min(72rem,100%)] mx-auto',
+          )}
+          data-composer-viewport
+        >
         {/* 消息区域 */}
-        <AgentMessages
-          sessionId={sessionId}
-          sessionModelId={agentModelId || undefined}
-          messagesLoaded={messagesLoaded}
-          persistedSDKMessages={persistedSDKMessages}
-          sessionPath={sessionPath}
-          attachedDirs={allAttachedDirs}
-          stoppedByUser={stoppedByUser}
-          onRetry={handleRetry}
-          onRetryInNewSession={handleRetryInNewSession}
-          onRelinkProjectRoot={handleRelinkProjectRoot}
-          onRestoreProjectRoot={handleOpenRestoreProjectRootDialog}
-          onFork={embedded || isLegacyTranscript ? undefined : handleFork}
-          onRewind={isLegacyTranscript ? undefined : handleRewindRequest}
-          onCreateTodo={handleOpenReplyTodoDialog}
-          onCompact={handleCompact}
-          onAddHistoryQuote={handleAddHistoryQuote}
-          explorationEnabled={!embedded}
-          onAgentHistoryQuoteClick={handleAgentHistoryQuoteClick}
-          historyQuoteNavigation={historyQuoteNavigation}
-        />
+        <div className="flex min-h-0 flex-1 flex-col" data-composer-message-viewport>
+          <AgentMessages
+            sessionId={sessionId}
+            sessionModelId={agentModelId || undefined}
+            messagesLoaded={messagesLoaded}
+            persistedSDKMessages={persistedSDKMessages}
+            sessionPath={sessionPath}
+            attachedDirs={allAttachedDirs}
+            stoppedByUser={stoppedByUser}
+            onRetry={handleRetry}
+            onRetryInNewSession={handleRetryInNewSession}
+            onRelinkProjectRoot={handleRelinkProjectRoot}
+            onRestoreProjectRoot={handleOpenRestoreProjectRootDialog}
+            onFork={embedded || isLegacyTranscript ? undefined : handleFork}
+            onRewind={isLegacyTranscript ? undefined : handleRewindRequest}
+            onCreateTodo={handleOpenReplyTodoDialog}
+            onCompact={handleCompact}
+            onAddHistoryQuote={handleAddHistoryQuote}
+            explorationEnabled={!embedded}
+            onAgentHistoryQuoteClick={handleAgentHistoryQuoteClick}
+            historyQuoteNavigation={historyQuoteNavigation}
+          />
+        </div>
 
         {/* 权限请求横幅 */}
         <PermissionBanner sessionId={sessionId} />
@@ -3022,8 +3029,9 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
         {!hasBannerOverlay && (
         <div className="px-2.5 pb-2.5 md:px-[18px] md:pb-[18px]" data-input-mode="agent">
           <div
+            ref={composerResize.frameRef}
             className={cn(
-              'rounded-[17px] border-[0.5px] border-border bg-background/70 backdrop-blur-sm transition-all duration-200',
+              'relative flex min-h-0 flex-col overflow-hidden rounded-[17px] border-[0.5px] border-border bg-background/70 backdrop-blur-sm transition-all duration-200',
               (isPlanMode || isPermissionPlanMode) && !isDragOver && 'plan-mode-border',
               isDragOver && 'border-[2px] border-dashed border-primary bg-primary/[0.03]'
             )}
@@ -3032,7 +3040,15 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
             onDrop={handleDrop}
           >
             {(isPlanMode || isPermissionPlanMode) && !isDragOver && <PlanModeDashedBorder />}
-            {isLegacyTranscript && (
+            <div
+              className="group absolute left-4 right-4 top-0 z-20 h-2 cursor-row-resize touch-none"
+              onPointerDown={composerResize.onResizePointerDown}
+              title="拖拽调整输入框高度"
+            >
+              <span className="absolute left-1/2 top-1/2 h-px w-10 -translate-x-1/2 -translate-y-1/2 rounded-full bg-muted-foreground/40 opacity-0 transition-opacity group-hover:opacity-100" />
+            </div>
+            <div className="min-h-0 shrink overflow-y-auto overscroll-contain" data-composer-chrome>
+              {isLegacyTranscript && (
               <div className="flex items-center justify-between gap-3 px-4 py-2 text-sm text-amber-700 dark:text-amber-300">
                 <span>这是已退役 Claude runtime 的只读历史会话；原对话可查看，但不能继续、分叉或回退。</span>
                 <Button size="sm" variant="outline" onClick={() => void handleRetryInNewSession()} disabled={!agentChannelId}>
@@ -3094,64 +3110,74 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
             />
 
             {/* Agent 建议提示 */}
-            {suggestion && !streaming && (
-              <div className="px-3 pt-2.5 pb-1.5">
-                <button
-                  type="button"
-                  className="group flex items-start gap-2 w-full rounded-lg border border-dashed border-primary/30 bg-primary/[0.03] px-3 py-2.5 text-left text-sm transition-colors hover:border-primary/50 hover:bg-primary/[0.06]"
-                  onClick={() => handleSend(suggestion)}
-                >
-                  <Sparkles className="size-4 shrink-0 mt-0.5 text-primary/60 group-hover:text-primary/80" />
-                  <span className="flex-1 min-w-0 text-foreground/80 group-hover:text-foreground line-clamp-3">{suggestion}</span>
-                  <X
-                    className="size-3.5 shrink-0 mt-0.5 text-muted-foreground/40 hover:text-foreground transition-colors"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setPromptSuggestions((prev) => {
-                        if (!prev.has(sessionId)) return prev
-                        const map = new Map(prev)
-                        map.delete(sessionId)
-                        return map
-                      })
-                    }}
-                  />
-                </button>
-              </div>
-            )}
+              {suggestion && !streaming && (
+                <div className="px-3 pt-2.5 pb-1.5">
+                  <button
+                    type="button"
+                    className="group flex items-start gap-2 w-full rounded-lg border border-dashed border-primary/30 bg-primary/[0.03] px-3 py-2.5 text-left text-sm transition-colors hover:border-primary/50 hover:bg-primary/[0.06]"
+                    onClick={() => handleSend(suggestion)}
+                  >
+                    <Sparkles className="size-4 shrink-0 mt-0.5 text-primary/60 group-hover:text-primary/80" />
+                    <span className="flex-1 min-w-0 text-foreground/80 group-hover:text-foreground line-clamp-3">{suggestion}</span>
+                    <X
+                      className="size-3.5 shrink-0 mt-0.5 text-muted-foreground/40 hover:text-foreground transition-colors"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setPromptSuggestions((prev) => {
+                          if (!prev.has(sessionId)) return prev
+                          const map = new Map(prev)
+                          map.delete(sessionId)
+                          return map
+                        })
+                      }}
+                    />
+                  </button>
+                </div>
+              )}
+            </div>
 
-            <AgentScopedRichTextInput
-              ref={richTextInputRef}
-              sessionId={sessionId}
-              onInputActivity={handleInputActivity}
-              draftSyncDelayMs={300}
-              onSubmit={handleSend}
-              onPasteFiles={handlePasteFiles}
-              onPasteLongText={handlePasteLongText}
-              voiceInputId={agentVoiceInputId}
-              longTextPasteThreshold={longTextPasteAsAttachmentEnabled ? LONG_TEXT_ATTACHMENT_THRESHOLD : undefined}
-              placeholder={
-                agentChannelId && hasAvailableModel
-                  ? sendWithCmdEnter
-                    ? '输入消息...（@ 引用文件，/ 调用 Skill，# 使用 MCP，& 引用会话，～ 引用待办/日程；⌘/Ctrl+Enter 发送）'
-                    : '输入消息...（@ 引用文件，/ 调用 Skill，# 使用 MCP，& 引用会话，～ 引用待办/日程；Enter 发送）'
-                  : !agentChannelId
-                    ? '请先选择模型'
-                    : '暂无可用模型，请先在设置中启用渠道'
-              }
-              disabled={isComposerDisabled}
-              autoFocusTrigger={sessionId}
-              collapsible
-              enableMentions
-              workspacePath={sessionPath}
-              workspaceSlug={workspaceSlug}
-              attachedDirs={workspaceMentionPaths}
-              sessionAttachedDirs={sessionMentionPaths}
-              sendWithCmdEnter={sendWithCmdEnter}
-              onAgentHistoryQuoteClick={handleAgentHistoryQuoteClick}
-            />
+            <div
+              ref={composerResize.editorRef}
+              className="relative min-h-[101px] shrink-0 overflow-hidden transition-[height] duration-200 ease-out motion-reduce:transition-none"
+              data-composer-editor
+              style={composerResize.editorHeight === null ? undefined : { height: composerResize.editorHeight }}
+            >
+              <AgentScopedRichTextInput
+                ref={richTextInputRef}
+                sessionId={sessionId}
+                onInputActivity={handleInputActivity}
+                draftSyncDelayMs={300}
+                onSubmit={handleSend}
+                onPasteFiles={handlePasteFiles}
+                onPasteLongText={handlePasteLongText}
+                voiceInputId={agentVoiceInputId}
+                longTextPasteThreshold={longTextPasteAsAttachmentEnabled ? LONG_TEXT_ATTACHMENT_THRESHOLD : undefined}
+                placeholder={
+                  agentChannelId && hasAvailableModel
+                    ? sendWithCmdEnter
+                      ? '输入消息...（@ 引用文件，/ 调用 Skill，# 使用 MCP，& 引用会话，～ 引用待办/日程；⌘/Ctrl+Enter 发送）'
+                      : '输入消息...（@ 引用文件，/ 调用 Skill，# 使用 MCP，& 引用会话，～ 引用待办/日程；Enter 发送）'
+                    : !agentChannelId
+                      ? '请先选择模型'
+                      : '暂无可用模型，请先在设置中启用渠道'
+                }
+                disabled={isComposerDisabled}
+                autoFocusTrigger={sessionId}
+                enableMentions
+                workspacePath={sessionPath}
+                workspaceSlug={workspaceSlug}
+                attachedDirs={workspaceMentionPaths}
+                sessionAttachedDirs={sessionMentionPaths}
+                sendWithCmdEnter={sendWithCmdEnter}
+                onAgentHistoryQuoteClick={handleAgentHistoryQuoteClick}
+                fillHeight={composerResize.editorHeight !== null}
+              />
+            </div>
 
             {/* Footer 工具栏 — 容器变窄时尾部按钮自动折叠进「更多」Popover */}
-            <InputToolbarOverflow items={inputToolbarItems} trailing={inputTrailingNode} />
+            <div className="shrink-0" data-composer-footer>
+              <InputToolbarOverflow items={inputToolbarItems} trailing={inputTrailingNode} />
+            </div>
           </div>
         </div>
         )}
