@@ -326,6 +326,23 @@ export const MCP_INTEGRATION_CATALOG: CatalogIntegration[] = [
     },
   },
   {
+    id: 'serply-search-mcp', name: 'Serply Search', iconSlug: 'asset:serply', kind: 'credential', priority: 7,
+    description: '接入 Serply 官方远程 MCP，提供 Google 网页、新闻、学术、职位与地图搜索，以及网页抓取能力。',
+    capabilities: ['Google 网页与新闻搜索', '学术与职位搜索', '网页抓取'],
+    setupUrl: 'https://serply.io/docs',
+    serverName: 'serply',
+    entry: remoteMcp('https://api.serply.io/mcp'),
+    credential: {
+      label: 'Serply API Key',
+      placeholder: '粘贴 Serply API Key',
+      helpText: '仅需填写 API Key。Proma 会加密保存到系统 Keychain，并通过 X-Api-Key 请求头连接 Serply 官方远程 MCP。',
+      acquisitionUrl: 'https://serply.io',
+      acquisitionLabel: '打开 Serply 控制台',
+      headerName: 'X-Api-Key',
+      credentialStorageUrl: 'https://api.serply.io/mcp',
+    },
+  },
+  {
     id: 'brave-search-mcp', name: 'Brave Search', iconSlug: 'asset:brave', kind: 'credential', priority: 5,
     description: '接入 Brave 官方搜索 MCP，提供网页、新闻、图片、视频、本地和地点搜索。',
     capabilities: ['网页与新闻搜索', '图片与视频搜索', '地点与本地搜索'],
