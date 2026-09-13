@@ -11,11 +11,10 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Star, Settings, Plus, CirclePlus, Trash2, Pencil, PanelLeft, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, FolderInput, FolderPlus, Clock, CalendarDays, ChevronRight, ChevronDown, ChevronUp, ChevronsDownUp, Blocks, Brain, ListTodo, GitBranch, Download, Loader2, RotateCw, Info } from 'lucide-react'
+import { Pin, PinOff, Star, Settings, Plus, CirclePlus, Trash2, Pencil, ArrowRightLeft, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, Folder, FolderOpen, FolderInput, FolderPlus, Clock, CalendarDays, ChevronRight, ChevronDown, ChevronUp, ChevronsDownUp, Blocks, Brain, ListTodo, GitBranch, Download, Loader2, RotateCw, Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
-import { SearchDialog } from './SearchDialog'
 import { UserAvatar } from '@/components/chat/UserAvatar'
 import { activeViewAtom, agentSkillsTabAtom } from '@/atoms/active-view'
 import { automationFormAtom, automationsAtom } from '@/atoms/automation-atoms'
@@ -404,13 +403,6 @@ function groupByDate<T extends { updatedAt: number }>(items: T[]): Array<{ label
   return groups
 }
 
-const SIDEBAR_DRAG_STRIP_HEIGHT = {
-  collapsedMac: 50,
-  expandedMac: 30,
-  collapsed: 8,
-  expanded: 4,
-} as const
-
 interface QuickSwitchTarget {
   id: string
   title: string
@@ -570,12 +562,12 @@ function getArchivedDelegatedChildren(
   ))
 }
 
-function SidebarWindowDragStrip({ height }: { height: number }): React.ReactElement {
+function SidebarWindowDragStrip(): React.ReactElement {
   return (
     <div
       aria-hidden="true"
       className="sidebar-window-drag-strip"
-      style={{ height }}
+      style={{ height: 'var(--sidebar-top-inset, 48px)', left: 'var(--titlebar-controls-end, 162px)' }}
     />
   )
 }
@@ -706,7 +698,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   const [activeTabId, setActiveTabId] = useAtom(activeTabIdAtom)
   // 会话高亮按"激活 Tab 所属会话"判定：预览 Tab 激活时其 owner 会话仍保持高亮
   const activeSessionId = useAtomValue(activeSessionIdAtom)
-  const [sidebarCollapsed, setSidebarCollapsed] = useAtom(sidebarCollapsedAtom)
+  const sidebarCollapsed = useAtomValue(sidebarCollapsedAtom)
   const { createChat, createAgent } = useCreateSession()
   const openSession = useOpenSession()
   const syncActiveTabSideEffects = useSyncActiveTabSideEffects()
@@ -723,7 +715,6 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   // 归档 & 搜索状态
   const [viewMode, setViewMode] = useAtom(sidebarViewModeAtom)
   const searchDialogOpen = useAtomValue(searchDialogOpenAtom)
-  const setSearchDialogOpen = useSetAtom(searchDialogOpenAtom)
   const newChatShortcutLabel = getAcceleratorDisplay(getActiveAccelerator('new-session'))
 
   /** 归档会话只在用户打开归档视图时加载；active 视图只保留未归档元数据。 */
@@ -2654,6 +2645,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     const rows: VirtualSidebarRow[] = []
     for (const group of archivedAgentSessionProjectGroups) {
       const collapsed = !expandedArchivedProjectIds.has(group.id)
+      const ProjectFolderIcon = collapsed ? Folder : FolderOpen
       const isCurrentProject = group.kind === 'workspace' && group.id === currentWorkspaceId
       rows.push({
         id: `agent-archived-project-${group.id}`,
@@ -2674,7 +2666,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                   {group.kind === 'automation' ? (
                     <Clock size={13} className="flex-shrink-0 text-foreground/40" />
                   ) : (
-                    <FolderOpen size={14} className="flex-shrink-0 text-[hsl(var(--sidebar-primary-foreground)/0.78)] dark:text-[hsl(var(--sidebar-primary-foreground)/0.65)]" />
+                    <ProjectFolderIcon size={14} className="flex-shrink-0 text-[hsl(var(--sidebar-primary-foreground)/0.78)] dark:text-[hsl(var(--sidebar-primary-foreground)/0.65)]" />
                   )}
                   <span className="flex min-w-0 items-center gap-1.5">
                     <span className="min-w-0 truncate text-[13px] font-medium leading-[18px]">{group.label}</span>
@@ -3193,50 +3185,21 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
         data-session-switch-hints={quickSwitchHintsVisible ? "true" : undefined}
         className={cn(
           "relative h-full flex flex-col items-center px-2",
-          !noTransition && "transition-[width] duration-300",
-          "bg-[hsl(var(--sidebar-surface))]",
+          !noTransition && "transition-[width,background-color] duration-300 ease-in-out motion-reduce:transition-none",
+          "bg-content-area",
         )}
         style={{ width: 60, flexShrink: 0 }}
       >
-        <SidebarWindowDragStrip
-          height={
-            isMac
-              ? SIDEBAR_DRAG_STRIP_HEIGHT.collapsedMac
-              : SIDEBAR_DRAG_STRIP_HEIGHT.collapsed
-          }
-        />
+        <SidebarWindowDragStrip />
 
         {/* macOS 需要避开左上角红绿灯；边栏覆盖全局标题栏拖拽层，因此留白自身也要可拖拽。 */}
         <div
-          className={cn(
-            "w-full flex-shrink-0 titlebar-drag-region",
-            isMac ? "h-[50px]" : "h-2",
-          )}
+          className="w-full flex-shrink-0"
+          style={{ height: 'var(--sidebar-top-inset, 48px)' }}
         />
 
         {/* 折叠态将会话放在主路径：控件维持 40px 热区，但把视觉体积收至 32px。 */}
         <div className="flex flex-col items-center gap-0.5">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                aria-label="展开侧边栏"
-                onClick={() => setSidebarCollapsed(false)}
-                className="group flex size-10 items-center justify-center p-1 titlebar-no-drag"
-              >
-                <span className="flex size-8 items-center justify-center rounded-[10px] bg-muted text-foreground/60 transition-[background-color,color] duration-150 group-hover:bg-foreground/[0.08] group-hover:text-foreground">
-                  <PanelLeftOpen size={16} />
-                </span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              展开侧边栏 (
-              {navigator.platform.includes("Mac") ? "⌘B" : "Ctrl+Shift+E"})
-            </TooltipContent>
-          </Tooltip>
-
-          <div className="my-1 h-px w-6 bg-border/70" />
-
           {/* 模式切换保持直接可达，项目选择仍由 Agent 图标的 hover popover 提供。 */}
           <CollapsedWorkspacePopover>
             <button
@@ -3314,21 +3277,6 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
             </TooltipContent>
           </Tooltip>
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                aria-label="搜索"
-                onClick={() => setSearchDialogOpen(true)}
-                className="group flex size-10 items-center justify-center p-1 titlebar-no-drag"
-              >
-                <span className="flex size-8 items-center justify-center rounded-[10px] text-foreground/45 transition-[background-color,color] duration-150 group-hover:bg-foreground/[0.06] group-hover:text-foreground/75">
-                  <Search size={15} />
-                </span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">搜索</TooltipContent>
-          </Tooltip>
           <CollapsedToolsPopover items={collapsedToolItems}>
             <button
               type="button"
@@ -3370,7 +3318,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
           }}
         />
 
-        {/* 底部只保留全局状态与账户入口，工作区工具统一从搜索下方进入。 */}
+        {/* 底部只保留全局状态与账户入口，工作区工具统一从新建会话下方进入。 */}
         <div className="flex flex-col items-center gap-0.5 py-2">
           {hasUpdate && (
             <SidebarUpdateButton
@@ -3405,7 +3353,6 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
         {projectDeleteDialog}
         {restoreProjectRootDialog}
         {moveDialog}
-        <SearchDialog />
       </div>
     );
   }
@@ -3417,39 +3364,24 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       data-session-switch-hints={quickSwitchHintsVisible ? 'true' : undefined}
       className={cn(
         'relative h-full flex flex-col',
-        !noTransition && 'transition-[width] duration-300',
+        !noTransition && 'transition-[width,background-color] duration-300 ease-in-out motion-reduce:transition-none',
         'bg-[hsl(var(--sidebar-surface))]'
       )}
-      style={{ width: width ?? 300, minWidth: 200, flexShrink: 0 }}
+      style={{ width: width ?? 300, flexShrink: 0 }}
     >
-      <SidebarWindowDragStrip
-        height={isMac ? SIDEBAR_DRAG_STRIP_HEIGHT.expandedMac : SIDEBAR_DRAG_STRIP_HEIGHT.expanded}
-      />
+      <SidebarWindowDragStrip />
 
       {/* macOS 需要避开左上角红绿灯；边栏覆盖全局标题栏拖拽层，因此留白自身也要可拖拽。 */}
-      <div className={cn('w-full flex-shrink-0 titlebar-drag-region', isMac ? 'h-[30px]' : 'h-1')} />
+      <div className="w-full flex-shrink-0" style={{ height: 'var(--sidebar-top-inset, 48px)' }} />
 
-      {/* 模式切换器 + 折叠按钮 */}
-      <div className={cn('titlebar-drag-region flex items-start gap-1.5 px-3', isMac && 'pt-[5px]')}>
+      {/* 模式切换器；侧栏开关由窗口标题栏常驻承载。 */}
+      <div className="titlebar-drag-region flex items-start px-3">
         <div className="flex-1 min-w-0">
           <ModeSwitcher />
         </div>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={() => setSidebarCollapsed(true)}
-              className={cn(
-                'sidebar-collapse-button mt-2 size-10 flex-shrink-0 flex items-center justify-center rounded-[10px] text-foreground/40 sidebar-control-surface hover:text-foreground/60 titlebar-no-drag transition-[background-color,color] duration-150'
-              )}
-            >
-              <PanelLeft size={14} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="right">收起侧边栏 ({navigator.platform.includes('Mac') ? '⌘B' : 'Ctrl+Shift+E'})</TooltipContent>
-        </Tooltip>
       </div>
 
-      {/* 新建任务/对话与搜索：默认无底色，降低左侧栏高频操作的视觉权重。 */}
+      {/* 新建任务/对话：默认无底色，降低左侧栏高频操作的视觉权重。 */}
       <div className="flex items-center gap-1 px-3 pt-2">
         <Tooltip>
           <TooltipTrigger asChild>
@@ -3476,19 +3408,6 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
               <ShortcutKeycaps shortcutId="new-session" keycapClassName="h-5 min-w-5 px-1 text-[11px]" separatorClassName="text-[10px]" />
             </span>
           </TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={() => setSearchDialogOpen(true)}
-              aria-label="搜索"
-              className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-[hsl(var(--sidebar-primary-foreground))] transition-[background-color,color,transform] hover:bg-foreground/[0.055] hover:text-[hsl(var(--sidebar-primary-foreground))] active:scale-[0.96] titlebar-no-drag"
-            >
-              <Search size={16} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">搜索 ({getAcceleratorDisplay(getActiveAccelerator('global-search'))})</TooltipContent>
         </Tooltip>
       </div>
 
@@ -3683,7 +3602,6 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       {projectDeleteDialog}
       {restoreProjectRootDialog}
       {moveDialog}
-      <SearchDialog />
     </div>
   )
 }
@@ -4023,10 +3941,8 @@ const ConversationItem = React.memo(function ConversationItem({
           className={cn(
             'session-quick-switch-row group relative w-full flex items-center gap-1.5 rounded-md py-1.5 pl-2.5 pr-1.5 transition-colors duration-100 titlebar-no-drag text-left',
             active && 'session-item-selected',
-            streaming
-              ? 'text-foreground font-medium hover:bg-foreground/[0.03]'
-              : 'hover:bg-foreground/[0.03]',
-            active && 'bg-foreground/[0.08]',
+            streaming && 'text-foreground font-medium',
+            active ? 'bg-foreground/[0.08]' : 'hover:bg-foreground/[0.03]',
           )}
         >
           {streaming && (
@@ -4102,8 +4018,8 @@ const ConversationItem = React.memo(function ConversationItem({
 type SessionLeftAccent = 'orange' | 'blue' | 'green'
 const SESSION_ACCENT_ROW_CLASS: Record<SessionLeftAccent, string> = {
   orange: 'bg-orange-500/[0.08] text-foreground font-medium',
-  blue: 'text-foreground font-medium hover:bg-foreground/[0.03]',
-  green: 'text-foreground font-medium hover:bg-foreground/[0.03]',
+  blue: 'text-foreground font-medium',
+  green: 'text-foreground font-medium',
 }
 
 const SESSION_ACCENT_INDICATOR_CLASS: Record<SessionLeftAccent, string> = {
@@ -4348,12 +4264,10 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
             'session-quick-switch-row group relative w-full flex items-center gap-1.5 rounded-md py-1.5 pl-2.5 pr-1.5 transition-colors duration-100 titlebar-no-drag text-left',
             !editing && 'cursor-grab active:cursor-grabbing',
             active && 'agent-session-item-active',
-            leftAccent
-              ? SESSION_ACCENT_ROW_CLASS[leftAccent]
-              : 'hover:bg-foreground/[0.03]',
+            leftAccent && SESSION_ACCENT_ROW_CLASS[leftAccent],
             // 选中态背景：浅色叠加深色变深、深色叠加浅色变浅，自动适配主题。
-            // orange accent 自带橙色底色，不再叠加，避免视觉过重。
-            active && leftAccent !== 'orange' && 'bg-foreground/[0.08]',
+            // 仅未选中行使用 hover 背景；orange accent 始终保留橙色底色。
+            leftAccent !== 'orange' && (active ? 'bg-foreground/[0.08]' : 'hover:bg-foreground/[0.03]'),
           )}
         >
           {leftAccent && (
@@ -4721,6 +4635,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
   hideSessions = false,
 }: AgentProjectGroupItemProps): React.ReactElement {
   const isCurrent = group.workspace.id === currentWorkspaceId
+  const ProjectFolderIcon = collapsed ? Folder : FolderOpen
   const sessionHoverPreviewEnabled = useAtomValue(sessionHoverPreviewEnabledAtom)
   const hasUnavailableProjectRoot = Boolean(
     group.workspace.projectRootPath
@@ -4795,7 +4710,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
               'text-[hsl(var(--sidebar-primary-foreground))]',
             )}
           >
-            <FolderOpen size={14} className="flex-shrink-0 text-[hsl(var(--sidebar-primary-foreground)/0.78)] dark:text-[hsl(var(--sidebar-primary-foreground)/0.65)]" />
+            <ProjectFolderIcon size={14} className="flex-shrink-0 text-[hsl(var(--sidebar-primary-foreground)/0.78)] dark:text-[hsl(var(--sidebar-primary-foreground)/0.65)]" />
             <input
               ref={workspaceEditRef}
               value={workspaceEditName}
@@ -4826,7 +4741,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
             {isAutomationGroup ? (
               <Clock size={13} className="flex-shrink-0 text-foreground/40" />
             ) : (
-              <FolderOpen size={14} className="flex-shrink-0 text-[hsl(var(--sidebar-primary-foreground)/0.78)] dark:text-[hsl(var(--sidebar-primary-foreground)/0.65)]" />
+              <ProjectFolderIcon size={14} className="flex-shrink-0 text-[hsl(var(--sidebar-primary-foreground)/0.78)] dark:text-[hsl(var(--sidebar-primary-foreground)/0.65)]" />
             )}
             <span className="flex min-w-0 items-center gap-1.5">
               <span className="min-w-0 truncate text-[13px] font-medium leading-[18px]">

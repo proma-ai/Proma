@@ -5,7 +5,7 @@
  * 使用上下文隔离确保安全性
  */
 
-import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import { contextBridge, ipcRenderer, webFrame, webUtils } from 'electron'
 import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, SLACK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, VAULT_IPC_CHANNELS, AGENT_ISLAND_IPC_CHANNELS, TERMINAL_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS } from '../types'
 import type {
@@ -296,6 +296,8 @@ export interface ElectronAPI {
   windowIsMaximized: () => Promise<boolean>
   /** 宿主 BrowserWindow 是否处于前台（焦点可位于原生 WebContentsView） */
   windowIsFocused: () => Promise<boolean>
+  /** 同步读取当前页面缩放，用于将原生标题栏坐标换算为 CSS 坐标（无需 IPC）。 */
+  getWindowZoomFactor: () => number
   /** 订阅窗口最大化/还原事件 */
   onWindowResize: (callback: () => void) => () => void
 
@@ -1515,6 +1517,8 @@ const electronAPI: ElectronAPI = {
   windowIsFocused: () => {
     return ipcRenderer.invoke(IPC_CHANNELS.WINDOW_IS_FOCUSED)
   },
+
+  getWindowZoomFactor: () => webFrame.getZoomFactor(),
 
   onWindowResize: (callback: () => void) => {
     const handler = (): void => callback()

@@ -171,7 +171,16 @@ export function TabBar(): React.ReactElement {
     document.addEventListener('pointerup', handleUp)
   }, [tabs])
 
-  if (tabs.length === 0) return <div className="h-[34px] titlebar-drag-region" />
+  if (tabs.length === 0) return (
+    <div
+      className="shrink-0 titlebar-drag-region transition-[margin-left] ease-in-out motion-reduce:transition-none"
+      style={{
+        height: 'max(34px, var(--app-titlebar-height, 34px))',
+        marginLeft: 'var(--main-titlebar-leading-inset, 0px)',
+        transitionDuration: 'var(--sidebar-layout-duration, 300ms)',
+      }}
+    />
+  )
 
   return (
     <>
@@ -399,11 +408,22 @@ function TabBarInner({
   }, [])
 
   return (
-    <div ref={barRef} className="main-tabbar flex items-end h-[34px] tabbar-bg relative">
+    <div
+      ref={barRef}
+      className="main-tabbar flex shrink-0 items-end tabbar-bg relative transition-[padding-left] ease-in-out motion-reduce:transition-none"
+      style={{
+        height: 'max(34px, var(--app-titlebar-height, 34px))',
+        paddingLeft: 'var(--main-titlebar-leading-inset, 0px)',
+        transitionDuration: 'var(--sidebar-layout-duration, 300ms)',
+      }}
+    >
       {/* 顶部 TabBar 的空白区域保持可拖拽；系统控制按钮由窗口顶部的统一标题栏承载。
           不要把 titlebar-no-drag 加到下面的整条 flex 容器上，否则标签右侧空白会失去拖拽能力。
           需要交互的单个 Tab 会在 TabBarItem 内部自己声明 titlebar-no-drag。 */}
-      <div className="pointer-events-none absolute inset-0 titlebar-drag-region" />
+      <div
+        className="pointer-events-none absolute inset-y-0 right-0 titlebar-drag-region transition-[left] ease-in-out motion-reduce:transition-none"
+        style={{ left: 'var(--main-titlebar-leading-inset, 0px)', transitionDuration: 'var(--sidebar-layout-duration, 300ms)' }}
+      />
 
       {/* Tear-off 提示遮罩：拖出 TabBar 区域时，让 TabBar 下方出现一条高亮分割线 */}
       {tearingOff && (
