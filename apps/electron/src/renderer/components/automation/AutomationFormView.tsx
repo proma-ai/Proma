@@ -599,7 +599,10 @@ export function AutomationFormView({ embedded = false }: { embedded?: boolean } 
     <div className={cn('titlebar-no-drag z-10 flex bg-content-area animate-in fade-in duration-200', embedded ? 'relative h-full min-h-0' : 'absolute inset-0')}>
       {/* 左栏：自然语言任务描述（主角） */}
       <div className="flex-1 min-w-0 flex flex-col">
-        <div className={cn('flex items-center gap-2 px-6 flex-shrink-0', embedded ? 'py-3' : 'py-4')}>
+        <div
+          className={cn('flex items-center gap-2 px-6 flex-shrink-0 transition-[margin-left] ease-in-out motion-reduce:transition-none', embedded ? 'py-3' : 'py-4')}
+          style={embedded ? undefined : { marginLeft: 'var(--main-titlebar-leading-inset, 0px)', transitionDuration: 'var(--sidebar-layout-duration, 300ms)' }}
+        >
           <button
             type="button"
             onClick={close}

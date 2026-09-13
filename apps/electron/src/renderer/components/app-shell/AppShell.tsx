@@ -9,6 +9,7 @@
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { LeftSidebar } from './LeftSidebar'
+import { SidebarTitlebarControls } from './SidebarTitlebarControls'
 import { RightSidePanel } from './RightSidePanel'
 import { MainArea } from '@/components/tabs/MainArea'
 import { appModeAtom } from '@/atoms/app-mode'
@@ -20,6 +21,7 @@ import { automationFormAtom } from '@/atoms/automation-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
 import { productivityToolsAtom } from '@/atoms/ui-preferences'
 import { useProjectActions } from '@/hooks/useProjectActions'
+import { useWindowTitlebarLayout } from '@/hooks/useWindowTitlebarLayout'
 import { WorkspaceMemoryChangeObserver } from '@/components/agent-skills/WorkspaceMemoryChangeObserver'
 import { settingsOpenAtom } from '@/atoms/settings-tab'
 import { WindowControls } from '@/components/WindowControls'
@@ -84,6 +86,7 @@ export function AppShell(): React.ReactElement {
   const settingsOpen = useAtomValue(settingsOpenAtom)
   const setSettingsOpen = useSetAtom(settingsOpenAtom)
   const appContentRef = React.useRef<HTMLDivElement>(null)
+  const shellRef = React.useRef<HTMLDivElement>(null)
 
   // Settings 覆盖原内容时，用 inert 移除后台焦点目标；不能在仍持有焦点的节点上设置 aria-hidden。
   React.useLayoutEffect(() => {
@@ -205,6 +208,7 @@ export function AppShell(): React.ReactElement {
   const leftSidebarContentWidth = sidebarCollapsed ? COLLAPSED_LEFT_SIDEBAR_WIDTH : clampedLeftSidebarWidth
   // 经典界面已移除，侧栏始终只占内容宽度与分隔线。
   const leftSidebarOccupiedWidth = leftSidebarContentWidth + 1
+  useWindowTitlebarLayout(shellRef, leftSidebarOccupiedWidth)
   // 右侧面板是完整的工作区：不论当前为文件、改动或扩展 Tab，继续向左拖拽时
   // 都应能收起左侧 Sidebar，并使用释放出的全部宽度；主区域仍由 MIN_MAIN_AREA_WIDTH 兜底。
   const canUseCollapsedSidebarSpace = sidebarCollapsed
@@ -359,13 +363,17 @@ export function AppShell(): React.ReactElement {
     <>
       <WindowControls />
 
-      <div className="shell-bg relative h-screen w-screen overflow-hidden bg-gradient-to-br from-zinc-50 to-zinc-100 dark:from-zinc-950 dark:to-zinc-900">
+      <div
+        ref={shellRef}
+        className="shell-bg relative h-screen w-screen overflow-hidden bg-gradient-to-br from-zinc-50 to-zinc-100 dark:from-zinc-950 dark:to-zinc-900"
+        style={{ '--sidebar-layout-duration': isDraggingLeftSidebar ? '0ms' : '300ms' } as React.CSSProperties}
+      >
         <div
           ref={appContentRef}
           className={cn('flex h-full w-full', getWindowTitlebarContentInsetClass(isWindows), settingsOpen && 'hidden')}
         >
             {/* 左侧边栏：可折叠，可拖拽调整宽度 */}
-            <div className="relative z-[60] crt-sidebar">
+            <div id="app-left-sidebar" className="relative z-[60] crt-sidebar">
               <LeftSidebar width={clampedLeftSidebarWidth} noTransition={isDraggingLeftSidebar} />
               {/* 侧边栏展开时显示拖拽手柄，折叠态隐藏 */}
               {!sidebarCollapsed && (
@@ -377,7 +385,13 @@ export function AppShell(): React.ReactElement {
                 />
               )}
             </div>
-            <div aria-hidden="true" className="relative z-[61] w-px flex-shrink-0 bg-border/80 dark:bg-border/70" />
+            <div
+              aria-hidden="true"
+              className={cn(
+                'relative z-[61] w-px flex-shrink-0 transition-colors duration-300 ease-in-out motion-reduce:transition-none',
+                sidebarCollapsed ? 'bg-content-area' : 'bg-border/80 dark:bg-border/70',
+              )}
+            />
 
             {/* 中间容器：relative z-[60] 使其在 z-50 拖动区域之上 */}
             <div className="flex-1 min-w-0 relative z-[60]">
@@ -405,6 +419,8 @@ export function AppShell(): React.ReactElement {
                 <RightSidePanel width={displayedRightPanelWidth} />
               </div>
             )}
+            {/* no-drag 控件在拖拽区域之后挂载，且保持独立、无 transform 的命中矩形。 */}
+            <SidebarTitlebarControls />
         </div>
         {currentWorkspace && <WorkspaceMemoryChangeObserver workspaceSlug={currentWorkspace.slug} />}
         {settingsOpen && (

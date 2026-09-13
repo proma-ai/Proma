@@ -580,7 +580,10 @@ export function AgentSkillsView({
           pointerdown，下拉打不开。窗口拖拽由 AppShell 顶部 0–50px 的全局 drag 层兜底。
           pt-14 让按钮整体位于全局 drag 层（0–50px, z-50）下方，避免被吃掉点击。 */}
       <div className={cn('titlebar-no-drag mx-auto flex w-full max-w-6xl shrink-0 items-center justify-between', embedded ? 'px-4 py-3' : 'px-8 pt-14 pb-4')}>
-        <div className="flex items-center gap-2.5">
+        <div
+          className="flex items-center gap-2.5 transition-[margin-left] ease-in-out motion-reduce:transition-none"
+          style={embedded ? undefined : { marginLeft: 'var(--main-titlebar-leading-inset, 0px)', transitionDuration: 'var(--sidebar-layout-duration, 300ms)' }}
+        >
           <Blocks className="size-6 text-foreground/70" />
           <h1 className={cn('font-semibold text-foreground', embedded ? 'text-lg' : 'text-2xl')}>{embedded ? (tab === 'mcp' ? 'MCP' : 'Skills') : 'Agent 技能'}</h1>
         </div>

@@ -97,9 +97,19 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
   }
 
   return (
-    <div className="relative z-[51] flex items-center gap-2 px-3 h-[48px]">
+    <div
+      className="relative z-[51] flex shrink-0 items-center gap-2 pr-3 transition-[padding-left] ease-in-out motion-reduce:transition-none"
+      style={{
+        height: 'var(--app-titlebar-height, 48px)',
+        paddingLeft: 'calc(12px + var(--main-titlebar-leading-inset, 0px))',
+        transitionDuration: 'var(--sidebar-layout-duration, 300ms)',
+      }}
+    >
       {/* 页面标题栏仍可拖动；系统控制按钮由窗口顶部的统一标题栏承载。 */}
-      <div className="absolute inset-0 titlebar-drag-region pointer-events-none" />
+      <div
+        className="absolute inset-y-0 right-0 titlebar-drag-region pointer-events-none transition-[left] ease-in-out motion-reduce:transition-none"
+        style={{ left: 'var(--main-titlebar-leading-inset, 0px)', transitionDuration: 'var(--sidebar-layout-duration, 300ms)' }}
+      />
       {editing ? (
         <div className="flex items-center gap-1.5 flex-1 min-w-0 titlebar-no-drag">
           <input

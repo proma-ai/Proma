@@ -9,15 +9,18 @@
 
 import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, readdirSync, realpathSync, rmSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
+import { satisfies, validRange } from 'semver'
 
 interface PackageManifest {
   name?: string
+  version?: string
   dependencies?: Record<string, string>
   optionalDependencies?: Record<string, string>
 }
 
 interface RuntimeDependency {
   name: string
+  versionRange: string
   optional: boolean
 }
 
@@ -113,9 +116,21 @@ function readPackageManifest(sourceDir: string): PackageManifest {
 }
 
 function listRuntimeDependencies(manifest: PackageManifest): RuntimeDependency[] {
-  const dependencies = Object.keys(manifest.dependencies ?? {}).map((name) => ({ name, optional: false }))
-  const optionalDependencies = Object.keys(manifest.optionalDependencies ?? {}).map((name) => ({ name, optional: true }))
+  const dependencies = Object.entries(manifest.dependencies ?? {}).map(([name, versionRange]) => ({ name, versionRange, optional: false }))
+  const optionalDependencies = Object.entries(manifest.optionalDependencies ?? {}).map(([name, versionRange]) => ({ name, versionRange, optional: true }))
   return [...dependencies, ...optionalDependencies]
+}
+
+function assertDependencyVersion(dependency: RuntimeDependency, sourceDir: string, parentSourceDir: string): void {
+  // Node 只按路径查找，不验证版本。嵌套依赖缺失时会误用 hoisted 的其他主版本，
+  // 直到 Electron 动态加载 SDK 才报 exports 错误；同步阶段就阻止该副本进入运行时。
+  // Git / file 等非 semver 声明仍交给包管理器处理。
+  if (validRange(dependency.versionRange) === null) return
+  const { version } = readPackageManifest(sourceDir)
+  if (version && satisfies(version, dependency.versionRange)) return
+  throw new Error(
+    `运行时依赖版本不匹配: ${dependency.name} 需要 ${dependency.versionRange}，实际为 ${version ?? '未知版本'}（依赖方: ${parentSourceDir}）；请在仓库根目录运行 bun install --frozen-lockfile 后重试`,
+  )
 }
 
 function copyPackage(
@@ -180,6 +195,7 @@ function copyDependency(
     throw new Error(`缺少运行时依赖: ${dependency.name} (${parentSourceDir})`)
   }
 
+  assertDependencyVersion(dependency, sourceDir, parentSourceDir)
   if (sourceAncestors.has(sourceDir)) return
 
   const topLevelSourceDir = ctx.topLevelPackageSources.get(dependency.name)
