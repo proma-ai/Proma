@@ -10,7 +10,7 @@ export function resolvePiThinkingLevel(
   provider: ProviderType | undefined,
   modelId?: string,
   capability?: ReasoningCapability,
-  modelApiProtocol?: 'anthropic-messages' | 'openai-responses',
+  modelApiProtocol?: 'anthropic-messages' | 'openai-responses' | 'google-generative-ai',
 ): AgentThinkingLevel {
   const reasoningProfile = resolveReasoningProfile({
     modelId,

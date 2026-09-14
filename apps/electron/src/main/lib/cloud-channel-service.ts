@@ -113,7 +113,7 @@ function broadcastOfficialChannelUpdated(): void {
 interface AgentModelItem {
   id: string
   display_name?: string
-  apiProtocol?: 'anthropic-messages' | 'openai-responses'
+  apiProtocol?: 'anthropic-messages' | 'openai-responses' | 'google-generative-ai'
   runtime?: 'both' | 'pi'
   contextWindow?: number
   maxInputTokens?: number
