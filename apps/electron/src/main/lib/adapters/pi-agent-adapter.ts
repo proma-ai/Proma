@@ -119,7 +119,7 @@ export interface PiAgentQueryOptions extends AgentQueryInput {
   baseUrl?: string
   provider: ProviderType
   /** 官方渠道由服务端下发的请求协议；缺失时按模型 ID 兼容推断。 */
-  modelApiProtocol?: 'anthropic-messages' | 'openai-responses'
+  modelApiProtocol?: 'anthropic-messages' | 'openai-responses' | 'google-generative-ai'
   /** 官方后台配置的上下文窗口，优先于 Pi catalog 默认值。 */
   modelContextWindow?: number
   /** 官方后台配置的最大输出 token 数，优先于 Pi catalog 默认值。 */
