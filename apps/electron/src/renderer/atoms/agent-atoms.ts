@@ -514,16 +514,8 @@ export const agentSidePanelOpenAtomFamily = atomFamily((sessionId: string) => at
   },
 ))
 
+/** 新 Agent 会话的右侧面板基线宽度；不继承旧版全局或其他会话的宽布局。 */
 const DEFAULT_AGENT_SIDE_PANEL_WIDTH = 460
-
-/**
- * 旧版全局宽度只作为尚未保存新布局的 Session 的初始基线，避免升级后尺寸回退。
- * 新布局写入后不再与其他 Session 共享。
- */
-const legacyAgentSidePanelWidthAtom = atomWithStorage<number>(
-  'proma-agent-workspace-width',
-  DEFAULT_AGENT_SIDE_PANEL_WIDTH,
-)
 
 export interface AgentSidePanelLayout {
   width: number
@@ -579,14 +571,14 @@ export const agentSidePanelLayoutMapAtom = atomWithStorage<Record<string, AgentS
 /** 指定 Agent Session 的右侧工作区布局。 */
 export const agentSidePanelLayoutAtomFamily = atomFamily((sessionId: string) => atom(
   (get) => get(agentSidePanelLayoutMapAtom)[sessionId] ?? {
-    width: get(legacyAgentSidePanelWidthAtom),
+    width: DEFAULT_AGENT_SIDE_PANEL_WIDTH,
     hasOpenedWideWorkspace: false,
     widePanelWidthOverride: null,
   },
   (get, set, update: AgentSidePanelLayout | ((previous: AgentSidePanelLayout) => AgentSidePanelLayout)) => {
     set(agentSidePanelLayoutMapAtom, (previous) => {
       const current = previous[sessionId] ?? {
-        width: get(legacyAgentSidePanelWidthAtom),
+        width: DEFAULT_AGENT_SIDE_PANEL_WIDTH,
         hasOpenedWideWorkspace: false,
         widePanelWidthOverride: null,
       }
