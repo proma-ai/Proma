@@ -1,7 +1,7 @@
 {
   "name": "@proma/electron",
   "version": "0.19.55",
-  "description": "Proma，为专业用户设计的 Agent - Electron App",
+  "description": "Proma，为专业用户设计的 Agent",
   "main": "dist/main.cjs",
   "author": {
     "name": "ErlichLiu",
