@@ -2684,6 +2684,18 @@ body {
   overflow-x: auto;
   border-radius: 0.5rem;
 }
+.live-markdown-table-editor-hint {
+  display: flex;
+  min-height: 1.75rem;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0.2rem 0.55rem;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.75rem;
+  line-height: 1;
+  pointer-events: none;
+  user-select: none;
+}
 .live-markdown-table-cell-trigger {
   display: block;
   width: calc(100% + 1.4rem);
@@ -2698,10 +2710,16 @@ body {
   line-height: inherit;
   text-align: inherit;
   cursor: text;
-  transition: background-color 120ms ease;
+  transform-origin: center;
+  transition-property: background-color, transform;
+  transition-duration: 120ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
 }
 .live-markdown-table-cell-trigger:hover {
   background: hsl(var(--muted) / 0.58);
+}
+.live-markdown-table-cell-trigger:active {
+  transform: scale(0.96);
 }
 .live-markdown-table-cell-trigger:focus-visible {
   outline: 2px solid hsl(var(--ring));

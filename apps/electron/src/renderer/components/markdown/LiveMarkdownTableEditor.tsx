@@ -1,7 +1,18 @@
 import * as React from 'react'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
 import { liveMarkdownTableCellDraft, renderLiveMarkdownTableInline } from './live-markdown-table-inline'
 import {
   type LiveMarkdownTable,
+  deleteLiveMarkdownTableColumn,
+  deleteLiveMarkdownTableRow,
+  insertLiveMarkdownTableColumn,
+  insertLiveMarkdownTableRow,
   liveMarkdownTableCellKeyAction,
   nextLiveMarkdownTableCell,
   shouldCommitLiveMarkdownTableCell,
@@ -22,6 +33,7 @@ interface LiveMarkdownTableEditorProps {
   readOnly: boolean
   autoFocusCell?: LiveMarkdownTableCell | null
   onCommit: (table: LiveMarkdownTable, focusCell?: LiveMarkdownTableCell) => void
+  onDelete: () => void
   onMeasure: () => void
   findController?: LiveMarkdownFindController
   sourceRange?: { from: number; to: number }
@@ -93,6 +105,7 @@ export function LiveMarkdownTableEditor({
   readOnly,
   autoFocusCell = null,
   onCommit,
+  onDelete,
   onMeasure,
   findController,
   sourceRange,
@@ -103,6 +116,31 @@ export function LiveMarkdownTableEditor({
   const [draft, setDraft] = useState(() => autoFocusCell ? liveMarkdownTableCellDraft(cellValue(table, autoFocusCell)) : '')
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const minimumHeightRef = useRef(0)
+  // CodeMirror 替换 widget 在 dispatch 同步卸载 textarea，会立即触发 blur。
+  // 该期间禁止再次提交，避免 EditorView.update 重入。
+  const isDispatchingTableChangeRef = useRef(false)
+
+  const dispatchTableCommit = (nextTable: LiveMarkdownTable, focusCell?: LiveMarkdownTableCell) => {
+    if (isDispatchingTableChangeRef.current) return
+    isDispatchingTableChangeRef.current = true
+    try {
+      onCommit(nextTable, focusCell)
+    } finally {
+      // TableWidget 会在本次 CodeMirror transaction 内排队卸载旧 React root。
+      // 让它先完成 textarea blur，避免 blur 回调在 update 仍未结束时二次 dispatch。
+      queueMicrotask(() => { isDispatchingTableChangeRef.current = false })
+    }
+  }
+
+  const dispatchTableDelete = () => {
+    if (isDispatchingTableChangeRef.current) return
+    isDispatchingTableChangeRef.current = true
+    try {
+      onDelete()
+    } finally {
+      queueMicrotask(() => { isDispatchingTableChangeRef.current = false })
+    }
+  }
 
   useEffect(() => {
     if (!autoFocusCell) return
@@ -155,7 +193,7 @@ export function LiveMarkdownTableEditor({
     if (activeCell) {
       const original = liveMarkdownTableCellDraft(cellValue(table, activeCell))
       if (shouldCommitLiveMarkdownTableCell(original, draft)) {
-        onCommit(updateLiveMarkdownTableCell(table, activeCell.row, activeCell.column, draft), cell)
+        dispatchTableCommit(updateLiveMarkdownTableCell(table, activeCell.row, activeCell.column, draft), cell)
         return
       }
       setActiveCell(cell)
@@ -167,7 +205,7 @@ export function LiveMarkdownTableEditor({
   }
 
   const commit = (focusCell?: LiveMarkdownTableCell) => {
-    if (!activeCell) return
+    if (!activeCell || isDispatchingTableChangeRef.current) return
     if (focusCell) {
       const target = inputRef.current?.closest('table')?.querySelector<HTMLButtonElement>(
         `[data-live-markdown-table-cell="${focusCell.row}:${focusCell.column}"]`,
@@ -185,7 +223,7 @@ export function LiveMarkdownTableEditor({
       }
       return
     }
-    onCommit(updateLiveMarkdownTableCell(table, activeCell.row, activeCell.column, draft), focusCell)
+    dispatchTableCommit(updateLiveMarkdownTableCell(table, activeCell.row, activeCell.column, draft), focusCell)
     if (!focusCell) {
       setActiveCell(null)
       setDraft('')
@@ -198,6 +236,28 @@ export function LiveMarkdownTableEditor({
   }
 
   const nextCell = (from: LiveMarkdownTableCell, backwards: boolean): LiveMarkdownTableCell => nextLiveMarkdownTableCell(table, from, backwards)
+
+  const tableWithDraft = (): LiveMarkdownTable => {
+    if (!activeCell) return table
+    return updateLiveMarkdownTableCell(table, activeCell.row, activeCell.column, draft)
+  }
+
+  const applyTableChange = (
+    change: (currentTable: LiveMarkdownTable) => LiveMarkdownTable,
+    focusCell?: LiveMarkdownTableCell,
+  ) => {
+    if (isDispatchingTableChangeRef.current) return
+    dispatchTableCommit(change(tableWithDraft()), focusCell)
+    setActiveCell(null)
+    setDraft('')
+  }
+
+  const removeTable = () => {
+    if (isDispatchingTableChangeRef.current) return
+    setActiveCell(null)
+    setDraft('')
+    dispatchTableDelete()
+  }
 
   const renderCell = (row: number, column: number, header: boolean) => {
     const cell = { row, column }
@@ -218,8 +278,8 @@ export function LiveMarkdownTableEditor({
       hasActiveFindMatch && 'live-markdown-table-find-match-active',
     ].filter(Boolean).join(' ') || undefined
 
-    return (
-      <Cell key={column} className={className}>
+    const cellContent = (
+      <Cell className={className}>
         {isActive ? (
           <textarea
             ref={inputRef}
@@ -230,7 +290,11 @@ export function LiveMarkdownTableEditor({
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             onBlur={(event) => {
-              if (event.relatedTarget instanceof HTMLElement && event.currentTarget.closest('table')?.contains(event.relatedTarget)) return
+              const relatedTarget = event.relatedTarget
+              if (relatedTarget instanceof HTMLElement && (
+                event.currentTarget.closest('table')?.contains(relatedTarget)
+                || relatedTarget.closest('[role="menu"]')
+              )) return
               commit()
             }}
             onKeyDown={(event) => {
@@ -274,10 +338,87 @@ export function LiveMarkdownTableEditor({
         )}
       </Cell>
     )
+
+    if (readOnly) return React.cloneElement(cellContent, { key: `${row}:${column}` })
+
+    const bodyRowIndex = row - 1
+    const hasMinimumColumns = table.header.length <= 2
+    const deleteRowFocus = table.rows.length === 1
+      ? { row: 0, column }
+      : { row: Math.min(row, table.rows.length - 1), column }
+    const deleteColumnFocus = { row, column: Math.min(column, table.header.length - 2) }
+
+    return (
+      <ContextMenu key={`${row}:${column}`}>
+        <ContextMenuTrigger asChild>{cellContent}</ContextMenuTrigger>
+        <ContextMenuContent className="z-[9999] min-w-48 p-0.5">
+          {!header && (
+            <ContextMenuItem onSelect={() => applyTableChange(
+              (currentTable) => insertLiveMarkdownTableRow(currentTable, bodyRowIndex),
+              { row, column },
+            )}
+            >
+              在上方插入行
+            </ContextMenuItem>
+          )}
+          <ContextMenuItem onSelect={() => applyTableChange(
+            (currentTable) => insertLiveMarkdownTableRow(currentTable, header ? 0 : bodyRowIndex + 1),
+            { row: header ? 1 : row + 1, column },
+          )}
+          >
+            在下方插入行
+          </ContextMenuItem>
+          {!header && (
+            <ContextMenuItem
+              className="text-destructive focus:bg-destructive focus:text-destructive-foreground"
+              onSelect={() => applyTableChange(
+                (currentTable) => deleteLiveMarkdownTableRow(currentTable, bodyRowIndex),
+                deleteRowFocus,
+              )}
+            >
+              删除本行
+            </ContextMenuItem>
+          )}
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={() => applyTableChange(
+            (currentTable) => insertLiveMarkdownTableColumn(currentTable, column),
+            { row, column },
+          )}
+          >
+            在左侧插入列
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => applyTableChange(
+            (currentTable) => insertLiveMarkdownTableColumn(currentTable, column + 1),
+            { row, column: column + 1 },
+          )}
+          >
+            在右侧插入列
+          </ContextMenuItem>
+          <ContextMenuItem
+            disabled={hasMinimumColumns}
+            className="text-destructive focus:bg-destructive focus:text-destructive-foreground"
+            onSelect={() => applyTableChange(
+              (currentTable) => deleteLiveMarkdownTableColumn(currentTable, column),
+              deleteColumnFocus,
+            )}
+          >
+            删除本列
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            className="text-destructive focus:bg-destructive focus:text-destructive-foreground"
+            onSelect={removeTable}
+          >
+            删除表格
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+    )
   }
 
   return (
     <div className="vault-markdown-table live-markdown-table-editor">
+      {!readOnly && <div className="live-markdown-table-editor-hint" aria-hidden="true">点击编辑、右键操作更多</div>}
       <table aria-label="Markdown 表格">
         <thead><tr>{table.header.map((_, column) => renderCell(0, column, true))}</tr></thead>
         {table.rows.length > 0 && <tbody>{table.rows.map((_, row) => <tr key={row}>{table.header.map((_, column) => renderCell(row + 1, column, false))}</tr>)}</tbody>}
