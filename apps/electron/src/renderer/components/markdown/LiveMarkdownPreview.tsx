@@ -15,6 +15,7 @@ import {
 } from './live-markdown-preview-syntax'
 import {
   isLiveMarkdownTableSeparator,
+  liveMarkdownTableFocusTargetSelector,
   parseLiveMarkdownTable,
   serializeLiveMarkdownTable,
   type LiveMarkdownTable,
@@ -317,10 +318,18 @@ class TableWidget extends LiveMarkdownBlockWidget {
           if (!currentBlock) return
           view.dispatch({ changes: { from: currentBlock.from, to: currentBlock.to, insert: nextSource } })
           if (focusCell) requestAnimationFrame(() => {
-            const target = view.dom.querySelector<HTMLButtonElement>(`[data-live-markdown-table-cell="${focusCell.row}:${focusCell.column}"]`)
+            const target = view.dom.querySelector<HTMLButtonElement>(
+              liveMarkdownTableFocusTargetSelector(currentBlock.from, focusCell),
+            )
             target?.focus()
-            target?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+            target?.click()
           })
+        }}
+        onDelete={() => {
+          if (view.state.readOnly) return
+          const currentBlock = buildBlocks(view.state).find((block) => block.kind === 'table' && block.from === this.from)
+          if (!currentBlock) return
+          view.dispatch({ changes: { from: currentBlock.from, to: currentBlock.to, insert: '' } })
         }}
       />,
     )
