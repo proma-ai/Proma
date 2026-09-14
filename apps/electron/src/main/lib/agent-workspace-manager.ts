@@ -32,14 +32,19 @@ import { findAllGitRoots, normalizeGitRoot } from './git-diff-service'
 import { listBuiltinMcpServers } from './builtin-mcp/catalog'
 import { RESERVED_BUILTIN_KEYS } from './builtin-mcp/baseline'
 import { inferMcpTransportType, normalizeMcpTransportType } from '@proma/shared'
-import type { AgentWorkspace, CreateAgentWorkspaceInput, WorkspaceMcpConfig, SkillMeta, SkillImportSource, OtherWorkspaceSkillsGroup, WorkspaceCapabilities, SkillFileNode, SkillFileContent, WorkspaceMemorySummary, BulkImportSkillItemResult, BulkImportSkillsResult, BulkImportWorkspaceSelection } from '@proma/shared'
+import type { AgentWorkspace, AgentWorkspaceSection, CreateAgentWorkspaceInput, UpdateAgentWorkspaceInput, WorkspaceMcpConfig, SkillMeta, SkillImportSource, OtherWorkspaceSkillsGroup, WorkspaceCapabilities, SkillFileNode, SkillFileContent, WorkspaceMemorySummary, BulkImportSkillItemResult, BulkImportSkillsResult, BulkImportWorkspaceSelection } from '@proma/shared'
 
 interface AgentWorkspacesIndex {
   version: number
   workspaces: AgentWorkspace[]
+  /** v3+；缺省时按空数组兼容旧索引。 */
+  sections?: AgentWorkspaceSection[]
+  /** v4+；默认项目区与自定义分区的侧栏顺序。 */
+  sectionOrder?: string[]
 }
 
-const INDEX_VERSION = 2
+export const DEFAULT_PROJECTS_SECTION_ID = '__default-projects__'
+const INDEX_VERSION = 4
 const WINDOWS_RESERVED_SLUGS = new Set([
   'con',
   'prn',
@@ -78,7 +83,115 @@ function readIndex(): AgentWorkspacesIndex {
     return data
   }
 
-  return { version: INDEX_VERSION, workspaces: [] }
+  return { version: INDEX_VERSION, workspaces: [], sections: [] }
+}
+
+function normalizedSectionOrder(index: AgentWorkspacesIndex): string[] {
+  const sectionIds = (index.sections ?? []).map((section) => section.id)
+  const knownIds = new Set([DEFAULT_PROJECTS_SECTION_ID, ...sectionIds])
+  const retained = (index.sectionOrder ?? []).filter((id, position, order) => knownIds.has(id) && order.indexOf(id) === position)
+  for (const id of [DEFAULT_PROJECTS_SECTION_ID, ...sectionIds]) {
+    if (!retained.includes(id)) retained.push(id)
+  }
+  return retained
+}
+
+/** 读取自定义分区列表，并遵循持久化的侧栏顺序。 */
+export function listAgentWorkspaceSections(): AgentWorkspaceSection[] {
+  const index = readIndex()
+  const byId = new Map((index.sections ?? []).map((section) => [section.id, section]))
+  return normalizedSectionOrder(index)
+    .filter((id) => id !== DEFAULT_PROJECTS_SECTION_ID)
+    .map((id) => ({ ...byId.get(id)! }))
+}
+
+/** 返回默认项目区与自定义分区的完整侧栏顺序。 */
+export function listAgentWorkspaceSectionOrder(): string[] {
+  return [...normalizedSectionOrder(readIndex())]
+}
+
+export function createAgentWorkspaceSection(name: string): AgentWorkspaceSection {
+  const trimmed = name.trim()
+  if (!trimmed) throw new Error('分区名称不能为空')
+  if (trimmed.length > 50) throw new Error('分区名称不能超过 50 个字符')
+  const index = readIndex()
+  const sections = index.sections ?? []
+  if (sections.some((section) => section.name === trimmed)) {
+    throw new Error(`分区名称「${trimmed}」已存在`)
+  }
+  const now = Date.now()
+  const section: AgentWorkspaceSection = { id: randomUUID(), name: trimmed, createdAt: now, updatedAt: now }
+  index.sections = [...sections, section]
+  index.sectionOrder = normalizedSectionOrder(index)
+  writeIndex(index)
+  return { ...section }
+}
+
+/** 按完整 ID 序列重排默认项目区与自定义分区。项目顺序与归属不受影响。 */
+export function reorderAgentWorkspaceSections(orderedIds: string[]): string[] {
+  const index = readIndex()
+  const expectedIds = normalizedSectionOrder(index)
+  if (orderedIds.length !== expectedIds.length || new Set(orderedIds).size !== expectedIds.length) {
+    throw new Error('分区排序数据无效')
+  }
+  const expectedSet = new Set(expectedIds)
+  if (!orderedIds.every((id) => expectedSet.has(id))) throw new Error('分区排序数据无效')
+  index.sectionOrder = [...orderedIds]
+  writeIndex(index)
+  return [...index.sectionOrder]
+}
+
+export function updateAgentWorkspaceSection(id: string, name: string): AgentWorkspaceSection {
+  const trimmed = name.trim()
+  if (!trimmed) throw new Error('分区名称不能为空')
+  if (trimmed.length > 50) throw new Error('分区名称不能超过 50 个字符')
+  const index = readIndex()
+  const sections = index.sections ?? []
+  const existing = sections.find((section) => section.id === id)
+  if (!existing) throw new Error('分区不存在')
+  if (sections.some((section) => section.id !== id && section.name === trimmed)) {
+    throw new Error(`分区名称「${trimmed}」已存在`)
+  }
+  const updated = { ...existing, name: trimmed, updatedAt: Date.now() }
+  index.sections = sections.map((section) => section.id === id ? updated : section)
+  writeIndex(index)
+  return { ...updated }
+}
+
+/**
+ * 解散分区，并可将成员项目原子移动到另一个分区的末尾。
+ * destinationSectionId 未传时，只解散分区，项目回到默认「项目」区。
+ */
+export function deleteAgentWorkspaceSection(id: string, destinationSectionId?: string): AgentWorkspace[] {
+  const index = readIndex()
+  const sections = index.sections ?? []
+  if (!sections.some((section) => section.id === id)) throw new Error('分区不存在')
+  if (destinationSectionId && !sections.some((section) => section.id === destinationSectionId && section.id !== id)) {
+    throw new Error('目标分区不存在')
+  }
+
+  index.sections = sections.filter((section) => section.id !== id)
+  index.sectionOrder = normalizedSectionOrder(index).filter((sectionId) => sectionId !== id)
+  const now = Date.now()
+  const moving = index.workspaces
+    .filter((workspace) => workspace.sectionId === id)
+    .map((workspace) => ({ ...workspace, sectionId: destinationSectionId, updatedAt: now }))
+
+  if (destinationSectionId && moving.length > 0) {
+    const remaining = index.workspaces.filter((workspace) => workspace.sectionId !== id)
+    const lastDestinationIndex = remaining.reduce(
+      (lastIndex, workspace, index) => workspace.sectionId === destinationSectionId ? index : lastIndex,
+      -1,
+    )
+    remaining.splice(lastDestinationIndex + 1, 0, ...moving)
+    index.workspaces = remaining
+  } else {
+    index.workspaces = index.workspaces.map((workspace) => (
+      workspace.sectionId === id ? { ...workspace, sectionId: undefined, updatedAt: now } : workspace
+    ))
+  }
+  writeIndex(index)
+  return index.workspaces.map((workspace) => ({ ...workspace }))
 }
 
 function migrateIndex(index: AgentWorkspacesIndex): void {
@@ -87,6 +200,14 @@ function migrateIndex(index: AgentWorkspacesIndex): void {
   // v1 → v2: 为所有工作区默认启用 skill-creator
   if (oldVersion < 2) {
     activateSkillCreatorInAllWorkspaces(index)
+  }
+  // v2 → v3: 引入分区。历史项目保持 sectionId 缺省，归入默认「项目」区。
+  if (oldVersion < 3) {
+    index.sections = []
+  }
+  // v3 → v4: 默认项目区与自定义分区共用可持久化排序。
+  if (oldVersion < 4) {
+    index.sectionOrder = [DEFAULT_PROJECTS_SECTION_ID, ...(index.sections ?? []).map((section) => section.id)]
   }
 
   index.version = INDEX_VERSION
@@ -265,8 +386,8 @@ function copyDefaultSkills(workspaceSlug: string, options: { throwOnError?: bool
 }
 
 export async function createAgentWorkspace(input: string | CreateAgentWorkspaceInput): Promise<AgentWorkspace> {
-  const { name, projectRootPath } = typeof input === 'string'
-    ? { name: input, projectRootPath: undefined }
+  const { name, projectRootPath, sectionId } = typeof input === 'string'
+    ? { name: input, projectRootPath: undefined, sectionId: undefined }
     : input
   let normalizedProjectRootPath: string | undefined
 
@@ -293,6 +414,9 @@ export async function createAgentWorkspace(input: string | CreateAgentWorkspaceI
   if (duplicate) {
     throw new Error(`项目名称「${name}」已存在`)
   }
+  if (sectionId && !(index.sections ?? []).some((section) => section.id === sectionId)) {
+    throw new Error('目标分区不存在')
+  }
 
   const existingSlugs = new Set(index.workspaces.map((w) => w.slug))
   const slug = slugify(name, existingSlugs)
@@ -302,6 +426,7 @@ export async function createAgentWorkspace(input: string | CreateAgentWorkspaceI
     name,
     slug,
     projectRootPath: normalizedProjectRootPath,
+    ...(sectionId ? { sectionId } : {}),
     createdAt: now,
     updatedAt: now,
   }
@@ -334,7 +459,7 @@ export async function createAgentWorkspace(input: string | CreateAgentWorkspaceI
 /** 更新工作区名称（slug 和目录不变） */
 export async function updateAgentWorkspace(
   id: string,
-  updates: { name: string },
+  updates: UpdateAgentWorkspaceInput,
 ): Promise<AgentWorkspace> {
   const index = readIndex()
   const idx = index.workspaces.findIndex((w) => w.id === id)
@@ -345,14 +470,21 @@ export async function updateAgentWorkspace(
 
   const existing = index.workspaces[idx]!
 
-  const duplicate = index.workspaces.find((w) => w.id !== id && w.name === updates.name)
-  if (duplicate) {
-    throw new Error(`项目名称「${updates.name}」已存在`)
+  if (updates.name !== undefined) {
+    const trimmedName = updates.name.trim()
+    if (!trimmedName) throw new Error('项目名称不能为空')
+    const duplicate = index.workspaces.find((w) => w.id !== id && w.name === trimmedName)
+    if (duplicate) throw new Error(`项目名称「${trimmedName}」已存在`)
+    updates = { ...updates, name: trimmedName }
+  }
+  if (updates.sectionId !== undefined && updates.sectionId !== null && !((index.sections ?? []).some((section) => section.id === updates.sectionId))) {
+    throw new Error('目标分区不存在')
   }
 
   const updated: AgentWorkspace = {
     ...existing,
-    name: updates.name,
+    ...(updates.name !== undefined ? { name: updates.name } : {}),
+    ...(updates.sectionId !== undefined ? (updates.sectionId ? { sectionId: updates.sectionId } : { sectionId: undefined }) : {}),
     updatedAt: Date.now(),
   }
 

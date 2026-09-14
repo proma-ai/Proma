@@ -12,6 +12,21 @@ import type { ProviderType } from './channel'
 export type LocalProjectRootStatus = 'available' | 'missing' | 'not_directory' | 'unavailable'
 
 /** Agent 工作区 */
+/** 项目的一级组织容器；不可嵌套。 */
+export interface AgentWorkspaceSection {
+  id: string
+  name: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface UpdateAgentWorkspaceInput {
+  name?: string
+  /** null 表示回到默认「项目」区；未设置则不改变归属。 */
+  sectionId?: string | null
+}
+
+/** Agent 工作区 */
 export interface AgentWorkspace {
   /** 工作区唯一标识 */
   id: string
@@ -26,6 +41,8 @@ export interface AgentWorkspace {
   projectRootPath?: string
   /** 本地项目根目录的运行时状态；Proma 托管项目不设置此字段。 */
   projectRootStatus?: LocalProjectRootStatus
+  /** 所属分区；缺省时归入默认「项目」区。 */
+  sectionId?: string
   /** 创建时间戳 */
   createdAt: number
   /** 更新时间戳 */
@@ -38,6 +55,8 @@ export interface CreateAgentWorkspaceInput {
   name: string
   /** 可选的用户本地项目根目录 */
   projectRootPath?: string
+  /** 可选的目标分区；缺省时归入默认「项目」区。 */
+  sectionId?: string
 }
 
 /** 创建项目后自动生成的首个 Agent 会话。 */
@@ -1856,6 +1875,13 @@ export const AGENT_IPC_CHANNELS = {
   DELETE_WORKSPACE: 'agent:delete-workspace',
   /** 重排工作区顺序 */
   REORDER_WORKSPACES: 'agent:reorder-workspaces',
+  /** 获取、创建和删除项目分区 */
+  LIST_WORKSPACE_SECTIONS: 'agent:list-workspace-sections',
+  LIST_WORKSPACE_SECTION_ORDER: 'agent:list-workspace-section-order',
+  CREATE_WORKSPACE_SECTION: 'agent:create-workspace-section',
+  UPDATE_WORKSPACE_SECTION: 'agent:update-workspace-section',
+  DELETE_WORKSPACE_SECTION: 'agent:delete-workspace-section',
+  REORDER_WORKSPACE_SECTIONS: 'agent:reorder-workspace-sections',
 
   // 标题生成
   /** 生成 Agent 会话标题 */
