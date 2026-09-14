@@ -19,6 +19,7 @@ import type {
   FetchModelsInput,
   FetchModelsResult,
   ChannelPlanQuotaResult,
+  CodexCliStatus,
   CodexOAuthLoginResult,
   XaiOAuthLoginResult,
   XaiOAuthDeviceCode,
@@ -327,6 +328,9 @@ export interface ElectronAPI {
 
   /** 查询渠道订阅 Plan 额度 */
   getChannelPlanQuota: (channelId: string) => Promise<ChannelPlanQuotaResult>
+
+  /** 探测本机 Codex CLI 的 ChatGPT 登录状态（不含 token） */
+  getCodexCliStatus: () => Promise<CodexCliStatus>
 
   /** 发起 ChatGPT (Codex) OAuth 登录，返回序列化凭据（作为 apiKey 存储） */
   codexOAuthLogin: (method?: import('@proma/shared').CodexOAuthLoginMethod) => Promise<CodexOAuthLoginResult>
@@ -1557,6 +1561,10 @@ const electronAPI: ElectronAPI = {
 
   getChannelPlanQuota: (channelId: string) => {
     return ipcRenderer.invoke(CHANNEL_IPC_CHANNELS.GET_PLAN_QUOTA, channelId)
+  },
+
+  getCodexCliStatus: () => {
+    return ipcRenderer.invoke(CHANNEL_IPC_CHANNELS.GET_CODEX_CLI_STATUS)
   },
 
   codexOAuthLogin: (method?: import('@proma/shared').CodexOAuthLoginMethod) => {

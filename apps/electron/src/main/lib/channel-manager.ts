@@ -20,6 +20,7 @@ import type {
   ChannelModel,
   ChannelPlanQuotaResult,
   ChannelPlanQuotaWindow,
+  CodexCliStatus,
   CodexOAuthCredentials,
   GithubCopilotOAuthCredentials,
   XaiOAuthCredentials,
@@ -43,6 +44,7 @@ import {
   VOLCENGINE_CODING_PLAN_MODELS,
 } from '@proma/shared'
 import { refreshCodexOAuth } from './codex-oauth-service'
+import { readCodexCliToken } from './codex-cli-token'
 import { refreshGithubCopilotOAuth } from './github-copilot-oauth-service'
 import { refreshXaiOAuth } from './xai-oauth-service'
 import { refreshXaiOAuthCredentialsSerial, rememberXaiOAuthCredentials } from './xai-oauth-credentials'
@@ -520,6 +522,19 @@ export function getChannelById(id: string): Channel | undefined {
  */
 export function createChannel(input: ChannelCreateInput): Channel {
   const config = readConfig()
+
+  // codex-cli 复用渠道读的是同一份 ~/.codex 登录（同账号、同 token、同内置模型目录），
+  // 同一时刻只允许一个：已存在则幂等返回既有渠道，避免重复添加功能完全等价的多条记录。
+  if (input.provider === 'openai-codex' && input.credentialSource === 'codex-cli') {
+    const existing = config.channels.find(
+      (c) => c.provider === 'openai-codex' && c.credentialSource === 'codex-cli',
+    )
+    if (existing) {
+      console.log(`[渠道管理] codex-cli 渠道已存在，跳过重复创建: ${existing.id}`)
+      return existing
+    }
+  }
+
   const now = Date.now()
 
   const channel: Channel = {
@@ -532,6 +547,10 @@ export function createChannel(input: ChannelCreateInput): Channel {
     enabled: input.enabled,
     createdAt: now,
     updatedAt: now,
+    // credentialSource 仅对 openai-codex 合法；不信任前端在其它 provider 上携带该标记。
+    ...(input.provider === 'openai-codex' && input.credentialSource
+      ? { credentialSource: input.credentialSource }
+      : {}),
   }
 
   config.channels.push(channel)
@@ -558,15 +577,35 @@ export function updateChannel(id: string, input: ChannelUpdateInput): Channel {
 
   const existing = config.channels[index]!
 
+  // 来源标记按「更新后的最终 provider」归一化：credentialSource 仅属于 openai-codex，
+  // 渠道被改成其它 provider 时必须清掉，避免在非 codex 渠道上残留无意义标记。
+  const finalProvider = input.provider ?? existing.provider
+  const isExternalSource =
+    finalProvider === 'openai-codex' && input.credentialSource === 'codex-cli'
   const updated: Channel = {
     ...existing,
     name: input.name ?? existing.name,
-    provider: input.provider ?? existing.provider,
+    provider: finalProvider,
     baseUrl: input.baseUrl ?? existing.baseUrl,
-    apiKey: input.apiKey ? encryptApiKey(input.apiKey) : existing.apiKey,
+    // 外部来源不存凭据（强制空）；否则按「有传入明文才更新」的原规则。
+    apiKey: isExternalSource
+      ? encryptApiKey('')
+      : input.apiKey
+        ? encryptApiKey(input.apiKey)
+        : existing.apiKey,
     models: input.models ?? existing.models,
     enabled: input.enabled ?? existing.enabled,
     updatedAt: Date.now(),
+    // 非 codex provider 一律无来源标记；codex 下：切到外部来源 → 标记，
+    // 写入真实凭据（input.apiKey 非空）→ 清除标记，否则保留原值。
+    credentialSource:
+      finalProvider !== 'openai-codex'
+        ? undefined
+        : isExternalSource
+          ? 'codex-cli'
+          : input.apiKey
+            ? undefined
+            : existing.credentialSource,
   }
 
   config.channels[index] = updated
@@ -588,9 +627,28 @@ export function deleteChannel(id: string): void {
   }
 
   const removed = config.channels.splice(index, 1)[0]!
+
   writeConfig(config)
 
   console.log(`[渠道管理] 已删除渠道: ${removed.name} (${removed.id})`)
+}
+
+/**
+ * 探测本机 Codex CLI 的 ChatGPT 登录状态，供渲染层在渠道表单中显式展示。
+ * 只返回可用性 / 账号 / 到期时间，绝不返回 token 本体。
+ */
+export function getCodexCliStatus(): CodexCliStatus {
+  const credentials = readCodexCliToken()
+  if (!credentials) return { available: false }
+  const alreadyConfigured = readConfig().channels.some(
+    (c) => c.provider === 'openai-codex' && c.credentialSource === 'codex-cli',
+  )
+  return {
+    available: true,
+    ...(credentials.accountId ? { accountId: credentials.accountId } : {}),
+    expiresAt: credentials.expires,
+    alreadyConfigured,
+  }
 }
 
 /**
@@ -626,6 +684,12 @@ export function persistCodexOAuthCredentials(channelId: string, credentials: Cod
     throw new Error(`Codex 渠道不存在或类型不匹配: ${channelId}`)
   }
 
+  // 凭据来源是本机 Codex CLI 时，token 由 CLI 独占维护：Proma 永不回写快照，
+  // 既避免持有/轮换 refresh token 与 CLI 互相踢登录，也不污染显式的来源标记。
+  if (channel.credentialSource === 'codex-cli') {
+    return
+  }
+
   const existing = parseCodexCredentials(decryptKey(channel.apiKey))
   const merged = {
     ...credentials,
@@ -643,6 +707,15 @@ export async function resolveCodexOAuthCredentials(channelId: string): Promise<C
   const channel = config.channels.find((c) => c.id === channelId)
   if (!channel) {
     throw new Error(`渠道不存在: ${channelId}`)
+  }
+
+  // 显式声明复用本机 Codex CLI 登录的渠道：apiKey 不存凭据，运行时实时读取
+  // ~/.codex/auth.json 的 access token（纯内存、不落库、不刷新）。仅这种来源走旁路，
+  // 绝不作用于常规 OAuth 渠道，避免应用内账号与 CLI 账号串用。
+  if (channel.credentialSource === 'codex-cli') {
+    const cliCredentials = readCodexCliToken()
+    if (cliCredentials) return cliCredentials
+    throw new Error('未检测到有效的本机 Codex CLI 登录，请先运行 codex login 或改用 ChatGPT 登录')
   }
 
   const credentials = parseCodexCredentials(decryptKey(channel.apiKey))
@@ -1155,24 +1228,28 @@ function createUnsupportedPlanQuota(provider: ProviderType, message: string): Ch
  */
 async function queryCodexPlanQuota(
   channelId: string,
-  serializedCredentials: string,
   proxyUrl?: string,
 ): Promise<ChannelPlanQuotaResult> {
-  const credentials = parseCodexCredentials(serializedCredentials)
-  if (!credentials) {
-    return createUnsupportedPlanQuota('openai-codex', 'ChatGPT 登录凭据无效或缺失，请重新登录')
+  // 统一经运行时凭据解析拿 access/accountId：常规 OAuth 渠道在此触发过期刷新，
+  // credentialSource='codex-cli' 渠道则实时读取 ~/.codex 令牌（其 apiKey 为空，
+  // 不能像旧实现那样以存储的 apiKey 作为凭据 gate，否则额度查询对 CLI 渠道恒失败）。
+  let credentials: CodexOAuthCredentials
+  try {
+    credentials = await resolveCodexOAuthCredentials(channelId)
+  } catch (error) {
+    return createUnsupportedPlanQuota(
+      'openai-codex',
+      error instanceof Error ? error.message : 'ChatGPT 登录凭据无效或缺失，请重新登录',
+    )
   }
 
-  const accessToken = await resolveCodexAccessToken(channelId)
-  // token 刷新时会把新凭据回写到 Channel，重新读取以取得可能更新的 accountId。
-  const activeCredentials = parseCodexCredentials(decryptApiKey(channelId)) ?? credentials
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${accessToken}`,
+    Authorization: `Bearer ${credentials.access}`,
     Accept: 'application/json',
     'User-Agent': getPromaUserAgent(pkg.version),
   }
-  if (activeCredentials.accountId) {
-    headers['ChatGPT-Account-Id'] = activeCredentials.accountId
+  if (credentials.accountId) {
+    headers['ChatGPT-Account-Id'] = credentials.accountId
   }
 
   try {
@@ -1749,7 +1826,7 @@ export async function getChannelPlanQuota(channelId: string): Promise<ChannelPla
       return await queryGithubCopilotPlanQuota(apiKey, proxyUrl)
     }
     if (provider === 'openai-codex') {
-      return await queryCodexPlanQuota(channelId, apiKey, proxyUrl)
+      return await queryCodexPlanQuota(channelId, proxyUrl)
     }
     if (provider === 'deepseek') {
       return await queryDeepSeekBalance(apiKey, channel.baseUrl, proxyUrl)
