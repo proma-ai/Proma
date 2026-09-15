@@ -5,10 +5,12 @@
  * 存储在 ~/.proma/user-profile.json
  */
 
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { BrowserWindow } from 'electron'
 import { getUserProfilePath } from './config-paths'
-import { DEFAULT_USER_AVATAR, DEFAULT_USER_NAME, USER_PROFILE_IPC_CHANNELS } from '../../types'
+import { writeJsonFileAtomic } from './safe-file'
+import { normalizeUserProfile } from '../../lib/user-profile'
+import { USER_PROFILE_IPC_CHANNELS } from '../../types'
 import type { UserProfile } from '../../types'
 
 /**
@@ -20,25 +22,15 @@ export function getUserProfile(): UserProfile {
   const filePath = getUserProfilePath()
 
   if (!existsSync(filePath)) {
-    return {
-      userName: DEFAULT_USER_NAME,
-      avatar: DEFAULT_USER_AVATAR,
-    }
+    return normalizeUserProfile(undefined)
   }
 
   try {
     const raw = readFileSync(filePath, 'utf-8')
-    const data = JSON.parse(raw) as Partial<UserProfile>
-    return {
-      userName: data.userName || DEFAULT_USER_NAME,
-      avatar: data.avatar || DEFAULT_USER_AVATAR,
-    }
+    return normalizeUserProfile(JSON.parse(raw))
   } catch (error) {
     console.error('[用户档案] 读取失败:', error)
-    return {
-      userName: DEFAULT_USER_NAME,
-      avatar: DEFAULT_USER_AVATAR,
-    }
+    return normalizeUserProfile(undefined)
   }
 }
 
@@ -49,15 +41,14 @@ export function getUserProfile(): UserProfile {
  */
 export function updateUserProfile(updates: Partial<UserProfile>): UserProfile {
   const current = getUserProfile()
-  const updated: UserProfile = {
-    ...current,
-    ...updates,
-  }
+  // 未提供的 PATCH 字段保留当前值；显式无效字段回退默认值。
+  // 保存、返回与广播同一份规范化数据，不能仅在下次读取时补默认值。
+  const updated = normalizeUserProfile({ ...current, ...updates })
 
   const filePath = getUserProfilePath()
 
   try {
-    writeFileSync(filePath, JSON.stringify(updated, null, 2), 'utf-8')
+    writeJsonFileAtomic(filePath, updated)
     console.log(`[用户档案] 已更新: ${updated.userName}`)
   } catch (error) {
     console.error('[用户档案] 写入失败:', error)

@@ -12,6 +12,7 @@ import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'node:fs'
 import { safeStorage, BrowserWindow } from 'electron'
 import { getCloudAuthPath } from './config-paths'
 import { updateUserProfile } from './user-profile-service'
+import { cloudUserToProfile } from '../../lib/user-profile'
 import {
   createApiClient,
   createAuthApi,
@@ -236,10 +237,7 @@ function toUserInfo(user: CloudUser): CloudUserInfo {
 /** 将 Cloud 用户信息同步到本地 user-profile.json（离线回退） */
 function syncCloudUserToLocalProfile(user: CloudUserInfo): void {
   try {
-    updateUserProfile({
-      userName: user.name,
-      avatar: user.image || user.avatar || undefined,
-    })
+    updateUserProfile(cloudUserToProfile(user))
     console.log('[Cloud Auth] 已同步 Cloud 用户档案到本地')
   } catch (error) {
     console.warn('[Cloud Auth] 同步本地用户档案失败:', error)

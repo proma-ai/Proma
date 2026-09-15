@@ -13,6 +13,7 @@ import React, { useEffect, useMemo, useRef } from 'react'
 import ReactDOM from 'react-dom/client'
 import { useSetAtom, useAtomValue, useStore } from 'jotai'
 import App from './App'
+import { AppErrorBoundary } from './components/app-shell/AppErrorBoundary'
 import {
   themeModeAtom,
   themeStyleAtom,
@@ -85,6 +86,7 @@ import { TabSwitcher } from './components/tabs/TabSwitcher'
 import { PromaLogo } from './lib/model-logo'
 import { ModelHealthInitializer } from './components/ModelHealthInitializer'
 import { cloudUserAtom, cloudAuthLoadingAtom, initializeCloudAuth } from './atoms/cloud-auth'
+import { normalizeUserProfile } from '../lib/user-profile'
 import { userProfileAtom } from './atoms/user-profile'
 import { billingInfoAtom, billingLoadingAtom, quotaExceededDialogAtom, initializeBilling } from './atoms/cloud-billing'
 import { LowCreditReminder } from './components/billing/LowCreditReminder'
@@ -621,12 +623,12 @@ function UserProfileInitializer(): null {
     // 先订阅再读取快照：若读取期间档案已更新，忽略可能过期的快照。
     const unsubscribe = window.electronAPI.onUserProfileChanged((profile) => {
       receivedChange = true
-      if (!disposed) setUserProfile(profile)
+      if (!disposed) setUserProfile(normalizeUserProfile(profile))
     })
 
     void window.electronAPI.getUserProfile()
       .then((profile) => {
-        if (!disposed && !receivedChange) setUserProfile(profile)
+        if (!disposed && !receivedChange) setUserProfile(normalizeUserProfile(profile))
       })
       .catch((error: unknown) => console.error('[用户档案] 加载失败:', error))
 
@@ -1237,7 +1239,9 @@ if (isQuickTaskWindow) {
       <VoiceDictationApp embedded />
       <GlobalShortcuts />
       <TabSwitcher />
-      <App />
+      <AppErrorBoundary>
+        <App />
+      </AppErrorBoundary>
     </React.StrictMode>
   )
 }
