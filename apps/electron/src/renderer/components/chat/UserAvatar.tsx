@@ -4,16 +4,21 @@
  * 对标 Cherry Studio 的 EmojiAvatar 设计：
  * - 支持 emoji 字符串（直接渲染文字）
  * - 支持 data:image/* URL（渲染为图片）
+ * - Windows 默认头像使用人物矢量图标，避免组合 emoji 分离显示
  * - 可配置大小
  * - 圆角 20%，柔和边框
  */
 
 import * as React from 'react'
+import { UserRound } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { detectIsWindows } from '@/lib/platform'
+import { normalizeUserAvatar } from '../../../lib/user-profile'
+import { DEFAULT_USER_AVATAR } from '../../../types/user-profile'
 
 interface UserAvatarProps {
   /** 头像内容（emoji 字符串 或 data:image/* URL） */
-  avatar: string
+  avatar?: string | null
   /** 尺寸（像素），默认 35 */
   size?: number
   className?: string
@@ -32,8 +37,9 @@ export function UserAvatar({
   onClick,
 }: UserAvatarProps): React.ReactElement {
   const fontSize = Math.round(size * 0.5)
+  const safeAvatar = normalizeUserAvatar(avatar)
 
-  if (isImageUrl(avatar)) {
+  if (isImageUrl(safeAvatar)) {
     return (
       <div
         className={cn(
@@ -45,7 +51,7 @@ export function UserAvatar({
         onClick={onClick}
       >
         <img
-          src={avatar}
+          src={safeAvatar}
           alt="用户头像"
           className="size-full object-cover"
         />
@@ -53,7 +59,8 @@ export function UserAvatar({
     )
   }
 
-  // emoji 渲染
+  // 仅替换 Windows 的默认值：不改变存储格式，自定义 emoji 和图片仍按原样展示。
+  const useDefaultIcon = safeAvatar === DEFAULT_USER_AVATAR && detectIsWindows()
   return (
     <div
       className={cn(
@@ -65,7 +72,15 @@ export function UserAvatar({
       style={{ width: size, height: size, fontSize }}
       onClick={onClick}
     >
-      {avatar}
+      {useDefaultIcon ? (
+        <UserRound
+          size={Math.round(size * 0.55)}
+          strokeWidth={1.75}
+          className="shrink-0 text-foreground/60"
+          role="img"
+          aria-label="默认用户头像"
+        />
+      ) : safeAvatar}
     </div>
   )
 }
