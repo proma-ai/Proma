@@ -62,6 +62,8 @@ export interface BridgeCommandHandlerConfig {
   onWorkspaceSwitched?: (workspaceId: string) => void
   /** 可选持久化存储：用于跨应用重启恢复 chatId → sessionId 绑定 */
   bindingStore?: BridgeChatBindingStore
+  /** 仅改变传给 Agent 的文本；会话中仍保存未经处理的原始消息。 */
+  transformAgentInput?: (message: string) => string
 }
 
 /** 通用聊天绑定 */
@@ -777,11 +779,14 @@ export class BridgeCommandHandler {
       ? buildAttachedFilesBlock(attachments.map(a => ({ label: a.label, path: a.absolutePath })))
       : ''
     const effectiveText = text.trim() || (attachments?.length ? '请查看上面附加的文件。' : '')
-    const userMessage = fileReferences + effectiveText
+    // 会话中保留原始外部文本；平台可仅对 Agent 输入追加来源标记，避免污染用户可见消息。
+    const rawUserMessage = fileReferences + effectiveText
+    const userMessage = this.config.transformAgentInput?.(rawUserMessage) ?? rawUserMessage
 
     const input = {
       sessionId: binding.sessionId,
       userMessage,
+      rawUserMessage,
       channelId: latestChannelId,
       modelId,
       workspaceId: binding.workspaceId,

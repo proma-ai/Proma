@@ -28,6 +28,8 @@ import * as crypto from 'node:crypto'
 import QRCode from 'qrcode'
 
 import { redactSensitiveLogText, redactSensitiveLogValue } from './bridge-log-redaction'
+import { assertWeChatSendSucceeded } from './wechat-api-utils'
+import { appendWeChatAgentSourceMarker } from './wechat-agent-input'
 
 // ===== iLink API 常量 =====
 
@@ -105,7 +107,8 @@ interface GetUpdatesResponse {
 }
 
 interface SendMessageResponse {
-  ret: number
+  ret?: number
+  errcode?: number
   errmsg?: string
 }
 
@@ -188,7 +191,7 @@ class ILinkClient {
 
   /** 发送消息 */
   async sendMessage(toUserId: string, items: WeChatMessageItem[], contextToken: string): Promise<SendMessageResponse> {
-    return this.post<SendMessageResponse>('/ilink/bot/sendmessage', {
+    const response = await this.post<SendMessageResponse>('/ilink/bot/sendmessage', {
       msg: {
         from_user_id: this.botId,
         to_user_id: toUserId,
@@ -200,6 +203,8 @@ class ILinkClient {
       },
       base_info: {},
     }, SEND_TIMEOUT_MS)
+    assertWeChatSendSucceeded(response)
+    return response
   }
 
   /** 发送文本消息（便捷方法） */
@@ -412,6 +417,7 @@ class WeChatBridge {
     },
     getDefaultWorkspaceId: () => getWeChatConfig().defaultWorkspaceId,
     bindingStore: createJsonBridgeChatBindingStore(getWeChatBindingsPath(), '微信 Bridge'),
+    transformAgentInput: appendWeChatAgentSourceMarker,
     onWorkspaceSwitched: (workspaceId) => updateWeChatDefaultWorkspace(workspaceId),
   })
 

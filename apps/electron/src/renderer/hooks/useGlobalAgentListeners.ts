@@ -84,6 +84,7 @@ import type { AgentStreamEvent, AgentStreamCompletePayload, AgentEvent, AgentStr
 import { inferContextWindow } from '@proma/shared'
 import {
   buildExternalAgentRunActivation,
+  createExternalAgentRunUserMessage,
   shouldActivateExternalAgentRun,
   shouldRevealDelegatedSession,
 } from '@/lib/external-agent-run'
@@ -754,6 +755,20 @@ export function useGlobalAgentListeners(): void {
           map.set(event.sessionId, activation.streamState)
           return map
         })
+
+        // 外部消息已先在主进程持久化；把同一 UUID 的原文加入 live 消息，
+        // 让当前已打开的会话无需等待完整刷新也能立即看见微信输入。
+        const externalUserMessage = createExternalAgentRunUserMessage(event)
+        if (externalUserMessage) {
+          store.set(liveMessagesMapAtom, (prev) => {
+            const current = prev.get(event.sessionId) ?? []
+            const incomingUuid = (externalUserMessage as unknown as { uuid?: string }).uuid
+            if (current.some((message) => (message as unknown as { uuid?: string }).uuid === incomingUuid)) return prev
+            const map = new Map(prev)
+            map.set(event.sessionId, [...current, externalUserMessage])
+            return map
+          })
+        }
 
         // 协作子 Agent 仅在用户正查看其父会话时才自动展开到右侧工作区。
         // 后台父会话派生子会话时，仍更新运行状态和侧栏树，但不能抢走用户焦点。
