@@ -17,7 +17,8 @@ export function useEnterpriseSkillsAvailability(): {
   const cloudUser = useAtomValue(cloudUserAtom)
   const billing = useAtomValue(billingInfoAtom)
   const billingLoading = useAtomValue(billingLoadingAtom)
-  const skills = billing?.enterprise?.capabilities.skills
+  // 新旧账单响应交替期间，enterprise 可能存在但尚未带 capabilities；默认禁用入口而非中断 SidePanel 渲染。
+  const skills = billing?.enterprise?.capabilities?.skills
 
   return {
     loading: cloudUser !== null && (billingLoading || billing === null),
