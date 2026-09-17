@@ -189,6 +189,7 @@ import {
   fetchModels,
   getChannelById,
   getChannelPlanQuota,
+  getCodexCliStatus,
 } from './lib/channel-manager'
 import { loginCodexOAuth, cancelCodexOAuthLogin } from './lib/codex-oauth-service'
 import { loginGithubCopilotOAuth, cancelGithubCopilotOAuthLogin } from './lib/github-copilot-oauth-service'
@@ -1790,6 +1791,15 @@ export function registerIpcHandlers(): void {
     CHANNEL_IPC_CHANNELS.GET_PLAN_QUOTA,
     async (_, channelId: string): Promise<import('@proma/shared').ChannelPlanQuotaResult> => {
       return getChannelPlanQuota(channelId)
+    }
+  )
+
+  // 探测本机 Codex CLI 的 ChatGPT 登录状态（只读、无副作用、不返回 token），
+  // 供渠道表单决定是否展示「使用本机已登录的 Codex 账号」入口。
+  ipcMain.handle(
+    CHANNEL_IPC_CHANNELS.GET_CODEX_CLI_STATUS,
+    async (): Promise<import('@proma/shared').CodexCliStatus> => {
+      return getCodexCliStatus()
     }
   )
 

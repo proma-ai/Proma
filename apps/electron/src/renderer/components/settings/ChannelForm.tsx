@@ -41,8 +41,10 @@ import {
 import type {
   Channel,
   ChannelCreateInput,
+  ChannelCredentialSource,
   ChannelModel,
   ChannelTestResult,
+  CodexCliStatus,
   CodexOAuthDeviceCode,
   GithubCopilotOAuthDeviceCode,
   FetchModelsResult,
@@ -236,6 +238,12 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
   const [pendingRiskAction, setPendingRiskAction] = React.useState<'auto-save' | 'create' | 'fetch' | 'save-and-close' | 'test' | null>(null)
   const [codexLoggingIn, setCodexLoggingIn] = React.useState(false)
   const [codexDeviceCode, setCodexDeviceCode] = React.useState<CodexOAuthDeviceCode | null>(null)
+  /** 当前编辑/新建渠道的凭据来源：'codex-cli' 表示复用本机 Codex CLI 登录；null 为常规 OAuth/API Key。 */
+  const [credentialSource, setCredentialSource] = React.useState<ChannelCredentialSource | null>(
+    channel?.credentialSource ?? null,
+  )
+  /** 本机 Codex CLI 登录探测结果（仅在 codex provider 下加载），用于显式展示可复用的账号。 */
+  const [codexCliStatus, setCodexCliStatus] = React.useState<CodexCliStatus | null>(null)
   const [githubCopilotLoggingIn, setGithubCopilotLoggingIn] = React.useState(false)
   const [githubCopilotDeviceCode, setGithubCopilotDeviceCode] = React.useState<GithubCopilotOAuthDeviceCode | null>(null)
   const [githubCopilotEnterpriseUrl, setGithubCopilotEnterpriseUrl] = React.useState('')
@@ -297,12 +305,27 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
     }
   }, [isEdit, channel, apiKeyLoaded])
 
+  /** codex provider 下探测本机 Codex CLI 登录，供「复用本机已登录账号」入口展示。 */
+  React.useEffect(() => {
+    if (provider !== 'openai-codex') {
+      setCodexCliStatus(null)
+      return
+    }
+    let cancelled = false
+    window.electronAPI.getCodexCliStatus()
+      .then((status) => { if (!cancelled) setCodexCliStatus(status) })
+      .catch(() => { if (!cancelled) setCodexCliStatus({ available: false }) })
+    return () => { cancelled = true }
+  }, [provider])
+
   const isZhipuTeamProvider = provider === 'zhipu-coding-team'
   const isCodexProvider = provider === 'openai-codex'
   const isGithubCopilotProvider = provider === 'github-copilot'
   const isXaiProvider = provider === 'xai'
   const isSubscriptionProvider = isCodexProvider || isGithubCopilotProvider || isXaiProvider
   const effectiveApiKey = isZhipuTeamProvider ? buildZhipuTeamSecret(zhipuTeamSecret) : apiKey
+  // codex 复用本机 Codex CLI 登录：apiKey 留空，凭据运行时实时读取，无需应用内 OAuth。
+  const isCodexCliMode = isCodexProvider && credentialSource === 'codex-cli'
   // 订阅渠道的 apiKey state 存的是登录后拿到的凭据 JSON；能解析出有效凭据即视为已登录。
   const codexCredentials = isCodexProvider ? parseCodexCredentials(apiKey) : null
   const githubCopilotCredentials = isGithubCopilotProvider ? parseGithubCopilotCredentials(apiKey) : null
@@ -310,7 +333,7 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
   const hasRequiredSecret = isZhipuTeamProvider
     ? Boolean(zhipuTeamSecret.apiKey.trim())
     : isCodexProvider
-      ? Boolean(codexCredentials)
+      ? (Boolean(codexCredentials) || isCodexCliMode)
       : isGithubCopilotProvider
         ? Boolean(githubCopilotCredentials)
         : isXaiProvider
@@ -340,6 +363,7 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
     currentBaseUrl: string,
     currentApiKey: string,
     currentEnabled: boolean,
+    currentCredentialSource: ChannelCredentialSource | null,
   ) => {
     if (!isEdit || !channel) return
     try {
@@ -350,6 +374,10 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
         apiKey: currentApiKey || undefined,
         models: currentModels,
         enabled: currentEnabled,
+        // codex-cli 来源透传；常规渠道传 undefined（写入真实凭据时服务端会自动清掉旧标记）。
+        ...(currentProvider === 'openai-codex' && currentCredentialSource === 'codex-cli'
+          ? { credentialSource: 'codex-cli' as const }
+          : {}),
       })
       toast.success('已保存', { id: 'auto-save-success' })
     } catch (error) {
@@ -367,11 +395,12 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
     nextApiKey: string,
     nextEnabled: boolean,
     requiresRiskAcknowledgement: boolean,
+    nextCredentialSource: ChannelCredentialSource | null,
   ) => {
     if (!isEdit || !initializedRef.current || requiresRiskAcknowledgement) return
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
     autoSaveTimerRef.current = setTimeout(() => {
-      doAutoSave(nextModels, nextName, nextProvider, nextBaseUrl, nextApiKey, nextEnabled)
+      doAutoSave(nextModels, nextName, nextProvider, nextBaseUrl, nextApiKey, nextEnabled, nextCredentialSource)
     }, AUTO_SAVE_DELAY)
   }, [isEdit, doAutoSave])
 
@@ -397,9 +426,10 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
       effectiveApiKey,
       enabled,
       requiresBaseUrlRiskAcknowledgement,
+      credentialSource,
     )
     return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current) }
-  }, [models, name, provider, baseUrl, effectiveApiKey, enabled, requiresBaseUrlRiskAcknowledgement, scheduleAutoSave])
+  }, [models, name, provider, baseUrl, effectiveApiKey, enabled, requiresBaseUrlRiskAcknowledgement, credentialSource, scheduleAutoSave])
 
   // 切换供应商时自动更新 Base URL 与名称，并为支持的渠道自动添加预设模型
   const handleProviderChange = (newProvider: string): void => {
@@ -410,6 +440,8 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
       setName(PROVIDER_LABELS[p])
     }
     setProvider(p)
+    // credentialSource 只属于 codex：切到其它供应商时重置，避免切回 codex 误落 CLI 模式。
+    if (p !== 'openai-codex') setCredentialSource(null)
     setBaseUrl(PROVIDER_DEFAULT_URLS[p])
     setAcknowledgedBaseUrl(normalizeBaseUrl(PROVIDER_DEFAULT_URLS[p]))
     setTestResult(null)
@@ -555,6 +587,7 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
       }
       const credentials = result.credentials
       // 凭据 JSON 已含 accountId，写入 apiKey 后由 codexCredentials 派生展示，无需单独 state。
+      setCredentialSource(null)
       setApiKey(credentials)
 
       // codex 模型是 Pi SDK 内置目录、不依赖凭据/baseUrl。登录后自动拉取并全部启用。
@@ -597,6 +630,60 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
       codexLoggingInRef.current = false
       setCodexLoggingIn(false)
     }
+  }
+
+  /**
+   * 显式复用本机 Codex CLI 已登录的 ChatGPT 账号：不在 Proma 内走 OAuth，
+   * apiKey 留空、标记 credentialSource='codex-cli'，运行时实时读取 ~/.codex 令牌。
+   * 新建模式选择即明确保存意图（与 ChatGPT OAuth 登录同一处理）；编辑模式交给 auto-save。
+   */
+  const handleUseCodexCli = async (): Promise<void> => {
+    if (!codexCliStatus?.available) return
+    // 全系统至多一个 codex-cli 渠道（同一份 ~/.codex 登录，重复无意义）；已存在则直接拒绝。
+    if (codexCliStatus.alreadyConfigured) return
+    setCredentialSource('codex-cli')
+    setApiKey('')
+    setTestResult(null)
+
+    // codex 模型是 Pi SDK 内置目录、纯本地拉取，不依赖凭据。
+    let codexModels: ChannelModel[] = models
+    try {
+      const modelsResult = await window.electronAPI.fetchModels({ provider, baseUrl, apiKey: '' })
+      setFetchResult(modelsResult)
+      if (modelsResult.success && modelsResult.models.length > 0) {
+        codexModels = modelsResult.models.map((m) => ({ ...m, enabled: true }))
+        setModels(codexModels)
+      }
+    } catch (modelErr) {
+      console.error('[模型配置表单] 拉取 ChatGPT 模型失败:', modelErr)
+    }
+
+    if (isEdit) {
+      toast.success('已切换为复用本机 Codex CLI 登录')
+      return
+    }
+    try {
+      const saved = await window.electronAPI.createChannel({
+        name: name.trim() || PROVIDER_LABELS['openai-codex'],
+        provider,
+        baseUrl,
+        apiKey: '',
+        credentialSource: 'codex-cli',
+        models: codexModels,
+        enabled,
+      })
+      toast.success('ChatGPT 渠道已创建（复用本机 Codex CLI 登录）')
+      onSaved(saved)
+    } catch (error) {
+      console.error('[模型配置表单] 创建 Codex CLI 渠道失败:', error)
+      toast.error('渠道创建失败，请重试')
+    }
+  }
+
+  /** 从「复用本机 Codex CLI」切回应用内 ChatGPT OAuth 登录。 */
+  const handleCodexCliToOAuth = (): void => {
+    setCredentialSource(null)
+    setApiKey('')
   }
 
   const handleCancelGithubCopilotLogin = (): void => {
@@ -837,6 +924,7 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
         apiKey: effectiveApiKey,
         models,
         enabled,
+        ...(isCodexCliMode ? { credentialSource: 'codex-cli' as const } : {}),
       }
       const savedChannel = await window.electronAPI.createChannel(input)
       toast.success('渠道创建成功')
@@ -848,7 +936,7 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
     } finally {
       setSaving(false)
     }
-  }, [name, provider, baseUrl, effectiveApiKey, hasRequiredSecret, models, enabled])
+  }, [name, provider, baseUrl, effectiveApiKey, hasRequiredSecret, models, enabled, isCodexCliMode])
 
   /** 显示第三方 Base URL 风险确认。 */
   const requestBaseUrlRiskAcknowledgement = (action: 'auto-save' | 'create' | 'fetch' | 'save-and-close' | 'test' | null): void => {
@@ -1068,6 +1156,30 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
             </div>
             {isCodexProvider ? (
               <div className="space-y-2">
+                {isCodexCliMode ? (
+                  <>
+                    <div className="flex items-center gap-1.5 text-xs text-emerald-600">
+                      <CheckCircle2 size={12} className="shrink-0" />
+                      <span>
+                        复用本机 Codex CLI 登录{codexCliStatus?.accountId ? `（账号 ${codexCliStatus.accountId.slice(0, 8)}…）` : ''}
+                        {codexCliStatus?.expiresAt ? `，令牌有效期至 ${new Date(codexCliStatus.expiresAt).toLocaleDateString()}` : ''}
+                      </span>
+                    </div>
+                    {!codexCliStatus?.available && (
+                      <div className="text-xs text-amber-600">当前未检测到有效的本机 Codex CLI 登录，请先在终端运行 codex login。</div>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      type="button"
+                      onClick={handleCodexCliToOAuth}
+                      className="w-full text-muted-foreground"
+                    >
+                      改用 ChatGPT 账号登录
+                    </Button>
+                  </>
+                ) : (
+                  <>
                 <Button
                   variant="outline"
                   size="sm"
@@ -1107,6 +1219,27 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
                     <span>已登录 ChatGPT 订阅{codexCredentials?.accountId ? `（账号 ${codexCredentials.accountId.slice(0, 8)}…）` : ''}</span>
                   </div>
                 ) : <div className="text-xs text-muted-foreground">Proma 会代理 token 请求；系统浏览器授权页仍需使用可访问 OpenAI 的网络。可改用设备码并在另一台设备完成授权。</div>}
+                {codexCliStatus?.available && !hasRequiredSecret && (
+                  codexCliStatus.alreadyConfigured ? (
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <CheckCircle2 size={12} className="shrink-0" />
+                      <span>已添加复用本机 Codex CLI 的渠道，无需重复创建</span>
+                    </div>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      type="button"
+                      onClick={() => void handleUseCodexCli()}
+                      disabled={codexLoggingIn}
+                      className="w-full text-muted-foreground"
+                    >
+                      使用本机已登录的 Codex 账号（免浏览器授权）
+                    </Button>
+                  )
+                )}
+                  </>
+                )}
               </div>
             ) : isGithubCopilotProvider ? (
               <div className="space-y-2">
