@@ -219,6 +219,8 @@ async function initializeOfficialChannelForLogin(): Promise<void> {
   } catch (error) {
     console.warn('[Cloud Auth] 登录后初始化官方渠道或 system key 失败，将在后续请求中重试:', error)
   }
+
+  // 通知由 Renderer 在认证状态变化后立即拉取；无需建立常驻连接。
 }
 
 // ===== CloudUser → CloudUserInfo 转换 =====

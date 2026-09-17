@@ -71,3 +71,14 @@ export function createFallbackTitle(userMessage: string): string | null {
 
   return cleaned.slice(0, MAX_TITLE_LENGTH) || null
 }
+
+/**
+ * 外部 Bridge 的标题请求失败时才使用首条用户消息兜底；普通桌面会话沿用原有行为。
+ */
+export function resolveAutoTitle(
+  generatedTitle: string | null,
+  userMessage: string,
+  fallbackToUserMessage: boolean,
+): string | null {
+  return generatedTitle ?? (fallbackToUserMessage ? createFallbackTitle(userMessage) : null)
+}

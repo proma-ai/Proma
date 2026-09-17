@@ -86,6 +86,7 @@ import { TabSwitcher } from './components/tabs/TabSwitcher'
 import { PromaLogo } from './lib/model-logo'
 import { ModelHealthInitializer } from './components/ModelHealthInitializer'
 import { cloudUserAtom, cloudAuthLoadingAtom, initializeCloudAuth } from './atoms/cloud-auth'
+import { cloudNotificationsAtom, initializeCloudNotifications } from './atoms/cloud-notifications'
 import { normalizeUserProfile } from '../lib/user-profile'
 import { userProfileAtom } from './atoms/user-profile'
 import { billingInfoAtom, billingLoadingAtom, quotaExceededDialogAtom, initializeBilling } from './atoms/cloud-billing'
@@ -692,6 +693,20 @@ function CloudInitializer(): null {
   return null
 }
 
+function CloudNotificationsInitializer(): null {
+  const cloudUser = useAtomValue(cloudUserAtom)
+  const setNotifications = useSetAtom(cloudNotificationsAtom)
+
+  useEffect(() => {
+    // 登出或账号切换时立即清空内存队列，避免下一个账号看到前一账号的公告。
+    setNotifications([])
+    if (!isCloudMode() || !cloudUser) return
+    return initializeCloudNotifications(setNotifications)
+  }, [cloudUser?.id, setNotifications])
+
+  return null
+}
+
 function AutomationInitializer(): null {
   const setAutomations = useSetAtom(automationsAtom)
   const setAgentSessions = useSetAtom(agentSessionsAtom)
@@ -1218,6 +1233,7 @@ if (isQuickTaskWindow) {
       <ThemeInitializer />
       <UserProfileInitializer />
       <CloudInitializer />
+      <CloudNotificationsInitializer />
       <LowCreditReminder />
       <ModelHealthInitializer />
       <AgentSettingsInitializer />

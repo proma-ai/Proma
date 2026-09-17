@@ -1176,9 +1176,11 @@ export interface ElectronAPI {
 
   // ===== Cloud 实时通知相关 =====
 
-  /** Cloud 通知 API（仅暴露读取和确认，不暴露认证令牌） */
+  /** Cloud 通知 API（仅暴露读取、确认与订阅，不暴露认证令牌） */
   cloudNotifications: {
+    /** 获取当前用户未确认的通知 */
     getPending: () => Promise<CloudNotificationIpcResponse<CloudNotification[]>>
+    /** 确认一条通知 */
     acknowledge: (notificationId: string) => Promise<CloudNotificationIpcResponse<void>>
   }
 

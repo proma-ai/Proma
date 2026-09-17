@@ -136,11 +136,13 @@ export class BridgeCommandHandler {
 
     const workspaceId = this.resolveValidWorkspaceId(settings.agentWorkspaceId)
 
+    // 保持默认标题，让首条外部消息复用 Agent 编排器的统一自动命名流程。
+    // 平台来源由 binding 保存，不能作为会话标题，否则会被视为用户已命名。
     const session = createAgentSession(
-      `${this.config.platformName}会话`,
+      undefined,
       channelId,
       workspaceId || undefined,
-      undefined
+      undefined,
     )
 
     const binding: BridgeChatBinding = {

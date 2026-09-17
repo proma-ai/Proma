@@ -86,7 +86,7 @@ import { isVisibleRunMessage } from './agent-run-message-visibility'
 import { resolvePiThinkingLevel } from './agent-thinking-level'
 import { resolvePiReasoningCapability } from './adapters/pi-model-registry'
 import { generateCodexTitle } from './adapters/pi-codex-title-generator'
-import { createFallbackTitle, sanitizeGeneratedTitle, TITLE_PROMPT } from './title-generation'
+import { createFallbackTitle, resolveAutoTitle, sanitizeGeneratedTitle, TITLE_PROMPT } from './title-generation'
 import { claimWorkspaceMemoryRefreshOpportunity } from './agent-memory-refresh-service'
 import { browserController } from './browser-controller'
 import { resolveRuntimeAdditionalDirectories } from './agent-orchestrator-vault-access'
@@ -447,6 +447,7 @@ export class AgentOrchestrator {
     channelId: string,
     modelId: string,
     callbacks: SessionCallbacks,
+    fallbackToUserMessage: boolean,
     signal?: AbortSignal,
   ): Promise<void> {
     if (signal?.aborted) return
@@ -467,8 +468,10 @@ export class AgentOrchestrator {
         updateAgentSessionMeta(sessionId, { explorationTitleInitializedAt })
       }
 
-      const title = await this.generateTitle({ userMessage, channelId, modelId }, signal)
-        ?? (isFirstExplorationMessage ? createFallbackTitle(userMessage) : null)
+      const generatedTitle = await this.generateTitle({ userMessage, channelId, modelId }, signal)
+      const title = isDefaultSessionTitle
+        ? resolveAutoTitle(generatedTitle, userMessage, fallbackToUserMessage)
+        : generatedTitle ?? createFallbackTitle(userMessage)
       if (!title || signal?.aborted) return
 
       // 标题请求是异步的；请求期间用户可能已手动重命名，不能用旧结果覆盖。
@@ -1671,7 +1674,15 @@ export class AgentOrchestrator {
 
         // 标题请求与前台 Agent run 使用独立的 Codex Responses 请求，可并发执行。
         // 自动标题只会写入仍为默认名称的会话，因此不会覆盖用户的手动重命名。
-        this.autoGenerateTitle(sessionId, userMessage, channelId, resolvedModel, callbacks)
+        // 标题优先基于用户原文；Bridge 追加的来源标记等 Agent 运行上下文不应出现在标题中。
+        this.autoGenerateTitle(
+          sessionId,
+          rawUserMessage ?? userMessage,
+          channelId,
+          resolvedModel,
+          callbacks,
+          input.triggeredBy === 'external' && !automationContext,
+        )
           .catch((err) => console.error('[Agent 编排] 标题生成未捕获异常:', err))
       }
       const handleSessionId = (sdkSessionId: string, piSessionFile?: string): void => {
@@ -1699,8 +1710,6 @@ export class AgentOrchestrator {
             console.error(`[Agent 编排] 保存 Pi session_id 失败:`, err)
           }
         }
-
-        startAutoTitleGeneration()
       }
       const handleModelResolved = (model: string): void => {
         // `[1m]` 是 SDK 内部上下文变体，不应泄漏到标题生成或用户可见的模型名。
@@ -1828,6 +1837,10 @@ export class AgentOrchestrator {
           this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'retry', ...retry } })
         },
       }
+
+      // 首条用户消息已持久化且运行参数已就绪，立刻启动自动命名。
+      // 不依赖 Pi onSessionId：部分第三方渠道在该回调延迟或缺失时仍必须完成重命名。
+      startAutoTitleGeneration()
 
       console.log(`[Agent 编排] 开始通过 Adapter 遍历事件流...`)
 
