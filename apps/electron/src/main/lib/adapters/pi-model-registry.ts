@@ -13,8 +13,8 @@ import {
   inferContextWindow,
   inferCodexAlignedGPT5ContextWindow,
   getGeminiModelCapability,
+  getPromaOfficialClaudeCapabilityFamily,
   isGpt6AstraFamily,
-  resolvePromaOfficialModelCapabilityId,
   resolveReasoningCapability,
   resolveReasoningProfile,
   type CodexOAuthCredentials,
@@ -646,6 +646,20 @@ async function findPiCatalogModel(provider: ProviderType, modelId: string): Prom
       if (model) return model
     }
   }
+
+  // 官方渠道的 Claude 数字 SKU 没有 Pi catalog 条目时，才按确认过的能力家族
+  // 寻找基准条目。它不是请求 ID 改写，且不影响第三方渠道、Fable 或未知版本。
+  const officialClaudeCapabilityFamily = provider === 'proma'
+    ? getPromaOfficialClaudeCapabilityFamily(modelId)
+    : undefined
+  if (officialClaudeCapabilityFamily) {
+    for (const candidate of fallbackProviders) {
+      const models = await getCatalogModels(candidate)
+      const model = findCatalogModelById(models, officialClaudeCapabilityFamily)
+        ?? findClaudeCatalogModel(models, officialClaudeCapabilityFamily)
+      if (model) return model
+    }
+  }
   return undefined
 }
 
@@ -751,14 +765,11 @@ export async function resolvePiReasoningCapability(
   modelApiProtocol?: PiAgentQueryOptions['modelApiProtocol'],
 ): Promise<ReasoningCapability | undefined> {
   const resolvedModelId = stripLegacyAgentSdkContextSuffix(modelId)
-  const resolvedCapabilityModelId = provider === 'proma'
-    ? resolvePromaOfficialModelCapabilityId(resolvedModelId) ?? resolvedModelId
-    : resolvedModelId
-  const catalogModel = resolvedCapabilityModelId
-    ? await findPiCatalogModel(provider, resolvedCapabilityModelId)
+  const catalogModel = resolvedModelId
+    ? await findPiCatalogModel(provider, resolvedModelId)
     : undefined
   const profile = resolveReasoningProfile({
-    modelId: resolvedCapabilityModelId,
+    modelId: resolvedModelId,
     transport: provider === 'openai-codex' || provider === 'xai'
       ? 'openai-responses'
       : toReasoningTransport(resolvePiApi(provider, catalogModel?.api, resolvedModelId, modelApiProtocol)),
@@ -773,17 +784,15 @@ export async function resolvePiReasoningCapability(
 }
 
 async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiModelDefaults> {
-  // 折扣别名保持 `input.model` 作为请求 ID，仅从商业版内置的基准模型继承 reasoning 协议。
-  const capabilityModelId = input.provider === 'proma'
-    ? resolvePromaOfficialModelCapabilityId(input.model) ?? input.model
-    : input.model
-  const catalogModel = capabilityModelId ? await findPiCatalogModel(input.provider, capabilityModelId) : undefined
+  // 精确匹配优先；官方 Claude 数字 SKU 仅在 catalog 缺失时按能力家族回退。
+  // `input.model` 始终是最终注册及实际请求所使用的模型 ID。
+  const catalogModel = input.model ? await findPiCatalogModel(input.provider, input.model) : undefined
   // Proma 后端下发的规格优先于本地目录和通用推断。
   const configuredContextWindow = positiveInteger(input.modelContextWindow)
   const configuredMaxTokens = positiveInteger(input.modelMaxOutputTokens)
   const codexAlignedCapabilities = getCodexAlignedGPT5Capabilities(input.model)
   const api = resolvePiApi(input.provider, catalogModel?.api, input.model, input.modelApiProtocol)
-  const providerSpecificCapabilities = compilePiReasoningCapabilities(api, capabilityModelId)
+  const providerSpecificCapabilities = compilePiReasoningCapabilities(api, input.model)
   const glmModelId = input.model?.toLowerCase()
   const isVolcengineGlm5x = (input.provider === 'doubao' || input.provider === 'doubao-api' || input.provider === 'ark-coding-plan')
     && (glmModelId === 'glm-5.2' || glmModelId === 'glm-5.3')
@@ -795,8 +804,8 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
   // transport 或 catalog 标记，也不得继承 Claude 的 adaptive-thinking 请求形态。
   // 同时传入 modelId，接收上游为 Pi catalog 暂未收录的 Fable 5.1 增加的 adaptive-thinking 兼容。
   const shouldForceAdaptiveThinking = input.provider === 'proma'
-    ? shouldForcePromaOfficialClaudeAdaptiveThinking(capabilityModelId, api, catalogModel)
-    : shouldForcePiAdaptiveThinking(api, catalogModel, capabilityModelId)
+    ? shouldForcePromaOfficialClaudeAdaptiveThinking(input.model, api, catalogModel)
+    : shouldForcePiAdaptiveThinking(api, catalogModel, input.model)
   return {
     api,
     reasoning: catalogModel?.reasoning ?? true,

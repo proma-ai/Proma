@@ -117,7 +117,8 @@ export function detectThinkingCapability(
   }
 
   // Claude Opus 4.7+ / Fable 5：adaptive 唯一模式。
-  // 调用方会先将官方折扣别名归一化，故这里仅匹配规范模型家族。
+  // startsWith 只接受完整 ID 或连字符后缀，因此官方数字 SKU 可直接命中，
+  // 也不会将 claude-opus-50 等不同家族误判为 Opus 5。
   if (
     startsWith(modelId, 'claude-opus-4-7')
     || startsWith(modelId, 'claude-opus-4-8')

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { isGpt6AstraFamily, resolvePromaOfficialModelCapabilityId } from './model-family'
+import { getPromaOfficialClaudeCapabilityFamily, isGpt6AstraFamily } from './model-family'
 
 describe('GPT-6 Astra model family', () => {
   test.each([
@@ -19,14 +19,26 @@ describe('GPT-6 Astra model family', () => {
     })
 })
 
-describe('Proma official discount model capabilities', () => {
+describe('Proma official Claude capability families', () => {
   test.each([
+    ['claude-opus-5', 'claude-opus-5'],
     ['claude-opus-5-1', 'claude-opus-5'],
+    ['claude-opus-5-12', 'claude-opus-5'],
     ['claude-opus-4-8-1', 'claude-opus-4-8'],
     ['claude-sonnet-5-1', 'claude-sonnet-5'],
-    ['claude-fable-5-1', 'claude-fable-5-1'],
-    ['gpt-5.6-terra-2', 'gpt-5.6-terra-2'],
-  ])('resolves %s to the capability baseline %s', (modelId, expected) => {
-    expect(resolvePromaOfficialModelCapabilityId(modelId)).toBe(expected)
+    ['CLAUDE-SONNET-5-9[1m]', 'claude-sonnet-5'],
+  ] as const)('recognizes %s as %s', (modelId, expected) => {
+    expect(getPromaOfficialClaudeCapabilityFamily(modelId)).toBe(expected)
+  })
+
+  test.each([
+    'claude-fable-5-1',
+    'claude-opus-5-latest',
+    'claude-opus-50-1',
+    'claude-sonnet-5-1-beta',
+    'gpt-5.6-terra-2',
+    undefined,
+  ])('does not infer an official capability family for %s', (modelId) => {
+    expect(getPromaOfficialClaudeCapabilityFamily(modelId)).toBeUndefined()
   })
 })

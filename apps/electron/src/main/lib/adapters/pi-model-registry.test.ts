@@ -65,6 +65,7 @@ describe('shouldForcePiAdaptiveThinking', () => {
 describe('official discount model reasoning capability', () => {
   test.each([
     'claude-opus-5-1',
+    'claude-opus-5-12',
     'claude-opus-4-8-1',
     'claude-sonnet-5-1',
   ])('uses %s request ID with catalog reasoning metadata', async (modelId) => {
@@ -80,7 +81,7 @@ describe('official discount model reasoning capability', () => {
 })
 
 describe('official discount model runtime registration', () => {
-  test('registers the selected discount ID with the base model adaptive contract', async () => {
+  test('registers a family SKU request ID with the catalog adaptive contract', async () => {
     let registeredModel: Record<string, unknown> | undefined
     const sdk = {
       ModelRuntime: {
@@ -98,7 +99,7 @@ describe('official discount model runtime registration', () => {
     const { model } = await buildModel(sdk, {
       sessionId: 'discount-model-test',
       prompt: 'ping',
-      model: 'claude-opus-5-1',
+      model: 'claude-opus-5-12',
       apiKey: 'test-key',
       baseUrl: 'https://api.proma.cool/api/v1',
       provider: 'proma',
@@ -110,7 +111,7 @@ describe('official discount model runtime registration', () => {
     } as never)
 
     expect(model).toMatchObject({
-      id: 'claude-opus-5-1',
+      id: 'claude-opus-5-12',
       compat: { forceAdaptiveThinking: true },
     })
   })
