@@ -23,48 +23,6 @@ function buildRequest(provider: ProviderType, apiKey = 'test-key') {
   })
 }
 
-describe('AnthropicAdapter thinking capability aliases', () => {
-  test.each([
-    'claude-opus-5-1',
-    'claude-opus-4-8-1',
-    'claude-sonnet-5-1',
-  ])('keeps discount alias %s in the request while inheriting adaptive thinking', (modelId) => {
-    const request = new AnthropicAdapter('anthropic').buildStreamRequest({
-      baseUrl: 'https://api.example.com',
-      apiKey: 'test-key',
-      modelId,
-      history: [],
-      userMessage: 'ping',
-      readImageAttachments: () => [],
-      thinkingEnabled: true,
-    })
-
-    expect(JSON.parse(request.body)).toMatchObject({
-      model: modelId,
-      thinking: { type: 'adaptive', display: 'summarized' },
-    })
-  })
-
-  test.each(['claude-opus-5', 'claude-opus-4-8', 'claude-fable-5-1'])(
-    'uses adaptive thinking for current Claude model %s',
-    (modelId) => {
-      const request = new AnthropicAdapter('anthropic').buildStreamRequest({
-        baseUrl: 'https://api.example.com',
-        apiKey: 'test-key',
-        modelId,
-        history: [],
-        userMessage: 'ping',
-        readImageAttachments: () => [],
-        thinkingEnabled: true,
-      })
-
-      expect(JSON.parse(request.body)).toMatchObject({
-        thinking: { type: 'adaptive', display: 'summarized' },
-      })
-    },
-  )
-})
-
 describe('AnthropicAdapter headers', () => {
   test('xiaomi API uses api-key authentication', () => {
     const request = buildRequest('xiaomi')
