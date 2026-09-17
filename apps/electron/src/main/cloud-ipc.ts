@@ -32,6 +32,10 @@ import {
   updateCloudProfile,
 } from './lib/cloud-auth-service'
 import {
+  getPendingCloudNotifications,
+  acknowledgeCloudNotification,
+} from './lib/cloud-notification-service'
+import {
   initBillingService,
   getBilling,
   checkBalance,
@@ -131,6 +135,18 @@ export async function registerCloudIpcHandlers(): Promise<void> {
     async () => {
       return getAuthState()
     },
+  )
+
+  // ===== 实时通知 =====
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.GET_PENDING_NOTIFICATIONS,
+    async () => getPendingCloudNotifications(),
+  )
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.ACKNOWLEDGE_NOTIFICATION,
+    async (_, notificationId: string) => acknowledgeCloudNotification(notificationId),
   )
 
   // ===== 邮箱验证 / 密码重置 =====
@@ -375,5 +391,5 @@ export async function registerCloudIpcHandlers(): Promise<void> {
     async (_, workspaceSlug: string, skills: SkillMeta[]) => checkEnterpriseSkillUpdates(requireRegisteredWorkspaceSlug(workspaceSlug), skills),
   )
 
-  console.log('[Cloud IPC] 已注册 Cloud 认证、账单、渠道、用量与企业 Skills处理器')
+  console.log('[Cloud IPC] 已注册 Cloud 认证、通知、账单、渠道、用量与企业 Skills处理器')
 }

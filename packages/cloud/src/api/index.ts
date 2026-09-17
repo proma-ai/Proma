@@ -31,3 +31,6 @@ export type { PromptsApi } from './prompts'
 
 export { createUsageApi } from './usage'
 export type { UsageApi } from './usage'
+
+export { createNotificationsApi, normalizePendingNotifications } from './notifications'
+export type { NotificationsApi, NotificationsApiClient } from './notifications'

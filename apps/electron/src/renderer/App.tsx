@@ -8,6 +8,7 @@ import { TooltipProvider } from './components/ui/tooltip'
 import { CloudAuthGate } from './components/cloud-auth'
 import { QuotaExceededDialog } from './components/billing/QuotaExceededDialog'
 import { OnboardingBillingPromptDialog } from './components/billing/OnboardingBillingPromptDialog'
+import { CloudNotificationDialog } from './components/cloud-notifications/CloudNotificationDialog'
 import { agentChannelIdAtom, agentModelIdAtom, agentSessionsAtom, currentAgentSessionIdAtom, currentAgentWorkspaceIdAtom } from './atoms/agent-atoms'
 import { appModeAtom } from './atoms/app-mode'
 import { PROMA_OFFICIAL_CHANNEL_ID, PROMA_OFFICIAL_DEFAULT_AGENT_MODEL } from '@proma/shared'
@@ -167,6 +168,7 @@ export default function App(): React.ReactElement {
           open={onboardingBillingPromptOpen}
           onOpenChange={setOnboardingBillingPromptOpen}
         />
+        <CloudNotificationDialog />
       </CloudAuthGate>
       <ShortcutGuideDialog />
       <FaqDialog />

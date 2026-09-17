@@ -28,6 +28,38 @@ export interface CloudAuthIpcResponse {
   error?: string
 }
 
+// ===== 实时通知相关类型 =====
+
+/** Proma Cloud 向桌面端投递的富媒体通知。 */
+export interface CloudNotification {
+  id: string
+  title: string
+  bodyMarkdown: string
+  platform: string
+  publishedAt: string
+}
+
+/** 桌面客户端向 API 标识的目标平台。 */
+export type CloudNotificationClientPlatform = 'macos' | 'windows'
+
+/** 通知 IPC 通用响应。 */
+export interface CloudNotificationIpcResponse<T = unknown> {
+  success: boolean
+  data?: T
+  error?: string
+}
+
+/** 验证来自 Cloud 通知 API 的负载，避免不完整数据进入渲染进程。 */
+export function isCloudNotification(value: unknown): value is CloudNotification {
+  if (typeof value !== 'object' || value === null) return false
+  const notification = value as Record<string, unknown>
+  return typeof notification.id === 'string'
+    && typeof notification.title === 'string'
+    && typeof notification.bodyMarkdown === 'string'
+    && typeof notification.platform === 'string'
+    && typeof notification.publishedAt === 'string'
+}
+
 // ===== 账单/支付相关类型 =====
 
 /** 计费模式 */
@@ -264,6 +296,9 @@ export const CLOUD_IPC_CHANNELS = {
   UPDATE_PROFILE: 'cloud:auth:update-profile',
   // 认证状态变化推送通道（主进程 → 渲染进程）
   AUTH_STATE_CHANGED: 'cloud:auth:state-changed',
+  // 实时通知
+  GET_PENDING_NOTIFICATIONS: 'cloud:notifications:get-pending',
+  ACKNOWLEDGE_NOTIFICATION: 'cloud:notifications:acknowledge',
   // 账单相关
   GET_BILLING: 'cloud:billing:get',
   CHECK_BALANCE: 'cloud:billing:check-balance',

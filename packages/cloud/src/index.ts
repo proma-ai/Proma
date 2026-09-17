@@ -26,6 +26,8 @@ export {
   createSubscriptionApi,
   createPromptsApi,
   createUsageApi,
+  createNotificationsApi,
+  normalizePendingNotifications,
 } from './api/index'
 export type {
   CloudApiClient,
@@ -41,4 +43,6 @@ export type {
   SubscriptionApi,
   PromptsApi,
   UsageApi,
+  NotificationsApi,
+  NotificationsApiClient,
 } from './api/index'

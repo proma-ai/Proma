@@ -74,6 +74,8 @@ import type {
   FileEntry,
   CloudAuthState,
   CloudAuthIpcResponse,
+  CloudNotification,
+  CloudNotificationIpcResponse,
   BillingIpcResponse,
   BillingInfo,
   CheckBalanceResponse,
@@ -1168,6 +1170,14 @@ export interface ElectronAPI {
     updateProfile: (data: { name?: string; image?: string }) => Promise<CloudAuthIpcResponse>
     /** 订阅认证状态变化（返回清理函数） */
     onAuthStateChanged: (callback: (state: CloudAuthState) => void) => () => void
+  }
+
+  // ===== Cloud 实时通知相关 =====
+
+  /** Cloud 通知 API（仅暴露读取和确认，不暴露认证令牌） */
+  cloudNotifications: {
+    getPending: () => Promise<CloudNotificationIpcResponse<CloudNotification[]>>
+    acknowledge: (notificationId: string) => Promise<CloudNotificationIpcResponse<void>>
   }
 
   // ===== Cloud 账单/支付相关 =====
@@ -2846,6 +2856,16 @@ const electronAPI: ElectronAPI = {
       const listener = (_: unknown, state: CloudAuthState): void => callback(state)
       ipcRenderer.on(CLOUD_IPC_CHANNELS.AUTH_STATE_CHANGED, listener)
       return () => { ipcRenderer.removeListener(CLOUD_IPC_CHANNELS.AUTH_STATE_CHANGED, listener) }
+    },
+  },
+
+  // Cloud 实时通知
+  cloudNotifications: {
+    getPending: () => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_PENDING_NOTIFICATIONS)
+    },
+    acknowledge: (notificationId: string) => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.ACKNOWLEDGE_NOTIFICATION, notificationId)
     },
   },
 
