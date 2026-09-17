@@ -1,11 +1,11 @@
 /**
  * VersionHistory - 版本历史组件
  *
- * 显示 GitHub Release 历史版本列表
+ * 显示来自公开更新日志接口的历史版本列表
  */
 
 import * as React from 'react'
-import type { GitHubRelease } from '@proma/shared'
+import type { ChangelogItem } from '@proma/shared'
 import { RefreshCw, Loader2, ChevronDown, ChevronUp } from 'lucide-react'
 import { ReleaseNotesViewer } from './ReleaseNotesViewer'
 import { SettingsCard } from './primitives'
@@ -14,22 +14,19 @@ import { SettingsCard } from './primitives'
  * VersionHistory 组件
  */
 export function VersionHistory(): React.ReactElement {
-  const [releases, setReleases] = React.useState<GitHubRelease[]>([])
+  const [changelogs, setChangelogs] = React.useState<ChangelogItem[]>([])
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
-  const [expandedIds, setExpandedIds] = React.useState<Set<number>>(new Set())
+  const [expandedIds, setExpandedIds] = React.useState<Set<string>>(new Set())
 
-  // 加载 releases
-  const loadReleases = React.useCallback(async () => {
+  // 加载更新日志
+  const loadChangelogs = React.useCallback(async () => {
     setLoading(true)
     setError(null)
 
     try {
-      const data = await window.electronAPI.listReleases({
-        perPage: 3,
-        includePrerelease: false,
-      })
-      setReleases(data)
+      const data = await window.electronAPI.listChangelogs({ limit: 3 })
+      setChangelogs(data.changelogs)
     } catch (err) {
       console.error('[版本历史] 加载失败:', err)
       let errorMessage = err instanceof Error ? err.message : '加载失败'
@@ -47,11 +44,11 @@ export function VersionHistory(): React.ReactElement {
 
   // 初始加载
   React.useEffect(() => {
-    loadReleases()
-  }, [loadReleases])
+    void loadChangelogs()
+  }, [loadChangelogs])
 
   // 切换展开/折叠
-  const toggleExpand = (id: number): void => {
+  const toggleExpand = (id: string): void => {
     setExpandedIds(prev => {
       const next = new Set(prev)
       if (next.has(id)) {
@@ -70,7 +67,7 @@ export function VersionHistory(): React.ReactElement {
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-medium">版本历史</h3>
           <button
-            onClick={loadReleases}
+            onClick={loadChangelogs}
             disabled={loading}
             className="inline-flex items-center gap-1.5 rounded-md bg-secondary px-3 py-1.5 text-xs font-medium text-secondary-foreground hover:bg-secondary/80 transition-colors disabled:opacity-50"
           >
@@ -86,7 +83,7 @@ export function VersionHistory(): React.ReactElement {
 
       {/* 版本列表 */}
       <div className="divide-y">
-        {loading && releases.length === 0 ? (
+        {loading && changelogs.length === 0 ? (
           <div className="p-8 text-center">
             <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
             <p className="text-sm text-muted-foreground mt-2">加载中...</p>
@@ -96,27 +93,28 @@ export function VersionHistory(): React.ReactElement {
             <p className="text-sm text-muted-foreground">加载失败</p>
             <p className="text-xs text-muted-foreground mt-1">{error}</p>
           </div>
-        ) : releases.length === 0 ? (
+        ) : changelogs.length === 0 ? (
           <div className="p-8 text-center">
             <p className="text-sm text-muted-foreground">暂无版本历史</p>
           </div>
         ) : (
-          releases.map((release, index) => {
-            const isExpanded = expandedIds.has(release.id)
+          changelogs.map((changelog, index) => {
+            const isExpanded = expandedIds.has(changelog.id)
             const isLatest = index === 0
+            const version = changelog.version ?? '未标注版本'
 
             return (
-              <div key={release.id} className="p-4">
+              <div key={changelog.id} className="p-4">
                 {/* 版本标题（可点击展开） */}
                 <button
-                  onClick={() => toggleExpand(release.id)}
+                  onClick={() => toggleExpand(changelog.id)}
                   className="w-full flex items-center justify-between text-left hover:bg-accent/50 -m-4 p-4 rounded-lg transition-colors"
                 >
                   <div className="flex items-center gap-3 flex-1 min-w-0">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium font-mono truncate">
-                          {release.tag_name}
+                          {version}
                         </span>
                         {isLatest && (
                           <span className="text-xs text-primary font-medium">
@@ -124,14 +122,16 @@ export function VersionHistory(): React.ReactElement {
                           </span>
                         )}
                       </div>
-                      {release.name && release.name !== release.tag_name && (
+                      {changelog.title && changelog.title !== version && (
                         <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                          {release.name}
+                          {changelog.title}
                         </p>
                       )}
                     </div>
                     <span className="text-xs text-muted-foreground shrink-0">
-                      {new Date(release.published_at).toLocaleDateString('zh-CN')}
+                      {changelog.publishedAt
+                        ? new Date(changelog.publishedAt).toLocaleDateString('zh-CN')
+                        : '未发布'}
                     </span>
                   </div>
                   {isExpanded ? (
@@ -141,11 +141,11 @@ export function VersionHistory(): React.ReactElement {
                   )}
                 </button>
 
-                {/* Release Notes（展开时显示） */}
+                {/* 更新说明（展开时显示） */}
                 {isExpanded && (
                   <div className="mt-4 pt-4 border-t">
                     <ReleaseNotesViewer
-                      release={release}
+                      release={changelog}
                       showHeader={false}
                       compact
                     />

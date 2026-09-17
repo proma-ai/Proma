@@ -9,7 +9,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import {
   IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS,
   ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS,
-  GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS,
+  GITHUB_RELEASE_IPC_CHANNELS, CHANGELOG_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS,
   FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, SLACK_IPC_CHANNELS, WECHAT_IPC_CHANNELS,
   AUTOMATION_IPC_CHANNELS, CLOUD_IPC_CHANNELS, SYNC_IPC_CHANNELS,
   PLANNING_IPC_CHANNELS, VAULT_IPC_CHANNELS, AGENT_ISLAND_IPC_CHANNELS, TERMINAL_IPC_CHANNELS,
@@ -102,6 +102,8 @@ import type {
   SystemProxyDetectResult,
   GitHubRelease,
   GitHubReleaseListOptions,
+  ChangelogListOptions,
+  ChangelogListResponse,
   PermissionRequest,
   PermissionResponse,
   PromaPermissionMode,
@@ -1284,6 +1286,9 @@ export interface ElectronAPI {
   listReleases: (options?: GitHubReleaseListOptions) => Promise<GitHubRelease[]>
   /** 根据 tag 获取 Release */
   getReleaseByTag: (tag: string) => Promise<GitHubRelease | null>
+
+  /** 获取公开更新日志（与官网 v2 使用同一接口） */
+  listChangelogs: (options?: ChangelogListOptions) => Promise<ChangelogListResponse>
 
   /** 工作区能力变化通知 */
   onCapabilitiesChanged: (callback: () => void) => () => void
@@ -3004,6 +3009,10 @@ const electronAPI: ElectronAPI = {
 
   getReleaseByTag: (tag) => {
     return ipcRenderer.invoke(GITHUB_RELEASE_IPC_CHANNELS.GET_RELEASE_BY_TAG, tag)
+  },
+
+  listChangelogs: (options) => {
+    return ipcRenderer.invoke(CHANGELOG_IPC_CHANNELS.LIST, options)
   },
 
   // ===== 飞书集成 =====

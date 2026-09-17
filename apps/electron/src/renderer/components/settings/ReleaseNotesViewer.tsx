@@ -1,11 +1,11 @@
 /**
  * ReleaseNotesViewer - Release Notes 查看器
  *
- * 显示 GitHub Release 的发布说明（Markdown 格式）
+ * 显示 GitHub Release 或公开更新日志的 Markdown 内容
  */
 
 import * as React from 'react'
-import type { GitHubRelease } from '@proma/shared'
+import type { ChangelogItem, GitHubRelease } from '@proma/shared'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Badge } from '@/components/ui/badge'
@@ -15,12 +15,43 @@ import { cn } from '@/lib/utils'
 import { copyTextToClipboard } from '@/lib/clipboard'
 
 interface ReleaseNotesViewerProps {
-  /** Release 数据 */
-  release: GitHubRelease
+  /** GitHub Release 或公共更新日志数据 */
+  release: GitHubRelease | ChangelogItem
   /** 是否显示标题（默认 true） */
   showHeader?: boolean
   /** 是否紧凑模式（默认 false） */
   compact?: boolean
+}
+
+function isGitHubRelease(release: GitHubRelease | ChangelogItem): release is GitHubRelease {
+  return 'body' in release
+}
+
+interface ReleaseNotesContent {
+  title: string
+  content: string
+  publishedAt: string | null
+  isPrerelease: boolean
+  githubUrl?: string
+}
+
+function normalizeReleaseNotes(release: GitHubRelease | ChangelogItem): ReleaseNotesContent {
+  if (isGitHubRelease(release)) {
+    return {
+      title: release.name || release.tag_name,
+      content: release.body,
+      publishedAt: release.published_at,
+      isPrerelease: release.prerelease,
+      githubUrl: release.html_url,
+    }
+  }
+
+  return {
+    title: release.title,
+    content: release.content,
+    publishedAt: release.publishedAt,
+    isPrerelease: false,
+  }
 }
 
 /**
@@ -53,7 +84,7 @@ export function ReleaseNotesViewer({
   showHeader = true,
   compact = false,
 }: ReleaseNotesViewerProps): React.ReactElement {
-  const releaseName = release.name || release.tag_name
+  const releaseNotes = normalizeReleaseNotes(release)
 
   return (
     <div className="space-y-3">
@@ -63,30 +94,33 @@ export function ReleaseNotesViewer({
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="text-sm font-semibold truncate">
-                {releaseName}
+                {releaseNotes.title}
               </h3>
-              {release.prerelease && (
+              {releaseNotes.isPrerelease && (
                 <Badge variant="secondary" className="text-xs">
                   预发布
                 </Badge>
               )}
             </div>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {formatReleaseDate(release.published_at)}
-            </p>
+            {releaseNotes.publishedAt && (
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {formatReleaseDate(releaseNotes.publishedAt)}
+              </p>
+            )}
           </div>
 
-          {/* GitHub 链接 */}
-          <a
-            href={release.html_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors shrink-0"
-            title="在 GitHub 上查看"
-          >
-            <ExternalLink className="h-3 w-3" />
-            GitHub
-          </a>
+          {releaseNotes.githubUrl && (
+            <a
+              href={releaseNotes.githubUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors shrink-0"
+              title="在 GitHub 上查看"
+            >
+              <ExternalLink className="h-3 w-3" />
+              GitHub
+            </a>
+          )}
         </div>
       )}
 
@@ -99,7 +133,7 @@ export function ReleaseNotesViewer({
           '[&>*:first-child]:mt-0 [&>*:last-child]:mb-0'
         )}
       >
-        {release.body ? (
+        {releaseNotes.content ? (
           <Markdown
             remarkPlugins={[remarkGfm]}
             components={{
@@ -121,10 +155,10 @@ export function ReleaseNotesViewer({
               ),
             }}
           >
-            {release.body}
+            {releaseNotes.content}
           </Markdown>
         ) : (
-          <p className="text-muted-foreground italic">暂无发布说明</p>
+          <p className="text-muted-foreground italic">暂无更新说明</p>
         )}
       </div>
     </div>
