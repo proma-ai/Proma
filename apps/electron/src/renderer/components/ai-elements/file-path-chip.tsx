@@ -39,8 +39,34 @@ interface FileResolutionCacheEntry {
 
 /** 文件存在性缓存（模块级共享，避免重复 IPC）。key 包含会话授权上下文。 */
 const fileExistsCache = new Map<string, FileResolutionCacheEntry>()
+const fileResolutionRequests = new Map<string, Promise<FileResolutionCacheEntry>>()
 function existsCacheKey(filePath: string, bases: string[], sessionId?: string): string {
   return `${sessionId ?? ''}\0${filePath}\0${bases.join('\0')}`
+}
+
+function resolveFilePathEntry(filePath: string, bases: string[], sessionId?: string): Promise<FileResolutionCacheEntry> {
+  const key = existsCacheKey(filePath, bases, sessionId)
+  const cached = fileExistsCache.get(key)
+  if (cached) return Promise.resolve(cached)
+
+  const inFlight = fileResolutionRequests.get(key)
+  if (inFlight) return inFlight
+
+  const promise = window.electronAPI.resolveFilePath(filePath, {
+    sessionId,
+    candidateBasePaths: bases.length > 0 ? bases : undefined,
+  }).then((resolved) => {
+    const entry: FileResolutionCacheEntry = {
+      exists: resolved !== null,
+      ...(resolved?.resolvedPath ? { resolvedPath: resolved.resolvedPath } : {}),
+    }
+    fileExistsCache.set(key, entry)
+    return entry
+  }).finally(() => {
+    fileResolutionRequests.delete(key)
+  })
+  fileResolutionRequests.set(key, promise)
+  return promise
 }
 
 interface FilePathChipProps {
@@ -91,19 +117,10 @@ export function FilePathChip({ filePath, basePath, basePaths, sessionId, classNa
     if (inFlight?.key === key) return inFlight.promise
 
     const generation = ++requestGenerationRef.current
-    const bases = candidateBases.length > 0 ? candidateBases : undefined
     let promise: Promise<void>
-    promise = window.electronAPI.resolveFilePath(cleanPath, {
-      sessionId: resolvedSessionId ?? undefined,
-      candidateBasePaths: bases,
-    })
-      .then((resolved) => {
+    promise = resolveFilePathEntry(cleanPath, candidateBases, resolvedSessionId)
+      .then((entry) => {
         if (!isAsyncResultCurrent(generation, requestGenerationRef.current, mountedRef.current)) return
-        const entry: FileResolutionCacheEntry = {
-          exists: resolved !== null,
-          ...(resolved?.resolvedPath ? { resolvedPath: resolved.resolvedPath } : {}),
-        }
-        fileExistsCache.set(key, entry)
         setFileStatus(entry.exists ? 'resolved' : 'broken')
         setResolvedPath(entry.resolvedPath)
       })
@@ -214,6 +231,47 @@ export function FilePathChip({ filePath, basePath, basePaths, sessionId, classNa
       </ContextMenuContent>
     </ContextMenu>
   )
+}
+
+interface ResolvableFilePathChipProps extends FilePathChipProps {
+  /** 路径未通过主进程解析时显示的原始 Markdown 节点，避免制造不可用 Chip。 */
+  fallback: React.ReactElement
+}
+
+/**
+ * 用于模型自由文本中的路径候选。只有文件存在且位于当前会话授权范围内时才升级为 Chip；
+ * 解析期间和失败后都保留调用方提供的原始 Markdown 外观。
+ */
+export function ResolvableFilePathChip({ fallback, filePath, basePath, basePaths, sessionId, className }: ResolvableFilePathChipProps): React.ReactElement {
+  const store = useStore()
+  const candidateBases = React.useMemo<string[]>(() => {
+    if (basePaths && basePaths.length > 0) return basePaths.filter(Boolean)
+    if (basePath) return [basePath]
+    return []
+  }, [basePath, basePaths])
+  const cleanPath = React.useMemo(() => stripLineCol(filePath.trim()).path, [filePath])
+  const resolvedSessionId = sessionId ?? store.get(currentAgentSessionIdAtom) ?? undefined
+  const resolutionKey = React.useMemo(
+    () => existsCacheKey(cleanPath, candidateBases, resolvedSessionId),
+    [candidateBases, cleanPath, resolvedSessionId],
+  )
+  const [resolvedKey, setResolvedKey] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    let cancelled = false
+    setResolvedKey(null)
+    void resolveFilePathEntry(cleanPath, candidateBases, resolvedSessionId)
+      .then((entry) => {
+        if (!cancelled && entry.exists) setResolvedKey(resolutionKey)
+      })
+      .catch(() => {
+        if (!cancelled) setResolvedKey(null)
+      })
+    return () => { cancelled = true }
+  }, [candidateBases, cleanPath, resolvedSessionId, resolutionKey])
+
+  if (resolvedKey !== resolutionKey) return fallback
+  return <FilePathChip filePath={filePath} basePath={basePath} basePaths={basePaths} sessionId={sessionId} className={className} />
 }
 
 export { isAbsoluteFilePath, isImageFilePath, isLocalFileReference, isRelativeFilePath }
