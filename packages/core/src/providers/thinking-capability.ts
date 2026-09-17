@@ -2,8 +2,8 @@
  * Claude 思考模式能力检测
  *
  * Anthropic 在 Claude 4.6+ 引入了 adaptive thinking，协议与旧版 extended thinking 不兼容：
- * - Opus 4.7 / Mythos Preview：只支持 adaptive，发送旧版 `{type: 'enabled', budget_tokens}` 会 400
- * - Opus 4.6 / Sonnet 5：两种都支持，adaptive 为推荐
+ * - Opus 4.7+ / Fable 5 / Mythos Preview：只支持 adaptive，发送旧版 `{type: 'enabled', budget_tokens}` 会 400
+ * - Opus 4.6 / Sonnet 4.6+：两种都支持，adaptive 为推荐
  * - 更老的 Claude 系列（Sonnet 4.5 / Opus 4.5 / 3.x 等）：只支持 manual
  *
  * DeepSeek v4 系列走 Anthropic 兼容端点，但思考强度通过 `output_config.effort` 控制
@@ -116,15 +116,22 @@ export function detectThinkingCapability(
     return { mode: 'adaptive-only', disableStrategy: 'omit-field' }
   }
 
-  // Claude Opus 4.7:adaptive 唯一模式
-  if (startsWith(modelId, 'claude-opus-4-7')) {
+  // Claude Opus 4.7+ / Fable 5：adaptive 唯一模式。
+  // 调用方会先将官方折扣别名归一化，故这里仅匹配规范模型家族。
+  if (
+    startsWith(modelId, 'claude-opus-4-7')
+    || startsWith(modelId, 'claude-opus-4-8')
+    || startsWith(modelId, 'claude-opus-5')
+    || startsWith(modelId, 'claude-fable-5')
+  ) {
     return { mode: 'adaptive-only', disableStrategy: 'explicit-disabled' }
   }
 
-  // Claude Opus 4.6 / Sonnet 5：两者都支持，优先 adaptive
+  // Claude Opus 4.6 / Sonnet 4.6+：两种都支持，优先 adaptive。
   if (
-    startsWith(modelId, 'claude-opus-4-6') ||
-    startsWith(modelId, 'claude-sonnet-5')
+    startsWith(modelId, 'claude-opus-4-6')
+    || startsWith(modelId, 'claude-sonnet-4-6')
+    || startsWith(modelId, 'claude-sonnet-5')
   ) {
     return { mode: 'adaptive-preferred', disableStrategy: 'explicit-disabled' }
   }

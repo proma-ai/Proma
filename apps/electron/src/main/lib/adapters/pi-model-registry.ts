@@ -14,6 +14,7 @@ import {
   inferCodexAlignedGPT5ContextWindow,
   getGeminiModelCapability,
   isGpt6AstraFamily,
+  resolvePromaOfficialModelCapabilityId,
   resolveReasoningCapability,
   resolveReasoningProfile,
   type CodexOAuthCredentials,
@@ -750,9 +751,14 @@ export async function resolvePiReasoningCapability(
   modelApiProtocol?: PiAgentQueryOptions['modelApiProtocol'],
 ): Promise<ReasoningCapability | undefined> {
   const resolvedModelId = stripLegacyAgentSdkContextSuffix(modelId)
-  const catalogModel = resolvedModelId ? await findPiCatalogModel(provider, resolvedModelId) : undefined
+  const resolvedCapabilityModelId = provider === 'proma'
+    ? resolvePromaOfficialModelCapabilityId(resolvedModelId) ?? resolvedModelId
+    : resolvedModelId
+  const catalogModel = resolvedCapabilityModelId
+    ? await findPiCatalogModel(provider, resolvedCapabilityModelId)
+    : undefined
   const profile = resolveReasoningProfile({
-    modelId: resolvedModelId,
+    modelId: resolvedCapabilityModelId,
     transport: provider === 'openai-codex' || provider === 'xai'
       ? 'openai-responses'
       : toReasoningTransport(resolvePiApi(provider, catalogModel?.api, resolvedModelId, modelApiProtocol)),
@@ -767,13 +773,17 @@ export async function resolvePiReasoningCapability(
 }
 
 async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiModelDefaults> {
-  const catalogModel = input.model ? await findPiCatalogModel(input.provider, input.model) : undefined
+  // 折扣别名保持 `input.model` 作为请求 ID，仅从商业版内置的基准模型继承 reasoning 协议。
+  const capabilityModelId = input.provider === 'proma'
+    ? resolvePromaOfficialModelCapabilityId(input.model) ?? input.model
+    : input.model
+  const catalogModel = capabilityModelId ? await findPiCatalogModel(input.provider, capabilityModelId) : undefined
   // Proma 后端下发的规格优先于本地目录和通用推断。
   const configuredContextWindow = positiveInteger(input.modelContextWindow)
   const configuredMaxTokens = positiveInteger(input.modelMaxOutputTokens)
   const codexAlignedCapabilities = getCodexAlignedGPT5Capabilities(input.model)
   const api = resolvePiApi(input.provider, catalogModel?.api, input.model, input.modelApiProtocol)
-  const providerSpecificCapabilities = compilePiReasoningCapabilities(api, input.model)
+  const providerSpecificCapabilities = compilePiReasoningCapabilities(api, capabilityModelId)
   const glmModelId = input.model?.toLowerCase()
   const isVolcengineGlm5x = (input.provider === 'doubao' || input.provider === 'doubao-api' || input.provider === 'ark-coding-plan')
     && (glmModelId === 'glm-5.2' || glmModelId === 'glm-5.3')
@@ -785,8 +795,8 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
   // transport 或 catalog 标记，也不得继承 Claude 的 adaptive-thinking 请求形态。
   // 同时传入 modelId，接收上游为 Pi catalog 暂未收录的 Fable 5.1 增加的 adaptive-thinking 兼容。
   const shouldForceAdaptiveThinking = input.provider === 'proma'
-    ? shouldForcePromaOfficialClaudeAdaptiveThinking(input.model, api, catalogModel)
-    : shouldForcePiAdaptiveThinking(api, catalogModel, input.model)
+    ? shouldForcePromaOfficialClaudeAdaptiveThinking(capabilityModelId, api, catalogModel)
+    : shouldForcePiAdaptiveThinking(api, catalogModel, capabilityModelId)
   return {
     api,
     reasoning: catalogModel?.reasoning ?? true,

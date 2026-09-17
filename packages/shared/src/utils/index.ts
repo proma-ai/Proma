@@ -29,7 +29,7 @@ export {
   inferContextWindow,
 } from './context-window'
 export { calculateContextUsageRatio } from './context-usage'
-export { isGpt6AstraFamily } from './model-family'
+export { isGpt6AstraFamily, resolvePromaOfficialModelCapabilityId } from './model-family'
 export {
   getGeminiModelCapability,
   normalizeGeminiThinkingLevel,

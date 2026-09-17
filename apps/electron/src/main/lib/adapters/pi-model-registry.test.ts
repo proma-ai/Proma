@@ -2,8 +2,10 @@ import { describe, expect, test } from 'bun:test'
 import { CODEX_GPT_56_CONTEXT_WINDOW } from '@proma/shared'
 import {
   buildCodexModel,
+  buildModel,
   resolvePiApi,
   resolvePiImageInputCapability,
+  resolvePiReasoningCapability,
   shouldForcePiAdaptiveThinking,
   shouldForcePromaOfficialClaudeAdaptiveThinking,
   supportsPiNativeImageInput,
@@ -57,6 +59,60 @@ describe('shouldForcePiAdaptiveThinking', () => {
     }
     expect(shouldForcePromaOfficialClaudeAdaptiveThinking('gpt-5.6-terra', 'openai-responses', adaptiveAnthropicCatalog)).toBe(false)
     expect(shouldForcePromaOfficialClaudeAdaptiveThinking('k3', 'anthropic-messages', adaptiveAnthropicCatalog)).toBe(false)
+  })
+})
+
+describe('official discount model reasoning capability', () => {
+  test.each([
+    'claude-opus-5-1',
+    'claude-opus-4-8-1',
+    'claude-sonnet-5-1',
+  ])('uses %s request ID with catalog reasoning metadata', async (modelId) => {
+    await expect(resolvePiReasoningCapability(
+      'proma',
+      modelId,
+      'anthropic-messages',
+    )).resolves.toMatchObject({
+      source: 'pi-catalog',
+      defaultLevel: 'high',
+    })
+  })
+})
+
+describe('official discount model runtime registration', () => {
+  test('registers the selected discount ID with the base model adaptive contract', async () => {
+    let registeredModel: Record<string, unknown> | undefined
+    const sdk = {
+      ModelRuntime: {
+        create: async () => ({
+          registerProvider: (_provider: string, config: { models: Record<string, unknown>[] }) => {
+            registeredModel = config.models[0]
+          },
+          getModel: (_provider: string, modelId: string) => (
+            registeredModel?.id === modelId ? registeredModel : undefined
+          ),
+        }),
+      },
+    } as never
+
+    const { model } = await buildModel(sdk, {
+      sessionId: 'discount-model-test',
+      prompt: 'ping',
+      model: 'claude-opus-5-1',
+      apiKey: 'test-key',
+      baseUrl: 'https://api.proma.cool/api/v1',
+      provider: 'proma',
+      modelApiProtocol: 'anthropic-messages',
+      permissionMode: 'default',
+      systemPrompt: '',
+      piAgentDir: '/tmp',
+      piSessionDir: '/tmp',
+    } as never)
+
+    expect(model).toMatchObject({
+      id: 'claude-opus-5-1',
+      compat: { forceAdaptiveThinking: true },
+    })
   })
 })
 

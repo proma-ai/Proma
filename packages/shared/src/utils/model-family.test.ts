@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { isGpt6AstraFamily } from './model-family'
+import { isGpt6AstraFamily, resolvePromaOfficialModelCapabilityId } from './model-family'
 
 describe('GPT-6 Astra model family', () => {
   test.each([
@@ -17,4 +17,16 @@ describe('GPT-6 Astra model family', () => {
     ('Given non-Astra model %s When checking Then returns false', (modelId) => {
       expect(isGpt6AstraFamily(modelId)).toBe(false)
     })
+})
+
+describe('Proma official discount model capabilities', () => {
+  test.each([
+    ['claude-opus-5-1', 'claude-opus-5'],
+    ['claude-opus-4-8-1', 'claude-opus-4-8'],
+    ['claude-sonnet-5-1', 'claude-sonnet-5'],
+    ['claude-fable-5-1', 'claude-fable-5-1'],
+    ['gpt-5.6-terra-2', 'gpt-5.6-terra-2'],
+  ])('resolves %s to the capability baseline %s', (modelId, expected) => {
+    expect(resolvePromaOfficialModelCapabilityId(modelId)).toBe(expected)
+  })
 })

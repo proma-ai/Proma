@@ -24,7 +24,7 @@
  * - UA 格式：`Proma/<version> (+https://github.com/ErlichLiu/Proma)`
  */
 
-import { extractZhipuCodingTeamApiToken, type ProviderType } from '@proma/shared'
+import { extractZhipuCodingTeamApiToken, resolvePromaOfficialModelCapabilityId, type ProviderType } from '@proma/shared'
 import type {
   ProviderAdapter,
   ProviderRequest,
@@ -306,7 +306,12 @@ export class AnthropicAdapter implements ProviderAdapter {
   buildStreamRequest(input: StreamRequestInput): ProviderRequest {
     const url = this.resolveMessagesUrl(input.baseUrl)
     const messages = toAnthropicMessages(input)
-    const capability = detectThinkingCapability(this.providerType, input.modelId)
+    const capability = detectThinkingCapability(
+      this.providerType,
+      this.providerType === 'proma'
+        ? resolvePromaOfficialModelCapabilityId(input.modelId) ?? input.modelId
+        : input.modelId,
+    )
 
     // manual 模式：budget_tokens 必须 < max_tokens，所以开启时放大上限
     // adaptive / effort-based 模式：max_tokens 作为「思考+回答」的总硬上限，给充足空间
