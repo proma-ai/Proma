@@ -89,8 +89,12 @@ export function isRelativeFilePath(text: string): boolean {
   const filename = getFileName(clean)
   const ext = getExtension(filename)
   const hasExplicitRelativePrefix = clean.startsWith('./') || clean.startsWith('.\\')
-  // 仅因包含分隔符的无扩展名链接（如 v1/users）很可能是站内 URL，不能劫持为文件预览。
-  return hasExplicitRelativePrefix || Boolean(ext) || EXTENSIONLESS_FILE_NAMES.has(filename.toLowerCase())
+  // 裸文本必须是已知可预览文件类型或常见无扩展名文件；任意带点文本（如 v1.2）
+  // 不应触发 IPC。显式相对路径和含目录分隔符的路径则交由主进程最终校验。
+  return hasExplicitRelativePrefix
+    || PATH_SEP_RE.test(clean)
+    || ALL_PREVIEWABLE_EXTS.has(ext)
+    || EXTENSIONLESS_FILE_NAMES.has(filename.toLowerCase())
 }
 
 /** 可安全交给主进程解析的本地文件引用（绝对或相对）。 */

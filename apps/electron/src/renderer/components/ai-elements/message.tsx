@@ -39,7 +39,7 @@ import {
 import { LoadingIndicator } from '@/components/ui/loading-indicator'
 import { CodeBlock, MermaidBlock } from '@proma/ui'
 import { detectLanguage } from '@proma/core'
-import { FilePathChip, isAbsoluteFilePath, isImageFilePath, isLocalFileReference, isRelativeFilePath } from './file-path-chip'
+import { FilePathChip, ResolvableFilePathChip, isAbsoluteFilePath, isImageFilePath, isLocalFileReference, isRelativeFilePath } from './file-path-chip'
 import { buildAgentHistoryQuoteLabel, parseAgentHistoryQuoteMention } from '@/lib/quoted-selection'
 import { createMentionPattern } from '@/lib/mention-patterns'
 import { resolveSkillMentionName } from '@/lib/skill-mention-name'
@@ -562,7 +562,14 @@ const MarkdownLink = React.memo(function MarkdownLink({
 
     const filePath = safeDecode(href)
     if (isLocalFileReference(filePath)) {
-      return <FilePathChip filePath={filePath} basePaths={contextBasePaths} sessionId={pathResolutionContext?.sessionId} />
+      return (
+        <ResolvableFilePathChip
+          filePath={filePath}
+          basePaths={contextBasePaths}
+          sessionId={pathResolutionContext?.sessionId}
+          fallback={<span>{linkChildren}</span>}
+        />
+      )
     }
   }
 
@@ -717,6 +724,14 @@ const MarkdownInlineCode = React.memo(function MarkdownInlineCode({
   }
 
   const text = typeof codeChildren === 'string' ? codeChildren : ''
+  const fallbackCode = (
+    <code
+      className="rounded bg-foreground/10 px-[0.35em] py-[0.15em] text-[0.875em] font-mono font-medium"
+      {...codeProps}
+    >
+      {codeChildren}
+    </code>
+  )
 
   if (text) {
     // 合并 basePath（主 cwd）+ basePaths（props 或 context 提供的附加目录）作为候选
@@ -729,7 +744,14 @@ const MarkdownInlineCode = React.memo(function MarkdownInlineCode({
       }
     }
     if (isAbsoluteFilePath(text)) {
-      return <FilePathChip filePath={text.trim()} basePaths={merged.length > 0 ? merged : undefined} sessionId={pathResolutionContext?.sessionId} />
+      return (
+        <ResolvableFilePathChip
+          filePath={text.trim()}
+          basePaths={merged.length > 0 ? merged : undefined}
+          sessionId={pathResolutionContext?.sessionId}
+          fallback={fallbackCode}
+        />
+      )
     }
     if (merged.length > 0 && isRelativeFilePath(text)) {
       // 命中本轮实际触及文件的映射时，用绝对路径替换裸文件名（保留行号后缀），
@@ -743,21 +765,22 @@ const MarkdownInlineCode = React.memo(function MarkdownInlineCode({
         const baseName = pathPart.split(/[\\/]/).pop() || pathPart
         const abs = turnFileMap.get(baseName)
         if (abs) {
+          // 本轮实际成功读写过的文件具有工具调用证据，直接渲染 Chip，避免正文完成后再闪烁升级。
           return <FilePathChip filePath={abs + suffix} basePaths={merged} sessionId={pathResolutionContext?.sessionId} />
         }
       }
-      return <FilePathChip filePath={trimmed} basePaths={merged} sessionId={pathResolutionContext?.sessionId} />
+      return (
+        <ResolvableFilePathChip
+          filePath={trimmed}
+          basePaths={merged}
+          sessionId={pathResolutionContext?.sessionId}
+          fallback={fallbackCode}
+        />
+      )
     }
   }
 
-  return (
-    <code
-      className="rounded bg-foreground/10 px-[0.35em] py-[0.15em] text-[0.875em] font-mono font-medium"
-      {...codeProps}
-    >
-      {codeChildren}
-    </code>
-  )
+  return fallbackCode
 })
 
 /** 使用 react-markdown 渲染 assistant 消息内容，代码块使用 Shiki 语法高亮 */
