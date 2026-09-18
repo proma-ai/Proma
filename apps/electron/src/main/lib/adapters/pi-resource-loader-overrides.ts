@@ -11,13 +11,19 @@ export interface PromaProjectInstructionFile {
   content: string
 }
 
-export function createPromaManagedResourceLoaderOptions() {
+export function createPromaManagedResourceLoaderOptions(options?: { additionalExtensionPaths?: string[] }) {
   return {
     noContextFiles: true,
     noExtensions: true,
     noSkills: true,
     // An explicit empty source prevents Pi from discovering APPEND_SYSTEM.md.
     appendSystemPrompt: [],
+    // Whitelisted extensions only: Pi still loads explicit paths when
+    // `noExtensions` is true (resource-loader CLI/temporary path), so the
+    // managed runtime stays free of ambient user/project settings discovery.
+    ...(options?.additionalExtensionPaths?.length
+      ? { additionalExtensionPaths: options.additionalExtensionPaths }
+      : {}),
   }
 }
 
