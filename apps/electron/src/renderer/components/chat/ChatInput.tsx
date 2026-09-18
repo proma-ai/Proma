@@ -23,6 +23,7 @@ import { ChatThinkingPopover } from './ChatThinkingPopover'
 import { AttachmentPreviewItem } from './AttachmentPreviewItem'
 import { QuotedSelectionChip } from '@/components/diff/QuotedSelectionChip'
 import { RichTextInput } from '@/components/ai-elements/rich-text-input'
+import { useComposerResize } from '@/components/ai-elements/resizable-composer'
 import { SpeechButton } from '@/components/ai-elements/speech-button'
 import { InputToolbarOverflow, type ToolbarItem } from '@/components/ai-elements/InputToolbarOverflow'
 import {
@@ -74,6 +75,7 @@ interface ChatInputProps {
 
 export function ChatInput({ conversationId, streaming, pendingAttachments, onSetPendingAttachments, onSend, onStop, onClearContext }: ChatInputProps): React.ReactElement {
   const sendWithCmdEnter = useAtomValue(sendWithCmdEnterAtom)
+  const composerResize = useComposerResize(`chat:${conversationId}`)
   // 从 Map atom 读写草稿
   const draftsMap = useAtomValue(conversationDraftsAtom)
   const setDraftsMap = useSetAtom(conversationDraftsAtom)
@@ -431,8 +433,9 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
     >
         {/* 卡片式输入容器 — 对标 Cherry Studio: border-radius 17px, 0.5px border */}
         <div
+          ref={composerResize.frameRef}
           className={cn(
-            'rounded-[17px] border-[0.5px] border-border bg-background/70 backdrop-blur-sm transition-all duration-200',
+            'relative flex min-h-0 flex-col overflow-hidden rounded-[17px] border-[0.5px] border-border bg-background/70 backdrop-blur-sm transition-all duration-200',
             'focus-within:border-foreground/20',
             isDragOver && 'border-[2px] border-dashed border-[#2ecc71] bg-[#2ecc71]/[0.03]'
           )}
@@ -440,48 +443,68 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
         >
-          {/* 附件 + 引用选中文本 Chip（与 Agent 输入框保持一致） */}
-          {(pendingAttachments.length > 0 || currentQuotedSelection) && (
-            <div className="flex flex-wrap gap-2 px-3 pt-2.5 pb-1.5">
-              {pendingAttachments.map((att) => (
-                <AttachmentPreviewItem
-                  key={att.id}
-                  filename={att.filename}
-                  mediaType={att.mediaType}
-                  previewUrl={att.previewUrl}
-                  onRemove={() => handleRemoveAttachment(att.id)}
-                  onEditComplete={(editedDataUrl) => handleEditComplete(att.id, editedDataUrl)}
-                  imageSiblings={imageSiblings}
-                  siblingIndex={imageAttachmentsList.findIndex((a) => a.id === att.id)}
-                />
-              ))}
-              {currentQuotedSelection && (
-                <QuotedSelectionChip
-                  text={currentQuotedSelection.text}
-                  filePath={currentQuotedSelection.filePath}
-                  sourceLabel={currentQuotedSelection.sourceLabel}
-                  onRemove={handleRemoveQuotedSelection}
-                />
-              )}
-            </div>
-          )}
+          <div
+            className="group absolute left-4 right-4 top-0 z-20 h-2 cursor-row-resize touch-none"
+            onPointerDown={composerResize.onResizePointerDown}
+            title="拖拽调整输入框高度"
+          >
+            <span className="absolute left-1/2 top-1/2 h-px w-10 -translate-x-1/2 -translate-y-1/2 rounded-full bg-muted-foreground/40 opacity-0 transition-opacity group-hover:opacity-100" />
+          </div>
+
+          <div className="min-h-0 shrink overflow-y-auto overscroll-contain" data-composer-chrome>
+            {/* 附件 + 引用选中文本 Chip（与 Agent 输入框保持一致） */}
+            {(pendingAttachments.length > 0 || currentQuotedSelection) && (
+              <div className="flex flex-wrap gap-2 px-3 pt-2.5 pb-1.5">
+                {pendingAttachments.map((att) => (
+                  <AttachmentPreviewItem
+                    key={att.id}
+                    filename={att.filename}
+                    mediaType={att.mediaType}
+                    previewUrl={att.previewUrl}
+                    onRemove={() => handleRemoveAttachment(att.id)}
+                    onEditComplete={(editedDataUrl) => handleEditComplete(att.id, editedDataUrl)}
+                    imageSiblings={imageSiblings}
+                    siblingIndex={imageAttachmentsList.findIndex((a) => a.id === att.id)}
+                  />
+                ))}
+                {currentQuotedSelection && (
+                  <QuotedSelectionChip
+                    text={currentQuotedSelection.text}
+                    filePath={currentQuotedSelection.filePath}
+                    sourceLabel={currentQuotedSelection.sourceLabel}
+                    onRemove={handleRemoveQuotedSelection}
+                  />
+                )}
+              </div>
+            )}
+          </div>
 
           {/* TipTap 富文本编辑器 */}
-          <RichTextInput
-            value={content}
-            onChange={setContentFromEditor}
-            onSubmit={handleSend}
-            onPasteFiles={handlePasteFiles}
-            voiceInputId={chatVoiceInputId}
-            placeholder={sendWithCmdEnter ? '输入消息... (⌘/Ctrl+Enter 发送，Enter 换行)' : '输入消息... (Enter 发送，Shift+Enter 换行)'}
-            autoFocusTrigger={conversationId}
-            draftScopeKey={conversationId}
-            draftSyncVersion={draftSyncVersion}
-            sendWithCmdEnter={sendWithCmdEnter}
-          />
+          <div
+            ref={composerResize.editorRef}
+            className="relative min-h-[101px] shrink-0 overflow-hidden transition-[height] duration-200 ease-out motion-reduce:transition-none"
+            data-composer-editor
+            style={composerResize.editorHeight === null ? undefined : { height: composerResize.editorHeight }}
+          >
+            <RichTextInput
+              value={content}
+              onChange={setContentFromEditor}
+              onSubmit={handleSend}
+              onPasteFiles={handlePasteFiles}
+              voiceInputId={chatVoiceInputId}
+              placeholder={sendWithCmdEnter ? '输入消息... (⌘/Ctrl+Enter 发送，Enter 换行)' : '输入消息... (Enter 发送，Shift+Enter 换行)'}
+              autoFocusTrigger={conversationId}
+              draftScopeKey={conversationId}
+              draftSyncVersion={draftSyncVersion}
+              sendWithCmdEnter={sendWithCmdEnter}
+              fillHeight={composerResize.editorHeight !== null}
+            />
+          </div>
 
           {/* Footer 工具栏 — 容器变窄时尾部按钮自动折叠进「更多」Popover */}
-          <InputToolbarOverflow items={toolbarItems} trailing={trailingNode} />
+          <div className="shrink-0" data-composer-footer>
+            <InputToolbarOverflow items={toolbarItems} trailing={trailingNode} />
+          </div>
         </div>
     </div>
   )
