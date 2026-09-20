@@ -5,6 +5,7 @@ import {
   type MessagePortMain,
   type UtilityProcess,
 } from 'electron'
+import { startUtilityProcessWithRetry } from './utility-process-startup'
 import {
   AGENT_RUNTIME_BOOTSTRAP_ID,
   AGENT_RUNTIME_METHODS,
@@ -115,18 +116,22 @@ export class AgentRuntimeClient {
     try {
       return await this.startPromise
     } catch (error) {
+      const stoppedDuringStart = this.stopPromise !== undefined
+        || this.state.status === 'stopped'
       this.port?.close()
       this.port = undefined
       this.runtimeProcess?.kill()
       this.runtimeProcess = undefined
       this.rejectPending(error instanceof Error ? error : new Error(String(error)))
-      this.state = {
-        status: 'crashed',
-        bootId: AGENT_RUNTIME_BOOTSTRAP_ID,
-        pid: null,
-        active: false,
-        pendingRequests: 0,
-        lastError: serializeAgentRuntimeError(error, 'runtime.start_failed'),
+      if (!stoppedDuringStart) {
+        this.state = {
+          status: 'crashed',
+          bootId: AGENT_RUNTIME_BOOTSTRAP_ID,
+          pid: null,
+          active: false,
+          pendingRequests: 0,
+          lastError: serializeAgentRuntimeError(error, 'runtime.start_failed'),
+        }
       }
       throw error
     } finally {
@@ -183,10 +188,21 @@ export class AgentRuntimeClient {
   private async spawnAndHandshake(): Promise<AgentRuntimeState> {
     const generation = ++this.generation
     this.state = { ...this.state, status: 'starting', lastError: undefined }
-    const runtimeProcess = utilityProcess.fork(this.entryPath, [], {
-      serviceName: 'Proma Runtime',
-      env: { ...process.env, ...this.env, PROMA_AGENT_SESSION_ID: this.sessionId },
-    })
+    const shouldContinueStartup = () =>
+      generation === this.generation
+      && this.stopPromise === undefined
+      && this.state.status === 'starting'
+    const runtimeProcess = await startUtilityProcessWithRetry(
+      () => utilityProcess.fork(this.entryPath, [], {
+        serviceName: 'Proma Runtime',
+        env: { ...process.env, ...this.env, PROMA_AGENT_SESSION_ID: this.sessionId },
+      }),
+      { shouldContinue: shouldContinueStartup },
+    )
+    if (!shouldContinueStartup()) {
+      try { runtimeProcess.kill() } catch { /* utility process may already be exiting */ }
+      throw new Error('Agent runtime startup cancelled')
+    }
     this.runtimeProcess = runtimeProcess
     const processEvents = runtimeProcess as unknown as {
       on(event: 'exit', listener: (code: number) => void): void
@@ -324,15 +340,29 @@ export class AgentRuntimeClient {
   }
 
   private async handleIncomingRequest(request: AgentRuntimeRequest): Promise<void> {
-    if (request.bootId !== this.bootId) return
+    const port = this.port
+    const runtimeProcess = this.runtimeProcess
+    const generation = this.generation
+    const bootId = this.bootId
+    if (!port || request.bootId !== bootId) return
+    const isCurrentRuntime = () =>
+      generation === this.generation
+      && runtimeProcess === this.runtimeProcess
+      && port === this.port
+      && bootId === this.bootId
+
     try {
       if (!this.requestHandler) throw new Error(`No main handler for runtime method: ${request.method}`)
       const payload = await this.requestHandler(request)
-      this.port?.postMessage(createAgentRuntimeResponse(request, { payload }, this.bootId))
+      // Capability handlers can resolve after stop/restart. Never direct an old
+      // runtime response to a replacement port/boot identity.
+      if (!isCurrentRuntime()) return
+      port.postMessage(createAgentRuntimeResponse(request, { payload }, bootId))
     } catch (error) {
-      this.port?.postMessage(createAgentRuntimeResponse(request, {
+      if (!isCurrentRuntime()) return
+      port.postMessage(createAgentRuntimeResponse(request, {
         error: serializeAgentRuntimeError(error, 'runtime.main_handler_failed'),
-      }, this.bootId))
+      }, bootId))
     }
   }
 

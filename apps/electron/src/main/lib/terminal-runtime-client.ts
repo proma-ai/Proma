@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { MessageChannelMain, utilityProcess, type MessagePortMain, type UtilityProcess } from 'electron'
+import { startUtilityProcessWithRetry } from './utility-process-startup'
 import type {
   TerminalCreateInput,
   TerminalExitEvent,
@@ -41,6 +42,7 @@ export class TerminalRuntimeClient {
   private runtimeProcess: UtilityProcess | undefined
   private port: RuntimePort | undefined
   private starting: Promise<void> | undefined
+  private generation = 0
   private readonly pendingCreates = new Map<string, PendingCreate>()
   private readonly outputListeners = new Set<(event: TerminalOutputEvent) => void>()
   private readonly exitListeners = new Set<(event: TerminalExitEvent) => void>()
@@ -93,13 +95,15 @@ export class TerminalRuntimeClient {
   }
 
   async stop(): Promise<void> {
+    this.generation++
     const port = this.port
+    const runtimeProcess = this.runtimeProcess
     this.port = undefined
     if (port) {
       port.postMessage({ type: 'terminal.shutdown' })
       port.close()
     }
-    this.runtimeProcess?.kill()
+    try { runtimeProcess?.kill() } catch { /* utility process may already be exiting */ }
     this.runtimeProcess = undefined
     this.starting = undefined
     this.rejectPendingCreates(new Error('终端运行时已停止'))
@@ -108,19 +112,43 @@ export class TerminalRuntimeClient {
   private async start(): Promise<void> {
     if (this.port) return
     if (this.starting) return this.starting
-    this.starting = new Promise<void>((resolve, reject) => {
-      const entryPath = join(__dirname, 'terminal-runtime.cjs')
-      const runtimeProcess = utilityProcess.fork(entryPath, [], { serviceName: 'Proma Terminal Runtime' })
-      this.runtimeProcess = runtimeProcess
+
+    const starting = this.startRuntime(++this.generation)
+    this.starting = starting
+    try {
+      await starting
+    } finally {
+      if (this.starting === starting) this.starting = undefined
+    }
+  }
+
+  private async startRuntime(generation: number): Promise<void> {
+    const entryPath = join(__dirname, 'terminal-runtime.cjs')
+    const isCurrentStartup = () => generation === this.generation
+    const runtimeProcess = await startUtilityProcessWithRetry(
+      () => utilityProcess.fork(entryPath, [], { serviceName: 'Proma Terminal Runtime' }),
+      { shouldContinue: isCurrentStartup },
+    )
+    if (!isCurrentStartup()) {
+      try { runtimeProcess.kill() } catch { /* utility process may already be exiting */ }
+      throw new Error('终端运行时启动已取消')
+    }
+    this.runtimeProcess = runtimeProcess
+
+    await new Promise<void>((resolve, reject) => {
       const channel = new MessageChannelMain()
       const port = channel.port2 as unknown as RuntimePort
+      const isCurrentRuntime = () =>
+        generation === this.generation
+        && this.runtimeProcess === runtimeProcess
+        && this.port === port
       const fail = (error: Error): void => {
         clearTimeout(timeout)
-        this.handleRuntimeFailure(error)
+        if (isCurrentRuntime()) this.handleRuntimeFailure(error, runtimeProcess, port)
         reject(error)
       }
       const timeout = setTimeout(() => {
-        if (this.port !== port) return
+        if (!isCurrentRuntime()) return
         fail(new Error('终端运行时启动超时'))
       }, STARTUP_TIMEOUT_MS)
       const ready = (): void => {
@@ -129,6 +157,7 @@ export class TerminalRuntimeClient {
       }
       this.port = port
       port.on('message', ({ data }) => {
+        if (!isCurrentRuntime()) return
         const message = data as RuntimeMessage
         if (message?.type === 'terminal.ready') ready()
         this.handleMessage(message)
@@ -138,8 +167,7 @@ export class TerminalRuntimeClient {
       const processEvents = runtimeProcess as unknown as { on(event: 'exit', listener: (code: number) => void): void }
       processEvents.on('exit', (code) => fail(new Error(`终端运行时已退出（${code}）`)))
       runtimeProcess.postMessage({ type: 'proma-terminal-runtime-port' }, [channel.port1])
-    }).finally(() => { this.starting = undefined })
-    return this.starting
+    })
   }
 
   private handleMessage(message: RuntimeMessage): void {
@@ -158,10 +186,15 @@ export class TerminalRuntimeClient {
     }
   }
 
-  private handleRuntimeFailure(error: Error): void {
-    this.port?.close()
-    this.port = undefined
-    this.runtimeProcess = undefined
+  private handleRuntimeFailure(
+    error: Error,
+    runtimeProcess: UtilityProcess | undefined = this.runtimeProcess,
+    port: RuntimePort | undefined = this.port,
+  ): void {
+    port?.close()
+    if (this.port === port) this.port = undefined
+    try { runtimeProcess?.kill() } catch { /* utility process may already be exiting */ }
+    if (this.runtimeProcess === runtimeProcess) this.runtimeProcess = undefined
     this.rejectPendingCreates(error)
   }
 
