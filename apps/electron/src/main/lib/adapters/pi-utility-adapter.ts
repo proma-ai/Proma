@@ -99,32 +99,41 @@ export class PiUtilityAdapter {
     }
   }
 
-  abort(sessionId: string): void {
+  async abort(sessionId: string): Promise<void> {
     // A recovery iterator can be late to release its runtime. Abort every
     // matching query rather than assuming the first map entry owns the session.
+    const aborts: Promise<void>[] = []
     for (const pending of this.pendingQueries.values()) {
       if (pending.sessionId !== sessionId) continue
       this.abortCapabilitiesForQuery(pending.queryId)
-      void pending.client.call<QueryAbortResponse>(
+      aborts.push(pending.client.call<QueryAbortResponse>(
         AGENT_RUNTIME_METHODS.QUERY_ABORT,
         { queryId: pending.queryId, sessionId },
         { queryId: pending.queryId, timeoutMs: 5_000 },
-      ).then((result) => {
-        if (result.completed !== false) return
-        this.failStoppedQuery(pending, new Error('停止 Agent 超时，已关闭卡住的运行时'))
-      }).catch((error) => {
+      ).then(async (result) => {
+        if (result.completed === false) {
+          await this.failStoppedQuery(pending, new Error('停止 Agent 超时，已关闭卡住的运行时'))
+          return
+        }
+        // QUERY_ABORT confirms the utility query has ended. Close its process
+        // before resolving deletion's stop-and-drain barrier instead of relying
+        // on the async iterator's later finally block.
+        await pending.client.stop()
+      }).catch(async (error) => {
         console.warn(`[PiUtilityAdapter] abort failed: sessionId=${sessionId}`, error)
-        this.failStoppedQuery(pending, error)
-      })
+        await this.failStoppedQuery(pending, error)
+      }))
     }
+    await Promise.all(aborts)
   }
 
-  private failStoppedQuery(pending: PendingQuery, error: unknown): void {
-    if (pending.ended || pending.runtimeFailed) return
-    pending.runtimeFailed = true
-    this.abortCapabilitiesForQuery(pending.queryId)
-    pending.queue.fail(error)
-    void pending.client.stop()
+  private async failStoppedQuery(pending: PendingQuery, error: unknown): Promise<void> {
+    if (!pending.ended && !pending.runtimeFailed) {
+      pending.runtimeFailed = true
+      this.abortCapabilitiesForQuery(pending.queryId)
+      pending.queue.fail(error)
+    }
+    await pending.client.stop()
   }
 
   private abortCapabilitiesForQuery(queryId: string): void {

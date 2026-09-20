@@ -66,6 +66,18 @@ interface AgentSessionsIndex {
 /** 当前索引版本：v2 将 Claude runtime 退役为 Pi-only。 */
 const INDEX_VERSION = 2
 
+// 删除中的会话 ID 在应用生命周期内不可复用。先写入墓碑可让尚在异步预检、
+// 终止或持久化阶段的旧运行安全收束，而不会在文件删除后重新创建该会话。
+const deletingAgentSessionIds = new Set<string>()
+
+export function markAgentSessionDeleting(id: string): void {
+  deletingAgentSessionIds.add(id)
+}
+
+export function isAgentSessionDeleting(id: string): boolean {
+  return deletingAgentSessionIds.has(id)
+}
+
 /**
  * 会话引用最大返回数。
  *
@@ -460,6 +472,9 @@ export function getAgentSessionMessages(id: string): AgentMessage[] {
  * 追加一条消息到会话的 JSONL 文件
  */
 export function appendAgentMessage(id: string, message: AgentMessage): void {
+  // Late output from a stopped/deleted runtime must never recreate its JSONL file.
+  if (isAgentSessionDeleting(id) || !getAgentSessionMeta(id)) return
+
   const filePath = getAgentSessionMessagesPath(id)
 
   try {
@@ -494,6 +509,9 @@ const TRUNCATED_PREVIEW_LENGTH = 2000
  */
 export function appendSDKMessages(id: string, messages: SDKMessage[]): void {
   if (messages.length === 0) return
+  // `appendFileSync` creates a missing file. Do not let late runtime output
+  // recreate a transcript after DELETE_SESSION removed its metadata/files.
+  if (isAgentSessionDeleting(id) || !getAgentSessionMeta(id)) return
 
   const filePath = getAgentSessionMessagesPath(id)
 

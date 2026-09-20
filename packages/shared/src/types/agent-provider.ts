@@ -55,8 +55,8 @@ export interface AgentQueryInput {
 export interface AgentProviderAdapter {
   /** 发起查询，返回 SDKMessage 异步迭代流 */
   query(input: AgentQueryInput): AsyncIterable<SDKMessage>
-  /** 中止指定会话的执行 */
-  abort(sessionId: string): void
+  /** 中止指定会话的执行；支持实现返回 Promise 以便删除路径等待已发出的终止请求。 */
+  abort(sessionId: string): void | Promise<void>
   /**
    * 软中断当前 turn，但保留活跃 Query/Channel 以便继续注入下一条用户消息。
    * 与 abort() 的区别：不杀子进程，允许立即续跑新消息。
