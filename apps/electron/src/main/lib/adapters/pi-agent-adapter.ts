@@ -79,6 +79,7 @@ import {
 } from './pi-message-adapter'
 import { DEFAULT_CONTEXT_WINDOW, buildModel } from './pi-model-registry'
 import { PendingPromptSkillActivationTracker } from './pi-skill-activation-tracker'
+import { normalizePiToolResultDetails, serializePiToolResultPayload } from './pi-tool-result-json'
 import { createPiRetryTerminalGate, mapPiNativeRetryEvent } from './pi-retry-control'
 import {
   closePiRequestProxyDispatcher,
@@ -93,15 +94,12 @@ type BashToolOptions = import('@earendil-works/pi-coding-agent').BashToolOptions
 type PowerShellToolOptions = import('@earendil-works/pi-coding-agent').PowerShellToolOptions
 type SkillLoadResult = ReturnType<ResourceLoader['getSkills']>
 
-// Pi 0.84 从 retry API 移除了 maxTotalRetries / maxTotalDelayMs / jitterRatio，
-// runtime 的 _prepareRetry 退避是无上界的裸指数式：baseDelayMs * 2 ** (attempt - 1)，
-// 既不封顶单次延迟，也不限制累计退避。因此商业版旧配置里的「20 次」不能直接沿用：
-// 它原本靠 maxTotalDelayMs = 10 分钟封顶，实际到第 9~10 次就会停；无封顶时第 20 次
-// 单次延迟就是 1000 * 2^19 ≈ 6 天、累计约 12 天，Agent 会看上去永久卡在重试中。
-// 所以改用 maxRetries 直接承担时长上限：9 次累计退避 = 1000 * (2^9 - 1) ≈ 8.5 分钟，
-// 与旧行为的 10 分钟封顶等效，同时仍比上游默认的「8 次 + 无封顶」更可控。
-const PI_NATIVE_MAX_RETRIES = 9
-const PI_NATIVE_RETRY_BASE_DELAY_MS = 1_000
+// Pi 0.86 将单次 agent retry 退避限制为 maxAgentDelayMs（默认 60 秒）。
+// Proma 保持用户可等待约十分钟、但每次等待都可及时取消的策略：1 + 2 + 4 + 8 + 16 +
+// 32 + (8 × 60) = 543 秒。不能沿用 9 次，否则新上游默认上限会把总预算缩短为约 4 分钟。
+export const PI_NATIVE_MAX_RETRIES = 14
+export const PI_NATIVE_RETRY_BASE_DELAY_MS = 1_000
+export const PI_NATIVE_MAX_DELAY_MS = 60_000
 const MAX_AUTOMATIC_COMPACTION_CONTINUATIONS = 20
 
 export function shouldMarkCompactionAfterCompletedTurn(
@@ -729,16 +727,17 @@ function wrapToolWithPermission<TParams extends TSchema, TDetails, TState>(
 }
 
 function createJsonToolResult(payload: unknown): AgentToolResult<unknown> {
+  const serialized = serializePiToolResultPayload(payload)
   return {
-    content: [{ type: 'text', text: JSON.stringify(payload) }],
-    details: payload,
+    content: [{ type: 'text', text: serialized.text }],
+    details: serialized.details,
   } as AgentToolResult<unknown>
 }
 
 function createTextToolResult(text: string, details?: unknown): AgentToolResult<unknown> {
   return {
     content: [{ type: 'text', text }],
-    details,
+    ...(details === undefined ? {} : { details: normalizePiToolResultDetails(details) }),
   } as AgentToolResult<unknown>
 }
 
@@ -1376,6 +1375,7 @@ export function installRuntimeGuardHooks(session: AgentSession, guard: AgentRunt
     return {
       ...previousResult,
       content: sanitizedContent,
+      details: normalizePiToolResultDetails(resultAfterPreviousHooks.details),
       terminate: guardedResult.terminate,
     }
   }
@@ -1482,13 +1482,17 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         compaction: { enabled: true, reserveTokens: autoCompactionReserveTokens },
         // Pi 原生 retry 通过 agent.continue() 在同一 transcript 中恢复，能保留已完成的
         // tool_result；不能用外层重投原始 prompt 替代，否则会重复执行副作用工具。
-        // Pi 0.84 的退避无上界，故用 maxRetries 控住累计重试时长（≈ 8.5 分钟）；
+        // Pi 0.86 的每次退避由 maxAgentDelayMs 限制；14 次的累计上限为 543 秒。
         // provider retry 保持默认 0，避免嵌套计数。
         retry: {
           enabled: true,
           maxRetries: PI_NATIVE_MAX_RETRIES,
           baseDelayMs: PI_NATIVE_RETRY_BASE_DELAY_MS,
+          maxAgentDelayMs: PI_NATIVE_MAX_DELAY_MS,
         },
+        // Cache warming 会额外发送付费 provider 请求；在有产品级开关、计费归因和状态展示前，
+        // 不应因升级 Pi 而静默改变用户的资源消耗。
+        cacheWarming: 'off',
         ...buildPiRemoteConnectionSettings(input),
       })
       // Proma 官方 Agent 会以模型协议下发 OpenAI Responses；不能只按 provider
@@ -1568,19 +1572,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
       session.agent.transformContext = async (messages, signal) => sanitizePiMessageImageContent(
         await previousTransformContext?.(messages, signal) ?? messages,
       )
-      if (projectInstructionScope) {
-        const previousPrepareNextTurnWithContext = session.agent.prepareNextTurnWithContext
-        session.agent.prepareNextTurnWithContext = async (context, signal) => {
-          const previousSnapshot = await previousPrepareNextTurnWithContext?.(context, signal)
-          const nextContext = previousSnapshot?.context ?? context.context
-          const systemPrompt = projectInstructionScope.appendPendingInstructions(nextContext.systemPrompt)
-          if (systemPrompt === nextContext.systemPrompt) return previousSnapshot
-          return {
-            ...previousSnapshot,
-            context: { ...nextContext, systemPrompt },
-          }
-        }
-      }
+      // Pi 0.86 的 transcript-aware before_agent_start extension 会在下一轮注入动态项目指令。
       if (piAi && input.codexFastMode && input.provider === 'openai-codex' && isCodexFastModeSupportedModel(input.model)) {
         // Pi 的通用 streamSimple 会丢弃 provider 专属 serviceTier；这里直接走
         // provider stream，确保 request body 与 usage.cost 都使用 priority tier。

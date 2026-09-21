@@ -38,11 +38,10 @@
     "jotai-family": "^1.1.0"
   },
   "overrides": {
-    "@earendil-works/pi-agent-core": "0.85.1",
-    "@earendil-works/pi-ai": "0.85.1",
-    "@earendil-works/pi-coding-agent": "0.85.1",
-    "@earendil-works/pi-server": "0.85.1",
-    "@earendil-works/pi-tui": "0.85.1",
+    "@earendil-works/pi-agent-core": "0.86.1",
+    "@earendil-works/pi-ai": "0.86.1",
+    "@earendil-works/pi-coding-agent": "0.86.1",
+    "@earendil-works/pi-tui": "0.86.1",
     "@tiptap/core": "3.19.0",
     "@tiptap/extension-blockquote": "3.19.0",
     "@tiptap/extension-bold": "3.19.0",
@@ -85,7 +84,7 @@
 
   },
   "patchedDependencies": {
-    "@earendil-works/pi-ai@0.85.1": "patches/@earendil-works%2Fpi-ai@0.85.1.patch",
+    "@earendil-works/pi-ai@0.86.1": "patches/@earendil-works%2Fpi-ai@0.86.1.patch",
     "node-pty@1.1.0": "patches/node-pty@1.1.0.patch"
   }
 }

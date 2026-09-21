@@ -198,7 +198,9 @@ function validateFinalOutput(messages: AgentMessage[], outputFormat: JsonSchemaO
 
 function extractLastAssistantText(messages: AgentMessage[]): string {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index]
+    // Pi 0.86 的 AgentMessage 支持自定义消息；先以 unknown 做运行时判别，
+    // 避免 TypeScript 将联合类型提前收窄为 toolResult。
+    const message: unknown = messages[index]
     if (!isRecord(message) || message.role !== 'assistant' || !Array.isArray(message.content)) continue
     const text = message.content.map((block) => {
       if (!isRecord(block) || block.type !== 'text') return ''

@@ -89,6 +89,12 @@ export class ProjectInstructionScopeController {
         toolName: event.toolName,
         input: event.input as Record<string, unknown>,
       }))
+      // Pi 0.86 将系统提示词纳入 transcript；在下一次 agent start 时返回完整更新，
+      // 让 Pi 为支持的 provider 持久回放中途生效的项目指令。
+      pi.on('before_agent_start', (event) => {
+        const systemPrompt = this.appendPendingInstructions(event.systemPrompt)
+        return systemPrompt === event.systemPrompt ? undefined : { systemPrompt }
+      })
     }
   }
 
