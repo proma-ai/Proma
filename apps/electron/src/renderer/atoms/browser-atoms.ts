@@ -12,6 +12,30 @@ export const browserFocusRequestMapAtom = atom<Map<string, string>>(new Map())
 /** 首次风险确认完成后自动加载的 Agent 回复链接。 */
 export const browserPendingNavigationMapAtom = atom<Map<string, string>>(new Map())
 
+/**
+ * 删除会话时清理其全部受管浏览器 UI 状态。
+ *
+ * 主进程会销毁对应的原生 WebContentsView；这里同时移除 renderer 缓存，
+ * 避免 IPC 关闭事件晚到或丢失时右侧工作区继续渲染已删除会话的浏览器。
+ */
+export const clearBrowserSessionStateAtom = atom(
+  null,
+  (_get, set, sessionId: string) => {
+    const removeEntry = <T,>(previous: Map<string, T>): Map<string, T> => {
+      if (!previous.has(sessionId)) return previous
+      const next = new Map(previous)
+      next.delete(sessionId)
+      return next
+    }
+
+    set(browserPanelOpenMapAtom, removeEntry)
+    set(browserPanelMinimizedMapAtom, removeEntry)
+    set(browserStateMapAtom, removeEntry)
+    set(browserFocusRequestMapAtom, removeEntry)
+    set(browserPendingNavigationMapAtom, removeEntry)
+  },
+)
+
 export const currentSessionBrowserStateAtom = atom<BrowserViewState | null>((get) => {
   const sessionId = get(currentAgentSessionIdAtom)
   return sessionId ? get(browserStateMapAtom).get(sessionId) ?? null : null
