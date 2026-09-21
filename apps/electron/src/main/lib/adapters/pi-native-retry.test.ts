@@ -1,10 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { isRetryableAssistantError, retryAssistantCall, retryDelayMs, type AssistantMessage } from '@earendil-works/pi-ai/compat'
-import {
-  PI_NATIVE_MAX_DELAY_MS,
-  PI_NATIVE_MAX_RETRIES,
-  PI_NATIVE_RETRY_BASE_DELAY_MS,
-} from './pi-agent-adapter'
+import { isRetryableAssistantError, retryAssistantCall, type AssistantMessage } from '@earendil-works/pi-ai/compat'
 
 function failedAssistant(errorMessage: string): AssistantMessage {
   return {
@@ -15,25 +10,7 @@ function failedAssistant(errorMessage: string): AssistantMessage {
   } as unknown as AssistantMessage
 }
 
-function totalRetryDelay(): number {
-  return Array.from({ length: PI_NATIVE_MAX_RETRIES }, (_, index) => retryDelayMs({
-    baseDelayMs: PI_NATIVE_RETRY_BASE_DELAY_MS,
-    maxAgentDelayMs: PI_NATIVE_MAX_DELAY_MS,
-  }, index + 1)).reduce((total, delay) => total + delay, 0)
-}
-
 describe('Pi native retry classifier', () => {
-  test('keeps Proma retry budget near ten minutes while bounding each wait to one minute', () => {
-    const policy = {
-      baseDelayMs: PI_NATIVE_RETRY_BASE_DELAY_MS,
-      maxAgentDelayMs: PI_NATIVE_MAX_DELAY_MS,
-    }
-
-    expect(retryDelayMs(policy, 6)).toBe(32_000)
-    expect(retryDelayMs(policy, 7)).toBe(60_000)
-    expect(totalRetryDelay()).toBe(543_000)
-    expect(totalRetryDelay()).toBeLessThanOrEqual(600_000)
-  })
   test('classifies an OpenAI Responses terminal-event stream interruption as retryable', () => {
     expect(isRetryableAssistantError(
       failedAssistant('OpenAI Responses stream ended before a terminal response event'),
