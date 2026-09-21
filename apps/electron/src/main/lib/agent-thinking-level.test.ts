@@ -56,6 +56,14 @@ describe('Pi thinking level resolver', () => {
       'glm-5.3',
     )).toBe('max')
   })
+  test('Given GLM-5.3-FlashX and no override When resolving Then defaults to max reasoning', () => {
+    expect(resolvePiThinkingLevel(
+      { agentThinking: { type: 'adaptive' } },
+      undefined,
+      'zhipu',
+      'glm-5.3-flashx',
+    )).toBe('max')
+  })
 })
 
 test('Given a new reasoningLevel When legacy level also exists Then the new field wins', () => {
