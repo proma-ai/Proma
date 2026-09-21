@@ -350,6 +350,32 @@ export const VOLCENGINE_CODING_PLAN_MODELS: readonly ChannelModel[] = [
 ]
 
 /**
+ * 凭据来源标记（当前仅 ChatGPT 订阅 (Codex) 使用）。
+ *
+ * - 默认缺省：凭据由 Proma 应用内 OAuth 登录获得，序列化后存在 `apiKey` 字段。
+ * - `'codex-cli'`：复用本机 Codex CLI 登录（`~/.codex/auth.json`）。Proma 不登录、
+ *   不持久化 token，`apiKey` 留空，运行时实时读取该文件的 access token 当 Bearer，
+ *   续期完全交给 Codex CLI。这是用户在渠道表单中显式选择的来源，而非隐式推断。
+ */
+export type ChannelCredentialSource = 'codex-cli'
+
+/**
+ * 本机 Codex CLI 登录状态（渲染层探测用，主进程经 IPC 返回）。
+ *
+ * 刻意不含任何 token 本体，只暴露「是否可用 + 账号 + 到期时间」用于 UI 展示。
+ */
+export interface CodexCliStatus {
+  /** ~/.codex/auth.json 存在、为 ChatGPT 登录且 access token 仍在有效期内 */
+  available: boolean
+  /** ChatGPT 账号标识（来自 token JWT / 文件），用于向用户展示将复用哪个账号 */
+  accountId?: string
+  /** access token 到期 Unix 毫秒时间戳；available 为 false 时缺省 */
+  expiresAt?: number
+  /** 是否已存在复用本机 Codex CLI 登录的渠道（同一份 ~/.codex 凭据，重复创建无意义），供 UI 隐藏重复入口 */
+  alreadyConfigured?: boolean
+}
+
+/**
  * 渠道配置
  *
  * 存储在 ~/.proma/channels.json 中，apiKey 字段为加密后的 base64 字符串
@@ -363,7 +389,7 @@ export interface Channel {
   provider: ProviderType
   /** API Base URL */
   baseUrl: string
-  /** 加密后的 API Key（base64 编码） */
+  /** 加密后的 API Key（base64 编码）；credentialSource='codex-cli' 时为空字符串 */
   apiKey: string
   /** 可用模型列表 */
   models: ChannelModel[]
@@ -373,6 +399,8 @@ export interface Channel {
   createdAt: number
   /** 更新时间戳 */
   updatedAt: number
+  /** 凭据来源；缺省表示常规（API Key 或应用内 OAuth） */
+  credentialSource?: ChannelCredentialSource
 }
 
 /**
@@ -382,10 +410,12 @@ export interface ChannelCreateInput {
   name: string
   provider: ProviderType
   baseUrl: string
-  /** 明文 API Key，主进程会加密后存储 */
+  /** 明文 API Key，主进程会加密后存储；credentialSource='codex-cli' 时为空字符串 */
   apiKey: string
   models: ChannelModel[]
   enabled: boolean
+  /** 凭据来源；缺省为常规（API Key 或应用内 OAuth） */
+  credentialSource?: ChannelCredentialSource
 }
 
 /**
@@ -395,10 +425,11 @@ export interface ChannelUpdateInput {
   name?: string
   provider?: ProviderType
   baseUrl?: string
-  /** 明文 API Key，为空字符串表示不更新 */
+  /** 明文 API Key，为 undefined 表示不更新；显式传空字符串可清空（配合 codex-cli 来源） */
   apiKey?: string
   models?: ChannelModel[]
   enabled?: boolean
+  credentialSource?: ChannelCredentialSource
 }
 
 /**
@@ -543,6 +574,8 @@ export const CHANNEL_IPC_CHANNELS = {
   TEST_DIRECT: 'channel:test-direct',
   /** 查询订阅 Plan 额度 */
   GET_PLAN_QUOTA: 'channel:get-plan-quota',
+  /** 探测本机 Codex CLI 的 ChatGPT 登录状态（不含 token，仅可用性/账号/到期时间） */
+  GET_CODEX_CLI_STATUS: 'channel:get-codex-cli-status',
   /** 发起 ChatGPT (Codex) OAuth 登录，返回加密凭据与账号信息 */
   CODEX_OAUTH_LOGIN: 'channel:codex-oauth-login',
   /** 取消进行中的 ChatGPT OAuth 登录流程 */
