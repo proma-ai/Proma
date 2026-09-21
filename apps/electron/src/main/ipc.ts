@@ -3008,6 +3008,7 @@ export function registerIpcHandlers(): void {
         // A headless/delegated run can be in preflight before it appears active.
         await stopAgentAndDrain(sessionId)
         closeTerminalsForSession(sessionId)
+        await browserController.close(sessionId)
         deleteAgentSession(sessionId)
       }
       for (const automationId of affectedAutomationIds) {
