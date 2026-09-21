@@ -12,6 +12,7 @@ import { browserObservationNameLimit, prioritizeBrowserObservationCandidates, re
 import { buildPersistentBrowserPartition, resolveBrowserProfileKey } from './browser-profile-policy'
 import { canBrowserSessionTakeForeground, isNewBrowserTabLayoutRevision } from './browser-presentation-policy'
 import { hasAcknowledgedBrowserRiskDisclaimer } from './browser-risk-disclaimer'
+import { MAX_AUTO_BROWSER_ZOOM_PASSES, resolveAutoBrowserZoomFactor } from './browser-auto-zoom'
 import { buildPromaBrowserUserAgent } from './browser-identity'
 import {
   assertBrowserExtract,
@@ -75,6 +76,16 @@ type BrowserTabRecord = {
   /** 页面声明的 HTTP(S) favicon；仅用于 renderer 标签图标。 */
   favicon: string | null
   highlightTimer?: ReturnType<typeof setTimeout>
+  /** 最近一次由 BrowserSlot 请求的可用面板宽度，仅作重载后的重新测量触发依据。 */
+  autoFitViewportWidth?: number
+  /** 最近一次已应用的自动适配结果，避免同一尺寸的重复 CDP 测量；包含 zoom 以避免同源 tab 改变 page zoom 后读到陈旧缓存。 */
+  autoFitResult?: { generation: number; viewportWidth: number; zoomFactor: number }
+  /** 同一文档在存在横向溢出时测得的固有宽度，不受缩小后 viewport clamp 影响。 */
+  autoFitIntrinsicPageWidth?: { generation: number; width: number }
+  /** 单一主进程防抖：BrowserSlot 只随 layout 上报宽度，不再另起计时器。 */
+  autoFitTimer?: ReturnType<typeof setTimeout>
+  /** 同一 generation + viewport 的 setZoomFactor 重测次数上限，防止异常页面无限布局。 */
+  autoFitPass?: { generation: number; viewportWidth: number; count: number }
   lastBounds?: BrowserViewLayout['bounds']
   /** 仅记录当前实际挂载的 owner；隐藏时 detach，但保留 WebContents 及页面状态。 */
   attachedOwner: BrowserWindow | null
@@ -407,6 +418,27 @@ export class BrowserController {
   private invalidateTabDocument(tab: BrowserTabRecord): void {
     tab.refs.clear()
     tab.generation++
+    tab.autoFitResult = undefined
+    tab.autoFitIntrinsicPageWidth = undefined
+    tab.autoFitPass = undefined
+  }
+
+  private resetAutoFit(tab: BrowserTabRecord): void {
+    // 只清除旧文档的测量结果；保留当前页面 zoom，避免导航时先闪回 100% 再缩回目标档位。
+    tab.autoFitResult = undefined
+    tab.autoFitPass = undefined
+    if (tab.autoFitTimer) clearTimeout(tab.autoFitTimer)
+    tab.autoFitTimer = undefined
+  }
+
+  private scheduleAutoFit(browserSession: BrowserSessionRecord, tab: BrowserTabRecord): void {
+    if (!tab.autoFitViewportWidth || tab.view.webContents.isDestroyed()) return
+    if (tab.autoFitTimer) clearTimeout(tab.autoFitTimer)
+    tab.autoFitTimer = setTimeout(() => {
+      tab.autoFitTimer = undefined
+      // 只执行停止拖动后保存的最新 viewport，过时的布局从不进入 tab 操作队列。
+      void this.autoFit(browserSession.sessionId, tab.tabId, tab.autoFitViewportWidth!).catch(() => undefined)
+    }, 160)
   }
 
   /** 将同一 tab 的 UI/Agent 指令顺序化；一个失败不会卡死后续命令。 */
@@ -679,6 +711,7 @@ export class BrowserController {
     view.webContents.on('did-start-loading', () => {
       // 加载状态会因子资源再次开始，不能在此清 favicon，否则已获取的页面图标会被覆盖回默认图标。
       this.invalidateTabDocument(tab)
+      this.resetAutoFit(tab)
       this.updateNavigationState(browserSession, tab)
     })
     view.webContents.on('page-favicon-updated', (_event, faviconUrls: string[]) => {
@@ -693,7 +726,10 @@ export class BrowserController {
       }) ?? null
       this.emit(browserSession)
     })
-    view.webContents.on('did-stop-loading', () => this.updateNavigationState(browserSession, tab))
+    view.webContents.on('did-stop-loading', () => {
+      this.updateNavigationState(browserSession, tab)
+      this.scheduleAutoFit(browserSession, tab)
+    })
     view.webContents.on('page-title-updated', () => this.updateNavigationState(browserSession, tab))
     view.webContents.on('did-navigate', () => {
       // 只在主框架真正完成跨文档导航时清理旧站点图标；新页面随后会通过 page-favicon-updated 重新发布。
@@ -702,8 +738,15 @@ export class BrowserController {
       this.invalidateTabDocument(tab)
       this.updateNavigationState(browserSession, tab)
     })
-    view.webContents.on('did-navigate-in-page', () => { tab.popupInitialNavigationPending = false; this.invalidateTabDocument(tab); this.updateNavigationState(browserSession, tab) })
+    view.webContents.on('did-navigate-in-page', () => {
+      tab.popupInitialNavigationPending = false
+      this.invalidateTabDocument(tab)
+      this.updateNavigationState(browserSession, tab)
+      this.scheduleAutoFit(browserSession, tab)
+    })
     view.webContents.on('destroyed', () => {
+      if (tab.autoFitTimer) clearTimeout(tab.autoFitTimer)
+      tab.autoFitTimer = undefined
       if (!browserSession.tabs.has(tab.tabId)) return
       browserSession.tabs.delete(tab.tabId)
       browserSession.lastLayoutRevisionByTab.delete(tab.tabId)
@@ -992,17 +1035,26 @@ export class BrowserController {
     this.foregroundPresentationSessionId = browserSession.sessionId
     this.latestForegroundPresentationRevision = Math.max(this.latestForegroundPresentationRevision, layout.revision)
 
-    const zoomFactor = this.owner?.webContents.getZoomFactor() ?? 1
+    const ownerZoom = this.owner?.webContents.getZoomFactor() ?? 1
+    // BrowserSlot 的 DOMRect 位于 owner renderer 的 CSS 坐标系；WebContentsView bounds
+    // 位于原生 contentView 坐标系。两者只能通过 owner zoom 换算一次。
     const adjustedBounds = {
-      x: Math.round(bounds.x * zoomFactor),
-      y: Math.round(bounds.y * zoomFactor),
-      width: Math.round(bounds.width * zoomFactor),
-      height: Math.round(bounds.height * zoomFactor),
+      x: Math.round(bounds.x * ownerZoom),
+      y: Math.round(bounds.y * ownerZoom),
+      width: Math.round(bounds.width * ownerZoom),
+      height: Math.round(bounds.height * ownerZoom),
     }
-    if (!tab.lastBounds || Object.entries(adjustedBounds).some(([key, value]) => tab.lastBounds?.[key as keyof typeof adjustedBounds] !== value)) {
+    const boundsChanged = !tab.lastBounds || Object.entries(adjustedBounds).some(([key, value]) => tab.lastBounds?.[key as keyof typeof adjustedBounds] !== value)
+    if (boundsChanged) {
       tab.lastBounds = { ...adjustedBounds }
+      // 自动适配和原生 WebContentsView 使用同一 bounds 坐标系。
+      tab.autoFitViewportWidth = adjustedBounds.width
+      tab.autoFitResult = undefined
+      tab.autoFitPass = undefined
     }
     const shown = this.attachTabView(tab)
+    // setBounds 已同步到原生 WebContentsView 后，由唯一的主进程防抖测量。
+    if (shown && layout.visible) this.scheduleAutoFit(browserSession, tab)
     if (tab.state.visible !== shown) {
       tab.state.visible = shown
       changedSessions.add(browserSession)
@@ -1018,6 +1070,106 @@ export class BrowserController {
     }
     this.emitChangedSessions(changedSessions)
     if (shown) this.pruneBackgroundSessions()
+  }
+
+  /**
+   * 基于 WebContentsView 原生 viewport 与当前页面的只读 CSS 测量选择不低于 60% 的分级 zoom。
+   * 这里绝不临时恢复 100%：无溢出页面按当前 zoom 反推固有宽度，既能从 60% 回升，也不会闪烁。
+   */
+  async autoFit(sessionId: string, tabId: string, viewportWidth: number): Promise<void> {
+    const browserSession = this.sessions.get(sessionId)
+    const tab = browserSession?.tabs.get(tabId)
+    if (!browserSession || !tab || !Number.isFinite(viewportWidth) || viewportWidth <= 4) return
+    const normalizedViewportWidth = Math.round(viewportWidth)
+    const viewportChanged = tab.autoFitViewportWidth !== normalizedViewportWidth
+    tab.autoFitViewportWidth = normalizedViewportWidth
+    if (viewportChanged) {
+      tab.autoFitResult = undefined
+      tab.autoFitPass = undefined
+    }
+    if (!this.hasPresentation(sessionId, tabId) || tab.view.webContents.isDestroyed()) return
+    const isCurrentAutoFitResult = (result: typeof tab.autoFitResult | undefined, width: number): boolean => (
+      result?.generation === tab.generation
+      && result.viewportWidth === width
+      && Math.abs(tab.view.webContents.getZoomFactor() - result.zoomFactor) <= 0.001
+    )
+    if (isCurrentAutoFitResult(tab.autoFitResult, normalizedViewportWidth)) return
+
+    await this.runTabOperation(browserSession, tab, undefined, async () => {
+      if (!this.isManagedTabCurrent(browserSession, tab) || !this.hasPresentation(sessionId, tabId) || tab.view.webContents.isDestroyed()) return
+      const requestedViewportWidth = tab.autoFitViewportWidth
+      if (!requestedViewportWidth || isCurrentAutoFitResult(tab.autoFitResult, requestedViewportWidth)) return
+      const generation = tab.generation
+      try {
+        const currentZoom = tab.view.webContents.getZoomFactor()
+        const measurement = await this.executePageExpression(tab, `(() => {
+          const root = document.documentElement
+          const body = document.body
+          const rootClientWidth = root?.clientWidth || 0
+          const innerWidth = window.innerWidth || 0
+          const bodyClientWidth = body?.clientWidth || 0
+          const layoutViewportWidth = [rootClientWidth, innerWidth, bodyClientWidth].find((value) => Number.isFinite(value) && value > 0) || 0
+          const rootScrollWidth = root?.scrollWidth || 0
+          const bodyScrollWidth = body?.scrollWidth || 0
+          const pageWidth = bodyScrollWidth > 0 && layoutViewportWidth > 0 && bodyScrollWidth < layoutViewportWidth - 1 && rootScrollWidth <= layoutViewportWidth + 1
+            ? bodyScrollWidth
+            : Math.max(rootScrollWidth, bodyScrollWidth)
+          return {
+            pageWidth,
+            layoutViewportWidth,
+            intrinsicPageWidth: bodyScrollWidth > 0 && layoutViewportWidth > 0 && bodyScrollWidth < layoutViewportWidth - 1 && rootScrollWidth <= layoutViewportWidth + 1 ? bodyScrollWidth : undefined,
+          }
+        })()`)
+        if (
+          !this.isManagedTabCurrent(browserSession, tab)
+          || generation !== tab.generation
+          || requestedViewportWidth !== tab.autoFitViewportWidth
+          || tab.view.webContents.isDestroyed()
+        ) return
+        const data = measurement && typeof measurement === 'object' ? measurement as Record<string, unknown> : null
+        const pageWidth = typeof data?.pageWidth === 'number' ? data.pageWidth : 0
+        const layoutViewportWidth = typeof data?.layoutViewportWidth === 'number' ? data.layoutViewportWidth : 0
+        const intrinsicPageWidth = typeof data?.intrinsicPageWidth === 'number' ? data.intrinsicPageWidth : undefined
+        const pageHasHorizontalOverflow = pageWidth > layoutViewportWidth + 1
+        if (pageHasHorizontalOverflow && pageWidth > 0) {
+          tab.autoFitIntrinsicPageWidth = { generation, width: pageWidth }
+        } else if (intrinsicPageWidth && intrinsicPageWidth > 0) {
+          tab.autoFitIntrinsicPageWidth = { generation, width: intrinsicPageWidth }
+        }
+        const cachedIntrinsicPageWidth = tab.autoFitIntrinsicPageWidth?.generation === generation
+          ? tab.autoFitIntrinsicPageWidth.width
+          : undefined
+        const targetZoom = resolveAutoBrowserZoomFactor({
+          pageWidth,
+          layoutViewportWidth,
+          viewportWidth: requestedViewportWidth,
+          currentZoom,
+          intrinsicPageWidth: cachedIntrinsicPageWidth,
+        })
+        if (Math.abs(currentZoom - targetZoom) > 0.001) {
+          // 用户可能在 CDP 测量期间用浏览器快捷键调整了 zoom；此轮不覆盖该选择。
+          if (Math.abs(tab.view.webContents.getZoomFactor() - currentZoom) > 0.001) {
+            tab.autoFitResult = { generation, viewportWidth: requestedViewportWidth, zoomFactor: tab.view.webContents.getZoomFactor() }
+            return
+          }
+          tab.view.webContents.setZoomFactor(targetZoom)
+          // Zoom 会改变 CSS layout viewport；有界地再测一次，直到当前档位与基线稳定。
+          const previousPass = tab.autoFitPass
+          const passCount = previousPass?.generation === generation && previousPass.viewportWidth === requestedViewportWidth
+            ? previousPass.count + 1
+            : 1
+          tab.autoFitPass = { generation, viewportWidth: requestedViewportWidth, count: passCount }
+          tab.autoFitResult = undefined
+          if (passCount < MAX_AUTO_BROWSER_ZOOM_PASSES) this.scheduleAutoFit(browserSession, tab)
+          else tab.autoFitResult = { generation, viewportWidth: requestedViewportWidth, zoomFactor: targetZoom }
+        } else {
+          tab.autoFitPass = undefined
+          tab.autoFitResult = { generation, viewportWidth: requestedViewportWidth, zoomFactor: currentZoom }
+        }
+      } catch {
+        // 页面可能刚卸载或 CDP 暂不可用；保持当前 zoom，避免把短暂异常变成可见跳变。
+      }
+    })
   }
 
   /**
