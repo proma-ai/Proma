@@ -58,7 +58,7 @@ const ZERO_MODEL_COST: PiModelCost = { input: 0, output: 0, cacheRead: 0, cacheW
 export const DEFAULT_CONTEXT_WINDOW = 200_000
 const DEFAULT_MAX_TOKENS = 64_000
 const VOLCENGINE_GLM_MAX_TOKENS = 128_000
-/** GLM-5.3 与 GLM-5.3-Flash 均支持 128K 最大输出。 */
+/** GLM-5.3 系列均支持 128K 最大输出。 */
 const GLM_53_FAMILY_MAX_TOKENS = 131_072
 const CODEX_BASE_URL = 'https://chatgpt.com/backend-api'
 const CODEX_MAX_TOKENS = 128_000
@@ -797,7 +797,7 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
   const isVolcengineGlm5x = (input.provider === 'doubao' || input.provider === 'doubao-api' || input.provider === 'ark-coding-plan')
     && (glmModelId === 'glm-5.2' || glmModelId === 'glm-5.3')
   const isCatalogMissingGlm53Family = !catalogModel
-    && (glmModelId === 'glm-5.3' || glmModelId === 'glm-5.3-flash')
+    && (glmModelId === 'glm-5.3' || glmModelId === 'glm-5.3-flash' || glmModelId === 'glm-5.3-flashx')
   const catalogContextWindow = catalogModel?.contextWindow ?? DEFAULT_CONTEXT_WINDOW
   const inferredContextWindow = inferContextWindow(input.model) ?? DEFAULT_CONTEXT_WINDOW
   // 商业版官方渠道的需求仅限 Claude；GPT、Kimi 等官方模型即使共享 Anthropic
@@ -822,7 +822,7 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
     contextWindow: configuredContextWindow ?? codexAlignedCapabilities?.contextWindow ?? Math.max(catalogContextWindow, inferredContextWindow),
     // 同样后端下发优先（configuredMaxTokens 只会来自 provider === 'proma' 的官方渠道，
     // 与仅对 doubao / ark-coding-plan 生效的方舟上限天然互斥）。Pi catalog 缺少时，
-    // GLM-5.3 与 GLM-5.3-Flash 均按官方 128K 输出上限注册。
+    // GLM-5.3 系列均按官方 128K 输出上限注册。
     maxTokens: configuredMaxTokens
       ?? (isVolcengineGlm5x
         ? VOLCENGINE_GLM_MAX_TOKENS

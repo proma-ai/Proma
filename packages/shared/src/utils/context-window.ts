@@ -58,7 +58,7 @@ const ONE_MILLION_CONTEXT_RULES = {
   // DeepSeek
   deepseek: ['deepseek-v4', 'deepseek-flash'],
   // 智谱 GLM
-  glm: ['glm-5.3', 'glm-5.3-flash', 'glm-5.2'],
+  glm: ['glm-5.3', 'glm-5.3-flash', 'glm-5.3-flashx', 'glm-5.2'],
   // 小米 MiMo
   mimo: ['mimo-v2.5'],
   // MiniMax
