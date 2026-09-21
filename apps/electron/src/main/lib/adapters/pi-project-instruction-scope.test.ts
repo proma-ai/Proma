@@ -47,6 +47,29 @@ describe('Pi 项目指令动态 scope', () => {
     expect(controller.beforeToolCall({ toolName: 'read', input: { path: 'packages/api/handler.ts' } })).toBeUndefined()
   })
 
+  test('Given a scoped instruction is pending When Pi starts the next agent turn Then injects it through before_agent_start', () => {
+    const projectRoot = createProject()
+    mkdirSync(join(projectRoot, 'packages'), { recursive: true })
+    writeFileSync(join(projectRoot, 'AGENTS.md'), 'root instruction')
+    writeFileSync(join(projectRoot, 'packages', 'AGENTS.md'), 'packages instruction')
+    const controller = createController(projectRoot)
+    const handlers = new Map<string, (event: unknown) => unknown>()
+
+    controller.createExtension()({
+      on(event: string, handler: (payload: unknown) => unknown) {
+        handlers.set(event, handler)
+        return () => {}
+      },
+    } as never)
+
+    expect(controller.beforeToolCall({ toolName: 'read', input: { path: 'packages/handler.ts' } })?.block).toBe(true)
+    const beforeAgentStart = handlers.get('before_agent_start')
+    expect(beforeAgentStart?.({ systemPrompt: 'base system prompt' })).toEqual({
+      systemPrompt: expect.stringContaining('packages/AGENTS.md'),
+    })
+    expect(beforeAgentStart?.({ systemPrompt: 'base system prompt' })).toBeUndefined()
+  })
+
   test('Given a legacy CLAUDE.md in an activated subtree When editing another project file Then requires creating AGENTS.md first', () => {
     const projectRoot = createProject()
     mkdirSync(join(projectRoot, 'apps'), { recursive: true })
