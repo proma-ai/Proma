@@ -40,6 +40,12 @@ const ROOT_DIR = path.join(import.meta.dir, "..")
 const OUT_DIR = path.join(ROOT_DIR, "out")
 const PACKAGE_JSON_PATH = path.join(ROOT_DIR, "package.json")
 const RELEASES_PREFIX = "releases"
+const OSS_TIMEOUT_MS = 5 * 60 * 1000
+const OSS_REQUEST_RETRIES = 2
+const UPLOAD_ATTEMPTS = 3
+const MULTIPART_PART_SIZE = 8 * 1024 * 1024
+const MULTIPART_PARALLEL = 2
+const CHECKPOINT_DIR = path.join(OUT_DIR, ".oss-upload-checkpoints")
 
 // 解析命令行参数
 const args = process.argv.slice(2)
@@ -139,7 +145,16 @@ function getOSSClient(envConfig: EnvConfig): OSS {
   console.log(`🌍 环境: ${envConfig.name.toUpperCase()}`)
   console.log(`📦 Bucket: ${bucket}`)
 
-  return new OSS({ accessKeyId, accessKeySecret, bucket, region })
+  return new OSS({
+    accessKeyId,
+    accessKeySecret,
+    bucket,
+    region,
+    secure: true,
+    timeout: OSS_TIMEOUT_MS,
+    // @types/ali-oss does not yet declare these SDK-supported options.
+    retryMax: OSS_REQUEST_RETRIES,
+  } as OSS.Options & { retryMax: number })
 }
 
 // ============================================
@@ -184,6 +199,49 @@ const MIME_TYPES: Record<string, string> = {
 // 上传逻辑
 // ============================================
 
+function checkpointPathFor(ossPath: string): string {
+  return path.join(CHECKPOINT_DIR, `${ossPath.replace(/[^a-zA-Z0-9._-]/g, "_")}.json`)
+}
+
+function loadCheckpoint(checkpointPath: string, ossPath: string, localSize: number): OSS.Checkpoint | undefined {
+  if (!fs.existsSync(checkpointPath)) return undefined
+  try {
+    const checkpoint = JSON.parse(fs.readFileSync(checkpointPath, "utf-8")) as OSS.Checkpoint
+    if (checkpoint.name === ossPath && checkpoint.fileSize === localSize && checkpoint.partSize === MULTIPART_PART_SIZE) {
+      return checkpoint
+    }
+  } catch {
+    // A corrupted checkpoint must never prevent a fresh upload.
+  }
+  fs.rmSync(checkpointPath, { force: true })
+  return undefined
+}
+
+function saveCheckpoint(checkpointPath: string, checkpoint: OSS.Checkpoint): void {
+  fs.mkdirSync(CHECKPOINT_DIR, { recursive: true })
+  fs.writeFileSync(checkpointPath, JSON.stringify(checkpoint))
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+}
+
+async function withUploadRetry<T>(label: string, action: () => Promise<T>): Promise<T> {
+  let lastError: unknown
+  for (let attempt = 1; attempt <= UPLOAD_ATTEMPTS; attempt += 1) {
+    try {
+      return await action()
+    } catch (error) {
+      lastError = error
+      if (attempt === UPLOAD_ATTEMPTS) break
+      const delayMs = 1_000 * 2 ** (attempt - 1)
+      console.warn(`  ⚠️ ${label} 第 ${attempt} 次失败 (${formatError(error)})，${delayMs / 1_000}s 后重试...`)
+      await new Promise<void>((resolve) => setTimeout(resolve, delayMs))
+    }
+  }
+  throw lastError
+}
+
 async function uploadFile(client: OSS, localPath: string, ossPath: string): Promise<boolean> {
   try {
     const fileName = path.basename(localPath)
@@ -195,23 +253,35 @@ async function uploadFile(client: OSS, localPath: string, ossPath: string): Prom
     console.log(`     → ${ossPath}`)
 
     if (localSize > MULTIPART_THRESHOLD) {
-      // 大文件：分片上传
-      await client.multipartUpload(ossPath, localPath, {
-        headers: { "Content-Type": mime },
-        progress: (p: number) => {
-          process.stdout.write(`\r     进度: ${(p * 100).toFixed(1)}%`)
-        },
+      const checkpointPath = checkpointPathFor(ossPath)
+      let checkpoint = loadCheckpoint(checkpointPath, ossPath, localSize)
+      if (checkpoint) console.log("     ↳ 发现断点，将继续未完成的分片")
+
+      await withUploadRetry(fileName, async () => {
+        await client.multipartUpload(ossPath, localPath, {
+          headers: { "Content-Type": mime },
+          timeout: OSS_TIMEOUT_MS,
+          partSize: MULTIPART_PART_SIZE,
+          parallel: MULTIPART_PARALLEL,
+          checkpoint,
+          progress: (progress: number, nextCheckpoint: OSS.Checkpoint) => {
+            checkpoint = nextCheckpoint
+            saveCheckpoint(checkpointPath, nextCheckpoint)
+            process.stdout.write(`\r     进度: ${(progress * 100).toFixed(1)}%`)
+          },
+        })
       })
+      fs.rmSync(checkpointPath, { force: true })
       console.log("") // 换行
     } else {
-      // 小文件：直接上传
-      await client.put(ossPath, localPath, {
+      await withUploadRetry(fileName, () => client.put(ossPath, localPath, {
         headers: { "Content-Type": mime },
-      })
+        timeout: OSS_TIMEOUT_MS,
+      }))
     }
 
-    // 校验 OSS 文件大小
-    const head = await client.head(ossPath)
+    // 校验 OSS 文件大小；短暂 HEAD 失败同样不应让已完成上传白白失败。
+    const head = await withUploadRetry(`${fileName} 校验`, () => client.head(ossPath, { timeout: OSS_TIMEOUT_MS }))
     const remoteSize = Number(head.res.headers["content-length"])
     if (remoteSize !== localSize) {
       console.error(`  ❌ 大小不匹配！本地: ${localSize}, OSS: ${remoteSize}`)
@@ -221,7 +291,7 @@ async function uploadFile(client: OSS, localPath: string, ossPath: string): Prom
     console.log(`  ✅ 完成 (校验通过)`)
     return true
   } catch (error) {
-    console.error(`  ❌ 失败: ${error}`)
+    console.error(`  ❌ 失败: ${formatError(error)}`)
     return false
   }
 }
