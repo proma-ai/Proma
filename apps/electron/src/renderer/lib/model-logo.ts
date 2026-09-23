@@ -36,6 +36,7 @@ import GPT51CodexLogo from '@/assets/models/gpt-5.1-codex.png'
 import GPT51CodexMiniLogo from '@/assets/models/gpt-5.1-codex-mini.png'
 import GPT6AstraLogo from '@/assets/models/gpt-6-astra.png'
 import GPT6SolLogo from '@/assets/models/gpt-6-sol.png'
+import GPT6TerraLogo from '@/assets/models/gpt-6-terra.png'
 import GPT6LunaLogo from '@/assets/models/gpt-6-luna.png'
 
 // DeepSeek
@@ -141,6 +142,11 @@ export { resolveModelDisplayName } from './model-display-name'
  */
 const MODEL_LOGO_MAP: Record<string, string> = {
   // === GPT 系列（具体型号优先） ===
+  // 官方渠道的数字折扣 SKU（如 gpt-6-sol-1）与对应基准模型共用视觉标识。
+  // 仅在渲染层匹配，不扩大 Agent 能力或推理档位的模型家族判定。
+  '^gpt-6-sol-\\d+$': GPT6SolLogo,
+  '^gpt-6-terra(?:-\\d+)?$': GPT6TerraLogo,
+  '^gpt-6-luna-\\d+$': GPT6LunaLogo,
   'gpt-image': GPTImageLogo,
   'gpt-3': GPT35Logo,
   'gpt-4': GPT4Logo,
