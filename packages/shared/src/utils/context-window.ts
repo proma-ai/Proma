@@ -115,7 +115,7 @@ function matchesContextRule(model: string, pattern: string): boolean {
  * 上下文窗口配置表。仅影响显示推断的模型加在 rules；已确认 1M
  * 能力的模型加在上方 ONE_MILLION_CONTEXT_RULES，并自动复用于 rules。
  *
- * 匹配规则：modelId.toLowerCase() 包含 pattern 即命中（substring match）。
+ * 匹配规则：对 modelId 执行 trim().toLowerCase() 后，包含 pattern 即命中（substring match）。
  * exclude 列表优先级最高：命中 exclude 的模型始终返回 DEFAULT_CONTEXT_WINDOW。
  *
  * 参考：https://docs.anthropic.com/en/docs/build-with-claude/context-windows
@@ -139,7 +139,7 @@ const CONTEXT_WINDOW_CONFIG = {
  */
 export function supports1MContext(modelId: string): boolean {
   if (!modelId) return false
-  const m = modelId.toLowerCase()
+  const m = modelId.trim().toLowerCase()
   if (CONTEXT_WINDOW_CONFIG.exclude.some((p) => m.includes(p))) return false
   return CONTEXT_WINDOW_CONFIG.rules.some((p) => matchesContextRule(m, p))
 }

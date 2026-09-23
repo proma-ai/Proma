@@ -61,8 +61,8 @@ const DEFAULT_MAX_TOKENS = 64_000
 const VOLCENGINE_GLM_MAX_TOKENS = 128_000
 /** GLM-5.3 系列均支持 128K 最大输出。 */
 const GLM_53_FAMILY_MAX_TOKENS = 131_072
-/** MiMo-V2.6 系列（pro / flash / pro-ultraspeed）官方最大输出均为 128K。 */
-const MIMO_V26_FAMILY_MAX_TOKENS = 128_000
+/** MiMo-V2.6 系列（pro / flash / pro-ultraspeed）官方最大输出均为 128K（131,072 tokens）。 */
+const MIMO_V26_FAMILY_MAX_TOKENS = 131_072
 const CODEX_BASE_URL = 'https://chatgpt.com/backend-api'
 const CODEX_MAX_TOKENS = 128_000
 /** 已从 ChatGPT Codex 订阅下线、不得再展示或运行的模型。 */
@@ -357,7 +357,8 @@ const DEEPSEEK_V4_FLASH_VISION_MODEL_IDS = new Set([
 /** 判断模型是否已确认支持原生图片输入。 */
 export function supportsPiNativeImageInput(modelId: string | undefined): boolean {
   const normalized = stripLegacyAgentSdkContextSuffix(modelId)?.trim().toLowerCase()
-  return normalized !== undefined && DEEPSEEK_V4_FLASH_VISION_MODEL_IDS.has(normalized)
+  return normalized !== undefined
+    && (DEEPSEEK_V4_FLASH_VISION_MODEL_IDS.has(normalized) || isMimoV26Model(normalized))
 }
 
 function applyPiModelCapabilityOverrides(model: PiCatalogModel | undefined): PiCatalogModel | undefined {
@@ -720,7 +721,7 @@ export async function resolvePiImageInputCapability(
   if (provider === 'opencode-go-openai') return 'unsupported'
   if (!resolvedModelId) return 'unknown'
   if (isOfficialDeepSeekV4ProTextOnly(provider, resolvedModelId)) return 'unsupported'
-  // Flash 实验变体尚未进入 Pi catalog，不能因目录缺失退回 unknown。
+  // 已确认的原生视觉模型可能尚未进入 Pi catalog，不能因目录缺失退回 unknown。
   if (supportsPiNativeImageInput(resolvedModelId)) return 'supported'
   const catalogModel = await findPiCatalogModel(provider, resolvedModelId)
   if (!catalogModel) return 'unknown'
@@ -740,7 +741,7 @@ export async function resolvePiVisionRelayRoute(
 ): Promise<PiVisionRelayRoute | undefined> {
   const resolvedModelId = stripLegacyAgentSdkContextSuffix(modelId)
   if (provider === 'opencode-go-openai' || !resolvedModelId) return undefined
-  // DeepSeek Flash 的实验视觉模型尚未进入 Pi catalog；其渠道协议无需 catalog 分流。
+  // 已确认的原生视觉模型可能尚未进入 Pi catalog；其渠道协议无需 catalog 分流。
   if (supportsPiNativeImageInput(resolvedModelId)) {
     return { adapterProvider: provider }
   }
