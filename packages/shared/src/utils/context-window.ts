@@ -63,8 +63,9 @@ const ONE_MILLION_CONTEXT_RULES = {
   deepseek: ['deepseek-v4', 'deepseek-flash'],
   // 智谱 GLM
   glm: ['glm-5.3', 'glm-5.3-flash', 'glm-5.3-flashx', 'glm-5.2'],
-  // 小米 MiMo
-  mimo: ['mimo-v2.5'],
+  // 小米 MiMo：V2.6 系列（pro / flash / pro-ultraspeed）均为 1M 上下文；
+  // 保留 mimo-v2.5（2026-10-21 下线）以兼容历史会话的用量统计分母。
+  mimo: ['mimo-v2.6', 'mimo-v2.5'],
   // MiniMax
   minimax: ['minimax-m3'],
   // Kimi

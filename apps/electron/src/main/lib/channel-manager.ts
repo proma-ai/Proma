@@ -88,11 +88,10 @@ const KIMI_PRESET_MODELS: ChannelModel[] = [
   { id: 'kimi-k2.6', name: 'Kimi K2.6', enabled: true },
 ]
 const XIAOMI_PRESET_MODELS: ChannelModel[] = [
-  { id: 'mimo-v2.5-pro', name: 'MiMo V2.5 Pro', enabled: true },
-  { id: 'mimo-v2-pro', name: 'MiMo V2 Pro', enabled: true },
-  { id: 'mimo-v2.5', name: 'MiMo V2.5', enabled: true },
-  { id: 'mimo-v2-omni', name: 'MiMo V2 Omni', enabled: true },
-  { id: 'mimo-v2-flash', name: 'MiMo V2 Flash', enabled: true },
+  { id: 'mimo-v2.6-pro', name: 'MiMo V2.6 Pro', enabled: true },
+  { id: 'mimo-v2.6-flash', name: 'MiMo V2.6 Flash', enabled: true },
+  // 官方限流为定制服务，默认不勾选，用户按需启用。
+  { id: 'mimo-v2.6-pro-ultraspeed', name: 'MiMo V2.6 Pro UltraSpeed', enabled: false },
 ]
 const QWEN_TOKEN_PLAN_PRESET_MODELS: ChannelModel[] = [
   { id: 'qwen3.8-max-preview', name: 'Qwen3.8 Max Preview', enabled: true },
@@ -202,6 +201,23 @@ const PRESET_MODEL_CANDIDATE_UPDATES: readonly {
       'openai-codex': [
         { id: 'gpt-6-sol', name: 'GPT-6 Sol', enabled: true },
         { id: 'gpt-6-luna', name: 'GPT-6 Luna', enabled: true },
+      ],
+    },
+  },
+  {
+    // 小米 MiMo-V2.6 系列（2026-09-22 发布，1M 上下文）；v2.5 系列于 2026-10-21 下线，
+    // 仅以候选形式补充新模型，不改动存量渠道已启用的旧模型。
+    id: 'xiaomi-mimo-v2-6-v1',
+    candidates: {
+      xiaomi: [
+        { id: 'mimo-v2.6-pro', name: 'MiMo V2.6 Pro', enabled: true },
+        { id: 'mimo-v2.6-flash', name: 'MiMo V2.6 Flash', enabled: true },
+        { id: 'mimo-v2.6-pro-ultraspeed', name: 'MiMo V2.6 Pro UltraSpeed', enabled: false },
+      ],
+      'xiaomi-token-plan': [
+        { id: 'mimo-v2.6-pro', name: 'MiMo V2.6 Pro', enabled: true },
+        { id: 'mimo-v2.6-flash', name: 'MiMo V2.6 Flash', enabled: true },
+        { id: 'mimo-v2.6-pro-ultraspeed', name: 'MiMo V2.6 Pro UltraSpeed', enabled: false },
       ],
     },
   },
