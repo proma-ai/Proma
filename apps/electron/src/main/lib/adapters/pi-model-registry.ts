@@ -16,6 +16,7 @@ import {
   getGeminiModelCapability,
   getPromaOfficialClaudeCapabilityFamily,
   isGpt6AstraFamily,
+  isMimoV26Model,
   resolveReasoningCapability,
   resolveReasoningProfile,
   type CodexOAuthCredentials,
@@ -60,6 +61,8 @@ const DEFAULT_MAX_TOKENS = 64_000
 const VOLCENGINE_GLM_MAX_TOKENS = 128_000
 /** GLM-5.3 系列均支持 128K 最大输出。 */
 const GLM_53_FAMILY_MAX_TOKENS = 131_072
+/** MiMo-V2.6 系列（pro / flash / pro-ultraspeed）官方最大输出均为 128K。 */
+const MIMO_V26_FAMILY_MAX_TOKENS = 128_000
 const CODEX_BASE_URL = 'https://chatgpt.com/backend-api'
 const CODEX_MAX_TOKENS = 128_000
 /** 已从 ChatGPT Codex 订阅下线、不得再展示或运行的模型。 */
@@ -787,6 +790,9 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
     && (glmModelId === 'glm-5.2' || glmModelId === 'glm-5.3')
   const isCatalogMissingGlm53Family = !catalogModel
     && (glmModelId === 'glm-5.3' || glmModelId === 'glm-5.3-flash' || glmModelId === 'glm-5.3-flashx')
+  // MiMo-V2.6 刚发布，Pi catalog 未收录时仍按官方规格注册，避免回落到 64K 默认值。
+  // 家族判定复用 shared 的精确 ID 列表，避免 startsWith 宽匹配误伤未来 ID（如 mimo-v2.60）。
+  const isCatalogMissingMimoV26Family = !catalogModel && isMimoV26Model(glmModelId)
   const catalogContextWindow = catalogModel?.contextWindow ?? DEFAULT_CONTEXT_WINDOW
   const inferredContextWindow = inferContextWindow(input.model) ?? DEFAULT_CONTEXT_WINDOW
   // 商业版官方渠道的需求仅限 Claude；GPT、Kimi 等官方模型即使共享 Anthropic
@@ -815,7 +821,12 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
     maxTokens: configuredMaxTokens
       ?? (isVolcengineGlm5x
         ? VOLCENGINE_GLM_MAX_TOKENS
-        : (catalogModel?.maxTokens ?? (isCatalogMissingGlm53Family ? GLM_53_FAMILY_MAX_TOKENS : DEFAULT_MAX_TOKENS))),
+        : (catalogModel?.maxTokens
+          ?? (isCatalogMissingGlm53Family
+            ? GLM_53_FAMILY_MAX_TOKENS
+            : isCatalogMissingMimoV26Family
+              ? MIMO_V26_FAMILY_MAX_TOKENS
+              : DEFAULT_MAX_TOKENS))),
   }
 }
 

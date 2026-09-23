@@ -85,8 +85,8 @@ const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'openai', 'openai-respons
 const PROVIDER_TEST_MODEL_PRESETS: Partial<Record<ProviderType, string[]>> = {
   deepseek: ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-flash', 'deepseek-v4-flash-vision-exp'],
   'kimi-api': ['kimi-k3', 'kimi-k2.6'],
-  xiaomi: ['mimo-v2.5-pro', 'mimo-v2-pro', 'mimo-v2.5', 'mimo-v2-omni', 'mimo-v2-flash'],
-  'xiaomi-token-plan': ['mimo-v2.5-pro', 'mimo-v2-pro', 'mimo-v2.5', 'mimo-v2-omni', 'mimo-v2-flash'],
+  xiaomi: ['mimo-v2.6-pro', 'mimo-v2.6-flash', 'mimo-v2.6-pro-ultraspeed'],
+  'xiaomi-token-plan': ['mimo-v2.6-pro', 'mimo-v2.6-flash', 'mimo-v2.6-pro-ultraspeed'],
   'qwen-token-plan': ['qwen3.8-max-preview', 'qwen3.7-max', 'qwen3.7-flash', 'qwen3.6-flash'],
 }
 
@@ -410,11 +410,9 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
         ])
       } else if (p === 'xiaomi' || p === 'xiaomi-token-plan') {
         setModels([
-          { id: 'mimo-v2.5-pro', name: 'MiMo V2.5 Pro', enabled: true },
-          { id: 'mimo-v2-pro', name: 'MiMo V2 Pro', enabled: true },
-          { id: 'mimo-v2.5', name: 'MiMo V2.5', enabled: true },
-          { id: 'mimo-v2-omni', name: 'MiMo V2 Omni', enabled: true },
-          { id: 'mimo-v2-flash', name: 'MiMo V2 Flash', enabled: true },
+          { id: 'mimo-v2.6-pro', name: 'MiMo V2.6 Pro', enabled: true },
+          { id: 'mimo-v2.6-flash', name: 'MiMo V2.6 Flash', enabled: true },
+          { id: 'mimo-v2.6-pro-ultraspeed', name: 'MiMo V2.6 Pro UltraSpeed', enabled: false },
         ])
       } else if (p === 'qwen') {
         setModels([

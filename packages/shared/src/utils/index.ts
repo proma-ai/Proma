@@ -28,6 +28,7 @@ export {
   inferCodexAlignedGPT5ContextWindow,
   supports1MContext,
   inferContextWindow,
+  isMimoV26Model,
 } from './context-window'
 export { calculateContextUsageRatio } from './context-usage'
 export {
