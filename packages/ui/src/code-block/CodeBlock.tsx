@@ -197,6 +197,8 @@ export function CodeBlock({ children, onCopy }: CodeBlockProps): React.ReactElem
       }
     }
 
+    let unsubscribe: (() => void) | undefined
+
     // 同步路径可用时
     const syncResult = highlightToTokens({ code: trimmedCode, language: langOrText, theme: shikiTheme })
     if (syncResult) {
@@ -204,27 +206,27 @@ export function CodeBlock({ children, onCopy }: CodeBlockProps): React.ReactElem
         // 距上次更新已超过节流间隔，立即执行
         lastUpdateRef.current = now
         setTokenResult(syncResult)
-      } else if (!timerRef.current) {
+      } else {
         // 安排延迟执行，确保最终状态正确
         timerRef.current = setTimeout(() => {
           timerRef.current = null
           doHighlight()
         }, THROTTLE_MS - elapsed)
       }
-      return
+    } else {
+      // 兜底：高亮器尚未初始化，订阅就绪事件，初始化完成后用同步路径上色
+      unsubscribe = onHighlighterReady(() => doHighlight())
     }
 
-    // 兜底：高亮器尚未初始化，订阅就绪事件，初始化完成后用同步路径上色
-    const unsubscribe = onHighlighterReady(() => doHighlight())
-    return () => unsubscribe()
-  }, [trimmedCode, langOrText, shikiTheme])
-
-  // 清理节流定时器
-  React.useEffect(() => {
     return () => {
-      if (timerRef.current) clearTimeout(timerRef.current)
+      // 依赖变化（尤其主题切换）时，不能让旧闭包按旧主题回写 token。
+      if (timerRef.current) {
+        clearTimeout(timerRef.current)
+        timerRef.current = null
+      }
+      unsubscribe?.()
     }
-  }, [])
+  }, [trimmedCode, langOrText, shikiTheme])
 
   // 复制到剪贴板
   const handleCopy = React.useCallback(async () => {
