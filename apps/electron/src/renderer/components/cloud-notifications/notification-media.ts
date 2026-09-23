@@ -26,7 +26,8 @@ export function getNotificationMediaLayout(
   const targetHeight = landscape ? 300 : 400
   const naturalWidth = validSize ? Math.min(width, aspect * targetHeight) : 400
   const mediaWidth = Math.min(landscape ? 600 : 400, Math.max(168, Math.round(naturalWidth)))
-  const mediaColumnWidth = mediaWidth + 32 // 媒体两侧各 16px 间距
+  // 图片贴齐弹窗外缘，不再为独立媒体卡片预留两侧内边距。
+  const mediaColumnWidth = mediaWidth
   return { mediaColumnWidth, dialogWidth: Math.min(1120, mediaColumnWidth + 496) }
 }
 

@@ -72,27 +72,39 @@ const markdownComponents: Components = {
   },
 }
 
-/** 媒体依实际比例显示，不强塞进固定比例的白色背板。 */
+/** 图片贴齐弹窗外缘；比例由图片本身决定，长文案时仅裁切超出的边缘。 */
 export function NotificationMediaView({
   media,
   title,
+  aspectRatio,
   onDimensions,
 }: {
   media: NotificationMedia
   title: string
+  aspectRatio?: number
   onDimensions?: (width: number, height: number) => void
 }): React.ReactElement {
   const [failed, setFailed] = React.useState(false)
-  const outline = 'rounded-lg shadow-[0_2px_12px_rgba(0,0,0,0.06)] ring-1 ring-black/10 dark:ring-white/10'
+  const isImage = media.type === 'image'
+  const videoOutline = 'rounded-lg shadow-[0_2px_12px_rgba(0,0,0,0.06)] ring-1 ring-black/10 dark:ring-white/10'
   return (
-    <div className="flex min-w-0 items-center justify-center p-4" role="group" aria-label="通知媒体">
+    <div
+      className={isImage
+        ? 'relative min-h-44 min-w-0 self-stretch overflow-hidden'
+        : 'flex min-w-0 items-center justify-center p-4'}
+      style={isImage ? { aspectRatio: aspectRatio && aspectRatio > 0 ? aspectRatio : 1, maxHeight: 'min(62vh, 420px)' } : undefined}
+      role="group"
+      aria-label="通知媒体"
+    >
       {failed ? (
-        <p className="flex min-h-44 w-full items-center justify-center rounded-lg bg-muted/30 px-4 text-center text-sm text-muted-foreground" role="status">
+        <p className={isImage
+          ? 'absolute inset-0 flex items-center justify-center bg-muted/30 px-4 text-center text-sm text-muted-foreground'
+          : 'flex min-h-44 w-full items-center justify-center rounded-lg bg-muted/30 px-4 text-center text-sm text-muted-foreground'} role="status">
           媒体暂时无法加载，请阅读右侧通知内容。
         </p>
       ) : media.type === 'video' ? (
         <video
-          className={`block h-auto min-h-[min(50vh,300px)] max-h-[min(70vh,520px)] w-full max-w-full bg-black object-contain ${outline}`}
+          className={`block h-auto min-h-[min(50vh,300px)] max-h-[min(70vh,520px)] w-full max-w-full bg-black object-contain ${videoOutline}`}
           src={media.url}
           controls
           preload="metadata"
@@ -102,7 +114,7 @@ export function NotificationMediaView({
         >你的系统不支持播放此视频。</video>
       ) : (
         <img
-          className={`block h-auto max-h-[min(62vh,420px)] w-auto max-w-full ${outline}`}
+          className="absolute inset-0 block h-full w-full object-cover"
           src={media.url}
           alt={title}
           onLoad={(event) => onDimensions?.(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
@@ -156,7 +168,7 @@ function NotificationDialogContent({
     <DialogContent
       hideClose
       className={media
-        ? `max-h-[calc(100vh-4rem)] w-[calc(100vw-3rem)] gap-0 overflow-hidden p-0 transition-[width] duration-200 motion-reduce:transition-none ${media.type === 'video' ? 'max-w-[1080px]' : 'max-w-[1120px]'}`
+        ? `max-h-[calc(100vh-4rem)] w-[calc(100vw-3rem)] gap-0 overflow-hidden border-0 p-0 transition-[width] duration-200 motion-reduce:transition-none ${media.type === 'video' ? 'max-w-[1080px]' : 'max-w-[1120px]'}`
         : 'max-h-[calc(100vh-5rem)] max-w-2xl overflow-y-auto'}
       style={layout ? { width: `min(calc(100vw - 3rem), ${layout.dialogWidth}px)` } : undefined}
       onEscapeKeyDown={(event) => event.preventDefault()}
@@ -164,7 +176,9 @@ function NotificationDialogContent({
       onInteractOutside={(event) => event.preventDefault()}
     >
       <div
-        className={media ? 'grid min-h-0 transition-[grid-template-columns] duration-200 motion-reduce:transition-none' : 'contents'}
+        className={media
+          ? `grid min-h-0 transition-[grid-template-columns] duration-200 motion-reduce:transition-none ${media.type === 'image' ? 'max-h-[min(62vh,420px)]' : ''}`
+          : 'contents'}
         style={layout ? { gridTemplateColumns: media?.type === 'video'
           ? `minmax(0, min(${layout.mediaColumnWidth}px, 54%, calc(100% - 350px))) minmax(0, 1fr)`
           : `minmax(0, min(${layout.mediaColumnWidth}px, 57%, calc(100% - 320px))) minmax(0, 1fr)` } : undefined}
@@ -173,6 +187,7 @@ function NotificationDialogContent({
           key={`${notification.id}:${media.url}`}
           media={media}
           title={notification.title}
+          aspectRatio={media.type === 'image' && dimensions ? dimensions.width / dimensions.height : undefined}
           onDimensions={(width, height) => {
             if (width <= 0 || height <= 0) return
             setMediaSize((current) => current?.id === notification.id && current.url === media.url
@@ -180,7 +195,7 @@ function NotificationDialogContent({
               ? current : { id: notification.id, url: media.url, width, height })
           }}
         />}
-        <div className={media ? 'flex min-h-0 min-w-0 flex-col gap-5 px-7 py-7' : 'contents'}>
+        <div className={media ? 'flex min-h-0 min-w-0 flex-col gap-3 px-7 py-7' : 'contents'}>
           <DialogHeader>
             <DialogTitle className={media ? 'text-balance text-xl leading-snug' : undefined}>{notification.title}</DialogTitle>
           </DialogHeader>

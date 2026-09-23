@@ -28,18 +28,18 @@ describe('通知主视觉解析', () => {
     expect(portrait.mediaColumnWidth).toBeLessThan(landscape.mediaColumnWidth)
     expect(portrait.dialogWidth).toBeLessThan(landscape.dialogWidth)
     expect(portrait.mediaColumnWidth).toBeGreaterThanOrEqual(200)
-    expect(landscape.mediaColumnWidth).toBeGreaterThanOrEqual(560)
-    expect(landscape.mediaColumnWidth).toBeLessThanOrEqual(632)
+    expect(landscape.mediaColumnWidth).toBeGreaterThanOrEqual(530)
+    expect(landscape.mediaColumnWidth).toBeLessThanOrEqual(600)
     expect(landscape.dialogWidth).toBeLessThanOrEqual(1120)
-    // 16:9 主图在大窗口里接近 300px 高，在 800px 窗口仍为右侧正文留下 320px。
-    const imageWidth = Math.min(landscape.mediaColumnWidth, landscape.dialogWidth * 0.57, landscape.dialogWidth - 320) - 32
+    // 16:9 主图不再为白边预留 32px，在大窗口里约 300px 高。
+    const imageWidth = Math.min(landscape.mediaColumnWidth, landscape.dialogWidth * 0.57, landscape.dialogWidth - 320)
     expect(imageWidth * 900 / 1600).toBeGreaterThanOrEqual(295)
     expect(landscape.dialogWidth - landscape.mediaColumnWidth).toBeGreaterThanOrEqual(440)
     const narrowDialogWidth = 800 - 48 // w-[calc(100vw-3rem)]
     const narrowColumnWidth = Math.min(landscape.mediaColumnWidth, narrowDialogWidth * 0.57, narrowDialogWidth - 320)
-    expect((narrowColumnWidth - 32) * 900 / 1600).toBeGreaterThanOrEqual(220)
+    expect(narrowColumnWidth * 900 / 1600).toBeGreaterThanOrEqual(220)
     expect(narrowDialogWidth - narrowColumnWidth).toBeGreaterThanOrEqual(320)
-    expect(getNotificationMediaLayout(200, 200).mediaColumnWidth).toBe(232)
+    expect(getNotificationMediaLayout(200, 200).mediaColumnWidth).toBe(200)
     expect(getNotificationMediaLayout(0, 0)).toEqual(getNotificationMediaLayout(400, 400))
   })
 
