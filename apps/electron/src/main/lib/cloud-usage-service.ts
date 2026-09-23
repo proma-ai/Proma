@@ -20,6 +20,7 @@ import type {
 } from '@proma/shared'
 import { getApiClient } from './cloud-auth-service'
 import { AsyncTtlCache } from './async-ttl-cache'
+import { BoundedAsyncLookupCache } from './agent-turn-usage-cache'
 
 // ===== API 实例（延迟初始化） =====
 
@@ -34,6 +35,14 @@ const agentTokenActivityHistoryCache = new AsyncTtlCache<AgentTokenActivityRespo
   AGENT_TOKEN_ACTIVITY_HISTORY_CACHE_TTL_MS,
 )
 let agentTokenActivityHistoryCacheDate: string | null = null
+
+const AGENT_TURN_USAGE_CACHE_TTL_MS = 24 * 60 * 60 * 1000
+const agentTurnUsageCache = new BoundedAsyncLookupCache<AgentTurnUsage>({
+  ttlMs: AGENT_TURN_USAGE_CACHE_TTL_MS,
+  maxEntries: 1_000,
+  maxConcurrent: 2,
+  shouldCache: (usage) => usage.found,
+})
 
 function getBeijingIsoDate(): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -165,10 +174,15 @@ export function clearAgentTokenActivityCache(): void {
   agentTokenActivityHistoryCacheDate = null
 }
 
+/** 在账号切换时丢弃上一账号已结算的 Agent 轮次积分缓存。 */
+export function clearAgentTurnUsageCache(): void {
+  agentTurnUsageCache.clear()
+}
+
 /** 获取一条官方 Agent 回复关联轮次的权威积分消耗。 */
 export async function getAgentTurnUsage(turnId: string): Promise<BillingIpcResponse<AgentTurnUsage>> {
   try {
-    const data = await getUsageApi().getAgentTurnUsage(turnId)
+    const data = await agentTurnUsageCache.getOrLoad(turnId, () => getUsageApi().getAgentTurnUsage(turnId))
     return { success: true, data }
   } catch (error) {
     return { success: false, error: wrapError(error) }

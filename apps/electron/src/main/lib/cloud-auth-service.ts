@@ -29,12 +29,23 @@ import type {
   ResetPasswordRequest,
   ResendCodeRequest,
 } from '@proma/cloud'
-import type { CloudUserInfo, CloudAuthState, CloudAuthIpcResponse } from '@proma/shared'
+import type { CloudUserInfo, CloudAuthState, CloudAuthIpcResponse, CloudAuthErrorReason } from '@proma/shared'
 import { CLOUD_IPC_CHANNELS } from '@proma/shared'
 
 // ===== 持久化数据结构 =====
 
 /** 持久化到文件的认证数据 */
+function toSafeAuthFailure(error: unknown, fallback: string): Pick<CloudAuthIpcResponse, 'error' | 'errorReason' | 'retryable'> {
+  if (isApiError(error)) {
+    return {
+      error: error.message,
+      errorReason: error.kind as CloudAuthErrorReason,
+      retryable: error.retryable,
+    }
+  }
+  return { error: fallback, errorReason: 'unknown', retryable: true }
+}
+
 interface PersistedAuthData {
   /** 加密后的 access token (base64) */
   accessToken: string
@@ -178,12 +189,13 @@ async function cleanupCloudSessionRuntime(): Promise<void> {
   }
   // 清理账号相关的 Cloud 数据缓存，避免下个账号复用前一账号的数据。
   try {
-    const [{ clearHealthCache }, { clearAgentTokenActivityCache }] = await Promise.all([
+    const [{ clearHealthCache }, { clearAgentTokenActivityCache, clearAgentTurnUsageCache }] = await Promise.all([
       import('./cloud-health-service'),
       import('./cloud-usage-service'),
     ])
     clearHealthCache()
     clearAgentTokenActivityCache()
+    clearAgentTurnUsageCache()
   } catch {
     // 清理失败不应阻塞认证状态恢复
   }
@@ -357,9 +369,11 @@ export async function initCloudAuthService(): Promise<void> {
       syncCloudUserToLocalProfile(cachedUser)
       console.log('[Cloud Auth] 会话恢复成功:', cachedUser.email)
     } catch (error) {
-      console.warn('[Cloud Auth] 会话恢复失败，token 可能已过期:', error)
-      // token 无效，清除
-      tokenStorage.clearTokens()
+      const failure = toSafeAuthFailure(error, '会话恢复失败，请稍后重试')
+      console.warn('[Cloud Auth] 会话恢复失败:', failure.errorReason)
+      // 网络、超时与服务端暂时故障不能把用户错误登出；只有服务端确认
+      // 的 401/403 认证失效才可清除本地凭据。
+      if (failure.errorReason === 'auth') invalidateExpiredCloudSession()
     }
   }
 }
@@ -392,8 +406,7 @@ export async function login(data: LoginRequest): Promise<CloudAuthIpcResponse> {
 
     return { success: true, user: cachedUser }
   } catch (error) {
-    const message = isApiError(error) ? error.message : '登录失败，请稍后重试'
-    return { success: false, error: message }
+    return { success: false, ...toSafeAuthFailure(error, '登录失败，请稍后重试') }
   }
 }
 
@@ -534,9 +547,9 @@ export async function handleOAuthCallback(token: string, refreshToken?: string):
 
     return { success: true, user: cachedUser }
   } catch (error) {
-    tokenStorage.clearTokens()
-    const message = isApiError(error) ? error.message : '获取用户信息失败'
-    return { success: false, error: message }
+    const failure = toSafeAuthFailure(error, '获取用户信息失败')
+    if (failure.errorReason === 'auth') invalidateExpiredCloudSession()
+    return { success: false, ...failure }
   }
 }
 
