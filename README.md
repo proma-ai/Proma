@@ -130,6 +130,8 @@ Proma 完全重构了交互体验和 UX 系统，我们认为左侧部分是会�
 
 Proma 一样支持这三种，但对于 Proma 来说，最好的 Skills 都不来自互联网和他人，它来自你的真实场景，我们推荐你可以手把手带着 Agent 做一次你真实的处理流程，然后让 Agent 沉淀成 Skills，这会是更加的方案，再通过实际的使用迭代。Proma 内嵌了一些我们认为必要的 Skills、并支持常见的 MCP 和 CLI 的一键安装。最后商业版还支持团队 Skills 的共享和迭代管理。对于 Skills 和 MCP 来说，Proma 都是分项目的，因为过多的 Skills 和 MCP 也会导致 Agent 能力的下降，按项目区分可以更好的精简这类上下文，可以自然提高 Agent 的实际表现，缺点是需要人本身的关注更多。
 
+「连接」目录内置 AnySearch 远程 MCP，可匿名接入公开网页搜索、垂直领域查询、并行检索和网页正文提取，不需要本机 Python。另有随安装包分发的 AnySearch Skill 与 REST 客户端，适合由 Agent 直接控制参数；这一方式需要 Python 3.10+，未设置 `ANYSEARCH_API_KEY` 时匿名使用（额度较低），已有密钥可由工作区环境变量提供。查询与公开 URL 会发送给 AnySearch，敏感数据不应放进搜索词。接入与维护细节见 [`apps/electron/default-skills/anysearch/INTEGRATION.md`](apps/electron/default-skills/anysearch/INTEGRATION.md)。
+
 ![image-20260908113623429](https://img.erlich.fun/personal-blog/proma/image-20260908113623429.png)
 
 ![image-20260908113638780](https://img.erlich.fun/personal-blog/proma/image-20260908113638780.png)
