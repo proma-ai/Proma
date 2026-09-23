@@ -241,6 +241,15 @@ const PRESET_MODEL_CANDIDATE_UPDATES: readonly {
       ],
     },
   },
+  {
+    id: 'openai-codex-gpt-6-sol-luna-v1',
+    candidates: {
+      'openai-codex': [
+        { id: 'gpt-6-sol', name: 'GPT-6 Sol', enabled: true },
+        { id: 'gpt-6-luna', name: 'GPT-6 Luna', enabled: true },
+      ],
+    },
+  },
 ]
 
 /**

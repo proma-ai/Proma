@@ -16,9 +16,9 @@ import zhipuModelLogo from '@/assets/models/official/zhipu.png'
 export const OFFICIAL_MODEL_CHANNELS = [
   {
     provider: 'OpenAI',
-    model: 'GPT 5.6 最新模型',
+    model: 'GPT-6 最新模型',
     logo: openaiModelLogo,
-    models: ['GPT-5.6 Sol', 'GPT-5.6 Terra', 'GPT-5.6 Luna', 'GPT-5.5', 'GPT-5.4', 'GPT-5.4 Mini'],
+    models: ['GPT-6 Astra', 'GPT-6 Sol', 'GPT-6 Luna', 'GPT-5.6 Sol', 'GPT-5.6 Terra', 'GPT-5.6 Luna', 'GPT-5.5', 'GPT-5.4', 'GPT-5.4 Mini'],
   },
   {
     provider: 'Anthropic',

@@ -2,10 +2,16 @@
  * GPT-6 Astra 已发布模型家族。
  *
  * 后端会原样下发 `gpt-6-astra-1`、`gpt-6-astra-az` 等 SKU；这些模型与
- * 基准 Astra 共享已验证的 Responses reasoning、372K context 与 Codex 请求契约。
+ * 基准 Astra 共享已验证的 Responses reasoning 与 Codex 请求契约；上下文窗口按渠道配置决定。
  * 只接受由 `-` 分隔的字母数字后缀，避免把 `gpt-6-astral` 等无关模型误归类。
  */
 const GPT_6_ASTRA_FAMILY_PATTERN = /^gpt-6-astra(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?$/
+const GPT_6_SOL_MODEL_ID = 'gpt-6-sol'
+const GPT_6_LUNA_MODEL_ID = 'gpt-6-luna'
+
+function normalizeModelId(modelId: string | undefined): string | undefined {
+  return modelId?.trim().toLowerCase().replace(/\[1m\]$/i, '')
+}
 
 /**
  * 官方 Claude 的这些系列允许附加纯数字 SKU 后缀，例如 `claude-opus-5-1`。
@@ -27,8 +33,18 @@ const PROMA_OFFICIAL_CLAUDE_CAPABILITY_FAMILY_PATTERNS: ReadonlyArray<readonly [
 ]
 
 export function isGpt6AstraFamily(modelId: string | undefined): boolean {
-  const normalized = modelId?.trim().toLowerCase().replace(/\[1m\]$/i, '')
+  const normalized = normalizeModelId(modelId)
   return normalized !== undefined && GPT_6_ASTRA_FAMILY_PATTERN.test(normalized)
+}
+
+/** GPT-6 Sol 仅接受精确请求 ID，避免把近似 SKU 错误归入官方模型。 */
+export function isGpt6SolFamily(modelId: string | undefined): boolean {
+  return normalizeModelId(modelId) === GPT_6_SOL_MODEL_ID
+}
+
+/** GPT-6 Luna 仅接受精确请求 ID，避免把近似 SKU 错误归入官方模型。 */
+export function isGpt6LunaFamily(modelId: string | undefined): boolean {
+  return normalizeModelId(modelId) === GPT_6_LUNA_MODEL_ID
 }
 
 /**
@@ -38,7 +54,7 @@ export function isGpt6AstraFamily(modelId: string | undefined): boolean {
 export function getPromaOfficialClaudeCapabilityFamily(
   modelId: string | undefined,
 ): PromaOfficialClaudeCapabilityFamily | undefined {
-  const normalized = modelId?.trim().toLowerCase().replace(/\[1m\]$/i, '')
+  const normalized = normalizeModelId(modelId)
   if (!normalized) return undefined
   return PROMA_OFFICIAL_CLAUDE_CAPABILITY_FAMILY_PATTERNS
     .find(([, pattern]) => pattern.test(normalized))?.[0]

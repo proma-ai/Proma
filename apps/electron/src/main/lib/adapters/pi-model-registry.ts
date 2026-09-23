@@ -9,6 +9,7 @@ import {
   CODEX_GPT_54_55_CONTEXT_WINDOW,
   CODEX_GPT_54_MINI_CONTEXT_WINDOW,
   CODEX_GPT_56_CONTEXT_WINDOW,
+  CODEX_GPT_6_CONTEXT_WINDOW,
   extractZhipuCodingTeamApiToken,
   inferContextWindow,
   inferCodexAlignedGPT5ContextWindow,
@@ -66,8 +67,7 @@ const CODEX_MAX_TOKENS = 128_000
 const UNSUPPORTED_CODEX_MODEL_IDS = new Set([
   'gpt-5.3-codex-spark',
 ])
-// GPT-6 Astra 与 GPT-5.6 系列统一按 372K 上下文注册。
-const CODEX_GPT_6_ASTRA_CONTEXT_WINDOW = CODEX_GPT_56_CONTEXT_WINDOW
+// ChatGPT Codex 订阅中的 GPT-6 Astra、Sol 与 Luna 均为 372K；Proma 官方 API 的 1.05M 规格由 modelContextWindow 优先覆盖。
 /**
  * 将 Codex 已标记的 GPT-5.x 上下文窗口外推到同名第三方模型。
  *
@@ -383,7 +383,33 @@ const CODEX_MODEL_PATCHES: PiCatalogModelPatch[] = [
     thinkingLevelMap: compilePiReasoningCapabilities('openai-responses', 'gpt-6-astra')?.thinkingLevelMap,
     input: ['text', 'image'],
     cost: ZERO_MODEL_COST,
-    contextWindow: CODEX_GPT_6_ASTRA_CONTEXT_WINDOW,
+    contextWindow: CODEX_GPT_6_CONTEXT_WINDOW,
+    maxTokens: CODEX_MAX_TOKENS,
+  },
+  {
+    id: 'gpt-6-sol',
+    name: 'GPT-6 Sol',
+    api: 'openai-codex-responses',
+    provider: 'openai-codex',
+    baseUrl: CODEX_BASE_URL,
+    reasoning: true,
+    thinkingLevelMap: compilePiReasoningCapabilities('openai-responses', 'gpt-6-sol')?.thinkingLevelMap,
+    input: ['text', 'image'],
+    cost: ZERO_MODEL_COST,
+    contextWindow: CODEX_GPT_6_CONTEXT_WINDOW,
+    maxTokens: CODEX_MAX_TOKENS,
+  },
+  {
+    id: 'gpt-6-luna',
+    name: 'GPT-6 Luna',
+    api: 'openai-codex-responses',
+    provider: 'openai-codex',
+    baseUrl: CODEX_BASE_URL,
+    reasoning: true,
+    thinkingLevelMap: compilePiReasoningCapabilities('openai-responses', 'gpt-6-luna')?.thinkingLevelMap,
+    input: ['text', 'image'],
+    cost: ZERO_MODEL_COST,
+    contextWindow: CODEX_GPT_6_CONTEXT_WINDOW,
     maxTokens: CODEX_MAX_TOKENS,
   },
   {
@@ -941,8 +967,8 @@ export function stripLegacyAgentSdkContextSuffix(modelId: string | undefined): s
 }
 
 /**
- * Pi 0.85 尚未在内置 Codex catalog 声明 Astra，但 ChatGPT 会将已授权的
- * Astra SKU 原样作为模型 ID 返回。仅对严格的 Astra 家族派生基准 contract：
+ * Pi 0.86 尚未在内置 Codex catalog 声明 Astra，但 ChatGPT 会将已授权的
+ * Astra SKU 原样作为模型 ID 返回。Sol/Luna 已由精确完整 patch 兜底；仅对严格的 Astra 家族派生基准 contract：
  * 保留实际请求 ID，绝不把相邻的未知模型错误地接入 Codex OAuth。
  */
 function createCodexAstraFamilyModel(

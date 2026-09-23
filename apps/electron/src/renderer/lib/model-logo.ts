@@ -34,7 +34,9 @@ import GPT51Logo from '@/assets/models/gpt-5.1.png'
 import GPT51ChatLogo from '@/assets/models/gpt-5.1-chat.png'
 import GPT51CodexLogo from '@/assets/models/gpt-5.1-codex.png'
 import GPT51CodexMiniLogo from '@/assets/models/gpt-5.1-codex-mini.png'
-import GPT6AstraLogo from '@/assets/models/gpt-6-astra.webp'
+import GPT6AstraLogo from '@/assets/models/gpt-6-astra.png'
+import GPT6SolLogo from '@/assets/models/gpt-6-sol.png'
+import GPT6LunaLogo from '@/assets/models/gpt-6-luna.png'
 
 // DeepSeek
 import DeepSeekLogo from '@/assets/models/deepseek.png'
@@ -124,7 +126,7 @@ import EmbeddingLogo from '@/assets/models/embedding.png'
 
 // ===== 供应商类型 =====
 
-import { isGpt6AstraFamily, type ProviderType } from '@proma/shared'
+import { isGpt6AstraFamily, isGpt6LunaFamily, isGpt6SolFamily, type ProviderType } from '@proma/shared'
 import type { ModelDisplayContext } from './model-display-name'
 export { resolveModelDisplayName } from './model-display-name'
 
@@ -282,6 +284,8 @@ const PROVIDER_LOGO_MAP: Record<ProviderType, string> = {
 export function getModelLogoById(modelId: string): string | undefined {
   if (!modelId) return undefined
   if (isGpt6AstraFamily(modelId)) return GPT6AstraLogo
+  if (isGpt6SolFamily(modelId)) return GPT6SolLogo
+  if (isGpt6LunaFamily(modelId)) return GPT6LunaLogo
 
   for (const key in MODEL_LOGO_MAP) {
     const regex = new RegExp(key, 'i')
