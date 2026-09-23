@@ -29,17 +29,30 @@ import type {
   ResetPasswordRequest,
   ResendCodeRequest,
 } from '@proma/cloud'
-import type { CloudUserInfo, CloudAuthState, CloudAuthIpcResponse } from '@proma/shared'
+import type { CloudUserInfo, CloudAuthState, CloudAuthIpcResponse, CloudAuthErrorReason } from '@proma/shared'
 import { CLOUD_IPC_CHANNELS } from '@proma/shared'
 
 // ===== 持久化数据结构 =====
 
 /** 持久化到文件的认证数据 */
+function toSafeAuthFailure(error: unknown, fallback: string): Pick<CloudAuthIpcResponse, 'error' | 'errorReason' | 'retryable'> {
+  if (isApiError(error)) {
+    return {
+      error: error.message,
+      errorReason: error.kind as CloudAuthErrorReason,
+      retryable: error.retryable,
+    }
+  }
+  return { error: fallback, errorReason: 'unknown', retryable: true }
+}
+
 interface PersistedAuthData {
   /** 加密后的 access token (base64) */
   accessToken: string
   /** 加密后的 refresh token (base64) */
   refreshToken: string
+  /** 加密后的最小用户快照；仅在离线恢复时维持已登录界面。 */
+  userSnapshot?: string
 }
 
 // ===== 内存缓存 =====
@@ -93,6 +106,17 @@ function loadTokensFromFile(): void {
     if (data.refreshToken) {
       cachedRefreshToken = decryptToken(data.refreshToken)
     }
+    if (data.userSnapshot) {
+      try {
+        const snapshot = JSON.parse(decryptToken(data.userSnapshot)) as Partial<CloudUserInfo>
+        if (typeof snapshot.id === 'string' && typeof snapshot.email === 'string' && typeof snapshot.name === 'string'
+          && (snapshot.status === 'PENDING' || snapshot.status === 'APPROVED' || snapshot.status === 'DISABLED')) {
+          cachedUser = snapshot as CloudUserInfo
+        }
+      } catch {
+        // A stale/corrupt user snapshot must not discard otherwise valid tokens.
+      }
+    }
 
     console.log('[Cloud Auth] 已从文件恢复 token')
   } catch (error) {
@@ -109,6 +133,7 @@ function saveTokensToFile(): void {
   const data: PersistedAuthData = {
     accessToken: encryptToken(cachedAccessToken),
     refreshToken: cachedRefreshToken ? encryptToken(cachedRefreshToken) : '',
+    userSnapshot: cachedUser ? encryptToken(JSON.stringify(cachedUser)) : '',
   }
 
   try {
@@ -178,12 +203,13 @@ async function cleanupCloudSessionRuntime(): Promise<void> {
   }
   // 清理账号相关的 Cloud 数据缓存，避免下个账号复用前一账号的数据。
   try {
-    const [{ clearHealthCache }, { clearAgentTokenActivityCache }] = await Promise.all([
+    const [{ clearHealthCache }, { clearAgentTokenActivityCache, clearAgentTurnUsageCache }] = await Promise.all([
       import('./cloud-health-service'),
       import('./cloud-usage-service'),
     ])
     clearHealthCache()
     clearAgentTokenActivityCache()
+    clearAgentTurnUsageCache()
   } catch {
     // 清理失败不应阻塞认证状态恢复
   }
@@ -197,6 +223,12 @@ function invalidateExpiredCloudSession(): void {
   tokenStorage.clearTokens()
   void cleanupCloudSessionRuntime()
   broadcastAuthStateChanged()
+}
+
+/** Clear account-scoped runtime state before replacing credentials for another user. */
+async function prepareCloudAccountChange(nextUserId?: string): Promise<void> {
+  if (cachedUser?.id === nextUserId) return
+  await cleanupCloudSessionRuntime()
 }
 
 /**
@@ -354,12 +386,15 @@ export async function initCloudAuthService(): Promise<void> {
     try {
       const user = await getAuthApi().getMe()
       cachedUser = toUserInfo(user)
+      saveTokensToFile()
       syncCloudUserToLocalProfile(cachedUser)
       console.log('[Cloud Auth] 会话恢复成功:', cachedUser.email)
     } catch (error) {
-      console.warn('[Cloud Auth] 会话恢复失败，token 可能已过期:', error)
-      // token 无效，清除
-      tokenStorage.clearTokens()
+      const failure = toSafeAuthFailure(error, '会话恢复失败，请稍后重试')
+      console.warn('[Cloud Auth] 会话恢复失败:', failure.errorReason)
+      // 网络、超时与服务端暂时故障不能把用户错误登出；只有服务端确认
+      // 的 401/403 认证失效才可清除本地凭据。
+      if (failure.errorReason === 'auth') invalidateExpiredCloudSession()
     }
   }
 }
@@ -374,15 +409,14 @@ export async function login(data: LoginRequest): Promise<CloudAuthIpcResponse> {
       return { success: false, error: '请先验证邮箱', user: toUserInfo(result.user) }
     }
 
-    // 保存 token
-    cachedAccessToken = result.token
-    if (result.refreshToken) {
-      cachedRefreshToken = result.refreshToken
-    }
-    saveTokensToFile()
+    const nextUser = toUserInfo(result.user)
+    await prepareCloudAccountChange(nextUser.id)
 
-    // 缓存用户信息
-    cachedUser = toUserInfo(result.user)
+    // 保存 token 和可离线恢复的最小用户快照。
+    cachedAccessToken = result.token
+    cachedRefreshToken = result.refreshToken ?? null
+    cachedUser = nextUser
+    saveTokensToFile()
     syncCloudUserToLocalProfile(cachedUser)
 
     // 必须在认证状态广播前完成首次官方渠道同步，避免新用户的 AppShell
@@ -392,8 +426,7 @@ export async function login(data: LoginRequest): Promise<CloudAuthIpcResponse> {
 
     return { success: true, user: cachedUser }
   } catch (error) {
-    const message = isApiError(error) ? error.message : '登录失败，请稍后重试'
-    return { success: false, error: message }
+    return { success: false, ...toSafeAuthFailure(error, '登录失败，请稍后重试') }
   }
 }
 
@@ -516,14 +549,18 @@ export async function openGoogleLogin(): Promise<CloudAuthIpcResponse> {
  */
 export async function handleOAuthCallback(token: string, refreshToken?: string): Promise<CloudAuthIpcResponse> {
   try {
+    // The callback does not include a user ID, so clear old account state before
+    // accepting its credentials. This prevents a new token from being paired
+    // with a previous user's cached profile during a transient /auth/me failure.
+    await prepareCloudAccountChange()
+    cachedUser = null
     cachedAccessToken = token
-    if (refreshToken) {
-      cachedRefreshToken = refreshToken
-    }
+    cachedRefreshToken = refreshToken ?? null
     saveTokensToFile()
 
     const user = await getAuthApi().getMe()
     cachedUser = toUserInfo(user)
+    saveTokensToFile()
     syncCloudUserToLocalProfile(cachedUser)
 
     // OAuth 登录与密码登录必须共享相同的“渠道就绪后再进入主界面”时序。
@@ -534,9 +571,9 @@ export async function handleOAuthCallback(token: string, refreshToken?: string):
 
     return { success: true, user: cachedUser }
   } catch (error) {
-    tokenStorage.clearTokens()
-    const message = isApiError(error) ? error.message : '获取用户信息失败'
-    return { success: false, error: message }
+    const failure = toSafeAuthFailure(error, '获取用户信息失败')
+    if (failure.errorReason === 'auth') invalidateExpiredCloudSession()
+    return { success: false, ...failure }
   }
 }
 
@@ -598,6 +635,7 @@ export async function updateCloudProfile(data: { name?: string; image?: string }
 
     const user = await getAuthApi().updateProfile(updateData)
     cachedUser = toUserInfo(user)
+    saveTokensToFile()
     broadcastAuthStateChanged()
     return { success: true, user: cachedUser }
   } catch (error) {

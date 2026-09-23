@@ -454,6 +454,9 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
         const response = await window.electronAPI.cloudUsage.getAgentTurnUsage(turnId).catch(() => undefined)
         if (cancelled || !response?.success || !response.data?.found) continue
         const value = Number(response.data.totalCost)
+        // A found response is the server-side aggregate for this turn. The
+        // main-process cache makes further local retries identical, so publish
+        // it immediately and reserve retries for the not-yet-written case.
         if (Number.isFinite(value)) setDeductedPoints(value)
         return
       }
