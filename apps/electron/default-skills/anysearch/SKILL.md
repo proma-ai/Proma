@@ -2,7 +2,7 @@
 name: anysearch
 description: 当用户需要公开网页的最新信息、跨来源并行检索、金融/学术/代码等垂直搜索，或读取搜索结果网页正文时，使用随 Proma 分发的 AnySearch 客户端。优先遵守当前会话已有的专用工具选择规则。
 group: proma
-version: "1.0.0"
+version: "1.0.1"
 ---
 
 # AnySearch 网页搜索
@@ -42,3 +42,5 @@ python3 '<本 Skill 目录>/scripts/anysearch.py' extract 'https://example.com/'
 ```
 
 按返回 JSON 中的 `data.results` 读取标题、URL 和摘要/内容；只引用实际返回且与论述相符的来源。`extract` 输出内容可能截断；PDF、Office 或媒体文件不适合作为网页正文提取。错误输出含 `ok: false`，不能把 API 失败说成无搜索结果。运行前先检查是否已有更合适的项目专用搜索工具；用户明确指定 AnySearch 时使用本 Skill。
+
+`code.doc` 的 `library` 适用于实际存在的公开软件包或框架，不要把任意产品或仓库名当作库名。引用垂直搜索结果前核对标题与 URL 是否确实属于目标；若结果不相关，说明该垂类未命中并改用普通网页搜索。向用户展示来源时用 `[标题](URL)`，裸 URL 后若接中文标点或摘要，先加空格，避免将后文拼进链接。

@@ -17,7 +17,7 @@ from urllib.request import Request, urlopen
 API_ORIGIN = "https://api.anysearch.com"
 TIMEOUT_SECONDS = 30
 MAX_RESPONSE_BYTES = 2_000_000
-CLIENT_ID = "proma-skill/1.0.0"
+CLIENT_ID = "proma-skill/1.0.1"
 SEARCH_FIELDS = {"query", "max_results", "tag", "params", "zone", "language"}
 
 
