@@ -10,11 +10,13 @@ import { appModeAtom } from '@/atoms/app-mode'
 import { currentConversationIdAtom } from '@/atoms/chat-atoms'
 import {
   agentSessionsAtom,
+  agentWorkspacesAtom,
   currentAgentSessionIdAtom,
   currentAgentWorkspaceIdAtom,
   unviewedCompletedSessionIdsAtom,
 } from '@/atoms/agent-atoms'
 import { activeTabIdAtom, tabsAtom } from '@/atoms/tab-atoms'
+import { resolveAgentSessionWorkspaceId } from '@/lib/agent-session-list'
 
 type FocusAgentSessionInput = (sessionId: string) => boolean
 
@@ -22,6 +24,7 @@ export function useFocusAgentSessionInput(): FocusAgentSessionInput {
   const store = useStore()
   const tabs = useAtomValue(tabsAtom)
   const agentSessions = useAtomValue(agentSessionsAtom)
+  const agentWorkspaces = useAtomValue(agentWorkspacesAtom)
   const setActiveTabId = useSetAtom(activeTabIdAtom)
   const setAppMode = useSetAtom(appModeAtom)
   const setCurrentConversationId = useSetAtom(currentConversationIdAtom)
@@ -45,9 +48,12 @@ export function useFocusAgentSessionInput(): FocusAgentSessionInput {
     })
 
     const session = agentSessions.find((item) => item.id === sessionId)
-    if (session?.workspaceId) {
-      setCurrentAgentWorkspaceId(session.workspaceId)
-      window.electronAPI.updateSettings({ agentWorkspaceId: session.workspaceId }).catch(console.error)
+    const workspaceId = session
+      ? resolveAgentSessionWorkspaceId(session, agentWorkspaces)
+      : undefined
+    if (workspaceId) {
+      setCurrentAgentWorkspaceId(workspaceId)
+      window.electronAPI.updateSettings({ agentWorkspaceId: workspaceId }).catch(console.error)
     }
 
     // 等待 AgentView 成为当前内容，再复用其既有输入框聚焦事件。
@@ -61,6 +67,7 @@ export function useFocusAgentSessionInput(): FocusAgentSessionInput {
     return true
   }, [
     agentSessions,
+    agentWorkspaces,
     setActiveTabId,
     setAppMode,
     setCurrentAgentSessionId,

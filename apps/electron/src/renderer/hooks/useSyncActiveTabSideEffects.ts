@@ -15,11 +15,13 @@ import { appModeAtom } from '@/atoms/app-mode'
 import { currentConversationIdAtom } from '@/atoms/chat-atoms'
 import {
   agentSessionsAtom,
+  agentWorkspacesAtom,
   currentAgentSessionIdAtom,
   currentAgentWorkspaceIdAtom,
   unviewedCompletedSessionIdsAtom,
 } from '@/atoms/agent-atoms'
 import type { TabItem } from '@/atoms/tab-atoms'
+import { resolveAgentSessionWorkspaceId } from '@/lib/agent-session-list'
 
 export type SyncActiveTabSideEffects = (newActiveTab: TabItem | null) => void
 
@@ -30,6 +32,7 @@ export function useSyncActiveTabSideEffects(): SyncActiveTabSideEffects {
   const setCurrentAgentWorkspaceId = useSetAtom(currentAgentWorkspaceIdAtom)
   const setUnviewedCompleted = useSetAtom(unviewedCompletedSessionIdsAtom)
   const agentSessions = useAtomValue(agentSessionsAtom)
+  const agentWorkspaces = useAtomValue(agentWorkspacesAtom)
 
   return useCallback<SyncActiveTabSideEffects>(
     (newActiveTab) => {
@@ -62,12 +65,13 @@ export function useSyncActiveTabSideEffects(): SyncActiveTabSideEffects {
       })
 
       // 同步 workspace
-      const session = agentSessions.find((s) => s.id === newActiveTab.sessionId)
-      if (session?.workspaceId) {
-        setCurrentAgentWorkspaceId(session.workspaceId)
-        window.electronAPI.updateSettings({
-          agentWorkspaceId: session.workspaceId,
-        }).catch(console.error)
+      const session = agentSessions.find((item) => item.id === newActiveTab.sessionId)
+      const workspaceId = session
+        ? resolveAgentSessionWorkspaceId(session, agentWorkspaces)
+        : undefined
+      if (workspaceId) {
+        setCurrentAgentWorkspaceId(workspaceId)
+        window.electronAPI.updateSettings({ agentWorkspaceId: workspaceId }).catch(console.error)
       }
     },
     [
@@ -77,6 +81,7 @@ export function useSyncActiveTabSideEffects(): SyncActiveTabSideEffects {
       setCurrentAgentWorkspaceId,
       setUnviewedCompleted,
       agentSessions,
+      agentWorkspaces,
     ],
   )
 }

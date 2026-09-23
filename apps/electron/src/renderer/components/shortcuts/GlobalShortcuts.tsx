@@ -58,7 +58,7 @@ import {
   updateShortcutOverrides,
 } from '@/lib/shortcut-registry'
 import { getFileParentPath } from '@/lib/file-utils'
-import { isDelegationObservationVisible } from '@/lib/agent-session-list'
+import { isDelegationObservationVisible, resolveAgentSessionWorkspaceId } from '@/lib/agent-session-list'
 import { getLastInteractedStopTarget, resolveStopGenerationTarget } from '@/lib/stop-generation-target'
 import { CLOSE_ACTIVE_RIGHT_WORKSPACE_TAB_EVENT } from '@/lib/right-workspace-events'
 import {
@@ -527,11 +527,13 @@ export function GlobalShortcuts(): null {
         store.set(activeViewAtom, 'conversations')
         store.set(currentAgentSessionIdAtom, session.id)
 
-        if (session.workspaceId) {
-          store.set(currentAgentWorkspaceIdAtom, session.workspaceId)
-          window.electronAPI.updateSettings({
-            agentWorkspaceId: session.workspaceId,
-          }).catch(console.error)
+        const workspaceId = resolveAgentSessionWorkspaceId(
+          session,
+          store.get(agentWorkspacesAtom),
+        )
+        if (workspaceId) {
+          store.set(currentAgentWorkspaceIdAtom, workspaceId)
+          window.electronAPI.updateSettings({ agentWorkspaceId: workspaceId }).catch(console.error)
         }
 
         const currentTabs = store.get(tabsAtom)
