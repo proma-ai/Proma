@@ -952,10 +952,12 @@ export class AgentOrchestrator {
             timeout: { title: 'Proma Cloud 请求超时', message: '连接 Proma Cloud 超时，请稍后重试。' },
             rate_limited: { title: 'Proma Cloud 请求过于频繁', message: '请求过于频繁，请稍后重试。' },
             server: { title: 'Proma Cloud 暂时不可用', message: 'Proma Cloud 暂时不可用，请稍后重试。' },
+            auth: { title: 'Proma Cloud 登录状态异常', message: 'Proma Cloud 凭据校验未通过，请重新登录后再试。' },
+            client: { title: 'Proma Cloud 请求被拒绝', message: 'Proma Cloud 拒绝了本次请求，请稍后重试或联系支持。' },
             unknown: { title: 'Proma Cloud 暂时不可用', message: '暂时无法取得 Proma 官方渠道凭据，请稍后重试。' },
           }[failureKind] ?? { title: 'Proma Cloud 暂时不可用', message: '暂时无法取得 Proma 官方渠道凭据，请稍后重试。' }
           reportPreflightError({
-            code: failureKind === 'network' ? 'network_error' : 'cloud_unavailable',
+            code: failureKind === 'network' ? 'network_error' : 'service_unavailable',
             title: failureCopy.title,
             message: failureCopy.message,
             actions: [{ key: 'r', label: '重试', action: 'retry' }],

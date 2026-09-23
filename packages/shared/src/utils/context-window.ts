@@ -64,8 +64,9 @@ const ONE_MILLION_CONTEXT_RULES = {
   deepseek: ['deepseek-v4', 'deepseek-flash'],
   // 智谱 GLM
   glm: ['glm-5.3', 'glm-5.3-flash', 'glm-5.3-flashx', 'glm-5.2'],
-  // 小米 MiMo
-  mimo: ['mimo-v2.5'],
+  // 小米 MiMo：官方精确 ID（见 EXACT_CONTEXT_RULES，避免子串误伤未来 ID）；
+  // mimo-v2.5 系列将于 2026-10-21 下线，保留以兼容历史会话的用量统计分母。
+  mimo: ['mimo-v2.5', 'mimo-v2.5-pro', 'mimo-v2.6-pro', 'mimo-v2.6-flash', 'mimo-v2.6-pro-ultraspeed'],
   // MiniMax
   minimax: ['minimax-m3'],
   // Kimi
@@ -83,7 +84,25 @@ const ONE_MILLION_CONTEXT_RULES = {
 } as const
 
 const ONE_MILLION_CONTEXT_DISPLAY_RULES = Object.values(ONE_MILLION_CONTEXT_RULES).flat()
-const EXACT_CONTEXT_RULES = new Set(['k3', 'kimi-k3'])
+const EXACT_CONTEXT_RULES = new Set([
+  'k3',
+  'kimi-k3',
+  // MiMo 全系列用精确匹配，避免子串误伤未来 ID（如 mimo-v2.50 / mimo-v2.60）。
+  'mimo-v2.5',
+  'mimo-v2.5-pro',
+  'mimo-v2.6-pro',
+  'mimo-v2.6-flash',
+  'mimo-v2.6-pro-ultraspeed',
+])
+
+/** MiMo-V2.6 系列的官方精确模型 ID（2026-09-22 模型列表），供 Pi runtime 等跨包复用。 */
+export const MIMO_V26_MODEL_IDS = ['mimo-v2.6-pro', 'mimo-v2.6-flash', 'mimo-v2.6-pro-ultraspeed'] as const
+
+/** 判断是否为 MiMo-V2.6 系列模型（精确匹配，含首尾空白与大小写归一）。 */
+export function isMimoV26Model(modelId: string | undefined): boolean {
+  if (!modelId) return false
+  return (MIMO_V26_MODEL_IDS as readonly string[]).includes(modelId.trim().toLowerCase())
+}
 
 function matchesContextRule(model: string, pattern: string): boolean {
   if (EXACT_CONTEXT_RULES.has(pattern)) {
@@ -96,7 +115,7 @@ function matchesContextRule(model: string, pattern: string): boolean {
  * 上下文窗口配置表。仅影响显示推断的模型加在 rules；已确认 1M
  * 能力的模型加在上方 ONE_MILLION_CONTEXT_RULES，并自动复用于 rules。
  *
- * 匹配规则：modelId.toLowerCase() 包含 pattern 即命中（substring match）。
+ * 匹配规则：对 modelId 执行 trim().toLowerCase() 后，包含 pattern 即命中（substring match）。
  * exclude 列表优先级最高：命中 exclude 的模型始终返回 DEFAULT_CONTEXT_WINDOW。
  *
  * 参考：https://docs.anthropic.com/en/docs/build-with-claude/context-windows
@@ -120,7 +139,7 @@ const CONTEXT_WINDOW_CONFIG = {
  */
 export function supports1MContext(modelId: string): boolean {
   if (!modelId) return false
-  const m = modelId.toLowerCase()
+  const m = modelId.trim().toLowerCase()
   if (CONTEXT_WINDOW_CONFIG.exclude.some((p) => m.includes(p))) return false
   return CONTEXT_WINDOW_CONFIG.rules.some((p) => matchesContextRule(m, p))
 }

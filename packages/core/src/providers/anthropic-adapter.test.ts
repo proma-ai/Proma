@@ -16,7 +16,7 @@ function buildRequest(provider: ProviderType, apiKey = 'test-key') {
   return adapter.buildStreamRequest({
     baseUrl,
     apiKey,
-    modelId: 'mimo-v2.5-pro',
+    modelId: 'mimo-v2.6-pro',
     history: [],
     userMessage: 'ping',
     readImageAttachments: () => [],
