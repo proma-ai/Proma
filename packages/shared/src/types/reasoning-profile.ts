@@ -18,7 +18,6 @@ export type ReasoningTransport =
 export function inferReasoningTransport(provider: ProviderType | undefined): ReasoningTransport {
   switch (provider) {
     case 'openai':
-    case 'opencode-go-openai':
     case 'zhipu':
     case 'doubao':
     case 'doubao-api':

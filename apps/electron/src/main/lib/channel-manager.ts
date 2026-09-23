@@ -83,11 +83,13 @@ const ARK_CODING_PLAN_TEST_MODEL = 'doubao-seed-2.0-code'
 
 /**
  * 商业版仅接受 Proma 官方渠道和各供应商的官方 API。
- * 通用兼容协议、自定义地址和聚合服务均可能成为第三方中转站，因此一律禁用。
+ * 通用兼容协议、自定义地址和聚合服务均可能成为第三方中转站；
+ * 此外 OpenCode Go 已停止支持。这些渠道均不得新建或继续使用。
  */
-const DISALLOWED_RELAY_PROVIDERS = new Set<ProviderType>([
+const DISALLOWED_COMMERCIAL_PROVIDERS = new Set<ProviderType>([
   'custom',
   'anthropic-compatible',
+  'opencode-go-openai', // 保留类型以识别并移除存量配置。
 ])
 
 const THIRD_PARTY_RELAY_DISABLED_MESSAGE = 'Proma 商业版已禁用第三方中转站，请使用内置供应商的默认 API 地址'
@@ -102,7 +104,7 @@ function isCommercialChannelAllowed(channel: Pick<Channel, 'id' | 'provider' | '
   }
   if (channel.provider === 'proma') return false
   if (channel.provider === 'openai-codex' || channel.provider === 'github-copilot' || channel.provider === 'xai') return !normalizeBaseUrl(channel.baseUrl)
-  if (DISALLOWED_RELAY_PROVIDERS.has(channel.provider)) return false
+  if (DISALLOWED_COMMERCIAL_PROVIDERS.has(channel.provider)) return false
   return normalizeBaseUrl(channel.baseUrl) === normalizeBaseUrl(PROVIDER_DEFAULT_URLS[channel.provider])
 }
 
@@ -189,9 +191,6 @@ const PRESET_MODEL_CANDIDATE_UPDATES: readonly {
         { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
       ],
       doubao: [
-        { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
-      ],
-      'opencode-go-openai': [
         { id: 'glm-5.3', name: 'GLM-5.3', enabled: false },
       ],
       zhipu: [
@@ -433,7 +432,7 @@ function migrateConfig(config: ChannelsConfig): { config: ChannelsConfig; change
     if (isCommercialChannelAllowed(channel)) return true
     changed = true
     removed.push(channel)
-    console.warn(`[渠道管理] 已删除不受商业版支持的第三方渠道: ${channel.name} (${channel.id}, ${channel.provider})`)
+    console.warn(`[渠道管理] 已删除不再支持的渠道: ${channel.name} (${channel.id}, ${channel.provider})`)
     return false
   })
 
@@ -551,7 +550,7 @@ function writeConfig(config: ChannelsConfig): void {
 }
 
 /**
- * 启动时显式清理已存储的第三方中转站。
+ * 启动时显式清理已存储的不受支持渠道。
  * `readConfig` 本身已幂等执行过滤；导出此函数用于让 bootstrap 明确表达清理时机。
  */
 export function purgeDisallowedCommercialChannels(): void {
@@ -559,7 +558,7 @@ export function purgeDisallowedCommercialChannels(): void {
 }
 
 /**
- * 将本次被移除的渠道记入「第三方中转站已被移除」一次性通知。
+ * 将本次被移除的渠道记入一次性通知。
  *
  * 与尚未被 Renderer 消费的历史通知按 provider+name 去重合并，避免用户
  * 连续多次启动且均未打开应用时，后一次迁移静默覆盖掉前一次的通知内容。
@@ -1198,7 +1197,6 @@ export async function testChannel(channelId: string): Promise<ChannelTestResult>
         return await testAnthropicCompatible(channel.baseUrl, apiKey, proxyUrl, provider)
       case 'openai':
       case 'openai-responses':
-      case 'opencode-go-openai':
       case 'zhipu':
       case 'doubao':
       case 'doubao-api':
@@ -2258,7 +2256,6 @@ export async function testChannelDirect(input: ChannelDirectTestInput): Promise<
         return await testAnthropicCompatible(input.baseUrl, input.apiKey, proxyUrl, provider)
       case 'openai':
       case 'openai-responses':
-      case 'opencode-go-openai':
       case 'zhipu':
       case 'doubao':
       case 'doubao-api':
@@ -2365,7 +2362,6 @@ export async function fetchModels(input: FetchModelsInput): Promise<FetchModelsR
         return await fetchAnthropicCompatibleModels(input.baseUrl, input.apiKey, proxyUrl, provider)
       case 'openai':
       case 'openai-responses':
-      case 'opencode-go-openai':
       case 'zhipu':
       case 'doubao':
       case 'doubao-api':

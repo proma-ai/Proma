@@ -69,9 +69,9 @@ export function getChannelsPath(): string {
 }
 
 /**
- * 获取「第三方中转站已被移除」一次性通知的持久化路径
+ * 获取「不再支持的渠道已被移除」一次性通知的持久化路径
  *
- * 商业版启动清理不受支持的第三方渠道后，把被移除渠道的摘要写入此文件，
+ * 商业版启动清理不受支持的渠道后，把被移除渠道的摘要写入此文件，
  * 供 Renderer 启动后读取并展示一次，随后清空。
  *
  * @returns ~/.proma/channel-removal-notice.json
