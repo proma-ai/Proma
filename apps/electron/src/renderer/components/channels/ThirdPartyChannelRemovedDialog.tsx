@@ -1,10 +1,8 @@
 /**
- * ThirdPartyChannelRemovedDialog - 第三方中转站渠道移除通知
+ * ThirdPartyChannelRemovedDialog - 不再支持的渠道移除通知
  *
- * 商业版启动时会静默清理本地已配置的第三方中转站渠道（详见
- * channel-manager.ts 的 isCommercialChannelAllowed）。这个弹窗把「清理发生
- * 过」这件事变得对用户可见：列出具体被移除了哪些渠道，并给出两条迁移路径——
- * 切换到官方渠道，或回退到不受此限制的开源版本。
+ * 商业版启动时清理不受支持的渠道（包含旧 OpenCode Go 配置及第三方中转站）。
+ * 这个弹窗列出实际被移除的渠道；仅在包含中转站时提示开源版本选项。
  *
  * 由 App.tsx 中的 GlobalThirdPartyChannelRemovedDialog 负责在启动后调用一次
  * `consumeChannelRemovalNotice`（读取即清除），因此本组件本身不关心持久化。
@@ -41,6 +39,8 @@ export function ThirdPartyChannelRemovedDialog({
 }: ThirdPartyChannelRemovedDialogProps): React.ReactElement {
   const setSettingsTab = useSetAtom(settingsTabAtom)
   const setSettingsOpen = useSetAtom(settingsOpenAtom)
+  const hasOpenCode = channels.some((channel) => channel.provider === 'opencode-go-openai')
+  const onlyOpenCode = hasOpenCode && channels.every((channel) => channel.provider === 'opencode-go-openai')
 
   const handleOpenChannelSettings = (): void => {
     onOpenChange(false)
@@ -58,11 +58,14 @@ export function ThirdPartyChannelRemovedDialog({
         <DialogHeader>
           <div className="flex items-center gap-2">
             <AlertTriangle className="h-5 w-5 text-amber-500" />
-            <DialogTitle>已移除第三方中转站渠道</DialogTitle>
+            <DialogTitle>{hasOpenCode ? '已移除不再支持的渠道' : '已移除第三方中转站渠道'}</DialogTitle>
           </div>
           <DialogDescription>
-            为进一步提升 Agent 的整体安全性，防止第三方中转站带来的设备劫持、隐私信息泄露、欺诈风险及 Proma
-            Key 盗用等隐患，商业版已全面禁用第三方中转站，仅保留 Proma 官方渠道及各供应商的官方 API。
+            {onlyOpenCode
+              ? 'OpenCode Go 渠道已停止支持，存量配置已从本地渠道列表中移除。其他渠道不受影响。'
+              : hasOpenCode
+                ? 'OpenCode Go 渠道已停止支持；商业版同时禁用第三方中转站。以下存量渠道已从本地配置移除。'
+                : '为进一步提升 Agent 的整体安全性，防止第三方中转站带来的设备劫持、隐私信息泄露、欺诈风险及 Proma Key 盗用等隐患，商业版已全面禁用第三方中转站，仅保留 Proma 官方渠道及各供应商的官方 API。'}
           </DialogDescription>
         </DialogHeader>
 
@@ -79,15 +82,16 @@ export function ThirdPartyChannelRemovedDialog({
         </div>
 
         <p className="text-sm text-muted-foreground">
-          你可以迁移至 Proma 官方渠道或其他官方供应商，继续享受商业版的完整服务；也可以回退至不受此限制的
-          Proma 开源版本。
+          {onlyOpenCode
+            ? '请切换到 Proma 官方渠道或其他受支持的供应商。'
+            : '你可以迁移至 Proma 官方渠道或其他官方供应商；第三方中转站用户也可以考虑 Proma 开源版本。'}
         </p>
 
         <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={handleOpenSourceLink}>
+          {!onlyOpenCode && <Button variant="outline" onClick={handleOpenSourceLink}>
             <ExternalLink className="mr-1.5 h-4 w-4" />
             了解开源版本
-          </Button>
+          </Button>}
           <Button onClick={handleOpenChannelSettings}>
             <Settings className="mr-1.5 h-4 w-4" />
             查看渠道设置

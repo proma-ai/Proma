@@ -115,12 +115,6 @@ describe('Codex Astra family fallback', () => {
 })
 
 describe('resolvePiApi', () => {
-  test('Given OpenCode Go catalog APIs, when resolving, then preserves each model protocol', () => {
-    expect(resolvePiApi('opencode-go-openai', 'openai-completions')).toBe('openai-completions')
-    expect(resolvePiApi('opencode-go-openai', 'openai-responses')).toBe('openai-responses')
-    expect(resolvePiApi('opencode-go-openai', 'anthropic-messages')).toBe('anthropic-messages')
-  })
-
   test('Given an official model protocol from the backend, when resolving, then it overrides model-name inference', () => {
     expect(resolvePiApi('proma', undefined, 'internal-gpt-alias', 'openai-responses')).toBe('openai-responses')
   })

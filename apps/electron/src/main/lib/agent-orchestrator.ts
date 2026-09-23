@@ -327,7 +327,7 @@ export class AgentOrchestrator {
     if (signal?.aborted) return null
     console.log('[Agent 标题生成] 开始生成标题:', { channelId, modelId, userMessage: userMessage.slice(0, 50) })
 
-    // 渠道信息在异常路径也要用于判断是否应用 OpenCode Go 本地兜底，因此提前解析；
+    // 渠道信息在异常路径也要用于判断是否应用自定义渠道本地兜底，因此提前解析；
     // 同时保留 listChannels 自身的错误边界：解析失败时按“无渠道”处理并返回 null。
     let channel: import('@proma/shared').Channel | undefined
     try {
@@ -420,18 +420,17 @@ export class AgentOrchestrator {
       const result = title ? sanitizeGeneratedTitle(title) : null
       if (!result) {
         console.warn('[Agent 标题生成] API 未返回可用标题')
-        // OpenCode Go 的推理模型可能把输出预算全花在推理上返回空正文，或
-        // 内容块为数组；自定义渠道（custom）也可能返回空/异常；任何取不到可用标题的情况
+        // 自定义渠道（custom）可能返回空/异常；任何取不到可用标题的情况
         // 都回退到首行兜底，保证会话一定被重命名。
-        return (channel.provider === 'opencode-go-openai' || channel.provider === 'custom') ? createFallbackTitle(userMessage) : null
+        return (channel.provider === 'custom') ? createFallbackTitle(userMessage) : null
       }
 
       console.log(`[Agent 标题生成] 生成标题成功: "${result}"`)
       return result
     } catch (error) {
       console.warn('[Agent 标题生成] 生成失败:', error)
-      // OpenCode Go / 自定义渠道的服务端偶发返回空标题/异常响应/超时，异常路径同样要完成重命名。
-      return (channel.provider === 'opencode-go-openai' || channel.provider === 'custom') ? createFallbackTitle(userMessage) : null
+      // 自定义渠道的服务端偶发返回空标题/异常响应/超时，异常路径同样要完成重命名。
+      return (channel.provider === 'custom') ? createFallbackTitle(userMessage) : null
     }
   }
 

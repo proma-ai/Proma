@@ -29,7 +29,6 @@ import {
   getPromaUserAgent,
   normalizeAnthropicBaseUrlForSdk,
   normalizeOpenAIBaseUrlForSdk,
-  normalizeVersionedAnthropicBaseUrl,
   resolveAnthropicMessagesUrl,
 } from '@proma/core'
 import type { Api, KnownProvider, Model } from '@earendil-works/pi-ai/compat'
@@ -362,8 +361,7 @@ function applyPiModelCapabilityOverrides(model: PiCatalogModel | undefined): PiC
   if (!model) return model
 
   const normalizedId = model.id.trim().toLowerCase()
-  // Pi catalog also exposes Google-protocol Gemini through OpenCode Go. The API
-  // contract—not the catalog provider name—determines whether Google thinking levels apply.
+  // Google 协议模型的 thinking 档位由 API 合约决定，而非目录供应商名。
   const geminiCapability = model.api === 'google-generative-ai' ? getGeminiModelCapability(normalizedId) : undefined
   const requiresMinimalThinkingExclusion = geminiCapability && !geminiCapability.thinkingLevels.includes('minimal')
   const input: PiCatalogModel['input'] = supportsPiNativeImageInput(model.id) && !model.input.includes('image')
@@ -509,7 +507,6 @@ function normalizePiApi(
       return resolvePromaOfficialApi(modelId, modelApiProtocol)
     case 'openai':
     case 'xai':
-    case 'opencode-go-openai':
     case 'zhipu':
     case 'doubao':
     case 'doubao-api':
@@ -525,18 +522,13 @@ function normalizePiApi(
   }
 }
 
-/**
- * OpenCode Go may expose OpenAI Chat, Responses, and Anthropic Messages from a
- * single configured channel. Honor the selected catalog model protocol while
- * retaining Proma official-channel protocol metadata as the source of truth.
- */
+/** 官方渠道的协议元数据优先于模型名称推断。 */
 export function resolvePiApi(
   provider: ProviderType,
   catalogApi?: Api,
   modelId?: string,
   modelApiProtocol?: PiAgentQueryOptions['modelApiProtocol'],
 ): Api {
-  if (provider === 'opencode-go-openai' && catalogApi) return catalogApi
   return normalizePiApi(provider, modelId, modelApiProtocol)
 }
 
@@ -557,8 +549,6 @@ function candidatePiProviders(provider: ProviderType): KnownProvider[] {
       return ['moonshotai-cn', 'moonshotai']
     case 'kimi-coding':
       return ['kimi-coding', 'moonshotai-cn', 'moonshotai']
-    case 'opencode-go-openai':
-      return ['opencode-go']
     case 'zhipu':
       return ['zai']
     case 'zhipu-coding':
@@ -630,11 +620,6 @@ async function getCatalogModels(provider: KnownProvider): Promise<readonly PiCat
 }
 
 async function findPiCatalogModel(provider: ProviderType, modelId: string): Promise<PiCatalogModel | undefined> {
-  // OpenCode Go 的 key、能力声明与协议只能来自其自有 catalog；绝不能因未命中
-  // 而借用其它 provider 的同名模型，否则会把错误协议/规格套到该渠道 Base URL。
-  if (provider === 'opencode-go-openai') {
-    return findCatalogModelById(await getCatalogModels('opencode-go'), modelId)
-  }
   if (provider === 'openai-codex') {
     return findCatalogModelById(await getCodexCatalogModels(), modelId)
   }
@@ -729,6 +714,7 @@ export async function resolvePiImageInputCapability(
   modelId: string | undefined,
 ): Promise<'supported' | 'unsupported' | 'unknown'> {
   const resolvedModelId = stripLegacyAgentSdkContextSuffix(modelId)
+  if (provider === 'opencode-go-openai') return 'unsupported'
   if (!resolvedModelId) return 'unknown'
   if (isOfficialDeepSeekV4ProTextOnly(provider, resolvedModelId)) return 'unsupported'
   // Flash 实验变体尚未进入 Pi catalog，不能因目录缺失退回 unknown。
@@ -750,43 +736,15 @@ export async function resolvePiVisionRelayRoute(
   modelId: string | undefined,
 ): Promise<PiVisionRelayRoute | undefined> {
   const resolvedModelId = stripLegacyAgentSdkContextSuffix(modelId)
-  if (!resolvedModelId) return undefined
+  if (provider === 'opencode-go-openai' || !resolvedModelId) return undefined
   // DeepSeek Flash 的实验视觉模型尚未进入 Pi catalog；其渠道协议无需 catalog 分流。
-  if (provider !== 'opencode-go-openai' && supportsPiNativeImageInput(resolvedModelId)) {
+  if (supportsPiNativeImageInput(resolvedModelId)) {
     return { adapterProvider: provider }
   }
 
-  // OpenCode Go must never fall back to another provider's catalog: its key and images
-  // may only be sent to the catalog endpoint owned by the configured OpenCode Go channel.
-  const catalogModel = provider === 'opencode-go-openai'
-    ? findCatalogModelById(await getCatalogModels('opencode-go'), resolvedModelId)
-    : await findPiCatalogModel(provider, resolvedModelId)
+  const catalogModel = await findPiCatalogModel(provider, resolvedModelId)
   if (!catalogModel || !resolvePiModelInput(provider, resolvedModelId, catalogModel.input).includes('image')) return undefined
-
-  if (provider !== 'opencode-go-openai') {
-    return { adapterProvider: provider }
-  }
-
-  switch (catalogModel.api) {
-    case 'anthropic-messages':
-      return {
-        // Anthropic-compatible adapter 接收完整 messages 端点，避免误套 OpenAI 协议。
-        adapterProvider: 'anthropic-compatible',
-        baseUrl: `${normalizeVersionedAnthropicBaseUrl(catalogModel.baseUrl)}/messages`,
-      }
-    case 'openai-completions':
-      return {
-        adapterProvider: 'opencode-go-openai',
-        baseUrl: catalogModel.baseUrl,
-      }
-    case 'openai-responses':
-      return {
-        adapterProvider: 'openai-responses',
-        baseUrl: catalogModel.baseUrl,
-      }
-    default:
-      return undefined
-  }
+  return { adapterProvider: provider }
 }
 
 /** Resolve Pi session reasoning from a verified profile before catalog fallback. */
@@ -1178,6 +1136,9 @@ export async function listGithubCopilotModels(credentials: GithubCopilotOAuthCre
 }
 
 export async function buildModel(sdk: PiSdk, input: PiAgentQueryOptions) {
+  if (input.provider === 'opencode-go-openai') {
+    throw new Error('OpenCode Go 渠道已停用，请选择其他渠道')
+  }
   if (input.provider === 'openai-codex') {
     return buildCodexModel(sdk, input)
   }

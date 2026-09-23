@@ -107,7 +107,7 @@ const CONTEXT_WINDOW_CONFIG = {
   /** 1M 上下文模型匹配规则 */
   rules: [
     ...ONE_MILLION_CONTEXT_DISPLAY_RULES,
-    // OpenAI 协议渠道（如 OpenCode Go）使用该真实模型 ID。
+    // 保留真实模型 ID 的历史上下文窗口推断。
     'kimi-k3',
     // 已废弃的 MiMo V2 Pro 仅保留历史显示推断
     'mimo-v2-pro',
