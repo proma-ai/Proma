@@ -38,6 +38,8 @@ interface UpdateStatus {
 /** 更新 API */
 interface UpdaterAPI {
   checkForUpdates: () => Promise<void>
+  /** Renderer 网络恢复只上报主进程；不会在 Renderer 内执行更新检查。 */
+  notifyOnline: () => void
   getStatus: () => Promise<UpdateStatus>
   onStatusChanged: (callback: (status: UpdateStatus) => void) => () => void
   /** 在所有运行中的 Agent 结束后重启并安装更新 */

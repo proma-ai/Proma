@@ -399,6 +399,12 @@ function UpdaterInitializer(): null {
     return cleanup
   }, [setUpdateStatus])
 
+  useEffect(() => {
+    const notifyOnline = (): void => window.electronAPI.updater?.notifyOnline()
+    window.addEventListener('online', notifyOnline)
+    return () => window.removeEventListener('online', notifyOnline)
+  }, [])
+
   const showDownloadedUpdateReminder = React.useCallback((version: string): void => {
     if (readyToastIdRef.current !== null) {
       toast.dismiss(readyToastIdRef.current)

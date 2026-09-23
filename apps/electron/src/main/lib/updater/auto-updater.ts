@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import type { UpdateStatus } from './updater-types'
 import { UPDATER_IPC_CHANNELS } from './updater-types'
 import { createIdleInstallScheduler } from './idle-install-scheduler'
+import { createUpdateCheckScheduler, type UpdateCheckScheduler } from './update-check-scheduler'
 import { isNewerVersion } from './version'
 import { createUpdateCacheCleanup, getDefaultUpdaterBaseCacheDirectory, shouldDeferUpdateCacheCleanup } from './update-cache-cleanup'
 
@@ -20,8 +21,11 @@ let currentStatus: UpdateStatus = { status: 'idle' }
 /** 主窗口引用 */
 let win: BrowserWindow | null = null
 
-/** 定时检查定时器 */
-let checkInterval: ReturnType<typeof setInterval> | null = null
+/** 低负载、事件感知的更新检查调度器。 */
+let updateCheckScheduler: UpdateCheckScheduler | null = null
+
+/** 所有触发源共享的更新检查，避免手动、焦点恢复和周期检查重叠。 */
+let checkInFlight: Promise<void> | null = null
 
 /** 新版窗口稳定后执行的更新缓存清理定时器。 */
 let appliedUpdateCacheCleanupTimer: ReturnType<typeof setTimeout> | null = null
@@ -106,34 +110,58 @@ export function getUpdateStatus(): UpdateStatus {
   return currentStatus
 }
 
-/** 手动触发检查更新 */
-export async function checkForUpdates(): Promise<void> {
-  // 下载未完成时不能启动第二次下载；已下载版本仍需检查，以便追赶随后发布的新版。
+/**
+ * 触发一次权威更新检查。
+ *
+ * 手动检查、周期检查和窗口恢复都复用这一 Promise；electron-updater 不需要也
+ * 不应承受重叠的 manifest 请求。下载尚未结束时保持原有的跳过语义。
+ */
+export function checkForUpdates(): Promise<void> {
   if (currentStatus.status === 'downloading') {
     console.log('[更新] 跳过检查：正在下载更新')
-    return
+    return Promise.resolve()
+  }
+  if (checkInFlight) {
+    console.log('[更新] 合并检查：已有更新检查正在进行')
+    return checkInFlight
   }
 
-  downloadedStatusDuringCheck = currentStatus.status === 'downloaded' ? currentStatus : null
+  checkInFlight = (async () => {
+    downloadedStatusDuringCheck = currentStatus.status === 'downloaded' ? currentStatus : null
 
-  try {
-    // 已有下载完成的更新时保持它在界面中可见，也保留用户已安排的空闲安装。
-    if (!downloadedStatusDuringCheck) {
-      setStatus({ status: 'checking' })
+    try {
+      // 已有下载完成的更新时保持它在界面中可见，也保留用户已安排的空闲安装。
+      if (!downloadedStatusDuringCheck) {
+        setStatus({ status: 'checking' })
+      }
+      await autoUpdater.checkForUpdates()
+    } catch (err) {
+      console.error('[更新] 检查更新失败:', err)
+      if (downloadedStatusDuringCheck) {
+        console.warn('[更新] 保留已下载更新，稍后继续检查是否有新版')
+        downloadedStatusDuringCheck = null
+        return
+      }
+      setStatus({
+        status: 'error',
+        error: err instanceof Error ? err.message : String(err),
+      })
+    } finally {
+      checkInFlight = null
     }
-    await autoUpdater.checkForUpdates()
-  } catch (err) {
-    console.error('[更新] 检查更新失败:', err)
-    if (downloadedStatusDuringCheck) {
-      console.warn('[更新] 保留已下载更新，稍后继续检查是否有新版')
-      downloadedStatusDuringCheck = null
-      return
-    }
-    setStatus({
-      status: 'error',
-      error: err instanceof Error ? err.message : String(err),
-    })
-  }
+  })()
+
+  return checkInFlight
+}
+
+/** 窗口重新活跃时尝试检查；调度器负责冷却与请求合并。 */
+export function notifyUpdaterWindowActive(): void {
+  updateCheckScheduler?.notifyActive()
+}
+
+/** 系统网络恢复时尝试检查；调度器负责冷却与请求合并。 */
+export function notifyUpdaterOnline(): void {
+  updateCheckScheduler?.notifyOnline()
 }
 
 /**
@@ -198,10 +226,9 @@ function quitAndInstall(): void {
 
 /** 清理更新器资源（定时器等） */
 export function cleanupUpdater(): void {
-  if (checkInterval) {
-    clearInterval(checkInterval)
-    checkInterval = null
-  }
+  updateCheckScheduler?.dispose()
+  updateCheckScheduler = null
+  checkInFlight = null
   if (appliedUpdateCacheCleanupTimer) {
     clearTimeout(appliedUpdateCacheCleanupTimer)
     appliedUpdateCacheCleanupTimer = null
@@ -368,25 +395,18 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
     })
   })
 
-  // 启动后延迟 10 秒首次检查
-  setTimeout(() => {
-    console.log('[更新] 首次自动检查更新')
-    void checkForUpdates()
-  }, 10_000)
-
-  // 每 4 小时自动检查一次；已下载版本也会检查，发现更高版本即自动替换下载。
-  checkInterval = setInterval(() => {
-    console.log('[更新] 定时自动检查更新')
-    void checkForUpdates()
-  }, 4 * 60 * 60 * 1000)
+  updateCheckScheduler?.dispose()
+  updateCheckScheduler = createUpdateCheckScheduler({
+    check: checkForUpdates,
+  })
+  updateCheckScheduler.start()
 
   // 窗口关闭时清理定时器
   mainWindow.on('closed', () => {
     cancelAppliedUpdateCacheCleanup()
-    if (checkInterval) {
-      clearInterval(checkInterval)
-      checkInterval = null
-    }
+    updateCheckScheduler?.dispose()
+    updateCheckScheduler = null
+    checkInFlight = null
     if (appliedUpdateCacheCleanupTimer) {
       clearTimeout(appliedUpdateCacheCleanupTimer)
       appliedUpdateCacheCleanupTimer = null
@@ -397,5 +417,5 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
     win = null
   })
 
-  console.log('[更新] 自动更新模块已初始化（自动下载最新版本，支持空闲时安装）')
+  console.log('[更新] 自动更新模块已初始化（抖动周期检查、活跃恢复检查、自动下载与空闲安装）')
 }
