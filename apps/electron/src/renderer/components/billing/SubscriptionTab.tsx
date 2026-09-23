@@ -170,6 +170,9 @@ export function SubscriptionTab({
   const [selectedTier, setSelectedTier] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(false)
   const [wechatPay, setWechatPay] = React.useState<WechatPayState | null>(null)
+  const activeOrderRef = React.useRef<string | null>(null)
+  const pollingRef = React.useRef(false)
+  const completedOrderRef = React.useRef<string | null>(null)
   const [showUsedUp, setShowUsedUp] = React.useState(false)
 
   const refreshSubscription = React.useCallback(async () => {
@@ -188,6 +191,8 @@ export function SubscriptionTab({
     const result = await window.electronAPI.cloudSubscription.createWechatPayment(tierId)
     setLoading(false)
     if (result.success && result.data) {
+      activeOrderRef.current = result.data.order_no
+      completedOrderRef.current = null
       setWechatPay({
         codeUrl: result.data.code_url,
         orderNo: result.data.order_no,
@@ -198,22 +203,33 @@ export function SubscriptionTab({
     }
   }
 
+  const orderNo = wechatPay?.orderNo
   const handleWechatPoll = React.useCallback(async () => {
-    if (!wechatPay) return
-    const result = await window.electronAPI.cloudSubscription.getOrderStatus(wechatPay.orderNo)
-    if (result.success && result.data) {
+    if (!orderNo || pollingRef.current || completedOrderRef.current === orderNo) return
+    pollingRef.current = true
+    try {
+      const result = await window.electronAPI.cloudSubscription.getOrderStatus(orderNo)
+      // 用户可能已取消并创建新订单；旧轮询结果不得污染新支付流程。
+      if (activeOrderRef.current !== orderNo || !result.success || !result.data) return
       const { status } = result.data
       if (status === 'ACTIVE') {
-        setWechatPay((prev) => prev ? { ...prev, status: 'success' } : null)
+        completedOrderRef.current = orderNo
+        setWechatPay((prev) => prev?.orderNo === orderNo ? { ...prev, status: 'success' } : prev)
         await onSubscriptionComplete()
         await refreshSubscription()
       } else if (status === 'CANCELLED') {
-        setWechatPay((prev) => prev ? { ...prev, status: 'failed' } : null)
+        setWechatPay((prev) => prev?.orderNo === orderNo ? { ...prev, status: 'failed' } : prev)
       }
+    } catch (error) {
+      // 网络错误不能当成付款失败；下次轮询可继续确认订单。
+      console.warn('[微信支付] 查询订单或刷新订阅失败:', error)
+    } finally {
+      pollingRef.current = false
     }
-  }, [wechatPay, onSubscriptionComplete, refreshSubscription])
+  }, [orderNo, onSubscriptionComplete, refreshSubscription])
 
   const handleReset = async (): Promise<void> => {
+    activeOrderRef.current = null
     setWechatPay(null)
     await onSubscriptionComplete()
     await refreshSubscription()
