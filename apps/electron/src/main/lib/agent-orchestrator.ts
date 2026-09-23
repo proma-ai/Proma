@@ -32,7 +32,7 @@ import {
   normalizePathForCompare,
   normalizeMcpTransportType,
   inferContextWindow,
-  inferReasoningTransport,
+  inferAgentReasoningTransport,
   isPromaOfficialOpenAIReasoningModel,
   resolveReasoningProfile,
   collectSkillActivations,
@@ -1823,10 +1823,7 @@ export class AgentOrchestrator {
           || (channel.provider === 'proma' && isPromaOfficialOpenAIReasoningModel(selectedModelId)))
           && resolveReasoningProfile({
             modelId: selectedModelId,
-            transport: selectedOfficialAgentModel?.apiProtocol === 'openai-responses'
-              || (channel.provider === 'proma' && isPromaOfficialOpenAIReasoningModel(selectedModelId))
-              ? 'openai-responses'
-              : inferReasoningTransport(channel.provider),
+            transport: inferAgentReasoningTransport(channel.provider, selectedModelId, selectedOfficialAgentModel?.apiProtocol),
           })?.id.startsWith('openai-reasoning-')) && {
             openAIThinkingLevel: piThinkingLevel!,
           }),

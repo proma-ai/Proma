@@ -6,8 +6,8 @@
  * 只接受由 `-` 分隔的字母数字后缀，避免把 `gpt-6-astral` 等无关模型误归类。
  */
 const GPT_6_ASTRA_FAMILY_PATTERN = /^gpt-6-astra(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?$/
-const GPT_6_SOL_MODEL_ID = 'gpt-6-sol'
-const GPT_6_LUNA_MODEL_ID = 'gpt-6-luna'
+const GPT_6_SOL_FAMILY_PATTERN = /^gpt-6-sol(?:-\d+)?$/
+const GPT_6_LUNA_FAMILY_PATTERN = /^gpt-6-luna(?:-\d+)?$/
 
 function normalizeModelId(modelId: string | undefined): string | undefined {
   return modelId?.trim().toLowerCase().replace(/\[1m\]$/i, '')
@@ -37,14 +37,16 @@ export function isGpt6AstraFamily(modelId: string | undefined): boolean {
   return normalized !== undefined && GPT_6_ASTRA_FAMILY_PATTERN.test(normalized)
 }
 
-/** GPT-6 Sol 仅接受精确请求 ID，避免把近似 SKU 错误归入官方模型。 */
+/** GPT-6 Sol 的官方数字 SKU 复用基准模型的思考档位；不匹配未验证的文字后缀。 */
 export function isGpt6SolFamily(modelId: string | undefined): boolean {
-  return normalizeModelId(modelId) === GPT_6_SOL_MODEL_ID
+  const normalized = normalizeModelId(modelId)
+  return normalized !== undefined && GPT_6_SOL_FAMILY_PATTERN.test(normalized)
 }
 
-/** GPT-6 Luna 仅接受精确请求 ID，避免把近似 SKU 错误归入官方模型。 */
+/** GPT-6 Luna 的官方数字 SKU 复用基准模型的思考档位；不匹配未验证的文字后缀。 */
 export function isGpt6LunaFamily(modelId: string | undefined): boolean {
-  return normalizeModelId(modelId) === GPT_6_LUNA_MODEL_ID
+  const normalized = normalizeModelId(modelId)
+  return normalized !== undefined && GPT_6_LUNA_FAMILY_PATTERN.test(normalized)
 }
 
 /**

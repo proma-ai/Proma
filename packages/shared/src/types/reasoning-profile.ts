@@ -1,6 +1,6 @@
 import { isGpt6AstraFamily, isGpt6LunaFamily, isGpt6SolFamily } from '../utils/model-family'
 import type { ProviderType } from './channel'
-import type { AgentThinkingLevel } from './agent'
+import { isPromaOfficialOpenAIReasoningModel, type AgentThinkingLevel } from './agent'
 
 /** Proma 可识别的 reasoning 请求协议族。 */
 export type ReasoningTransport =
@@ -33,6 +33,17 @@ export function inferReasoningTransport(provider: ProviderType | undefined): Rea
     default:
       return 'anthropic-messages'
   }
+}
+
+export function inferAgentReasoningTransport(
+  provider: ProviderType | undefined,
+  modelId: string | undefined,
+  modelApiProtocol?: 'anthropic-messages' | 'openai-responses' | 'google-generative-ai',
+): ReasoningTransport {
+  if (provider === 'proma' && (modelApiProtocol === 'openai-responses' || isPromaOfficialOpenAIReasoningModel(modelId))) {
+    return 'openai-responses'
+  }
+  return inferReasoningTransport(provider)
 }
 
 /** 编译器据此生成 runtime 专属请求参数。 */
