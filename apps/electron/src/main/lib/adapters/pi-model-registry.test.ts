@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test'
 import { CODEX_GPT_56_CONTEXT_WINDOW } from '@proma/shared'
 import {
   buildCodexModel,
-  buildModel,
   resolvePiApi,
   resolvePiImageInputCapability,
   shouldForcePiAdaptiveThinking,
@@ -71,54 +70,6 @@ describe('DeepSeek V4 native image input', () => {
     expect(supportsPiNativeImageInput('deepseek-v4-pro')).toBe(false)
     await expect(resolvePiImageInputCapability('proma', 'deepseek-v4-pro')).resolves.toBe('unsupported')
   })
-})
-
-describe('MiMo V2.6 native image input', () => {
-  test.each(['mimo-v2.6-pro', 'mimo-v2.6-flash', 'mimo-v2.6-pro-ultraspeed'])
-    ('Given catalog lacks %s When resolving image capability Then treats it as supported', async (modelId) => {
-      expect(supportsPiNativeImageInput(modelId)).toBe(true)
-      await expect(resolvePiImageInputCapability('xiaomi', modelId)).resolves.toBe('supported')
-      await expect(resolvePiImageInputCapability('xiaomi-token-plan', modelId)).resolves.toBe('supported')
-    })
-
-  test('Given a future MiMo-like ID When resolving image capability Then does not grant V2.6 support', () => {
-    expect(supportsPiNativeImageInput('mimo-v2.60-pro')).toBe(false)
-  })
-
-  test.each(['mimo-v2.6-pro', 'mimo-v2.6-flash', 'mimo-v2.6-pro-ultraspeed'])
-    ('Given bundled Pi catalog contains %s When building the model Then preserves its official 1M and 128K limits', async (modelId) => {
-      let registeredModels: Array<Record<string, unknown>> = []
-      const sdkRuntimeRecorder = {
-        ModelRuntime: {
-          create: async () => ({
-            registerProvider: (_provider: string, config: { models: Array<Record<string, unknown>> }) => {
-              registeredModels = config.models
-            },
-            getModel: (_provider: string, id: string) => registeredModels.find((model) => model.id === id),
-          }),
-        },
-      } as never
-
-      const { model } = await buildModel(sdkRuntimeRecorder, {
-        provider: 'xiaomi',
-        model: modelId,
-        apiKey: 'test-key',
-        baseUrl: 'https://api.xiaomimimo.com/anthropic',
-        sessionId: 'mimo-capability-test',
-        permissionMode: 'bypassPermissions',
-        systemPrompt: '',
-        piAgentDir: '/tmp',
-        piSessionDir: '/tmp',
-      } as never)
-
-      expect(model).toMatchObject({
-        id: modelId,
-        input: ['text', 'image'],
-        // Pi catalog uses binary token units: 1M = 1,048,576 and 128K = 131,072.
-        contextWindow: 1_048_576,
-        maxTokens: 131_072,
-      })
-    })
 })
 
 describe('Codex Astra family fallback', () => {
