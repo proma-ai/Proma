@@ -10,17 +10,17 @@ import { Users, Copy } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { copyTextToClipboard } from '@/lib/clipboard'
 
-const WECHAT_ID = 'geekthings'
+export const PROMA_CONTACT_WECHAT_ID = 'geekthings'
 
 export function TeamPromoBanner(): React.ReactElement {
   const handleClick = async (): Promise<void> => {
     try {
-      await copyTextToClipboard(WECHAT_ID)
-      toast.success(`已复制微信号 ${WECHAT_ID}`, {
+      await copyTextToClipboard(PROMA_CONTACT_WECHAT_ID)
+      toast.success(`已复制微信号 ${PROMA_CONTACT_WECHAT_ID}`, {
         description: '添加后即可开通团队额度与企业 Skills 共享协作',
       })
     } catch {
-      toast.message(`请手动复制微信号：${WECHAT_ID}`)
+      toast.message(`请手动复制微信号：${PROMA_CONTACT_WECHAT_ID}`)
     }
   }
 
@@ -47,7 +47,7 @@ export function TeamPromoBanner(): React.ReactElement {
           Proma 团队版：额度与 Skills 协作
         </p>
         <p className="text-[11px] text-emerald-700/80 dark:text-emerald-300/70 mt-0.5">
-          团队额度自动分配与共享；管理员可集中发布包含关联文件的企业 Skills，成员可浏览、手动安装和更新，沉淀团队 SOP 与工具流程（需满足三人以上使用，团队版 ¥1000 起购买，赠送 10% 额度）· 点击复制微信号 <span className="font-mono font-semibold">{WECHAT_ID}</span> 联系开通
+          团队额度自动分配与共享；管理员可集中发布包含关联文件的企业 Skills，成员可浏览、手动安装和更新，沉淀团队 SOP 与工具流程（需满足三人以上使用，团队版 ¥1000 起购买，赠送 10% 额度）· 点击复制微信号 <span className="font-mono font-semibold">{PROMA_CONTACT_WECHAT_ID}</span> 联系开通
         </p>
       </div>
 
