@@ -20,7 +20,7 @@ export class BoundedAsyncLookupCache<T> {
   private readonly cached = new Map<string, CacheEntry<T>>()
   private readonly pending = new Map<string, Promise<T>>()
   private readonly queue: QueuedLookup<T>[] = []
-  private active = 0
+  private readonly activeByGeneration = new Map<number, number>()
   private generation = 0
 
   constructor(
@@ -63,17 +63,19 @@ export class BoundedAsyncLookupCache<T> {
     this.generation += 1
     this.cached.clear()
     // Existing requests cannot be aborted safely, but a new account must never
-    // reuse their result or wait behind their single-flight entry.
+    // reuse their result, wait behind their single-flight entry, or consume its
+    // own per-generation concurrency budget.
     this.pending.clear()
     const error = new Error('agent turn usage lookup cache was cleared')
     while (this.queue.length) this.queue.shift()?.reject(error)
   }
 
   private drain(): void {
-    while (this.active < this.options.maxConcurrent && this.queue.length) {
+    while ((this.activeByGeneration.get(this.generation) ?? 0) < this.options.maxConcurrent && this.queue.length) {
       const lookup = this.queue.shift()
       if (!lookup) return
-      this.active += 1
+      const active = this.activeByGeneration.get(lookup.generation) ?? 0
+      this.activeByGeneration.set(lookup.generation, active + 1)
       void lookup.loader()
         .then((value) => {
           if (lookup.generation === this.generation && this.options.shouldCache(value)) {
@@ -86,7 +88,9 @@ export class BoundedAsyncLookupCache<T> {
         })
         .catch(lookup.reject)
         .finally(() => {
-          this.active -= 1
+          const remaining = (this.activeByGeneration.get(lookup.generation) ?? 1) - 1
+          if (remaining > 0) this.activeByGeneration.set(lookup.generation, remaining)
+          else this.activeByGeneration.delete(lookup.generation)
           this.drain()
         })
     }

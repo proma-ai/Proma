@@ -97,3 +97,24 @@ test('clearing account state drops successful cache entries', async () => {
   await expect(cache.getOrLoad('turn-1', loader)).resolves.toEqual({ found: true, totalCost: 2 })
   expect(calls).toBe(2)
 })
+
+test('a new account does not wait for the old generation active lookups', async () => {
+  const cache = createCache()
+  const oldGates = [deferred<Usage>(), deferred<Usage>()]
+  const newGate = deferred<Usage>()
+  let newCalls = 0
+
+  const oldRequests = oldGates.map((gate, index) => cache.getOrLoad(`old-${index}`, () => gate.promise))
+  cache.clear()
+  const newRequest = cache.getOrLoad('new-1', () => {
+    newCalls += 1
+    return newGate.promise
+  })
+
+  expect(newCalls).toBe(1)
+  newGate.resolve({ found: true, totalCost: 3 })
+  await expect(newRequest).resolves.toEqual({ found: true, totalCost: 3 })
+
+  oldGates.forEach((gate) => gate.resolve({ found: true, totalCost: 1 }))
+  await Promise.all(oldRequests)
+})
