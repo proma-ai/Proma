@@ -17,11 +17,38 @@ export interface ApiResponse<T> {
   ok: boolean
 }
 
-/** API 错误 */
+/** 可安全传递到 UI 的 Cloud 请求失败类别。 */
+export type CloudFailureKind = 'network' | 'timeout' | 'server' | 'rate_limited' | 'auth' | 'client' | 'unknown'
+
+/** API 错误。message 始终是可展示的固定文案，不含传输层或服务端原文。 */
 export interface ApiError {
   status: number
   message: string
-  data?: unknown
+  kind: CloudFailureKind
+  retryable: boolean
+}
+
+export function getSafeCloudFailureMessage(kind: CloudFailureKind): string {
+  switch (kind) {
+    case 'network': return '无法连接 Proma Cloud，请检查网络后重试'
+    case 'timeout': return '连接 Proma Cloud 超时，请稍后重试'
+    case 'server': return 'Proma Cloud 暂时不可用，请稍后重试'
+    case 'rate_limited': return '请求过于频繁，请稍后重试'
+    case 'auth': return '认证已过期，请重新登录'
+    case 'client': return '请求未能完成，请检查输入后重试'
+    default: return '请求失败，请稍后重试'
+  }
+}
+
+function classifyFailure(status: number, timedOut = false): { kind: CloudFailureKind; retryable: boolean } {
+  if (timedOut) return { kind: 'timeout', retryable: true }
+  if (status === 0) return { kind: 'network', retryable: true }
+  if (status === 401 || status === 403) return { kind: 'auth', retryable: false }
+  if (status === 408) return { kind: 'timeout', retryable: true }
+  if (status === 429) return { kind: 'rate_limited', retryable: true }
+  if (status >= 500) return { kind: 'server', retryable: true }
+  if (status >= 400) return { kind: 'client', retryable: false }
+  return { kind: 'unknown', retryable: false }
 }
 
 /** Token 存取接口（由调用方注入，适配不同环境） */
@@ -113,16 +140,9 @@ async function tryRefreshToken(
       if (response.status === 401 || response.status === 403) {
         return { status: 'expired' }
       }
-      const errorData = await response.json().catch(() => null)
       return {
         status: 'transient_failure',
-        error: createApiError(
-          response.status,
-          (errorData as Record<string, string>)?.detail ||
-            (errorData as Record<string, string>)?.message ||
-            `Token 刷新失败: ${response.status}`,
-          errorData,
-        ),
+        error: createApiError(response.status),
       }
     }
 
@@ -138,7 +158,7 @@ async function tryRefreshToken(
     console.error('[CloudApiClient] Token 刷新失败:', error)
     return {
       status: 'transient_failure',
-      error: createApiError(0, `网络错误: ${error instanceof Error ? error.message : '未知错误'}`),
+      error: createApiError(0),
     }
   }
 }
@@ -161,6 +181,7 @@ export function createApiClient(options?: {
     path: string,
     init: RequestInit = {},
     isRetry = false,
+    networkRetryAttempt = 0,
   ): Promise<ApiResponse<T>> {
     const url = `${config.baseUrl}${path}`
 
@@ -194,20 +215,13 @@ export function createApiClient(options?: {
         // /auth/login 返回 401 = 用户名或密码错误，不是 token 过期
         // /auth/refresh 返回 401 = refresh token 已失效，清除会话
         if (path.includes('/auth/login') || path.includes('/auth/register')) {
-          const errorData = await response.json().catch(() => null)
-          throw createApiError(
-            response.status,
-            (errorData as Record<string, string>)?.detail ||
-              (errorData as Record<string, string>)?.message ||
-              '邮箱或密码错误',
-            errorData,
-          )
+          throw createApiError(response.status, { safeMessage: '邮箱或密码错误' })
         }
 
         if (path.includes('/auth/refresh')) {
           tokenStorage.clearTokens()
           onAuthFailed?.()
-          throw createApiError(response.status, '认证已过期，请重新登录')
+          throw createApiError(response.status)
         }
 
         // 如果已在刷新中，等待刷新完成后重试
@@ -231,7 +245,7 @@ export function createApiClient(options?: {
           isRefreshing = false
           tokenStorage.clearTokens()
           onAuthFailed?.()
-          throw createApiError(401, '认证已过期，请重新登录')
+          throw createApiError(401)
         }
 
         onRefreshFailed(new Error(refreshResult.error.message))
@@ -246,14 +260,7 @@ export function createApiClient(options?: {
 
       // 非 2xx 状态码抛出错误
       if (!response.ok) {
-        const errorData = await response.json().catch(() => null)
-        throw createApiError(
-          response.status,
-          (errorData as Record<string, string>)?.detail ||
-            (errorData as Record<string, string>)?.message ||
-            `请求失败: ${response.status}`,
-          errorData,
-        )
+        throw createApiError(response.status)
       }
 
       // 解析响应
@@ -269,15 +276,25 @@ export function createApiClient(options?: {
 
       // AbortError = 超时
       if (error instanceof DOMException && error.name === 'AbortError') {
-        throw createApiError(0, '请求超时')
+        throw createApiError(0, { timedOut: true })
       }
 
-      // 已经是 ApiError 直接抛出
+      // Only idempotent reads and the explicitly opted-in login request get one
+      // short retry. Other mutations must never be retried implicitly.
       if (isApiError(error)) {
+        if (shouldRetryRequest(path, init, error, networkRetryAttempt)) {
+          await waitBeforeRetry()
+          return request<T>(path, init, isRetry, networkRetryAttempt + 1)
+        }
         throw error
       }
 
-      throw createApiError(0, `网络错误: ${error instanceof Error ? error.message : '未知错误'}`)
+      const networkError = createApiError(0)
+      if (shouldRetryRequest(path, init, networkError, networkRetryAttempt)) {
+        await waitBeforeRetry()
+        return request<T>(path, init, isRetry, networkRetryAttempt + 1)
+      }
+      throw networkError
     }
   }
 
@@ -311,9 +328,28 @@ export function createApiClient(options?: {
   }
 }
 
-/** 创建 API 错误对象 */
-function createApiError(status: number, message: string, data?: unknown): ApiError {
-  return { status, message, data }
+/** 创建只含安全诊断信息的 API 错误对象。 */
+function createApiError(
+  status: number,
+  options: { safeMessage?: string; timedOut?: boolean } = {},
+): ApiError {
+  const { kind, retryable } = classifyFailure(status, options.timedOut)
+  return {
+    status,
+    kind,
+    retryable,
+    message: options.safeMessage ?? getSafeCloudFailureMessage(kind),
+  }
+}
+
+function shouldRetryRequest(path: string, init: RequestInit, error: ApiError, attempt: number): boolean {
+  if (attempt >= 1 || !error.retryable) return false
+  return init.method === 'GET' || path === '/auth/login'
+}
+
+async function waitBeforeRetry(): Promise<void> {
+  const delay = 250 + Math.floor(Math.random() * 251)
+  await new Promise<void>((resolve) => setTimeout(resolve, delay))
 }
 
 /** 类型守卫：判断是否为 ApiError */
