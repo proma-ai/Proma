@@ -18,6 +18,8 @@ import {
 } from '@/components/ui/dialog'
 import { cloudNotificationsAtom, invalidateCloudNotificationFetches } from '@/atoms/cloud-notifications'
 import type { CloudNotification } from '@proma/shared'
+import { resolveNotificationMedia } from './notification-media'
+import type { NotificationMedia } from './notification-media'
 
 const REMARK_PLUGINS = [remarkGfm]
 
@@ -70,6 +72,36 @@ const markdownComponents: Components = {
   },
 }
 
+/** 主视觉与正文分开渲染；失败时保留右侧内容及已读操作。 */
+export function NotificationMediaView({ media, title }: { media: NotificationMedia; title: string }): React.ReactElement {
+  const [failed, setFailed] = React.useState(false)
+  return (
+    <div className="flex min-w-0 items-center justify-center bg-muted/30 p-4 dark:bg-muted/15" role="group" aria-label="通知媒体">
+      <div className="flex aspect-[4/3] max-h-[min(68vh,420px)] w-full items-center justify-center overflow-hidden rounded-xl bg-background/70 shadow-[0_2px_12px_rgba(0,0,0,0.05)] ring-1 ring-black/10 dark:bg-black/20 dark:ring-white/10">
+        {failed ? (
+          <p className="px-4 text-center text-sm text-muted-foreground" role="status">媒体暂时无法加载，请阅读右侧通知内容。</p>
+        ) : media.type === 'video' ? (
+          <video
+            className="h-full w-full object-contain"
+            src={media.url}
+            controls
+            preload="metadata"
+            aria-label={`${title}的视频`}
+            onError={() => setFailed(true)}
+          >你的系统不支持播放此视频。</video>
+        ) : (
+          <img
+            className="h-full w-full object-contain"
+            src={media.url}
+            alt={title}
+            onError={() => setFailed(true)}
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
 interface CloudNotificationDialogProps {
   notification: CloudNotification | null
   onAcknowledge: (notificationId: string) => Promise<void>
@@ -88,6 +120,7 @@ function NotificationDialogContent({
   }, [notification?.id])
 
   if (!notification) return null
+  const media = resolveNotificationMedia(notification)
 
   const handleAcknowledge = async (): Promise<void> => {
     setAcknowledging(true)
@@ -104,33 +137,42 @@ function NotificationDialogContent({
   return (
     <DialogContent
       hideClose
-      className="max-h-[calc(100vh-5rem)] max-w-2xl overflow-y-auto"
+      className={media
+        ? 'max-h-[calc(100vh-4rem)] w-[calc(100vw-3rem)] max-w-[900px] gap-0 overflow-hidden p-0'
+        : 'max-h-[calc(100vh-5rem)] max-w-2xl overflow-y-auto'}
       onEscapeKeyDown={(event) => event.preventDefault()}
       onPointerDownOutside={(event) => event.preventDefault()}
       onInteractOutside={(event) => event.preventDefault()}
     >
-      <DialogHeader>
-        <DialogTitle>{notification.title}</DialogTitle>
-      </DialogHeader>
+      <div className={media ? 'grid min-h-0 grid-cols-[minmax(0,2fr)_minmax(0,3fr)]' : 'contents'}>
+        {media && <NotificationMediaView key={notification.id} media={media} title={notification.title} />}
+        <div className={media ? 'flex min-h-0 min-w-0 flex-col gap-5 px-7 py-7' : 'contents'}>
+          <DialogHeader>
+            <DialogTitle className={media ? 'text-balance text-xl leading-snug' : undefined}>{notification.title}</DialogTitle>
+          </DialogHeader>
 
-      <div className="prose prose-sm dark:prose-invert max-w-none break-words">
-        <Markdown
-          remarkPlugins={REMARK_PLUGINS}
-          skipHtml
-          urlTransform={(url) => isHttpsUrl(url) ? url : ''}
-          components={markdownComponents}
-        >
-          {notification.bodyMarkdown}
-        </Markdown>
+          <div className={media
+            ? 'prose prose-sm dark:prose-invert min-h-0 max-h-[min(60vh,420px)] max-w-none flex-1 overflow-y-auto break-words pr-1 [text-wrap:pretty]'
+            : 'prose prose-sm dark:prose-invert max-w-none break-words'}>
+            <Markdown
+              remarkPlugins={REMARK_PLUGINS}
+              skipHtml
+              urlTransform={(url) => isHttpsUrl(url) ? url : ''}
+              components={markdownComponents}
+            >
+              {notification.bodyMarkdown}
+            </Markdown>
+          </div>
+
+          {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
+
+          <DialogFooter className={media ? 'mt-auto' : undefined}>
+            <Button className="min-h-10" onClick={() => void handleAcknowledge()} disabled={acknowledging}>
+              {acknowledging ? '正在确认…' : '已读'}
+            </Button>
+          </DialogFooter>
+        </div>
       </div>
-
-      {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
-
-      <DialogFooter>
-        <Button onClick={() => void handleAcknowledge()} disabled={acknowledging}>
-          {acknowledging ? '正在确认…' : '已读'}
-        </Button>
-      </DialogFooter>
     </DialogContent>
   )
 }

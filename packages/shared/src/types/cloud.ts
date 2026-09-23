@@ -35,6 +35,9 @@ export interface CloudNotification {
   id: string
   title: string
   bodyMarkdown: string
+  /** 旧服务端不会返回媒体字段。 */
+  mediaUrl?: string | null
+  mediaType?: 'image' | 'video' | null
   platform: string
   publishedAt: string
 }
