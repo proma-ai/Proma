@@ -149,8 +149,8 @@ body {
     --tooltip: 0 0% 15%;
     --tooltip-foreground: 0 0% 98%;
     --tooltip-muted: 0 0% 75%;
-    /* 代码块背景 */
-    --code-bg: 210 13% 12%;                   /* #1e2228 */
+    /* 代码块背景与浅色侧栏保持一致。 */
+    --code-bg: var(--sidebar-surface);
     /* 虚线边框色（新会话按钮、搜索按钮） */
     --dashed-border: 0 0% 9% / 0.35;
     --dashed-border-hover: 0 0% 9% / 0.50;
@@ -240,8 +240,8 @@ body {
     --tooltip: 210 45% 18%;               /* #192e43 Tooltip */
     --tooltip-foreground: 0 0% 98%;       /* #fafafa Tooltip前景 */
     --tooltip-muted: 210 20% 75%;         /* #b3bfcc Tooltip弱 */
-    /* 代码块背景 - 蓝调 */
-    --code-bg: 210 35% 14%;               /* #172030 深蓝 */
+    /* 代码块背景与浅色侧栏保持一致。 */
+    --code-bg: var(--sidebar-surface);
     /* 虚线边框色 */
     --dashed-border: 205 50% 50% / 0.30;
     --dashed-border-hover: 205 50% 50% / 0.45;
@@ -330,7 +330,8 @@ body {
     --tooltip: 132 18% 18%;
     --tooltip-foreground: 0 0% 98%;
     --tooltip-muted: 82 12% 68%;
-    --code-bg: 138 22% 13%;
+    /* 代码块背景与浅色侧栏保持一致。 */
+    --code-bg: var(--sidebar-surface);
     --dashed-border: 134 24% 38% / 0.34;
     --dashed-border-hover: 134 24% 38% / 0.50;
   }
@@ -423,8 +424,8 @@ body {
     --tooltip: 40 8% 20%;                 /* #37352e Tooltip */
     --tooltip-foreground: 0 0% 98%;       /* #fafafa Tooltip前景 */
     --tooltip-muted: 40 5% 55%;           /* #928e84 Tooltip弱 */
-    /* 代码块背景 - 与主色相近的深暖棕 */
-    --code-bg: 18 15% 18%;                /* #362f2b 深暖棕（主色深版） */
+    /* 代码块背景与浅色侧栏保持一致。 */
+    --code-bg: var(--sidebar-surface);
     /* 虚线边框色 */
     --dashed-border: 18 20% 50% / 0.40;
     --dashed-border-hover: 18 20% 50% / 0.55;
@@ -1048,10 +1049,10 @@ body {
 }
 
 /* ===== 输入框内代码块：按主题分色 ===== */
-/* 浅色主题：使用深色 code-bg + 浅色文字，与 AI 代码块一致 */
+/* 浅色主题：代码块背景与侧栏一致，文字改用前景色保证对比度 */
 .tiptap pre {
   background-color: hsl(var(--code-bg));
-  color: hsl(0 0% 90%);
+  color: hsl(var(--foreground));
 }
 .tiptap pre code {
   color: inherit;
@@ -1233,7 +1234,7 @@ body {
   padding: 0;
 }
 
-/* 浅色主题代码块是深底，用偏浅的蓝灰选区承托原有文字与 Shiki 语法色。 */
+/* 浅色主题代码块背景与侧栏一致，选区用偏深的蓝灰半透明承托文字。 */
 :root:not(.dark) :is(
   .code-block-wrapper pre.shiki,
   .tiptap pre
@@ -1242,7 +1243,7 @@ body {
   .code-block-wrapper pre.shiki,
   .tiptap pre
 ) ::selection {
-  background-color: hsl(210 80% 68% / 0.32);
+  background-color: hsl(210 70% 50% / 0.30);
 }
 
 :root:not(.dark) :is(
@@ -1253,7 +1254,7 @@ body {
   .code-block-wrapper pre.shiki,
   .tiptap pre
 ) ::-moz-selection {
-  background-color: hsl(210 80% 68% / 0.32);
+  background-color: hsl(210 70% 50% / 0.30);
 }
 
 /* 代码行：限制重排范围，GPU 合成优化 */

@@ -2728,8 +2728,8 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                   <span className="flex min-w-0 items-center gap-1.5">
                     <span className="min-w-0 truncate text-[13px] font-medium leading-[18px]">{group.label}</span>
                     <LocalProjectBadge
-                      projectRootPath={group.workspace?.projectRootPath}
-                      projectRootStatus={group.workspace?.projectRootStatus}
+                      projectRootPath={group.kind === 'workspace' ? group.workspace?.projectRootPath : undefined}
+                      projectRootStatus={group.kind === 'workspace' ? group.workspace?.projectRootStatus : undefined}
                     />
                     {isCurrentProject && (
                       <span className="workspace-selected-triangle flex-shrink-0" aria-hidden="true" />
@@ -2779,7 +2779,6 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                   }
                   : undefined}
                 leftAccent={getSessionLeftAccent(rowStatus)}
-                workspaceName={item.session.workspaceId ? workspaceNameMap.get(item.session.workspaceId) : undefined}
                 relativeTimeNow={relativeTimeNow}
                 onSelect={handleSelectAgentSession}
                 onRequestDelete={handleRequestDelete}
@@ -2808,7 +2807,6 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                     activeDelegationSessionId={activeDelegationSessionId}
                     agentIndicatorMap={agentIndicatorMap}
                     relativeTimeNow={relativeTimeNow}
-                    workspaceName={childSession.workspaceId ? workspaceNameMap.get(childSession.workspaceId) : undefined}
                     onSelect={handleSelectAgentSession}
                     onRequestDelete={handleRequestDelete}
                     onRequestMove={handleRequestMove}
