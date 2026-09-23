@@ -127,7 +127,7 @@ import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
 import { sendWithCmdEnterAtom } from '@/atoms/shortcut-atoms'
 import { useOpenPreview } from '@/components/diff/preview-opener'
 import type { AgentDeferredQueueMessageInput, AgentSendInput, AgentPendingFile, AgentThinkingLevel, FileDialogLargeFile, FileDialogResult, ModelOption, ReasoningCapability, SDKMessage, SDKUserMessage } from '@proma/shared'
-import { inferContextWindow, inferReasoningTransport, isCodexFastModeSupportedModel, MAX_ATTACHMENT_SIZE, normalizeReasoningCapabilityLevel, normalizeReasoningLevel, resolveReasoningCapability, resolveReasoningProfile } from '@proma/shared'
+import { inferContextWindow, inferAgentReasoningTransport, isCodexFastModeSupportedModel, MAX_ATTACHMENT_SIZE, normalizeReasoningCapabilityLevel, normalizeReasoningLevel, resolveReasoningCapability, resolveReasoningProfile } from '@proma/shared'
 import { fileToBase64, formatFileNames, getFileParentPath } from '@/lib/file-utils'
 import { getFilePanelDragData, INSERT_FILE_MENTION_EVENT, type FilePanelDragItem } from '@/lib/file-panel-drag'
 import {
@@ -792,10 +792,14 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
     && agentChannelProvider === 'openai-codex'
     && isCodexFastModeSupportedModel(agentModelId ?? undefined)
   const codexFastModeEnabled = isCodexFastModeAvailable && sessionMeta?.codexFastMode === true
+  const selectedAgentModelProtocol = agentChannelProvider === 'proma'
+    ? globalChannels.find((channel) => channel.id === agentChannelId)
+      ?.agentModels?.find((model) => model.id === agentModelId)?.apiProtocol
+    : undefined
   const reasoningProfile = hasSessionMeta
     ? resolveReasoningProfile({
       modelId: agentModelId ?? undefined,
-      transport: inferReasoningTransport(agentChannelProvider),
+      transport: inferAgentReasoningTransport(agentChannelProvider, agentModelId ?? undefined, selectedAgentModelProtocol),
     })
     : undefined
   const reasoningCapabilityKey = `${agentChannelId ?? ''}:${agentModelId ?? ''}`

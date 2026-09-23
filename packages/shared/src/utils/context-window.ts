@@ -8,7 +8,7 @@
  */
 
 import { getGeminiModelCapability } from './gemini-model-capabilities'
-import { isGpt6AstraFamily, isGpt6LunaFamily, isGpt6SolFamily } from './model-family'
+import { isGpt6AstraFamily } from './model-family'
 
 /** 默认上下文窗口（无法识别模型时使用） */
 export const DEFAULT_CONTEXT_WINDOW = 200_000
@@ -30,11 +30,12 @@ export const CODEX_GPT_6_CONTEXT_WINDOW = 372_000
  * provider catalog 决定，避免把不同 SKU 误写成同一窗口。
  */
 export function inferCodexAlignedGPT5ContextWindow(modelId: string | undefined): number | undefined {
-  if (isGpt6AstraFamily(modelId) || isGpt6SolFamily(modelId) || isGpt6LunaFamily(modelId)) {
+  const model = modelId?.toLowerCase().replace(/\[1m\]$/i, '')
+  // Codex 默认窗口仅用于 Codex 目录中的基准 Sol/Luna，官方数字 SKU 交由后端模型目录决定。
+  if (isGpt6AstraFamily(modelId) || model === 'gpt-6-sol' || model === 'gpt-6-luna') {
     return CODEX_GPT_6_CONTEXT_WINDOW
   }
 
-  const model = modelId?.toLowerCase().replace(/\[1m\]$/i, '')
   switch (model) {
     case 'gpt-5.4-mini': return CODEX_GPT_54_MINI_CONTEXT_WINDOW
     case 'gpt-5.4':

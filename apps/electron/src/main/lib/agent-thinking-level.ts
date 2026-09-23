@@ -1,4 +1,4 @@
-import { inferReasoningTransport, isPromaOfficialOpenAIReasoningModel, normalizeReasoningCapabilityLevel, normalizeReasoningLevel, resolveReasoningProfile, type AgentSessionMeta, type AgentThinkingLevel, type ProviderType, type ReasoningCapability } from '@proma/shared'
+import { inferAgentReasoningTransport, normalizeReasoningCapabilityLevel, normalizeReasoningLevel, resolveReasoningProfile, type AgentSessionMeta, type AgentThinkingLevel, type ProviderType, type ReasoningCapability } from '@proma/shared'
 import type { AppSettings } from '../../types'
 
 type ThinkingSettings = Pick<AppSettings, 'agentThinking' | 'agentEffort'>
@@ -14,9 +14,7 @@ export function resolvePiThinkingLevel(
 ): AgentThinkingLevel {
   const reasoningProfile = resolveReasoningProfile({
     modelId,
-    transport: provider === 'proma' && (isPromaOfficialOpenAIReasoningModel(modelId) || modelApiProtocol === 'openai-responses')
-      ? 'openai-responses'
-      : inferReasoningTransport(provider),
+    transport: inferAgentReasoningTransport(provider, modelId, modelApiProtocol),
   })
   const persistedLevel = sessionMeta?.reasoningLevel ?? sessionMeta?.openAIThinkingLevel
   const configuredLevel = settings.agentThinking?.type === 'disabled' ? 'off' : settings.agentEffort

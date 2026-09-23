@@ -104,9 +104,8 @@ export const CODEX_FAST_MODE_MODEL_IDS = PROMA_OFFICIAL_OPENAI_REASONING_MODEL_I
 /** 模型 ID 是否可通过 ChatGPT Codex OAuth 使用 Fast Mode。 */
 export function isCodexFastModeSupportedModel(modelId: string | undefined): boolean {
   return isGpt6AstraFamily(modelId)
-    || isGpt6SolFamily(modelId)
-    || isGpt6LunaFamily(modelId)
-    || (modelId !== undefined && (CODEX_FAST_MODE_MODEL_IDS as readonly string[]).includes(modelId.toLowerCase()))
+    || (modelId !== undefined
+      && (CODEX_FAST_MODE_MODEL_IDS as readonly string[]).includes(modelId.toLowerCase()))
 }
 
 /**
