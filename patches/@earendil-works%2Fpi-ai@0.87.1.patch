@@ -1,8 +1,7 @@
 diff --git a/dist/utils/retry.js b/dist/utils/retry.js
-index 65c7c9efd7667445b711fcd43549062ee3eb5ecf..a68249412801369ac48f09235e79b1aa9ba0cddc 100644
 --- a/dist/utils/retry.js
 +++ b/dist/utils/retry.js
-@@ -61,9 +61,19 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
+@@ -63,9 +63,19 @@
      // "stream ended without ..." and "Anthropic stream ended before message_stop"
      // (#4433); Bedrock/Smithy can throw an HTTP/2 no-response error (#3594).
      "ended without",

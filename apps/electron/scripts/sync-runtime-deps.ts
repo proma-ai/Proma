@@ -66,7 +66,7 @@ const defaultTargetNodeModules = join(appDir, 'node_modules')
 // 外置 Pi 包会被 electron-builder 原样收入 asar，因此必须在复制后显式套用同一补丁。
 const RUNTIME_PACKAGE_PATCHES: ReadonlyMap<string, { file: string; marker: string }> = new Map([
   ['@earendil-works/pi-ai', {
-    file: resolve(repoRoot, 'patches/@earendil-works%2Fpi-ai@0.86.1.patch'),
+    file: resolve(repoRoot, 'patches/@earendil-works%2Fpi-ai@0.87.1.patch'),
     marker: 'stream_read_error',
   }],
 ])
