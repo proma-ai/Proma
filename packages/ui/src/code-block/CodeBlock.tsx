@@ -39,6 +39,36 @@ interface CodeBlockProps {
 /** 节流间隔（ms）：流式输出时限制高亮更新频率 */
 const THROTTLE_MS = 80
 
+type ShikiTheme = 'github-dark' | 'github-light'
+
+function getCurrentShikiTheme(): ShikiTheme {
+  if (typeof document === 'undefined' || document.documentElement.classList.contains('dark')) {
+    return 'github-dark'
+  }
+  return 'github-light'
+}
+
+/**
+ * 跟随 <html> 的主题 class，确保浅色代码块使用深色语法 token。
+ * 主题切换很少发生，MutationObserver 仅在 class 变更时重新高亮一次。
+ */
+function useShikiTheme(): ShikiTheme {
+  const [theme, setTheme] = React.useState<ShikiTheme>(getCurrentShikiTheme)
+
+  React.useEffect(() => {
+    if (typeof MutationObserver === 'undefined') return
+
+    const observer = new MutationObserver(() => {
+      setTheme(getCurrentShikiTheme())
+    })
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+
+    return () => observer.disconnect()
+  }, [])
+
+  return theme
+}
+
 // ===== 工具函数 =====
 
 /** 递归提取 ReactNode 中的纯文本 */
@@ -138,6 +168,7 @@ const CodeLine = React.memo(function CodeLine({ tokens, rawLine }: CodeLineProps
 export function CodeBlock({ children, onCopy }: CodeBlockProps): React.ReactElement {
   const { language, code } = React.useMemo(() => extractCodeInfo(children), [children])
   const [copied, setCopied] = React.useState(false)
+  const shikiTheme = useShikiTheme()
 
   const trimmedCode = code.replace(/\n$/, '')
   const langOrText = language || 'text'
@@ -145,7 +176,7 @@ export function CodeBlock({ children, onCopy }: CodeBlockProps): React.ReactElem
 
   // ---- 节流 token 高亮 ----
   const [tokenResult, setTokenResult] = React.useState<HighlightTokensResult | null>(
-    () => highlightToTokens({ code: trimmedCode, language: langOrText })
+    () => highlightToTokens({ code: trimmedCode, language: langOrText, theme: shikiTheme })
   )
   const pendingCodeRef = React.useRef(trimmedCode)
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -159,7 +190,7 @@ export function CodeBlock({ children, onCopy }: CodeBlockProps): React.ReactElem
 
     const doHighlight = () => {
       const currentCode = pendingCodeRef.current
-      const result = highlightToTokens({ code: currentCode, language: langOrText })
+      const result = highlightToTokens({ code: currentCode, language: langOrText, theme: shikiTheme })
       if (result) {
         lastUpdateRef.current = Date.now()
         setTokenResult(result)
@@ -167,7 +198,7 @@ export function CodeBlock({ children, onCopy }: CodeBlockProps): React.ReactElem
     }
 
     // 同步路径可用时
-    const syncResult = highlightToTokens({ code: trimmedCode, language: langOrText })
+    const syncResult = highlightToTokens({ code: trimmedCode, language: langOrText, theme: shikiTheme })
     if (syncResult) {
       if (elapsed >= THROTTLE_MS) {
         // 距上次更新已超过节流间隔，立即执行
@@ -186,7 +217,7 @@ export function CodeBlock({ children, onCopy }: CodeBlockProps): React.ReactElem
     // 兜底：高亮器尚未初始化，订阅就绪事件，初始化完成后用同步路径上色
     const unsubscribe = onHighlighterReady(() => doHighlight())
     return () => unsubscribe()
-  }, [trimmedCode, langOrText])
+  }, [trimmedCode, langOrText, shikiTheme])
 
   // 清理节流定时器
   React.useEffect(() => {
@@ -225,7 +256,7 @@ export function CodeBlock({ children, onCopy }: CodeBlockProps): React.ReactElem
       <pre
         className="shiki overflow-x-auto p-4 m-0 text-[0.875em] leading-[1.6] bg-[hsl(var(--code-bg))]"
         style={{
-          color: tokenResult?.fgColor ?? '#e1e4e8',
+          color: tokenResult?.fgColor ?? (shikiTheme === 'github-light' ? '#24292e' : '#e1e4e8'),
           borderRadius: '0 0 8px 8px',
         }}
       >
