@@ -17,6 +17,7 @@ import {
   isGpt6AstraFamily,
   isGpt6LunaFamily,
   isGpt6SolFamily,
+  isMimoV26Model,
   resolveReasoningCapability,
   resolveReasoningProfile,
   type CodexOAuthCredentials,
@@ -702,8 +703,8 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
   const isCatalogMissingGlm53Family = !catalogModel
     && (glmModelId === 'glm-5.3' || glmModelId === 'glm-5.3-flash' || glmModelId === 'glm-5.3-flashx')
   // MiMo-V2.6 刚发布，Pi catalog 未收录时仍按官方规格注册，避免回落到 64K 默认值。
-  const isCatalogMissingMimoV26Family = !catalogModel
-    && (glmModelId?.startsWith('mimo-v2.6') ?? false)
+  // 家族判定复用 shared 的精确 ID 列表，避免 startsWith 宽匹配误伤未来 ID（如 mimo-v2.60）。
+  const isCatalogMissingMimoV26Family = !catalogModel && isMimoV26Model(glmModelId)
   const catalogContextWindow = catalogModel?.contextWindow ?? DEFAULT_CONTEXT_WINDOW
   const inferredContextWindow = inferContextWindow(input.model) ?? DEFAULT_CONTEXT_WINDOW
   const shouldForceAdaptiveThinking = shouldForcePiAdaptiveThinking(api, catalogModel, input.model)
