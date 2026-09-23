@@ -10,10 +10,18 @@ export interface NotificationMediaLayout {
   dialogWidth: number
 }
 
-/** 媒体最大高度约 400px：竖图收窄弹窗，横图扩展媒体列，但给文案保留约 440px。 */
-export function getNotificationMediaLayout(width: number, height: number): NotificationMediaLayout {
+/** 图片收敛到固有尺寸；视频可放大播放区，但仍给右侧文案留出空间。 */
+export function getNotificationMediaLayout(
+  width: number,
+  height: number,
+  type: NotificationMedia['type'] = 'image',
+): NotificationMediaLayout {
   const validSize = Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
   const aspect = validSize ? width / height : 1
+  if (type === 'video') {
+    const mediaColumnWidth = Math.min(592, Math.max(292, Math.round(aspect * 360) + 32))
+    return { mediaColumnWidth, dialogWidth: Math.min(1080, mediaColumnWidth + 496) }
+  }
   const naturalWidth = validSize ? Math.min(width, aspect * 400) : 400
   const mediaWidth = Math.min(400, Math.max(168, Math.round(naturalWidth)))
   const mediaColumnWidth = mediaWidth + 32 // 媒体两侧各 16px 间距

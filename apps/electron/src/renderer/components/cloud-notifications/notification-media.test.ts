@@ -34,6 +34,16 @@ describe('通知主视觉解析', () => {
     expect(getNotificationMediaLayout(0, 0)).toEqual(getNotificationMediaLayout(400, 400))
   })
 
+  test('横版视频获得比图片更宽的媒体列，竖版视频仍保持紧凑', () => {
+    const image = getNotificationMediaLayout(1920, 1080)
+    const video = getNotificationMediaLayout(1920, 1080, 'video')
+    const portraitVideo = getNotificationMediaLayout(720, 1280, 'video')
+    expect(video.mediaColumnWidth).toBeGreaterThan(image.mediaColumnWidth)
+    expect(video.dialogWidth).toBeGreaterThan(image.dialogWidth)
+    expect(video.dialogWidth).toBeLessThanOrEqual(1080)
+    expect(portraitVideo.mediaColumnWidth).toBeLessThan(video.mediaColumnWidth)
+  })
+
   test('不完整或不安全的媒体字段不进入渲染', () => {
     for (const mediaUrl of ['http://example.com/a.png', 'javascript:alert(1)', 'https://user:pass@example.com/a.png', 'https://example.com/a b.png', 'https://']) {
       expect(resolveNotificationMedia({ ...notification, mediaType: 'image', mediaUrl })).toBeNull()

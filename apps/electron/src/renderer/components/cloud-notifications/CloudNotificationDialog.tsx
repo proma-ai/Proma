@@ -92,7 +92,7 @@ export function NotificationMediaView({
         </p>
       ) : media.type === 'video' ? (
         <video
-          className={`block h-auto max-h-[min(62vh,420px)] w-full max-w-full bg-black object-contain ${outline}`}
+          className={`block h-auto min-h-[min(50vh,300px)] max-h-[min(70vh,520px)] w-full max-w-full bg-black object-contain ${outline}`}
           src={media.url}
           controls
           preload="metadata"
@@ -134,7 +134,11 @@ function NotificationDialogContent({
   if (!notification) return null
   const media = resolveNotificationMedia(notification)
   const dimensions = mediaSize?.id === notification.id && mediaSize.url === media?.url ? mediaSize : null
-  const layout = media ? getNotificationMediaLayout(dimensions?.width ?? 320, dimensions?.height ?? 400) : null
+  const layout = media ? getNotificationMediaLayout(
+    dimensions?.width ?? (media.type === 'video' ? 16 : 320),
+    dimensions?.height ?? (media.type === 'video' ? 9 : 400),
+    media.type,
+  ) : null
 
   const handleAcknowledge = async (): Promise<void> => {
     setAcknowledging(true)
@@ -152,7 +156,7 @@ function NotificationDialogContent({
     <DialogContent
       hideClose
       className={media
-        ? 'max-h-[calc(100vh-4rem)] w-[calc(100vw-3rem)] max-w-[900px] gap-0 overflow-hidden p-0 transition-[width] duration-200 motion-reduce:transition-none'
+        ? `max-h-[calc(100vh-4rem)] w-[calc(100vw-3rem)] gap-0 overflow-hidden p-0 transition-[width] duration-200 motion-reduce:transition-none ${media.type === 'video' ? 'max-w-[1080px]' : 'max-w-[900px]'}`
         : 'max-h-[calc(100vh-5rem)] max-w-2xl overflow-y-auto'}
       style={layout ? { width: `min(calc(100vw - 3rem), ${layout.dialogWidth}px)` } : undefined}
       onEscapeKeyDown={(event) => event.preventDefault()}
@@ -161,7 +165,9 @@ function NotificationDialogContent({
     >
       <div
         className={media ? 'grid min-h-0 transition-[grid-template-columns] duration-200 motion-reduce:transition-none' : 'contents'}
-        style={layout ? { gridTemplateColumns: `minmax(0, min(${layout.mediaColumnWidth}px, 42%)) minmax(0, 1fr)` } : undefined}
+        style={layout ? { gridTemplateColumns: media?.type === 'video'
+          ? `minmax(0, min(${layout.mediaColumnWidth}px, 54%, calc(100% - 350px))) minmax(0, 1fr)`
+          : `minmax(0, min(${layout.mediaColumnWidth}px, 42%)) minmax(0, 1fr)` } : undefined}
       >
         {media && <NotificationMediaView
           key={`${notification.id}:${media.url}`}
