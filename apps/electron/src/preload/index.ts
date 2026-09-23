@@ -1120,6 +1120,8 @@ export interface ElectronAPI {
   /** 更新 API */
   updater?: {
     checkForUpdates: () => Promise<void>
+    /** Renderer 网络恢复只上报主进程；不会在 Renderer 内执行更新检查。 */
+    notifyOnline: () => void
     getStatus: () => Promise<{
       status: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'not-available' | 'error'
       version?: string
@@ -2811,6 +2813,7 @@ const electronAPI: ElectronAPI = {
   // 自动更新
   updater: {
     checkForUpdates: () => ipcRenderer.invoke('updater:check'),
+    notifyOnline: () => ipcRenderer.send('updater:notify-online'),
     getStatus: () => ipcRenderer.invoke('updater:get-status'),
     onStatusChanged: (callback) => {
       const listener = (_event: Electron.IpcRendererEvent, status: Parameters<typeof callback>[0]): void => callback(status)

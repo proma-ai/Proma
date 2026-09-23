@@ -29,6 +29,7 @@ export interface DownloadProgress {
 /** 更新 IPC 通道常量 */
 export const UPDATER_IPC_CHANNELS = {
   CHECK_FOR_UPDATES: 'updater:check',
+  NOTIFY_ONLINE: 'updater:notify-online',
   GET_STATUS: 'updater:get-status',
   ON_STATUS_CHANGED: 'updater:status-changed',
   INSTALL_WHEN_IDLE: 'updater:install-when-idle',

@@ -12,6 +12,7 @@ import {
   checkForUpdates,
   getUpdateStatus,
   installWhenIdle,
+  notifyUpdaterOnline,
 } from './auto-updater'
 
 /** 注册更新 IPC 处理器 */
@@ -24,6 +25,10 @@ export function registerUpdaterIpc(): void {
       await checkForUpdates()
     }
   )
+
+  ipcMain.on(UPDATER_IPC_CHANNELS.NOTIFY_ONLINE, () => {
+    notifyUpdaterOnline()
+  })
 
   ipcMain.handle(
     UPDATER_IPC_CHANNELS.GET_STATUS,

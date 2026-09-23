@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, Menu, nativeTheme, protocol, screen, shell } from 'electron'
+import { app, BrowserWindow, dialog, Menu, nativeTheme, powerMonitor, protocol, screen, shell } from 'electron'
 import { join } from 'path'
 import { pathToFileURL } from 'url'
 import { existsSync } from 'fs'
@@ -117,7 +117,7 @@ import { browserController } from './lib/browser-controller'
 import { markRunningDelegationsAsInterrupted } from './lib/agent-session-manager'
 import { stopAllGenerations } from './lib/chat-service'
 import { migrateFlowSessions } from './lib/flow-migration'
-import { configureUpdater, initAutoUpdater, cleanupUpdater } from './lib/updater/auto-updater'
+import { configureUpdater, initAutoUpdater, cleanupUpdater, notifyUpdaterOnline, notifyUpdaterWindowActive } from './lib/updater/auto-updater'
 import { startWorkspaceWatcher, stopWorkspaceWatcher } from './lib/workspace-watcher'
 import { startChatToolsWatcher, stopChatToolsWatcher } from './lib/chat-tools-watcher'
 import { getIsQuitting, setQuitting } from './lib/app-lifecycle'
@@ -917,6 +917,11 @@ async function bootstrap(): Promise<void> {
   if (app.isPackaged && mainWindow) {
     configureUpdater(mainWindow, { hasActiveAgents: hasActiveAgentSessions })
     safeRun('initAutoUpdater', () => initAutoUpdater(mainWindow!))
+
+    // 更新检查由主进程统一管理。窗口重新获得焦点或系统从休眠恢复时，调度器
+    // 在冷却窗口外尽快检查；冷却、抖动和 single-flight 在 updater 内部处理。
+    mainWindow.on('focus', notifyUpdaterWindowActive)
+    powerMonitor.on('resume', notifyUpdaterOnline)
   }
 
   // 预创建快速任务窗口（隐藏状态，首次唤起秒开）

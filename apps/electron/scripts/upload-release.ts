@@ -240,28 +240,46 @@ async function uploadArtifacts(envConfig: EnvConfig): Promise<UploadResult[]> {
     return results
   }
 
-  // 跟踪已上传的 yml，避免重复上传
-  const uploadedYmls = new Set<string>()
+  // latest*.yml 是客户端发现更新的入口，必须作为最后一步发布：在它可见前，
+  // 本版本的所有安装包和 blockmap 都必须已经上传并通过 HEAD 校验。
+  const manifests = new Map<string, FileConfig>()
+  for (const { config } of artifacts) {
+    manifests.set(`${config.platformDir}/${config.ymlFile}`, config)
+  }
+
+  // 在上传任何不可变工件前先验证所有清单均存在。这样不会出现某个平台已
+  // 切换到新版、随后才发现另一平台缺少清单的可避免半发布状态；各平台的
+  // manifest 上传失败仍保持该平台的上一版本，对已发布平台没有错误引用。
+  for (const config of manifests.values()) {
+    const ymlLocalPath = path.join(OUT_DIR, config.ymlFile)
+    if (!fs.existsSync(ymlLocalPath)) {
+      const ymlOssPath = `${RELEASES_PREFIX}/${config.platformDir}/${config.ymlFile}`
+      console.error(`  ❌ 未找到 ${config.ymlFile}，取消本次发布`)
+      results.push({ file: config.ymlFile, ossPath: ymlOssPath, success: false, error: 'manifest not found' })
+    }
+  }
+  if (results.some((result) => !result.success)) {
+    return results
+  }
 
   for (const { file, config } of artifacts) {
     const localPath = path.join(OUT_DIR, file)
     const ossPath = `${RELEASES_PREFIX}/${config.platformDir}/${file}`
     const success = await uploadFile(client, localPath, ossPath)
     results.push({ file, ossPath, success })
+  }
 
-    // 上传对应的 yml 清单文件
-    const ymlKey = `${config.platformDir}/${config.ymlFile}`
-    if (!uploadedYmls.has(ymlKey)) {
-      const ymlLocalPath = path.join(OUT_DIR, config.ymlFile)
-      if (fs.existsSync(ymlLocalPath)) {
-        const ymlOssPath = `${RELEASES_PREFIX}/${config.platformDir}/${config.ymlFile}`
-        const ymlSuccess = await uploadFile(client, ymlLocalPath, ymlOssPath)
-        results.push({ file: config.ymlFile, ossPath: ymlOssPath, success: ymlSuccess })
-        uploadedYmls.add(ymlKey)
-      } else {
-        console.log(`  ⚠️  未找到 ${config.ymlFile}，跳过`)
-      }
-    }
+  if (results.some((result) => !result.success)) {
+    console.error('\n❌ 工件上传或校验失败，保留现有 latest manifest，不发布不完整版本')
+    return results
+  }
+
+  console.log('\n📄 所有工件已校验，开始发布更新清单...')
+  for (const config of manifests.values()) {
+    const ymlLocalPath = path.join(OUT_DIR, config.ymlFile)
+    const ymlOssPath = `${RELEASES_PREFIX}/${config.platformDir}/${config.ymlFile}`
+    const success = await uploadFile(client, ymlLocalPath, ymlOssPath)
+    results.push({ file: config.ymlFile, ossPath: ymlOssPath, success })
   }
 
   return results
