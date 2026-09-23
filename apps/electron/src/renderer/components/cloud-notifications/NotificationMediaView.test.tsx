@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import Markdown from 'react-markdown'
-import { NotificationMediaView, markdownComponents } from './CloudNotificationDialog'
+import { NotificationMediaView, markdownComponents, toggleNotificationVideoPlayback } from './CloudNotificationDialog'
 
 describe('通知主视觉组件', () => {
   test('图片无内边距、描边和独立圆角，按固有比例的舞台贴边铺满', () => {
@@ -24,12 +24,20 @@ describe('通知主视觉组件', () => {
     expect(html).toContain('src="https://cdn.example.com/banner.png"')
   })
 
-  test('主视觉视频也贴边铺满无内框，保留播放控件且不自动播放', () => {
+  test('主视觉视频静音自动循环，只显示播放暂停按钮', () => {
     const html = renderToStaticMarkup(
       <NotificationMediaView title="演示" media={{ type: 'video', url: 'https://cdn.example.com/video?token=1' }} aspectRatio={16 / 9} />,
     )
-    expect(html).toContain('controls=""')
-    expect(html).toContain('preload="metadata"')
+    const videoTag = html.match(/<video\b[^>]*>/)?.[0]
+    expect(videoTag).toBeDefined()
+    expect(videoTag).toContain('autoplay=""')
+    expect(videoTag).toContain('muted=""')
+    expect(videoTag).toContain('loop=""')
+    expect(videoTag).toContain('playsinline=""')
+    expect(videoTag).not.toContain(' controls=')
+    expect(videoTag).toContain('preload="metadata"')
+    expect(html.match(/<button\b/g)).toHaveLength(1)
+    expect(html).toContain('aria-label="播放视频"')
     expect(html).toContain('min-w-0 w-full')
     expect(html).toContain('aspect-ratio:1.777')
     expect(html).toContain('min-h-[min(50vh,300px)]')
@@ -38,16 +46,40 @@ describe('通知主视觉组件', () => {
     expect(html).not.toContain('p-4')
     expect(html).not.toContain('ring-1')
     expect(html).not.toContain('rounded-lg')
-    expect(html).not.toContain('autoplay')
     expect(html).toContain('aria-label="演示的视频"')
   })
 
-  test('旧 Markdown 正文内嵌视频不再绘制显式边框', () => {
+  test('播放暂停操作能正确切换，播放受阻时不产生未处理异常', async () => {
+    let playCount = 0
+    let pauseCount = 0
+    const video = {
+      paused: true,
+      play: async () => { playCount++ },
+      pause: () => { pauseCount++ },
+    }
+    await toggleNotificationVideoPlayback(video)
+    expect(playCount).toBe(1)
+    expect(pauseCount).toBe(0)
+    video.paused = false
+    await toggleNotificationVideoPlayback(video)
+    expect(pauseCount).toBe(1)
+    video.paused = true
+    video.play = async () => { throw new Error('autoplay blocked') }
+    await expect(toggleNotificationVideoPlayback(video)).resolves.toBeUndefined()
+  })
+
+  test('旧 Markdown 正文内嵌视频也自动循环且无原生控制条', () => {
     const html = renderToStaticMarkup(
       <Markdown components={markdownComponents}>![video](https://cdn.example.com/demo.mp4)</Markdown>,
     )
-    expect(html).toContain('<video')
-    expect(html).toContain('controls=""')
+    const videoTag = html.match(/<video\b[^>]*>/)?.[0]
+    expect(videoTag).toContain('autoplay=""')
+    expect(videoTag).toContain('muted=""')
+    expect(videoTag).toContain('loop=""')
+    expect(videoTag).not.toContain(' controls=')
+    expect(html).toContain('<p><span class="relative my-3 block') // Markdown 图片位于段落内，不能插入 div
+    expect(html.match(/<button\b/g)).toHaveLength(1)
+    expect(html).toContain('aria-label="播放视频"')
     expect(html).not.toContain('border border-border')
     expect(html).not.toContain('rounded-lg')
   })

@@ -8,6 +8,7 @@ import * as React from 'react'
 import { useAtom } from 'jotai'
 import Markdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { Pause, Play } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -37,6 +38,71 @@ function isVideoMarkdownImage(alt: string | undefined, src: string | undefined):
   return new URL(src).pathname.toLowerCase().endsWith('.mp4')
 }
 
+export async function toggleNotificationVideoPlayback(video: Pick<HTMLVideoElement, 'paused' | 'play' | 'pause'>): Promise<void> {
+  if (!video.paused) {
+    video.pause()
+    return
+  }
+  try {
+    await video.play()
+  } catch {
+    // 自动播放策略或媒体错误可能阻止播放；onPlay 未触发时按钮仍显示“播放”。
+  }
+}
+
+function NotificationVideoPlayer({
+  src,
+  title,
+  inline = false,
+  onDimensions,
+  onError,
+}: {
+  src: string
+  title: string
+  inline?: boolean
+  onDimensions?: (width: number, height: number) => void
+  onError?: () => void
+}): React.ReactElement {
+  const videoRef = React.useRef<HTMLVideoElement>(null)
+  const [playing, setPlaying] = React.useState(false)
+  return (
+    <>
+      <video
+        ref={videoRef}
+        className={inline
+          ? 'block max-h-[min(50vh,320px)] w-full bg-black object-contain'
+          : 'absolute inset-0 block h-full w-full bg-black object-cover'}
+        src={src}
+        autoPlay
+        muted
+        loop
+        playsInline
+        preload="metadata"
+        controlsList="nodownload nofullscreen noremoteplayback"
+        disablePictureInPicture
+        disableRemotePlayback
+        aria-label={title}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onLoadedMetadata={(event) => onDimensions?.(event.currentTarget.videoWidth, event.currentTarget.videoHeight)}
+        onError={onError}
+        onContextMenu={(event) => event.preventDefault()}
+      >你的系统不支持播放此视频。</video>
+      <button
+        type="button"
+        className={`absolute z-10 flex size-10 items-center justify-center rounded-full bg-black/65 text-white shadow-sm transition-[background-color,transform] hover:bg-black/80 active:scale-[0.96] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${inline ? 'bottom-3 left-3' : 'bottom-4 left-4'}`}
+        aria-label={playing ? '暂停视频' : '播放视频'}
+        title={playing ? '暂停视频' : '播放视频'}
+        onClick={() => {
+          if (videoRef.current) void toggleNotificationVideoPlayback(videoRef.current)
+        }}
+      >
+        {playing ? <Pause size={18} fill="currentColor" aria-hidden="true" /> : <Play size={18} fill="currentColor" className="translate-x-px" aria-hidden="true" />}
+      </button>
+    </>
+  )
+}
+
 export const markdownComponents: Components = {
   a: ({ href, children }) => {
     if (!isHttpsUrl(href)) return <>{children}</>
@@ -57,14 +123,9 @@ export const markdownComponents: Components = {
   img: ({ alt, src }) => {
     if (isVideoMarkdownImage(alt, src)) {
       return (
-        <video
-          controls
-          preload="metadata"
-          className="my-3 w-full bg-black object-contain"
-          src={src}
-        >
-          抱歉，你的系统不支持播放此视频。
-        </video>
+        <span className="relative my-3 block w-full overflow-hidden bg-black">
+          <NotificationVideoPlayer src={src} title="通知内嵌视频" inline />
+        </span>
       )
     }
     if (!isHttpsUrl(src)) return null
@@ -101,15 +162,12 @@ export function NotificationMediaView({
           媒体暂时无法加载，请阅读右侧通知内容。
         </p>
       ) : isVideo ? (
-        <video
-          className="absolute inset-0 block h-full w-full bg-black object-cover"
+        <NotificationVideoPlayer
           src={media.url}
-          controls
-          preload="metadata"
-          aria-label={`${title}的视频`}
-          onLoadedMetadata={(event) => onDimensions?.(event.currentTarget.videoWidth, event.currentTarget.videoHeight)}
+          title={`${title}的视频`}
+          onDimensions={onDimensions}
           onError={() => setFailed(true)}
-        >你的系统不支持播放此视频。</video>
+        />
       ) : (
         <img
           className="absolute inset-0 block h-full w-full object-cover"
