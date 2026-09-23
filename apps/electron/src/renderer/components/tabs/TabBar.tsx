@@ -38,6 +38,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { TabBarItem } from './TabBarItem'
 import { getTabBarActionLayout } from './tab-bar-action-layout'
 import { useCloseTab } from '@/hooks/useCloseTab'
+import { resolveAgentSessionWorkspaceId } from '@/lib/agent-session-list'
 import { cn } from '@/lib/utils'
 import { shortcutGuideOpenAtom } from '@/atoms/shortcut-guide'
 import { faqDialogOpenAtom } from '@/atoms/faq-dialog'
@@ -133,15 +134,16 @@ export function TabBar(): React.ReactElement {
         return next
       })
 
-      const session = agentSessions.find((s) => s.id === tab.sessionId)
-      if (session?.workspaceId) {
-        setCurrentAgentWorkspaceId(session.workspaceId)
-        window.electronAPI.updateSettings({
-          agentWorkspaceId: session.workspaceId,
-        }).catch(console.error)
+      const session = agentSessions.find((item) => item.id === tab.sessionId)
+      const workspaceId = session
+        ? resolveAgentSessionWorkspaceId(session, agentWorkspaces)
+        : undefined
+      if (workspaceId) {
+        setCurrentAgentWorkspaceId(workspaceId)
+        window.electronAPI.updateSettings({ agentWorkspaceId: workspaceId }).catch(console.error)
       }
     }
-  }, [setActiveTabId, setAutomationForm, tabs, agentSessions, setAppMode, setCurrentConversationId, setCurrentAgentSessionId, setCurrentAgentWorkspaceId, setUnviewedCompleted])
+  }, [setActiveTabId, setAutomationForm, tabs, agentSessions, agentWorkspaces, setAppMode, setCurrentConversationId, setCurrentAgentSessionId, setCurrentAgentWorkspaceId, setUnviewedCompleted])
 
   const handleDragStart = React.useCallback((tabId: string, e: React.PointerEvent) => {
     if (e.button !== 0) return // 只处理左键

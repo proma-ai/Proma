@@ -25,6 +25,46 @@ export function sortAgentSessionsByUpdatedAtDesc(
   return [...sessions].sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
+/** Resolve the default workspace from the current project list. */
+export function getDefaultAgentWorkspaceId(
+  workspaces: readonly AgentWorkspace[],
+): string | undefined {
+  return workspaces.find((workspace) => workspace.slug === 'default')?.id ?? workspaces[0]?.id
+}
+
+/**
+ * Resolve a session's effective workspace. Historical sessions without a
+ * workspace, or whose former workspace was deleted, belong to the default
+ * project just like the active project list does.
+ */
+export function resolveAgentSessionWorkspaceId(
+  session: Pick<AgentSessionMeta, 'workspaceId'>,
+  workspaces: readonly AgentWorkspace[],
+): string | undefined {
+  if (session.workspaceId && workspaces.some((workspace) => workspace.id === session.workspaceId)) {
+    return session.workspaceId
+  }
+  return getDefaultAgentWorkspaceId(workspaces)
+}
+
+/**
+ * Whether a session may restore a project when its header is selected.
+ * Delegated children remain manually selectable in their parent tree, but
+ * never restore a project themselves: opening one intentionally opens its
+ * parent and can otherwise change the active project unexpectedly.
+ */
+export function isAgentSessionProjectRestoreCandidate(
+  session: AgentSessionMeta,
+  excludedSessionIds: ReadonlySet<string>,
+): boolean {
+  return !session.archived
+    && !session.pinned
+    && !session.isDraft
+    && !excludedSessionIds.has(session.id)
+    && !(session.sourceAutomationId && !session.automationGraduated)
+    && !(session.parentSessionId && session.sourceDelegationId)
+}
+
 /** Agent 归档会话的顶层项目分组。 */
 export interface ArchivedAgentSessionProjectGroup {
   /** 稳定的虚拟列表 key；不对应真实项目的分组使用保留 ID。 */

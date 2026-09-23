@@ -82,6 +82,7 @@ import type { NotificationSoundType } from '@/types/settings'
 import { toast } from 'sonner'
 import type { AgentStreamEvent, AgentStreamCompletePayload, AgentEvent, AgentStreamPayload, AgentAssistantDelta, AgentAssistantDeltaPayload, AgentStreamErrorPayload, SDKAssistantMessage, SDKMessage, SDKUserMessage, SDKSystemMessage, PromaEvent, AgentSessionMeta, ProviderType, SDKContentBlock, SDKUserContentBlock } from '@proma/shared'
 import { inferContextWindow } from '@proma/shared'
+import { resolveAgentSessionWorkspaceId } from '@/lib/agent-session-list'
 import {
   buildExternalAgentRunActivation,
   createExternalAgentRunUserMessage,
@@ -676,9 +677,12 @@ export function useGlobalAgentListeners(): void {
       store.set(appModeAtom, 'agent')
       store.set(currentAgentSessionIdAtom, sessionId)
       const sessions = store.get(agentSessionsAtom)
-      const session = sessions.find((s) => s.id === sessionId)
-      if (session?.workspaceId) {
-        store.set(currentAgentWorkspaceIdAtom, session.workspaceId)
+      const session = sessions.find((item) => item.id === sessionId)
+      const workspaceId = session
+        ? resolveAgentSessionWorkspaceId(session, store.get(agentWorkspacesAtom))
+        : undefined
+      if (workspaceId) {
+        store.set(currentAgentWorkspaceIdAtom, workspaceId)
       }
     }
 

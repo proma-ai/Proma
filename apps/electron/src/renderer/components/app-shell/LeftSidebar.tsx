@@ -138,7 +138,9 @@ import {
   getDelegatedChildSessionStatus,
   getDelegationStatusIconClass,
   groupArchivedAgentSessionsByProject,
+  isAgentSessionProjectRestoreCandidate,
   isAgentSessionVisibleInTrees,
+  resolveAgentSessionWorkspaceId,
   isDelegationObservationVisible,
   removeDelegatedSessionSelection,
   replaceAgentSessionInFreshnessOrder,
@@ -479,11 +481,11 @@ function getRailInitial(title: string): string {
 
 /**
  * 是否为「应从项目会话列表隐藏」的自动任务会话：
- * 来自定时任务（sourceAutomationId）且未被置顶。
- * 这类会话的"家"是「自动任务」视图，始终不出现在普通项目列表。
+ * 来自定时任务（sourceAutomationId）、未被用户接管且未被置顶。
+ * 已毕业会话由用户继续使用，应回到所属项目的普通会话列表。
  */
 function isHiddenAutomationSession(session: AgentSessionMeta): boolean {
-  return !!session.sourceAutomationId && !session.pinned
+  return !!session.sourceAutomationId && !session.automationGraduated && !session.pinned
 }
 
 function getDelegatedChildStatus(
@@ -1330,19 +1332,47 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     }
   }, [agentChannelId, agentModelId, currentWorkspaceId, openSession, setActiveView, setAgentSessions, setCurrentWorkspaceId, setSessionChannelMap, setSessionModelMap])
 
-  /** 切换当前项目；点击当前已选中工作区标题时则折叠/展开其会话列表 */
+  /** 记录每个项目最近在主区域激活的会话。 */
+  const lastActiveAgentSessionByWorkspaceRef = React.useRef(new Map<string, string>())
+  React.useEffect(() => {
+    if (!currentAgentSessionId) return
+    const session = agentSessions.find((item) => item.id === currentAgentSessionId)
+    if (!session || !isAgentSessionProjectRestoreCandidate(session, draftSessionIds)) return
+    const workspaceId = resolveAgentSessionWorkspaceId(session, workspaces)
+    if (workspaceId) lastActiveAgentSessionByWorkspaceRef.current.set(workspaceId, session.id)
+  }, [agentSessions, currentAgentSessionId, draftSessionIds, workspaces])
+
+  /** 切换项目；优先恢复该项目本次运行中最近查看的会话。 */
   const handleSelectProject = React.useCallback((workspaceId: string): void => {
     if (workspaceId === currentWorkspaceId) {
-      // 点击当前工作区 → 折叠/展开会话列表
       setCollapsedWorkspaceIds((prev) => toggleSetEntry(prev, workspaceId))
       return
     }
+
+    const isOpenableSession = (session: AgentSessionMeta | undefined): session is AgentSessionMeta => Boolean(
+      session
+      && resolveAgentSessionWorkspaceId(session, workspaces) === workspaceId
+      && isAgentSessionProjectRestoreCandidate(session, draftSessionIds)
+    )
+    const lastSession = agentSessions.find((session) => (
+      session.id === lastActiveAgentSessionByWorkspaceRef.current.get(workspaceId)
+    ))
+    const targetSession = isOpenableSession(lastSession)
+      ? lastSession
+      : agentSessions.filter(isOpenableSession).sort((a, b) => b.updatedAt - a.updatedAt)[0]
+
+    setCollapsedWorkspaceIds((prev) => deleteSetEntry(prev, workspaceId))
+    if (targetSession) {
+      openSession('agent', targetSession.id, targetSession.title, {
+        onOpened: () => setActiveView('conversations'),
+      })
+      return
+    }
+
     setCurrentWorkspaceId(workspaceId)
     setActiveView('conversations')
-    // 切换到新工作区时，自动展开该工作区
-    setCollapsedWorkspaceIds((prev) => deleteSetEntry(prev, workspaceId))
     window.electronAPI.updateSettings({ agentWorkspaceId: workspaceId }).catch(console.error)
-  }, [currentWorkspaceId, setCurrentWorkspaceId, setActiveView])
+  }, [agentSessions, currentWorkspaceId, draftSessionIds, openSession, setCurrentWorkspaceId, setActiveView, workspaces])
 
   /** 合成「自动任务」组头部点击：仅折叠/展开，绝不切换当前项目（它不是真实工作区） */
   const handleToggleGroupCollapse = React.useCallback((groupId: string): void => {
@@ -1578,6 +1608,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
           && !session.isDraft
           && !draftSessionIds.has(session.id)
           && !!session.sourceAutomationId
+          && !session.automationGraduated
         )
       )
       if (sessions.length === 0) return null
@@ -2183,9 +2214,9 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   const handleRequestMove = React.useCallback((id: string): void => {
     setMoveTargetId(id)
     // 查找被迁移会话所属的工作区——排除分区应基于此而非当前 UI 工作区
-    const session = agentSessions.find((s) => s.id === id)
-    setMoveSourceWorkspaceId(session?.workspaceId)
-  }, [agentSessions])
+    const session = agentSessions.find((item) => item.id === id)
+    setMoveSourceWorkspaceId(session ? resolveAgentSessionWorkspaceId(session, workspaces) : undefined)
+  }, [agentSessions, workspaces])
 
   /** 迁移会话到另一个项目后的回调 */
   const handleSessionMoved = async (updatedSession: AgentSessionMeta, targetWorkspaceName: string): Promise<void> => {
@@ -2236,18 +2267,15 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
           && !session.pinned
           && !session.isDraft
           && !draftSessionIds.has(session.id)
-          // 自动任务会话不进入项目列表，统一归到「自动任务」视图
+          // 未毕业自动任务会话统一归到「自动任务」视图；毕业后回归项目列表。
           && !isHiddenAutomationSession(session)
           // 已被置顶母会话收纳的子会话留在置顶区的母会话下面，避免重复显示为项目根会话
           && !hasPinnedVisibleParent(session, agentSessions)
         )
       )
 
-      const defaultWsId = workspaces.find((ws) => ws.slug === 'default')?.id ?? workspaces[0]?.id
       for (const session of visibleHistory) {
-        const targetId = session.workspaceId && sessionsByWorkspaceId.has(session.workspaceId)
-          ? session.workspaceId
-          : defaultWsId
+        const targetId = resolveAgentSessionWorkspaceId(session, workspaces)
         if (!targetId) continue
         sessionsByWorkspaceId.get(targetId)!.push(session)
       }
