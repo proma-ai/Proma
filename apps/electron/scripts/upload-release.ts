@@ -40,6 +40,9 @@ const ROOT_DIR = path.join(import.meta.dir, "..")
 const OUT_DIR = path.join(ROOT_DIR, "out")
 const PACKAGE_JSON_PATH = path.join(ROOT_DIR, "package.json")
 const RELEASES_PREFIX = "releases"
+// Bucket-level transfer acceleration is enabled in OSS. ali-oss prepends the
+// configured bucket, producing https://<bucket>.oss-accelerate.aliyuncs.com.
+const OSS_ACCELERATE_ENDPOINT = "oss-accelerate.aliyuncs.com"
 const OSS_TIMEOUT_MS = 5 * 60 * 1000
 const OSS_REQUEST_RETRIES = 2
 const UPLOAD_ATTEMPTS = 3
@@ -150,6 +153,7 @@ function getOSSClient(envConfig: EnvConfig): OSS {
     accessKeySecret,
     bucket,
     region,
+    endpoint: OSS_ACCELERATE_ENDPOINT,
     secure: true,
     timeout: OSS_TIMEOUT_MS,
     // @types/ali-oss does not yet declare these SDK-supported options.
