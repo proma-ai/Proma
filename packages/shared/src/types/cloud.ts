@@ -21,16 +21,11 @@ export interface CloudAuthState {
   user: CloudUserInfo | null
 }
 
-/** 可安全展示的 Cloud 认证失败类别。 */
-export type CloudAuthErrorReason = 'network' | 'timeout' | 'server' | 'rate_limited' | 'auth' | 'client' | 'unknown'
-
 /** Cloud 认证 IPC 响应 */
 export interface CloudAuthIpcResponse {
   success: boolean
   user?: CloudUserInfo
   error?: string
-  errorReason?: CloudAuthErrorReason
-  retryable?: boolean
 }
 
 // ===== 实时通知相关类型 =====

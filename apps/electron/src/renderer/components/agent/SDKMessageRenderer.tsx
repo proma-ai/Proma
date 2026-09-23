@@ -448,16 +448,15 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
     if (!turnId || turnResult?._promaDeductedPoints != null) return
     let cancelled = false
     const load = async (): Promise<void> => {
-      let latestValue: number | undefined
       for (const delay of [0, 250, 600, 1_200]) {
         if (delay) await new Promise<void>((resolve) => setTimeout(resolve, delay))
         if (cancelled) return
         const response = await window.electronAPI.cloudUsage.getAgentTurnUsage(turnId).catch(() => undefined)
         if (cancelled || !response?.success || !response.data?.found) continue
         const value = Number(response.data.totalCost)
-        if (Number.isFinite(value)) latestValue = value
+        if (Number.isFinite(value)) setDeductedPoints(value)
+        return
       }
-      if (!cancelled && latestValue != null) setDeductedPoints(latestValue)
     }
     void load()
     return () => { cancelled = true }

@@ -52,7 +52,7 @@ import { createAgentTurnId } from './agent-turn-id'
 import { isStaleActiveQueueError } from './agent-queue-routing'
 import { decryptApiKey, getChannelById, listChannels, persistCodexOAuthCredentials, persistGithubCopilotOAuthCredentials, persistXaiOAuthCredentials, resolveChannelRuntimeApiKey, resolveCodexOAuthCredentials, resolveGithubCopilotOAuthCredentials, resolveXaiOAuthCredentials } from './channel-manager'
 import { getAdapter, fetchTitle } from '@proma/core'
-import { getCloudApiConfig, isApiError } from '@proma/cloud'
+import { getCloudApiConfig } from '@proma/cloud'
 import { getSystemApiKey, clearSystemKeyCache } from './cloud-channel-service'
 import { getAuthState, getAuthToken, tryRefreshAuthToken } from './cloud-auth-service'
 import pkg from '../../../package.json' with { type: 'json' }
@@ -911,10 +911,8 @@ export class AgentOrchestrator {
         try {
           apiKey = await getSystemApiKey()
         } catch (initialError) {
-          // Only a confirmed auth failure benefits from refresh. Retrying refresh
-          // for network/timeout/5xx conditions multiplies an outage and can make
-          // the client look logged out even though its session is still valid.
-          if (!isApiError(initialError) || initialError.kind !== 'auth') throw initialError
+          // getSystemApiKey 的 Cloud client 已在 access/refresh token 被服务端明确拒绝时
+          // 清理认证状态并触发登录页。网络、超时和 5xx 则保留当前会话，避免误登出。
           if (!getAuthState().isAuthenticated) throw initialError
           const refreshed = await tryRefreshAuthToken()
           if (!refreshed) throw initialError
@@ -946,18 +944,10 @@ export class AgentOrchestrator {
             canRetry: false,
           })
         } else {
-          const failureKind = isApiError(err) ? err.kind : 'unknown'
-          const failureCopy = {
-            network: { title: 'Proma Cloud 网络连接中断', message: '无法连接 Proma Cloud，请检查网络后重试。' },
-            timeout: { title: 'Proma Cloud 请求超时', message: '连接 Proma Cloud 超时，请稍后重试。' },
-            rate_limited: { title: 'Proma Cloud 请求过于频繁', message: '请求过于频繁，请稍后重试。' },
-            server: { title: 'Proma Cloud 暂时不可用', message: 'Proma Cloud 暂时不可用，请稍后重试。' },
-            unknown: { title: 'Proma Cloud 暂时不可用', message: '暂时无法取得 Proma 官方渠道凭据，请稍后重试。' },
-          }[failureKind] ?? { title: 'Proma Cloud 暂时不可用', message: '暂时无法取得 Proma 官方渠道凭据，请稍后重试。' }
           reportPreflightError({
-            code: failureKind === 'network' ? 'network_error' : 'cloud_unavailable',
-            title: failureCopy.title,
-            message: failureCopy.message,
+            code: 'network_error',
+            title: 'Proma Cloud 暂时不可用',
+            message: '暂时无法取得 Proma 官方渠道凭据，请检查网络或稍后重试。',
             actions: [{ key: 'r', label: '重试', action: 'retry' }],
             canRetry: true,
           })
