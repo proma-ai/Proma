@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { resolveNotificationMedia } from './notification-media'
+import { getNotificationMediaLayout, resolveNotificationMedia } from './notification-media'
 
 const notification = {
   id: 'notice-1',
@@ -20,6 +20,18 @@ describe('通知主视觉解析', () => {
       .toEqual({ type: 'image', url: 'https://cdn.example.com/banner' })
     expect(resolveNotificationMedia({ ...notification, mediaType: 'video', mediaUrl: 'https://cdn.example.com/play?id=1' }))
       .toEqual({ type: 'video', url: 'https://cdn.example.com/play?id=1' })
+  })
+
+  test('根据自然比例为竖图收窄媒体列，横图放宽，但为文案留出空间', () => {
+    const portrait = getNotificationMediaLayout(600, 900)
+    const landscape = getNotificationMediaLayout(1600, 900)
+    expect(portrait.mediaColumnWidth).toBeLessThan(landscape.mediaColumnWidth)
+    expect(portrait.dialogWidth).toBeLessThan(landscape.dialogWidth)
+    expect(portrait.mediaColumnWidth).toBeGreaterThanOrEqual(200)
+    expect(landscape.mediaColumnWidth).toBeLessThanOrEqual(432)
+    expect(landscape.dialogWidth).toBeLessThanOrEqual(900)
+    expect(getNotificationMediaLayout(200, 200).mediaColumnWidth).toBe(232)
+    expect(getNotificationMediaLayout(0, 0)).toEqual(getNotificationMediaLayout(400, 400))
   })
 
   test('不完整或不安全的媒体字段不进入渲染', () => {

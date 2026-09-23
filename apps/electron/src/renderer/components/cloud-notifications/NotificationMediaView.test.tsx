@@ -10,7 +10,10 @@ describe('通知主视觉组件', () => {
     )
     expect(html).toContain('aria-label="通知媒体"')
     expect(html).toContain('alt="新功能"')
-    expect(html).toContain('object-contain')
+    expect(html).toContain('w-auto max-w-full')
+    expect(html).toContain('max-h-[min(62vh,420px)]')
+    expect(html).not.toContain('aspect-[4/3]')
+    expect(html).not.toContain('bg-background/70')
     expect(html).toContain('src="https://cdn.example.com/banner.png"')
   })
 

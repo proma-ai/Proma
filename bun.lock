@@ -37,7 +37,7 @@
     },
     "apps/electron": {
       "name": "@proma/electron",
-      "version": "0.19.63",
+      "version": "0.19.64",
       "dependencies": {
         "@anthropic-ai/sdk": "^0.93.0",
         "@codemirror/language": "^6.12.4",

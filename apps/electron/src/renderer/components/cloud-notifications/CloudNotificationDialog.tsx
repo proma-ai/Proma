@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/dialog'
 import { cloudNotificationsAtom, invalidateCloudNotificationFetches } from '@/atoms/cloud-notifications'
 import type { CloudNotification } from '@proma/shared'
-import { resolveNotificationMedia } from './notification-media'
+import { getNotificationMediaLayout, resolveNotificationMedia } from './notification-media'
 import type { NotificationMedia } from './notification-media'
 
 const REMARK_PLUGINS = [remarkGfm]
@@ -72,32 +72,43 @@ const markdownComponents: Components = {
   },
 }
 
-/** 主视觉与正文分开渲染；失败时保留右侧内容及已读操作。 */
-export function NotificationMediaView({ media, title }: { media: NotificationMedia; title: string }): React.ReactElement {
+/** 媒体依实际比例显示，不强塞进固定比例的白色背板。 */
+export function NotificationMediaView({
+  media,
+  title,
+  onDimensions,
+}: {
+  media: NotificationMedia
+  title: string
+  onDimensions?: (width: number, height: number) => void
+}): React.ReactElement {
   const [failed, setFailed] = React.useState(false)
+  const outline = 'rounded-lg shadow-[0_2px_12px_rgba(0,0,0,0.06)] ring-1 ring-black/10 dark:ring-white/10'
   return (
-    <div className="flex min-w-0 items-center justify-center bg-muted/30 p-4 dark:bg-muted/15" role="group" aria-label="通知媒体">
-      <div className="flex aspect-[4/3] max-h-[min(68vh,420px)] w-full items-center justify-center overflow-hidden rounded-xl bg-background/70 shadow-[0_2px_12px_rgba(0,0,0,0.05)] ring-1 ring-black/10 dark:bg-black/20 dark:ring-white/10">
-        {failed ? (
-          <p className="px-4 text-center text-sm text-muted-foreground" role="status">媒体暂时无法加载，请阅读右侧通知内容。</p>
-        ) : media.type === 'video' ? (
-          <video
-            className="h-full w-full object-contain"
-            src={media.url}
-            controls
-            preload="metadata"
-            aria-label={`${title}的视频`}
-            onError={() => setFailed(true)}
-          >你的系统不支持播放此视频。</video>
-        ) : (
-          <img
-            className="h-full w-full object-contain"
-            src={media.url}
-            alt={title}
-            onError={() => setFailed(true)}
-          />
-        )}
-      </div>
+    <div className="flex min-w-0 items-center justify-center p-4" role="group" aria-label="通知媒体">
+      {failed ? (
+        <p className="flex min-h-44 w-full items-center justify-center rounded-lg bg-muted/30 px-4 text-center text-sm text-muted-foreground" role="status">
+          媒体暂时无法加载，请阅读右侧通知内容。
+        </p>
+      ) : media.type === 'video' ? (
+        <video
+          className={`block h-auto max-h-[min(62vh,420px)] w-full max-w-full bg-black object-contain ${outline}`}
+          src={media.url}
+          controls
+          preload="metadata"
+          aria-label={`${title}的视频`}
+          onLoadedMetadata={(event) => onDimensions?.(event.currentTarget.videoWidth, event.currentTarget.videoHeight)}
+          onError={() => setFailed(true)}
+        >你的系统不支持播放此视频。</video>
+      ) : (
+        <img
+          className={`block h-auto max-h-[min(62vh,420px)] w-auto max-w-full ${outline}`}
+          src={media.url}
+          alt={title}
+          onLoad={(event) => onDimensions?.(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
+          onError={() => setFailed(true)}
+        />
+      )}
     </div>
   )
 }
@@ -113,6 +124,7 @@ function NotificationDialogContent({
 }: CloudNotificationDialogProps): React.ReactElement | null {
   const [acknowledging, setAcknowledging] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  const [mediaSize, setMediaSize] = React.useState<{ id: string; url: string; width: number; height: number } | null>(null)
 
   React.useEffect(() => {
     setAcknowledging(false)
@@ -121,6 +133,8 @@ function NotificationDialogContent({
 
   if (!notification) return null
   const media = resolveNotificationMedia(notification)
+  const dimensions = mediaSize?.id === notification.id && mediaSize.url === media?.url ? mediaSize : null
+  const layout = media ? getNotificationMediaLayout(dimensions?.width ?? 320, dimensions?.height ?? 400) : null
 
   const handleAcknowledge = async (): Promise<void> => {
     setAcknowledging(true)
@@ -138,14 +152,28 @@ function NotificationDialogContent({
     <DialogContent
       hideClose
       className={media
-        ? 'max-h-[calc(100vh-4rem)] w-[calc(100vw-3rem)] max-w-[900px] gap-0 overflow-hidden p-0'
+        ? 'max-h-[calc(100vh-4rem)] w-[calc(100vw-3rem)] max-w-[900px] gap-0 overflow-hidden p-0 transition-[width] duration-200 motion-reduce:transition-none'
         : 'max-h-[calc(100vh-5rem)] max-w-2xl overflow-y-auto'}
+      style={layout ? { width: `min(calc(100vw - 3rem), ${layout.dialogWidth}px)` } : undefined}
       onEscapeKeyDown={(event) => event.preventDefault()}
       onPointerDownOutside={(event) => event.preventDefault()}
       onInteractOutside={(event) => event.preventDefault()}
     >
-      <div className={media ? 'grid min-h-0 grid-cols-[minmax(0,2fr)_minmax(0,3fr)]' : 'contents'}>
-        {media && <NotificationMediaView key={notification.id} media={media} title={notification.title} />}
+      <div
+        className={media ? 'grid min-h-0 transition-[grid-template-columns] duration-200 motion-reduce:transition-none' : 'contents'}
+        style={layout ? { gridTemplateColumns: `minmax(0, min(${layout.mediaColumnWidth}px, 42%)) minmax(0, 1fr)` } : undefined}
+      >
+        {media && <NotificationMediaView
+          key={`${notification.id}:${media.url}`}
+          media={media}
+          title={notification.title}
+          onDimensions={(width, height) => {
+            if (width <= 0 || height <= 0) return
+            setMediaSize((current) => current?.id === notification.id && current.url === media.url
+              && current.width === width && current.height === height
+              ? current : { id: notification.id, url: media.url, width, height })
+          }}
+        />}
         <div className={media ? 'flex min-h-0 min-w-0 flex-col gap-5 px-7 py-7' : 'contents'}>
           <DialogHeader>
             <DialogTitle className={media ? 'text-balance text-xl leading-snug' : undefined}>{notification.title}</DialogTitle>

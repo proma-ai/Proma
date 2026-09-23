@@ -5,6 +5,21 @@ export interface NotificationMedia {
   url: string
 }
 
+export interface NotificationMediaLayout {
+  mediaColumnWidth: number
+  dialogWidth: number
+}
+
+/** 媒体最大高度约 400px：竖图收窄弹窗，横图扩展媒体列，但给文案保留约 440px。 */
+export function getNotificationMediaLayout(width: number, height: number): NotificationMediaLayout {
+  const validSize = Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
+  const aspect = validSize ? width / height : 1
+  const naturalWidth = validSize ? Math.min(width, aspect * 400) : 400
+  const mediaWidth = Math.min(400, Math.max(168, Math.round(naturalWidth)))
+  const mediaColumnWidth = mediaWidth + 32 // 媒体两侧各 16px 间距
+  return { mediaColumnWidth, dialogWidth: Math.min(900, mediaColumnWidth + 496) }
+}
+
 /** 旧服务端没有媒体字段时保持单栏；异常媒体地址不交给浏览器加载。 */
 export function resolveNotificationMedia(notification: CloudNotification): NotificationMedia | null {
   const { mediaType, mediaUrl } = notification
