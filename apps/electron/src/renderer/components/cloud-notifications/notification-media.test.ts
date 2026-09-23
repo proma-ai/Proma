@@ -28,13 +28,22 @@ describe('通知主视觉解析', () => {
     expect(portrait.mediaColumnWidth).toBeLessThan(landscape.mediaColumnWidth)
     expect(portrait.dialogWidth).toBeLessThan(landscape.dialogWidth)
     expect(portrait.mediaColumnWidth).toBeGreaterThanOrEqual(200)
-    expect(landscape.mediaColumnWidth).toBeLessThanOrEqual(432)
-    expect(landscape.dialogWidth).toBeLessThanOrEqual(900)
+    expect(landscape.mediaColumnWidth).toBeGreaterThanOrEqual(560)
+    expect(landscape.mediaColumnWidth).toBeLessThanOrEqual(632)
+    expect(landscape.dialogWidth).toBeLessThanOrEqual(1120)
+    // 16:9 主图在大窗口里接近 300px 高，在 800px 窗口仍为右侧正文留下 320px。
+    const imageWidth = Math.min(landscape.mediaColumnWidth, landscape.dialogWidth * 0.57, landscape.dialogWidth - 320) - 32
+    expect(imageWidth * 900 / 1600).toBeGreaterThanOrEqual(295)
+    expect(landscape.dialogWidth - landscape.mediaColumnWidth).toBeGreaterThanOrEqual(440)
+    const narrowDialogWidth = 800 - 48 // w-[calc(100vw-3rem)]
+    const narrowColumnWidth = Math.min(landscape.mediaColumnWidth, narrowDialogWidth * 0.57, narrowDialogWidth - 320)
+    expect((narrowColumnWidth - 32) * 900 / 1600).toBeGreaterThanOrEqual(220)
+    expect(narrowDialogWidth - narrowColumnWidth).toBeGreaterThanOrEqual(320)
     expect(getNotificationMediaLayout(200, 200).mediaColumnWidth).toBe(232)
     expect(getNotificationMediaLayout(0, 0)).toEqual(getNotificationMediaLayout(400, 400))
   })
 
-  test('横版视频获得比图片更宽的媒体列，竖版视频仍保持紧凑', () => {
+  test('16:9 视频获得比同尺寸图片更宽的媒体列，竖版视频仍保持紧凑', () => {
     const image = getNotificationMediaLayout(1920, 1080)
     const video = getNotificationMediaLayout(1920, 1080, 'video')
     const portraitVideo = getNotificationMediaLayout(720, 1280, 'video')

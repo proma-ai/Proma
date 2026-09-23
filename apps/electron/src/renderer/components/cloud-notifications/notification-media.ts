@@ -10,7 +10,7 @@ export interface NotificationMediaLayout {
   dialogWidth: number
 }
 
-/** 图片收敛到固有尺寸；视频可放大播放区，但仍给右侧文案留出空间。 */
+/** 图片遵循原始比例；横图按约 300px 可见高度布局，同时给右侧文案留出空间。 */
 export function getNotificationMediaLayout(
   width: number,
   height: number,
@@ -22,10 +22,12 @@ export function getNotificationMediaLayout(
     const mediaColumnWidth = Math.min(592, Math.max(292, Math.round(aspect * 360) + 32))
     return { mediaColumnWidth, dialogWidth: Math.min(1080, mediaColumnWidth + 496) }
   }
-  const naturalWidth = validSize ? Math.min(width, aspect * 400) : 400
-  const mediaWidth = Math.min(400, Math.max(168, Math.round(naturalWidth)))
+  const landscape = aspect > 1.2
+  const targetHeight = landscape ? 300 : 400
+  const naturalWidth = validSize ? Math.min(width, aspect * targetHeight) : 400
+  const mediaWidth = Math.min(landscape ? 600 : 400, Math.max(168, Math.round(naturalWidth)))
   const mediaColumnWidth = mediaWidth + 32 // 媒体两侧各 16px 间距
-  return { mediaColumnWidth, dialogWidth: Math.min(900, mediaColumnWidth + 496) }
+  return { mediaColumnWidth, dialogWidth: Math.min(1120, mediaColumnWidth + 496) }
 }
 
 /** 旧服务端没有媒体字段时保持单栏；异常媒体地址不交给浏览器加载。 */
