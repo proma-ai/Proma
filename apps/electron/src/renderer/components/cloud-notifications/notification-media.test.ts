@@ -51,6 +51,7 @@ describe('通知主视觉解析', () => {
     expect(video.dialogWidth).toBeGreaterThan(image.dialogWidth)
     expect(video.dialogWidth).toBeLessThanOrEqual(1080)
     expect(portraitVideo.mediaColumnWidth).toBeLessThan(video.mediaColumnWidth)
+    expect(getNotificationMediaLayout(1000, 1000, 'video').mediaColumnWidth).toBe(360) // 没有内层 p-4
   })
 
   test('不完整或不安全的媒体字段不进入渲染', () => {

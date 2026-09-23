@@ -37,7 +37,7 @@ function isVideoMarkdownImage(alt: string | undefined, src: string | undefined):
   return new URL(src).pathname.toLowerCase().endsWith('.mp4')
 }
 
-const markdownComponents: Components = {
+export const markdownComponents: Components = {
   a: ({ href, children }) => {
     if (!isHttpsUrl(href)) return <>{children}</>
     return (
@@ -60,7 +60,7 @@ const markdownComponents: Components = {
         <video
           controls
           preload="metadata"
-          className="my-3 w-full rounded-lg border border-border/60 bg-black"
+          className="my-3 w-full bg-black object-contain"
           src={src}
         >
           抱歉，你的系统不支持播放此视频。
@@ -72,7 +72,7 @@ const markdownComponents: Components = {
   },
 }
 
-/** 图片贴齐弹窗外缘；比例由图片本身决定，长文案时仅裁切超出的边缘。 */
+/** 主视觉贴齐弹窗外缘；比例由媒体本身决定，文案较长时仅裁切超出的边缘。 */
 export function NotificationMediaView({
   media,
   title,
@@ -85,26 +85,24 @@ export function NotificationMediaView({
   onDimensions?: (width: number, height: number) => void
 }): React.ReactElement {
   const [failed, setFailed] = React.useState(false)
-  const isImage = media.type === 'image'
-  const videoOutline = 'rounded-lg shadow-[0_2px_12px_rgba(0,0,0,0.06)] ring-1 ring-black/10 dark:ring-white/10'
+  const isVideo = media.type === 'video'
   return (
     <div
-      className={isImage
-        ? 'relative min-h-44 min-w-0 self-stretch overflow-hidden'
-        : 'flex min-w-0 items-center justify-center p-4'}
-      style={isImage ? { aspectRatio: aspectRatio && aspectRatio > 0 ? aspectRatio : 1, maxHeight: 'min(62vh, 420px)' } : undefined}
+      className={`relative min-w-0 w-full self-stretch overflow-hidden ${isVideo ? 'min-h-[min(50vh,300px)] bg-black' : 'min-h-44'}`}
+      style={{
+        aspectRatio: aspectRatio && aspectRatio > 0 ? aspectRatio : isVideo ? 16 / 9 : 1,
+        maxHeight: isVideo ? 'min(70vh, 520px)' : 'min(62vh, 420px)',
+      }}
       role="group"
       aria-label="通知媒体"
     >
       {failed ? (
-        <p className={isImage
-          ? 'absolute inset-0 flex items-center justify-center bg-muted/30 px-4 text-center text-sm text-muted-foreground'
-          : 'flex min-h-44 w-full items-center justify-center rounded-lg bg-muted/30 px-4 text-center text-sm text-muted-foreground'} role="status">
+        <p className="absolute inset-0 flex items-center justify-center bg-muted/30 px-4 text-center text-sm text-muted-foreground" role="status">
           媒体暂时无法加载，请阅读右侧通知内容。
         </p>
-      ) : media.type === 'video' ? (
+      ) : isVideo ? (
         <video
-          className={`block h-auto min-h-[min(50vh,300px)] max-h-[min(70vh,520px)] w-full max-w-full bg-black object-contain ${videoOutline}`}
+          className="absolute inset-0 block h-full w-full bg-black object-cover"
           src={media.url}
           controls
           preload="metadata"
@@ -177,7 +175,7 @@ function NotificationDialogContent({
     >
       <div
         className={media
-          ? `grid min-h-0 transition-[grid-template-columns] duration-200 motion-reduce:transition-none ${media.type === 'image' ? 'max-h-[min(62vh,420px)]' : ''}`
+          ? `grid min-h-0 transition-[grid-template-columns] duration-200 motion-reduce:transition-none ${media.type === 'video' ? 'max-h-[min(70vh,520px)]' : 'max-h-[min(62vh,420px)]'}`
           : 'contents'}
         style={layout ? { gridTemplateColumns: media?.type === 'video'
           ? `minmax(0, min(${layout.mediaColumnWidth}px, 54%, calc(100% - 350px))) minmax(0, 1fr)`
@@ -187,7 +185,7 @@ function NotificationDialogContent({
           key={`${notification.id}:${media.url}`}
           media={media}
           title={notification.title}
-          aspectRatio={media.type === 'image' && dimensions ? dimensions.width / dimensions.height : undefined}
+          aspectRatio={dimensions ? dimensions.width / dimensions.height : undefined}
           onDimensions={(width, height) => {
             if (width <= 0 || height <= 0) return
             setMediaSize((current) => current?.id === notification.id && current.url === media.url

@@ -19,7 +19,7 @@ export function getNotificationMediaLayout(
   const validSize = Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
   const aspect = validSize ? width / height : 1
   if (type === 'video') {
-    const mediaColumnWidth = Math.min(592, Math.max(292, Math.round(aspect * 360) + 32))
+    const mediaColumnWidth = Math.min(592, Math.max(292, Math.round(aspect * 360)))
     return { mediaColumnWidth, dialogWidth: Math.min(1080, mediaColumnWidth + 496) }
   }
   const landscape = aspect > 1.2
