@@ -9,6 +9,7 @@ import {
   CODEX_GPT_54_55_CONTEXT_WINDOW,
   CODEX_GPT_54_MINI_CONTEXT_WINDOW,
   CODEX_GPT_56_CONTEXT_WINDOW,
+  CODEX_GPT_6_CONTEXT_WINDOW,
   extractZhipuCodingTeamApiToken,
   inferContextWindow,
   inferCodexAlignedGPT5ContextWindow,
@@ -66,8 +67,12 @@ const CODEX_MAX_TOKENS = 128_000
 const UNSUPPORTED_CODEX_MODEL_IDS = new Set([
   'gpt-5.3-codex-spark',
 ])
-// GPT-6 Astra 与 GPT-5.6 系列统一按 372K 上下文注册。
-const CODEX_GPT_6_ASTRA_CONTEXT_WINDOW = CODEX_GPT_56_CONTEXT_WINDOW
+/** 已从 Codex 渠道移除的模型家族；覆盖其 Mini 等同系列 SKU。 */
+const UNSUPPORTED_CODEX_MODEL_PREFIXES = [
+  'gpt-5.4',
+  'gpt-5.5',
+] as const
+// ChatGPT Codex 订阅中的 GPT-6 Astra、Sol 与 Luna 均为 372K；Proma 官方 API 的 1.05M 规格由 modelContextWindow 优先覆盖。
 /**
  * 将 Codex 已标记的 GPT-5.x 上下文窗口外推到同名第三方模型。
  *
@@ -383,7 +388,33 @@ const CODEX_MODEL_PATCHES: PiCatalogModelPatch[] = [
     thinkingLevelMap: compilePiReasoningCapabilities('openai-responses', 'gpt-6-astra')?.thinkingLevelMap,
     input: ['text', 'image'],
     cost: ZERO_MODEL_COST,
-    contextWindow: CODEX_GPT_6_ASTRA_CONTEXT_WINDOW,
+    contextWindow: CODEX_GPT_6_CONTEXT_WINDOW,
+    maxTokens: CODEX_MAX_TOKENS,
+  },
+  {
+    id: 'gpt-6-sol',
+    name: 'GPT-6 Sol',
+    api: 'openai-codex-responses',
+    provider: 'openai-codex',
+    baseUrl: CODEX_BASE_URL,
+    reasoning: true,
+    thinkingLevelMap: compilePiReasoningCapabilities('openai-responses', 'gpt-6-sol')?.thinkingLevelMap,
+    input: ['text', 'image'],
+    cost: ZERO_MODEL_COST,
+    contextWindow: CODEX_GPT_6_CONTEXT_WINDOW,
+    maxTokens: CODEX_MAX_TOKENS,
+  },
+  {
+    id: 'gpt-6-luna',
+    name: 'GPT-6 Luna',
+    api: 'openai-codex-responses',
+    provider: 'openai-codex',
+    baseUrl: CODEX_BASE_URL,
+    reasoning: true,
+    thinkingLevelMap: compilePiReasoningCapabilities('openai-responses', 'gpt-6-luna')?.thinkingLevelMap,
+    input: ['text', 'image'],
+    cost: ZERO_MODEL_COST,
+    contextWindow: CODEX_GPT_6_CONTEXT_WINDOW,
     maxTokens: CODEX_MAX_TOKENS,
   },
   {
@@ -941,8 +972,8 @@ export function stripLegacyAgentSdkContextSuffix(modelId: string | undefined): s
 }
 
 /**
- * Pi 0.85 尚未在内置 Codex catalog 声明 Astra，但 ChatGPT 会将已授权的
- * Astra SKU 原样作为模型 ID 返回。仅对严格的 Astra 家族派生基准 contract：
+ * Pi 0.86 尚未在内置 Codex catalog 声明 Astra，但 ChatGPT 会将已授权的
+ * Astra SKU 原样作为模型 ID 返回。Sol/Luna 已由精确完整 patch 兜底；仅对严格的 Astra 家族派生基准 contract：
  * 保留实际请求 ID，绝不把相邻的未知模型错误地接入 Codex OAuth。
  */
 function createCodexAstraFamilyModel(
@@ -992,7 +1023,9 @@ function isCompleteCatalogModel(model: PiCatalogModelPatch): model is PiCatalogM
 }
 
 function isSupportedCodexModel(model: Pick<PiCatalogModel, 'id'>): boolean {
-  return !UNSUPPORTED_CODEX_MODEL_IDS.has(model.id.trim().toLowerCase())
+  const modelId = model.id.trim().toLowerCase()
+  return !UNSUPPORTED_CODEX_MODEL_IDS.has(modelId)
+    && !UNSUPPORTED_CODEX_MODEL_PREFIXES.some((prefix) => modelId === prefix || modelId.startsWith(`${prefix}-`))
 }
 
 export async function getCodexCatalogModels(): Promise<PiCatalogModel[]> {
@@ -1024,10 +1057,13 @@ export async function buildCodexModel(sdk: PiSdk, input: CodexModelInput) {
 
   const resolvedModelId = stripLegacyAgentSdkContextSuffix(input.model)
   const runtimeModels = modelRuntime.getModels('openai-codex').filter(isSupportedCodexModel)
+  // Pi 0.87.1 已将 GPT-6 写入内置 catalog，但其 272K 元数据不等于 Proma 已验证的
+  // Codex 372K 规格。先从 Proma compatibility catalog 解析精确 ID，确保运行时模型
+  // 也保留该覆盖；其余 Pi 原生模型再直接复用 runtime entry。
   const codexModels = await getCodexCatalogModels()
   const model = resolvedModelId
-    ? runtimeModels.find((candidate) => candidate.id === resolvedModelId)
-      ?? findCatalogModelById(codexModels, resolvedModelId)
+    ? findCatalogModelById(codexModels, resolvedModelId)
+      ?? runtimeModels.find((candidate) => candidate.id === resolvedModelId)
       ?? createCodexAstraFamilyModel(codexModels, resolvedModelId)
     : runtimeModels[0]
 
@@ -1040,9 +1076,24 @@ export async function buildCodexModel(sdk: PiSdk, input: CodexModelInput) {
   return { modelRuntime, model }
 }
 
-/** 列出 Pi SDK 内置的 ChatGPT (Codex) 模型 ID，供渲染层"模型拉取"使用。 */
-export async function listCodexModels(): Promise<{ id: string; name: string }[]> {
-  return (await getCodexCatalogModels()).map((m) => ({ id: m.id, name: m.name }))
+/**
+ * 通过 Pi 的可用模型抽象列出 ChatGPT (Codex) 模型。
+ *
+ * Codex 当前在 Pi 中仍由内置 catalog 提供条目；使用携带 OAuth 凭据的
+ * `getAvailable()` 而非直接读取 catalog，可在 Pi 将来为该 provider 增加
+ * 账户或订阅级过滤时自动遵循其结果。
+ */
+export async function listCodexModels(
+  credentials: CodexOAuthCredentials,
+): Promise<{ id: string; name: string }[]> {
+  const sdk = await import('@earendil-works/pi-coding-agent')
+  const modelRuntime = await sdk.ModelRuntime.create({
+    credentials: createCodexRuntimeCredentialStore(credentials),
+    allowModelNetwork: false,
+  })
+  return (await modelRuntime.getAvailable('openai-codex'))
+    .filter(isSupportedCodexModel)
+    .map((model) => ({ id: model.id, name: model.name }))
 }
 
 export async function getXaiCatalogModels(): Promise<PiCatalogModel[]> {

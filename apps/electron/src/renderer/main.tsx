@@ -96,6 +96,7 @@ import { initShortcutRegistry, updateShortcutOverrides } from './lib/shortcut-re
 import { triggerLegacyScratchPadMigration } from './lib/legacy-scratch-pad-migration'
 import { initializePerformanceMonitor } from './lib/performance-monitor'
 import { createUpdateReminderScheduler, type UpdateReminderScheduler } from './lib/update-reminder-scheduler'
+import { getOrCreateRendererRoot } from './lib/renderer-root'
 import './styles/globals.css'
 import 'katex/dist/katex.min.css'
 
@@ -1177,10 +1178,27 @@ function LegacyScratchPadMigrationInitializer(): null {
   return null
 }
 
+const rootContainer = document.getElementById('root')
+if (!rootContainer) throw new Error('Renderer root container not found')
+
+// Vite Fast Refresh 会重新执行入口模块。复用容器已持有的 root，避免两个 React tree 同时管理 #root。
+const root = getOrCreateRendererRoot(rootContainer, ReactDOM.createRoot)
+let isCurrentRendererEntry = true
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    // 动态窗口组件可能在入口替换后才加载完成；旧模块不得再次覆盖新树。
+    isCurrentRendererEntry = false
+  })
+}
+
+function renderRoot(children: React.ReactNode): void {
+  if (isCurrentRendererEntry) root.render(children)
+}
+
 // ===== 快速任务窗口：轻量渲染 =====
 if (isQuickTaskWindow) {
   import('./components/quick-task/QuickTaskApp').then(({ QuickTaskApp }) => {
-    ReactDOM.createRoot(document.getElementById('root')!).render(
+    renderRoot(
       <React.StrictMode>
         <ThemeInitializer />
         <QuickTaskApp />
@@ -1189,7 +1207,7 @@ if (isQuickTaskWindow) {
   })
 } else if (isVoiceDictationIndicatorWindow) {
   import('./components/voice-dictation/VoiceDictationIndicatorApp').then(({ VoiceDictationIndicatorApp }) => {
-    ReactDOM.createRoot(document.getElementById('root')!).render(
+    renderRoot(
       <React.StrictMode>
         <ThemeInitializer />
         <VoiceDictationIndicatorApp />
@@ -1198,7 +1216,7 @@ if (isQuickTaskWindow) {
   })
 } else if (isDetachedPreviewWindow) {
   import('./components/diff/DetachedPreviewApp').then(({ DetachedPreviewApp }) => {
-    ReactDOM.createRoot(document.getElementById('root')!).render(
+    renderRoot(
       <React.StrictMode>
         <ThemeInitializer />
         <MarkdownFontSizeInitializer />
@@ -1209,7 +1227,7 @@ if (isQuickTaskWindow) {
   })
 } else if (isWorkspaceMemoryWindow) {
   import('./components/agent-skills/WorkspaceMemoryWindowApp').then(({ WorkspaceMemoryWindowApp }) => {
-    ReactDOM.createRoot(document.getElementById('root')!).render(
+    renderRoot(
       <React.StrictMode>
         <ThemeInitializer />
         <WorkspaceMemoryWindowApp />
@@ -1219,7 +1237,7 @@ if (isQuickTaskWindow) {
   })
 } else if (isAgentStatusHoverWindow) {
   import('./components/agent-status-hover/HoverPanel').then(({ HoverPanel }) => {
-    ReactDOM.createRoot(document.getElementById('root')!).render(
+    renderRoot(
       <React.StrictMode>
         <ThemeInitializer />
         <HoverPanel />
@@ -1228,7 +1246,7 @@ if (isQuickTaskWindow) {
   })
 } else {
   // ===== 主窗口：完整渲染 =====
-  ReactDOM.createRoot(document.getElementById('root')!).render(
+  renderRoot(
     <React.StrictMode>
       <ThemeInitializer />
       <UserProfileInitializer />

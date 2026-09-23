@@ -8,7 +8,7 @@
  */
 
 import { getGeminiModelCapability } from './gemini-model-capabilities'
-import { isGpt6AstraFamily } from './model-family'
+import { isGpt6AstraFamily, isGpt6LunaFamily, isGpt6SolFamily } from './model-family'
 
 /** 默认上下文窗口（无法识别模型时使用） */
 export const DEFAULT_CONTEXT_WINDOW = 200_000
@@ -20,15 +20,19 @@ export const ONE_MILLION_CONTEXT_WINDOW = 1_000_000
 export const CODEX_GPT_54_55_CONTEXT_WINDOW = 272_000
 export const CODEX_GPT_54_MINI_CONTEXT_WINDOW = 400_000
 export const CODEX_GPT_56_CONTEXT_WINDOW = 372_000
+/** ChatGPT Codex 订阅中的 GPT-6 Astra、Sol 与 Luna 上下文窗口。官方 API 规格由服务端模型目录下发。 */
+export const CODEX_GPT_6_CONTEXT_WINDOW = 372_000
 
 /**
- * 为与 ChatGPT Codex 同名的 GPT-5.x 模型返回统一上下文窗口。
+ * 为 ChatGPT Codex 中的 GPT-5.x / GPT-6 模型返回统一上下文窗口。
  *
  * 仅覆盖 Codex 已明确标记的模型；Pro/Nano 等未出现在 Codex 目录的变体继续交由
  * provider catalog 决定，避免把不同 SKU 误写成同一窗口。
  */
 export function inferCodexAlignedGPT5ContextWindow(modelId: string | undefined): number | undefined {
-  if (isGpt6AstraFamily(modelId)) return CODEX_GPT_56_CONTEXT_WINDOW
+  if (isGpt6AstraFamily(modelId) || isGpt6SolFamily(modelId) || isGpt6LunaFamily(modelId)) {
+    return CODEX_GPT_6_CONTEXT_WINDOW
+  }
 
   const model = modelId?.toLowerCase().replace(/\[1m\]$/i, '')
   switch (model) {
