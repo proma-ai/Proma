@@ -8,6 +8,7 @@ import * as React from 'react'
 import { useAtom } from 'jotai'
 import Markdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { Pause, Play } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -18,6 +19,8 @@ import {
 } from '@/components/ui/dialog'
 import { cloudNotificationsAtom, invalidateCloudNotificationFetches } from '@/atoms/cloud-notifications'
 import type { CloudNotification } from '@proma/shared'
+import { getNotificationMediaLayout, resolveNotificationMedia } from './notification-media'
+import type { NotificationMedia } from './notification-media'
 
 const REMARK_PLUGINS = [remarkGfm]
 
@@ -35,7 +38,72 @@ function isVideoMarkdownImage(alt: string | undefined, src: string | undefined):
   return new URL(src).pathname.toLowerCase().endsWith('.mp4')
 }
 
-const markdownComponents: Components = {
+export async function toggleNotificationVideoPlayback(video: Pick<HTMLVideoElement, 'paused' | 'play' | 'pause'>): Promise<void> {
+  if (!video.paused) {
+    video.pause()
+    return
+  }
+  try {
+    await video.play()
+  } catch {
+    // 自动播放策略或媒体错误可能阻止播放；onPlay 未触发时按钮仍显示“播放”。
+  }
+}
+
+function NotificationVideoPlayer({
+  src,
+  title,
+  inline = false,
+  onDimensions,
+  onError,
+}: {
+  src: string
+  title: string
+  inline?: boolean
+  onDimensions?: (width: number, height: number) => void
+  onError?: () => void
+}): React.ReactElement {
+  const videoRef = React.useRef<HTMLVideoElement>(null)
+  const [playing, setPlaying] = React.useState(false)
+  return (
+    <>
+      <video
+        ref={videoRef}
+        className={inline
+          ? 'block max-h-[min(50vh,320px)] w-full bg-black object-contain'
+          : 'absolute inset-0 block h-full w-full bg-black object-cover'}
+        src={src}
+        autoPlay
+        muted
+        loop
+        playsInline
+        preload="metadata"
+        controlsList="nodownload nofullscreen noremoteplayback"
+        disablePictureInPicture
+        disableRemotePlayback
+        aria-label={title}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onLoadedMetadata={(event) => onDimensions?.(event.currentTarget.videoWidth, event.currentTarget.videoHeight)}
+        onError={onError}
+        onContextMenu={(event) => event.preventDefault()}
+      >你的系统不支持播放此视频。</video>
+      <button
+        type="button"
+        className={`absolute z-10 flex size-10 items-center justify-center rounded-full bg-black/65 text-white shadow-sm transition-[background-color,transform] hover:bg-black/80 active:scale-[0.96] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${inline ? 'bottom-3 left-3' : 'bottom-4 left-4'}`}
+        aria-label={playing ? '暂停视频' : '播放视频'}
+        title={playing ? '暂停视频' : '播放视频'}
+        onClick={() => {
+          if (videoRef.current) void toggleNotificationVideoPlayback(videoRef.current)
+        }}
+      >
+        {playing ? <Pause size={18} fill="currentColor" aria-hidden="true" /> : <Play size={18} fill="currentColor" className="translate-x-px" aria-hidden="true" />}
+      </button>
+    </>
+  )
+}
+
+export const markdownComponents: Components = {
   a: ({ href, children }) => {
     if (!isHttpsUrl(href)) return <>{children}</>
     return (
@@ -55,19 +123,62 @@ const markdownComponents: Components = {
   img: ({ alt, src }) => {
     if (isVideoMarkdownImage(alt, src)) {
       return (
-        <video
-          controls
-          preload="metadata"
-          className="my-3 w-full rounded-lg border border-border/60 bg-black"
-          src={src}
-        >
-          抱歉，你的系统不支持播放此视频。
-        </video>
+        <span className="relative my-3 block w-full overflow-hidden bg-black">
+          <NotificationVideoPlayer src={src} title="通知内嵌视频" inline />
+        </span>
       )
     }
     if (!isHttpsUrl(src)) return null
     return <img src={src} alt={alt ?? ''} className="my-3 max-h-80 w-auto max-w-full rounded-lg border border-border/60 object-contain" />
   },
+}
+
+/** 主视觉贴齐弹窗外缘；比例由媒体本身决定，文案较长时仅裁切超出的边缘。 */
+export function NotificationMediaView({
+  media,
+  title,
+  aspectRatio,
+  onDimensions,
+}: {
+  media: NotificationMedia
+  title: string
+  aspectRatio?: number
+  onDimensions?: (width: number, height: number) => void
+}): React.ReactElement {
+  const [failed, setFailed] = React.useState(false)
+  const isVideo = media.type === 'video'
+  return (
+    <div
+      className={`relative min-w-0 w-full self-stretch overflow-hidden ${isVideo ? 'min-h-[min(50vh,300px)] bg-black' : 'min-h-44'}`}
+      style={{
+        aspectRatio: aspectRatio && aspectRatio > 0 ? aspectRatio : isVideo ? 16 / 9 : 1,
+        maxHeight: isVideo ? 'min(70vh, 520px)' : 'min(62vh, 420px)',
+      }}
+      role="group"
+      aria-label="通知媒体"
+    >
+      {failed ? (
+        <p className="absolute inset-0 flex items-center justify-center bg-muted/30 px-4 text-center text-sm text-muted-foreground" role="status">
+          媒体暂时无法加载，请阅读右侧通知内容。
+        </p>
+      ) : isVideo ? (
+        <NotificationVideoPlayer
+          src={media.url}
+          title={`${title}的视频`}
+          onDimensions={onDimensions}
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <img
+          className="absolute inset-0 block h-full w-full object-cover"
+          src={media.url}
+          alt={title}
+          onLoad={(event) => onDimensions?.(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
+          onError={() => setFailed(true)}
+        />
+      )}
+    </div>
+  )
 }
 
 interface CloudNotificationDialogProps {
@@ -81,6 +192,7 @@ function NotificationDialogContent({
 }: CloudNotificationDialogProps): React.ReactElement | null {
   const [acknowledging, setAcknowledging] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  const [mediaSize, setMediaSize] = React.useState<{ id: string; url: string; width: number; height: number } | null>(null)
 
   React.useEffect(() => {
     setAcknowledging(false)
@@ -88,6 +200,13 @@ function NotificationDialogContent({
   }, [notification?.id])
 
   if (!notification) return null
+  const media = resolveNotificationMedia(notification)
+  const dimensions = mediaSize?.id === notification.id && mediaSize.url === media?.url ? mediaSize : null
+  const layout = media ? getNotificationMediaLayout(
+    dimensions?.width ?? (media.type === 'video' ? 16 : 320),
+    dimensions?.height ?? (media.type === 'video' ? 9 : 400),
+    media.type,
+  ) : null
 
   const handleAcknowledge = async (): Promise<void> => {
     setAcknowledging(true)
@@ -104,33 +223,61 @@ function NotificationDialogContent({
   return (
     <DialogContent
       hideClose
-      className="max-h-[calc(100vh-5rem)] max-w-2xl overflow-y-auto"
+      className={media
+        ? `max-h-[calc(100vh-4rem)] w-[calc(100vw-3rem)] gap-0 overflow-hidden border-0 p-0 transition-[width] duration-200 motion-reduce:transition-none ${media.type === 'video' ? 'max-w-[1080px]' : 'max-w-[1120px]'}`
+        : 'max-h-[calc(100vh-5rem)] max-w-2xl overflow-y-auto'}
+      style={layout ? { width: `min(calc(100vw - 3rem), ${layout.dialogWidth}px)` } : undefined}
       onEscapeKeyDown={(event) => event.preventDefault()}
       onPointerDownOutside={(event) => event.preventDefault()}
       onInteractOutside={(event) => event.preventDefault()}
     >
-      <DialogHeader>
-        <DialogTitle>{notification.title}</DialogTitle>
-      </DialogHeader>
+      <div
+        className={media
+          ? `grid min-h-0 transition-[grid-template-columns] duration-200 motion-reduce:transition-none ${media.type === 'video' ? 'max-h-[min(70vh,520px)]' : 'max-h-[min(62vh,420px)]'}`
+          : 'contents'}
+        style={layout ? { gridTemplateColumns: media?.type === 'video'
+          ? `minmax(0, min(${layout.mediaColumnWidth}px, 54%, calc(100% - 350px))) minmax(0, 1fr)`
+          : `minmax(0, min(${layout.mediaColumnWidth}px, 57%, calc(100% - 320px))) minmax(0, 1fr)` } : undefined}
+      >
+        {media && <NotificationMediaView
+          key={`${notification.id}:${media.url}`}
+          media={media}
+          title={notification.title}
+          aspectRatio={dimensions ? dimensions.width / dimensions.height : undefined}
+          onDimensions={(width, height) => {
+            if (width <= 0 || height <= 0) return
+            setMediaSize((current) => current?.id === notification.id && current.url === media.url
+              && current.width === width && current.height === height
+              ? current : { id: notification.id, url: media.url, width, height })
+          }}
+        />}
+        <div className={media ? 'flex min-h-0 min-w-0 flex-col gap-3 px-7 py-7' : 'contents'}>
+          <DialogHeader>
+            <DialogTitle className={media ? 'text-balance text-xl leading-snug' : undefined}>{notification.title}</DialogTitle>
+          </DialogHeader>
 
-      <div className="prose prose-sm dark:prose-invert max-w-none break-words">
-        <Markdown
-          remarkPlugins={REMARK_PLUGINS}
-          skipHtml
-          urlTransform={(url) => isHttpsUrl(url) ? url : ''}
-          components={markdownComponents}
-        >
-          {notification.bodyMarkdown}
-        </Markdown>
+          <div className={media
+            ? 'prose prose-sm dark:prose-invert min-h-0 max-h-[min(60vh,420px)] max-w-none flex-1 overflow-y-auto break-words pr-1 [text-wrap:pretty]'
+            : 'prose prose-sm dark:prose-invert max-w-none break-words'}>
+            <Markdown
+              remarkPlugins={REMARK_PLUGINS}
+              skipHtml
+              urlTransform={(url) => isHttpsUrl(url) ? url : ''}
+              components={markdownComponents}
+            >
+              {notification.bodyMarkdown}
+            </Markdown>
+          </div>
+
+          {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
+
+          <DialogFooter className={media ? 'mt-auto' : undefined}>
+            <Button className="min-h-10" onClick={() => void handleAcknowledge()} disabled={acknowledging}>
+              {acknowledging ? '正在确认…' : '已读'}
+            </Button>
+          </DialogFooter>
+        </div>
       </div>
-
-      {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
-
-      <DialogFooter>
-        <Button onClick={() => void handleAcknowledge()} disabled={acknowledging}>
-          {acknowledging ? '正在确认…' : '已读'}
-        </Button>
-      </DialogFooter>
     </DialogContent>
   )
 }
