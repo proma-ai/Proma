@@ -16,7 +16,7 @@ import type {
   VoiceDictationStateEvent,
 } from '../../types'
 import { VOICE_DICTATION_IPC_CHANNELS } from '../../types'
-import { getAuthToken, tryRefreshAuthToken } from './cloud-auth-service'
+import { getAuthToken, getCloudSessionRevision, tryRefreshAuthToken } from './cloud-auth-service'
 
 const PROTOCOL_VERSION = 0b0001
 const HEADER_SIZE = 0b0001
@@ -107,7 +107,10 @@ function getEndpoint(settings: VoiceDictationSettings): string {
 }
 
 async function getCloudSpeechToken(): Promise<string> {
-  const token = await tryRefreshAuthToken() ?? getAuthToken()
+  const revision = getCloudSessionRevision()
+  const previousToken = getAuthToken()
+  const token = await tryRefreshAuthToken(revision) ?? previousToken
+  if (revision !== getCloudSessionRevision()) throw new Error('Cloud 账号已切换，请重新启动语音输入')
   if (!token) {
     throw new Error('请先登录 Proma Cloud 后再使用官方语音输入')
   }

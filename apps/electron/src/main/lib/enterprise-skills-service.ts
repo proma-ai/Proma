@@ -20,7 +20,7 @@ import type {
   EnterpriseSkillsAvailability,
   SkillMeta,
 } from '@proma/shared'
-import { getAuthToken, getApiClient, tryRefreshAuthToken } from './cloud-auth-service'
+import { getAuthToken, getApiClient, getCloudSessionRevision, tryRefreshAuthToken } from './cloud-auth-service'
 import { getDefaultSkillsDir, getInactiveSkillsDir, getWorkspaceSkillsDir } from './config-paths'
 
 const API_PATH = '/enterprise/skills'
@@ -171,12 +171,17 @@ function savePublishedEnterpriseSource(input: {
 }
 
 async function authenticatedFetch(path: string, init: RequestInit): Promise<Response> {
+  const revision = getCloudSessionRevision()
   const request = async (token: string | null): Promise<Response> => fetch(`${getCloudApiConfig().baseUrl}${path}`, {
     ...init,
     headers: { ...(init.headers ?? {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
   })
   let response = await request(getAuthToken())
-  if (response.status === 401 && await tryRefreshAuthToken()) response = await request(getAuthToken())
+  if (response.status === 401) {
+    const token = await tryRefreshAuthToken(revision)
+    if (token && revision === getCloudSessionRevision()) response = await request(token)
+  }
+  if (revision !== getCloudSessionRevision()) throw new EnterpriseSkillsError('Cloud 账号已切换，请重试', 'NETWORK')
   return response
 }
 

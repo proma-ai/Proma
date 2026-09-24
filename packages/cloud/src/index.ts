@@ -46,3 +46,6 @@ export type {
   NotificationsApi,
   NotificationsApiClient,
 } from './api/index'
+
+// 主进程目录预热复用相同的完整请求deadline。
+export { withCloudRequest, withCloudDeadline, assertCloudRequestActive, cancelledCloudRequest, invalidCloudResponse } from './api/cloud-request'

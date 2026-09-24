@@ -54,7 +54,7 @@ import { decryptApiKey, getChannelById, listChannels, persistCodexOAuthCredentia
 import { getAdapter, fetchTitle } from '@proma/core'
 import { getCloudApiConfig, isApiError } from '@proma/cloud'
 import { getSystemApiKey, clearSystemKeyCache } from './cloud-channel-service'
-import { getAuthState, getAuthToken, tryRefreshAuthToken } from './cloud-auth-service'
+import { getAuthState, getAuthToken, getCloudSessionRevision, tryRefreshAuthToken } from './cloud-auth-service'
 import pkg from '../../../package.json' with { type: 'json' }
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
@@ -342,8 +342,10 @@ export class AgentOrchestrator {
     }
 
     if (channel.provider === 'proma') {
+      const cloudSessionRevision = getCloudSessionRevision()
       // 官方渠道的模型 key 是短期系统 key，标题服务则使用 Cloud 登录 token。
       const run = async (token: string): Promise<string | null> => {
+        if (cloudSessionRevision !== getCloudSessionRevision()) return null
         const request = getAdapter('proma').buildTitleRequest({
           baseUrl: getCloudApiConfig().baseUrl,
           apiKey: token,
@@ -354,11 +356,11 @@ export class AgentOrchestrator {
       }
       try {
         let token = getAuthToken()
-        if (!token) token = await tryRefreshAuthToken()
+        if (!token) token = await tryRefreshAuthToken(cloudSessionRevision)
         if (!token) return null
         let title = await run(token)
         if (!title) {
-          const refreshed = await tryRefreshAuthToken()
+          const refreshed = await tryRefreshAuthToken(cloudSessionRevision)
           if (refreshed) title = await run(refreshed)
         }
         return title ? sanitizeGeneratedTitle(title) : null
@@ -900,6 +902,7 @@ export class AgentOrchestrator {
       return
     }
     activeChannelProvider = channel.provider
+    const cloudSessionRevision = getCloudSessionRevision()
 
     let apiKey: string
     let codexOAuthCredentials: CodexOAuthCredentials | undefined
@@ -909,17 +912,19 @@ export class AgentOrchestrator {
       // Proma 官方渠道没有本地加密 key；系统 key 由 Cloud service 按登录 token 获取。
       if (channel.provider === 'proma') {
         try {
-          apiKey = await getSystemApiKey()
+          apiKey = await getSystemApiKey(cloudSessionRevision)
         } catch (initialError) {
           // Only a confirmed auth failure benefits from refresh. Retrying refresh
           // for network/timeout/5xx conditions multiplies an outage and can make
           // the client look logged out even though its session is still valid.
           if (!isApiError(initialError) || initialError.kind !== 'auth') throw initialError
           if (!getAuthState().isAuthenticated) throw initialError
-          const refreshed = await tryRefreshAuthToken()
+          const refreshed = await tryRefreshAuthToken(cloudSessionRevision)
           if (!refreshed) throw initialError
+          if (cloudSessionRevision !== getCloudSessionRevision()) throw new Error('Cloud 账号已切换，请重新运行')
           clearSystemKeyCache()
-          apiKey = await getSystemApiKey()
+          apiKey = await getSystemApiKey(cloudSessionRevision)
+          if (cloudSessionRevision !== getCloudSessionRevision()) throw new Error('Cloud 账号已切换，请重新运行')
         }
       // 订阅 OAuth 渠道必须保留完整凭据给 Pi runtime，才能在执行中按真实 expires
       // 自动刷新；其余渠道只需解密 API Key。
@@ -1891,6 +1896,9 @@ export class AgentOrchestrator {
 
         try {
           // 获取异步迭代器（手动 .next() 以支持 Promise.race 中断）
+          if (channel.provider === 'proma' && cloudSessionRevision !== getCloudSessionRevision()) {
+            throw new Error('Cloud 账号已切换，请重新运行此任务')
+          }
           const queryIterable = this.adapter.query(queryOptions)
           const queryIterator = queryIterable[Symbol.asyncIterator]()
 
@@ -2024,11 +2032,13 @@ export class AgentOrchestrator {
                 if (channel.provider === 'proma'
                   && extractHttpStatusFromErrorText(detailedMessage, originalError) === 401
                   && attempt < MAX_QUERY_ATTEMPTS) {
-                  const refreshed = await tryRefreshAuthToken()
+                  const refreshed = await tryRefreshAuthToken(cloudSessionRevision)
                   if (refreshed) {
                     try {
                       clearSystemKeyCache()
-                      queryOptions.apiKey = await getSystemApiKey()
+                      if (cloudSessionRevision !== getCloudSessionRevision()) throw new Error('Cloud 账号已切换，请重新运行')
+                      queryOptions.apiKey = await getSystemApiKey(cloudSessionRevision)
+                      if (cloudSessionRevision !== getCloudSessionRevision()) throw new Error('Cloud 账号已切换，请重新运行')
                       queryOptions.resumeSessionId = undefined
                       shouldRetryFromError = true
                       break

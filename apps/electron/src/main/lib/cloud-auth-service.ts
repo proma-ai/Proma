@@ -8,8 +8,9 @@
  * - 认证状态变化时广播到所有渲染进程窗口
  */
 
-import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'node:fs'
+import { readFileSync, existsSync, unlinkSync } from 'node:fs'
 import { safeStorage, BrowserWindow } from 'electron'
+import { writeTextFileAtomic } from './safe-file'
 import { getCloudAuthPath } from './config-paths'
 import { updateUserProfile } from './user-profile-service'
 import { cloudUserToProfile } from '../../lib/user-profile'
@@ -18,6 +19,9 @@ import {
   createAuthApi,
   isApiError,
   getCloudApiConfig,
+  withCloudDeadline,
+  assertCloudRequestActive,
+  cancelledCloudRequest,
 } from '@proma/cloud'
 import type { TokenStorage, CloudApiClient, AuthApi } from '@proma/cloud'
 import type {
@@ -56,6 +60,16 @@ interface PersistedAuthData {
 }
 
 // ===== 内存缓存 =====
+
+let sessionRevision = 0
+let authActionRevision = 0
+
+/** 账号代际，正常token轮换不改变。 */
+export function getCloudSessionRevision(): number { return sessionRevision }
+
+function assertSessionRevision(expected: number): void {
+  if (sessionRevision !== expected) throw cancelledCloudRequest()
+}
 
 let cachedAccessToken: string | null = null
 let cachedRefreshToken: string | null = null
@@ -137,7 +151,7 @@ function saveTokensToFile(): void {
   }
 
   try {
-    writeFileSync(path, JSON.stringify(data, null, 2))
+    writeTextFileAtomic(path, JSON.stringify(data, null, 2))
   } catch (error) {
     console.error('[Cloud Auth] 保存认证文件失败:', error)
   }
@@ -157,6 +171,7 @@ function clearPersistedTokens(): void {
 // ===== TokenStorage 适配器 =====
 
 const tokenStorage: TokenStorage = {
+  getSessionRevision: getCloudSessionRevision,
   getToken: () => cachedAccessToken,
   setToken: (token: string) => {
     cachedAccessToken = token
@@ -168,6 +183,7 @@ const tokenStorage: TokenStorage = {
     saveTokensToFile()
   },
   clearTokens: () => {
+    sessionRevision += 1
     cachedAccessToken = null
     cachedRefreshToken = null
     cachedUser = null
@@ -185,10 +201,11 @@ function broadcastAuthStateChanged(): void {
 }
 
 /** 清理仅在已登出或确认认证失效后才可继续使用的运行时状态。 */
-async function cleanupCloudSessionRuntime(): Promise<void> {
+async function cleanupCloudSessionRuntime(expected = sessionRevision): Promise<void> {
   // 清理官方渠道（延迟导入避免循环依赖）
   try {
     const { cleanupOfficialChannel, stopModelsPolling } = await import('./cloud-channel-service')
+    if (sessionRevision !== expected) return
     cleanupOfficialChannel()
     stopModelsPolling()
   } catch {
@@ -197,6 +214,7 @@ async function cleanupCloudSessionRuntime(): Promise<void> {
   // 清理 inner key 进程内缓存（1h TTL），避免旧账号凭据继续被复用。
   try {
     const { invalidatePromaAgentInnerKeyCache } = await import('./proma-agent-key-service')
+    if (sessionRevision !== expected) return
     invalidatePromaAgentInnerKeyCache()
   } catch {
     // 清理失败不应阻塞认证状态恢复
@@ -207,6 +225,7 @@ async function cleanupCloudSessionRuntime(): Promise<void> {
       import('./cloud-health-service'),
       import('./cloud-usage-service'),
     ])
+    if (sessionRevision !== expected) return
     clearHealthCache()
     clearAgentTokenActivityCache()
     clearAgentTurnUsageCache()
@@ -219,15 +238,16 @@ async function cleanupCloudSessionRuntime(): Promise<void> {
  * 仅用于服务端明确确认认证失效的场景。
  * 认证广播会让 CloudAuthGate 立即展示登录页；网络、超时和 5xx 不得调用此函数。
  */
-function invalidateExpiredCloudSession(): void {
-  tokenStorage.clearTokens()
+function invalidateExpiredCloudSession(tokensAlreadyCleared = false): void {
+  if (!tokensAlreadyCleared) tokenStorage.clearTokens()
   void cleanupCloudSessionRuntime()
   broadcastAuthStateChanged()
 }
 
 /** Clear account-scoped runtime state before replacing credentials for another user. */
 async function prepareCloudAccountChange(nextUserId?: string): Promise<void> {
-  if (cachedUser?.id === nextUserId) return
+  sessionRevision += 1
+  if (cachedUser?.id === nextUserId && nextUserId !== undefined) return
   await cleanupCloudSessionRuntime()
 }
 
@@ -240,19 +260,26 @@ async function prepareCloudAccountChange(nextUserId?: string): Promise<void> {
  * 初始化失败不阻断登录，后续首条消息仍会重试获取凭据。
  */
 async function initializeOfficialChannelForLogin(): Promise<void> {
+  const expected = sessionRevision
   try {
-    // 动态导入避免 cloud-channel-service 与本模块形成初始化期循环依赖。
-    const { clearSystemKeyCache, getSystemApiKey, initOfficialChannel } = await import('./cloud-channel-service')
-
-    // 登录可覆盖当前账号；绝不能复用上一个账号的进程内 system key。
-    clearSystemKeyCache()
-    await initOfficialChannel()
-    await getSystemApiKey()
+    await withCloudDeadline(async signal => {
+      const { clearSystemKeyCache, getSystemApiKey, initOfficialChannel } = await import('./cloud-channel-service')
+      assertCloudRequestActive(signal)
+      assertSessionRevision(expected)
+      clearSystemKeyCache()
+      await initOfficialChannel(signal)
+      assertCloudRequestActive(signal)
+      assertSessionRevision(expected)
+      // system key为共享缓存加载，独立有界；取消预热等待不能中断其他Agent调用。
+      await getSystemApiKey()
+    }, getCloudApiConfig().timeout)
   } catch (error) {
-    console.warn('[Cloud Auth] 登录后初始化官方渠道或 system key 失败，将在后续请求中重试:', error)
+    console.warn('[Cloud Auth] 登录预热未完成，后续请求将重试:', isApiError(error) ? error.kind : 'unknown')
   }
-
-  // 通知由 Renderer 在认证状态变化后立即拉取；无需建立常驻连接。
+  assertSessionRevision(expected)
+  const { startModelsPolling } = await import('./cloud-channel-service')
+  assertSessionRevision(expected)
+  startModelsPolling(false)
 }
 
 // ===== CloudUser → CloudUserInfo 转换 =====
@@ -299,7 +326,7 @@ export function getApiClient(): CloudApiClient {
       },
       onAuthFailed: () => {
         console.log('[Cloud Auth] 认证已失效，切换到登录页')
-        invalidateExpiredCloudSession()
+        invalidateExpiredCloudSession(true)
       },
     })
   }
@@ -324,51 +351,15 @@ export function getAuthToken(): string | null {
   return cachedAccessToken
 }
 
-/** Token 刷新响应 */
-interface RefreshTokenData {
-  access_token: string
-  refresh_token?: string
-}
-
-/**
- * 尝试刷新 access token
- *
- * 使用 refresh token 直接调用后端刷新接口（不经过 CloudApiClient，
- * 避免 client 内部 401 处理逻辑的干扰）。
- *
- * @returns 新的 access token，刷新失败时返回 null
- */
-export async function tryRefreshAuthToken(): Promise<string | null> {
-  if (!cachedRefreshToken) return null
-
+/** 主动恢复与CloudApiClient的401恢复共享同一个有界刷新流程。 */
+export async function tryRefreshAuthToken(expectedRevision = sessionRevision): Promise<string | null> {
+  if (expectedRevision !== sessionRevision || !cachedRefreshToken) return null
   try {
-    const config = getCloudApiConfig()
-    const response = await fetch(`${config.baseUrl}/auth/refresh`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: cachedRefreshToken }),
-    })
-
-    if (!response.ok) {
-      console.warn('[Cloud Auth] Token 刷新失败:', response.status)
-      // 只有 refresh endpoint 明确拒绝 token 时，才确认本地登录已失效并切换到登录页。
-      if (response.status === 401 || response.status === 403) {
-        invalidateExpiredCloudSession()
-      }
-      return null
-    }
-
-    const data = (await response.json()) as RefreshTokenData
-    cachedAccessToken = data.access_token
-    if (data.refresh_token) {
-      cachedRefreshToken = data.refresh_token
-    }
-    saveTokensToFile()
-
-    console.log('[Cloud Auth] Token 刷新成功')
-    return cachedAccessToken
+    const token = await getApiClient().refreshAuthToken()
+    assertSessionRevision(expectedRevision)
+    return token
   } catch (error) {
-    console.warn('[Cloud Auth] Token 刷新失败:', error)
+    console.warn('[Cloud Auth] Token 刷新失败:', isApiError(error) ? error.kind : 'unknown')
     return null
   }
 }
@@ -383,8 +374,10 @@ export async function initCloudAuthService(): Promise<void> {
 
   // 有 token 则尝试获取用户信息验证 token 有效性
   if (cachedAccessToken) {
+    const expected = sessionRevision
     try {
       const user = await getAuthApi().getMe()
+      assertSessionRevision(expected)
       cachedUser = toUserInfo(user)
       saveTokensToFile()
       syncCloudUserToLocalProfile(cachedUser)
@@ -394,13 +387,14 @@ export async function initCloudAuthService(): Promise<void> {
       console.warn('[Cloud Auth] 会话恢复失败:', failure.errorReason)
       // 网络、超时与服务端暂时故障不能把用户错误登出；只有服务端确认
       // 的 401/403 认证失效才可清除本地凭据。
-      if (failure.errorReason === 'auth') invalidateExpiredCloudSession()
+      if (failure.errorReason === 'auth' && expected === sessionRevision) invalidateExpiredCloudSession()
     }
   }
 }
 
 /** 登录 */
 export async function login(data: LoginRequest): Promise<CloudAuthIpcResponse> {
+  const action = ++authActionRevision
   try {
     const result = await getAuthApi().login(data)
 
@@ -409,9 +403,13 @@ export async function login(data: LoginRequest): Promise<CloudAuthIpcResponse> {
       return { success: false, error: '请先验证邮箱', user: toUserInfo(result.user) }
     }
 
+    if (action !== authActionRevision) throw cancelledCloudRequest()
     const nextUser = toUserInfo(result.user)
     await prepareCloudAccountChange(nextUser.id)
+    if (action !== authActionRevision) throw cancelledCloudRequest()
 
+    // 原子提交新代际和凭据：清理窗口内新建的旧账号请求也必须失效。
+    sessionRevision += 1
     // 保存 token 和可离线恢复的最小用户快照。
     cachedAccessToken = result.token
     cachedRefreshToken = result.refreshToken ?? null
@@ -422,6 +420,7 @@ export async function login(data: LoginRequest): Promise<CloudAuthIpcResponse> {
     // 必须在认证状态广播前完成首次官方渠道同步，避免新用户的 AppShell
     // 在渠道/默认模型尚不存在时挂载，导致首次登录黑屏。
     await initializeOfficialChannelForLogin()
+    if (action !== authActionRevision) throw cancelledCloudRequest()
     broadcastAuthStateChanged()
 
     return { success: true, user: cachedUser }
@@ -446,6 +445,7 @@ export async function register(data: RegisterRequest): Promise<CloudAuthIpcRespo
 
 /** 登出 */
 export async function logout(): Promise<CloudAuthIpcResponse> {
+  authActionRevision += 1
   tokenStorage.clearTokens()
   await cleanupCloudSessionRuntime()
   broadcastAuthStateChanged()
@@ -459,7 +459,9 @@ export async function getMe(): Promise<CloudAuthIpcResponse> {
   }
 
   try {
+    const expected = sessionRevision
     const user = await getAuthApi().getMe()
+    assertSessionRevision(expected)
     cachedUser = toUserInfo(user)
     return { success: true, user: cachedUser }
   } catch (error) {
@@ -548,17 +550,24 @@ export async function openGoogleLogin(): Promise<CloudAuthIpcResponse> {
  * 处理 OAuth 回调（deep-link: proma://oauth/callback?token=...）
  */
 export async function handleOAuthCallback(token: string, refreshToken?: string): Promise<CloudAuthIpcResponse> {
+  const action = ++authActionRevision
+  let acceptedRevision: number | undefined
   try {
     // The callback does not include a user ID, so clear old account state before
     // accepting its credentials. This prevents a new token from being paired
     // with a previous user's cached profile during a transient /auth/me failure.
     await prepareCloudAccountChange()
+    if (action !== authActionRevision) throw cancelledCloudRequest()
+    sessionRevision += 1
     cachedUser = null
     cachedAccessToken = token
     cachedRefreshToken = refreshToken ?? null
+    acceptedRevision = sessionRevision
     saveTokensToFile()
 
+    const expected = sessionRevision
     const user = await getAuthApi().getMe()
+    assertSessionRevision(expected)
     cachedUser = toUserInfo(user)
     saveTokensToFile()
     syncCloudUserToLocalProfile(cachedUser)
@@ -567,12 +576,13 @@ export async function handleOAuthCallback(token: string, refreshToken?: string):
     // Onboarding 会在认证成功后立即创建欢迎 Agent 会话；若先广播，首次
     // Google 登录可能在 proma-official 渠道/默认模型落盘前抢先发送首条消息。
     await initializeOfficialChannelForLogin()
+    if (action !== authActionRevision) throw cancelledCloudRequest()
     broadcastAuthStateChanged()
 
     return { success: true, user: cachedUser }
   } catch (error) {
     const failure = toSafeAuthFailure(error, '获取用户信息失败')
-    if (failure.errorReason === 'auth') invalidateExpiredCloudSession()
+    if (failure.errorReason === 'auth' && acceptedRevision === sessionRevision) invalidateExpiredCloudSession()
     return { success: false, ...failure }
   }
 }

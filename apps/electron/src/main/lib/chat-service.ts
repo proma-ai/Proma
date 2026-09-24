@@ -24,7 +24,7 @@ import {
 } from '@proma/core'
 import type { ImageAttachmentData, ContinuationMessage } from '@proma/core'
 import { listChannels, resolveChannelRuntimeApiKey } from './channel-manager'
-import { getAuthToken, tryRefreshAuthToken } from './cloud-auth-service'
+import { getAuthToken, getCloudSessionRevision, tryRefreshAuthToken } from './cloud-auth-service'
 import { getCloudApiConfig } from '@proma/cloud'
 import { appendMessage, updateConversationMeta, getConversationMessages } from './conversation-manager'
 import { readAttachmentAsBase64, isImageAttachment } from './attachment-service'
@@ -299,6 +299,7 @@ export async function sendMessage(
   }
 
   // 2. 获取 API Key 和 Base URL
+  const cloudSessionRevision = getCloudSessionRevision()
   let apiKey: string
   let baseUrl: string
 
@@ -391,6 +392,9 @@ export async function sendMessage(
 
     /** 构建并执行流式请求（含 Proma 官方渠道 401 刷新重试） */
     const executeStream = async (key: string): Promise<void> => {
+      if (channel.provider === 'proma' && cloudSessionRevision !== getCloudSessionRevision()) {
+        throw new Error('Cloud 账号已切换，请重新发起请求')
+      }
       let continuationMessages: ContinuationMessage[] = []
       let round = 0
       let pendingToolResults = false
@@ -498,7 +502,7 @@ export async function sendMessage(
 
 
         if (status === 401) {
-          const newToken = await tryRefreshAuthToken()
+          const newToken = await tryRefreshAuthToken(cloudSessionRevision)
           if (newToken) {
             accumulatedContent = ''
             accumulatedReasoning = ''
@@ -689,6 +693,7 @@ export async function generateTitle(input: GenerateTitleInput): Promise<string |
     return fallbackTitle
   }
 
+  const cloudSessionRevision = getCloudSessionRevision()
   let apiKey: string
   let baseUrl: string
   if (channel.provider === 'proma') {
@@ -715,6 +720,7 @@ export async function generateTitle(input: GenerateTitleInput): Promise<string |
   const fetchFn = getFetchFn(proxyUrl)
   const titleModelId = channel.provider === 'proma' ? PROMA_TITLE_MODEL : modelId
   const doFetch = async (key: string): Promise<string | null> => {
+    if (channel.provider === 'proma' && cloudSessionRevision !== getCloudSessionRevision()) return null
     const request = adapter.buildTitleRequest({ baseUrl, apiKey: key, modelId: titleModelId, prompt: TITLE_PROMPT + userMessage })
     return fetchTitle(request, adapter, fetchFn)
   }
@@ -722,7 +728,7 @@ export async function generateTitle(input: GenerateTitleInput): Promise<string |
   try {
     let title = await doFetch(apiKey)
     if (!title && channel.provider === 'proma') {
-      const newToken = await tryRefreshAuthToken()
+      const newToken = await tryRefreshAuthToken(cloudSessionRevision)
       if (newToken) {
         console.log('[标题生成] Token 已刷新，重试...')
         title = await doFetch(newToken)
