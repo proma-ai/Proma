@@ -140,29 +140,39 @@ export function DiffPanelTabBar({
     thumb.style.transform = `translateX(${thumbOffset}px)`
   }, [])
 
-  React.useLayoutEffect(() => {
+  const revealActiveTab = React.useCallback((behavior: ScrollBehavior) => {
     const tabList = tabListRef.current
     const activeTabElement = tabRefs.current.get(activeTab)
     if (!tabList || !activeTabElement) return
 
     const nextScrollLeft = getScrollLeftToRevealTab(tabList, activeTabElement)
     if (nextScrollLeft !== tabList.scrollLeft) {
-      tabList.scrollTo({ left: nextScrollLeft, behavior: 'smooth' })
+      tabList.scrollTo({ left: nextScrollLeft, behavior })
     }
+  }, [activeTab])
+
+  React.useLayoutEffect(() => {
+    revealActiveTab('smooth')
     syncScrollbarThumb()
-  }, [activeTab, syncScrollbarThumb, tabs.length])
+  }, [revealActiveTab, syncScrollbarThumb, tabs.length])
 
   React.useLayoutEffect(() => {
     const tabList = tabListRef.current
     const track = scrollbarTrackRef.current
     if (!tabList) return
 
-    const observer = new ResizeObserver(syncScrollbarThumb)
+    // 右侧工作区从收起状态展开，或用户调整其宽度时，activeTab 和 tabs.length
+    // 都不会变化。需要在尺寸稳定后重新计算，否则新激活的网页 Tab 可能仍在可视区外。
+    const handleResize = (): void => {
+      revealActiveTab('auto')
+      syncScrollbarThumb()
+    }
+    const observer = new ResizeObserver(handleResize)
     observer.observe(tabList)
     if (track) observer.observe(track)
-    syncScrollbarThumb()
+    handleResize()
     return () => observer.disconnect()
-  }, [hasHorizontalOverflow, syncScrollbarThumb, tabs.length])
+  }, [hasHorizontalOverflow, revealActiveTab, syncScrollbarThumb, tabs.length])
 
   React.useEffect(() => {
     const tabList = tabListRef.current
