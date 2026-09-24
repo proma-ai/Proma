@@ -4476,7 +4476,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
                 >
                   {session.title}
                 </span>
-                <SafeTooltip content={session.starred ? '取消星标' : '添加星标'} side="top">
+                <SafeTooltip content={session.starred ? '取消星标' : '添加星标（不会被自动归档）'} side="top">
                   <button
                     type="button"
                     aria-label={session.starred ? '取消星标' : '添加星标'}

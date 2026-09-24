@@ -792,7 +792,7 @@ export interface AgentSessionMeta {
   sessionWorkbenchLayout?: SessionWorkbenchLayout
   /** 是否置顶 */
   pinned?: boolean
-  /** 是否已星标（仅用于侧栏快速识别，不影响排序或置顶） */
+  /** 是否已星标（不会被自动归档，不影响排序或置顶；手动归档仍保留） */
   starred?: boolean
   /** 是否已归档 */
   archived?: boolean

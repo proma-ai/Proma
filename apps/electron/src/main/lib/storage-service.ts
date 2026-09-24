@@ -535,7 +535,8 @@ function cleanupArchivedSessions(beforeDays: number): CleanupResult {
   const errors: string[] = []
 
   for (const session of sessions) {
-    if (!session.archived || session.updatedAt > cutoff) continue
+    // 星标是用户主动保留的标记；手动归档后仍不参与批量正文清理。
+    if (!session.archived || session.starred || session.updatedAt > cutoff) continue
 
     // 删除 JSONL 消息文件
     const msgPath = join(getAgentSessionsDir(), `${session.id}.jsonl`)
