@@ -11,7 +11,6 @@
  */
 
 import { dirname, isAbsolute, join, relative, resolve, sep, win32 } from 'node:path'
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { mkdir as mkdirAsync, writeFile as writeFileAsync } from 'node:fs/promises'
 import { BrowserWindow } from 'electron'
 import type { WebContents } from 'electron'
@@ -742,42 +741,26 @@ export function clearAgentQueuedMessages(sessionId: string): void {
  *
  * 将 base64 编码的文件写入当前会话的私有工作目录，供 Agent 通过授权的附加目录读取。
  */
-export function saveFilesToAgentSession(input: AgentSaveFilesInput): AgentSavedFile[] {
+export async function saveFilesToAgentSession(input: AgentSaveFilesInput): Promise<AgentSavedFile[]> {
   const sessionDir = getAgentSessionWorkspacePath(input.workspaceSlug, input.sessionId)
   const attachmentsDir = join(sessionDir, 'attachments')
-  const results: AgentSavedFile[] = []
-  const usedPaths = new Set<string>()
-
   const decodedFiles = input.files.map((file) => {
     const buffer = Buffer.from(file.data, 'base64')
     if (buffer.length > MAX_ATTACHMENT_SIZE) {
       throw new Error(`文件超过 100MB 限制: ${file.filename}`)
     }
-    return { file, buffer }
-  })
-
-  for (const { file, buffer } of decodedFiles) {
-    let targetPath = resolveSafeWorkspaceFilePath(attachmentsDir, file.filename)
-
-    // 防止同名文件覆盖
-    if (usedPaths.has(targetPath) || existsSync(targetPath)) {
-      const dotIdx = file.filename.lastIndexOf('.')
-      const baseName = dotIdx > 0 ? file.filename.slice(0, dotIdx) : file.filename
-      const ext = dotIdx > 0 ? file.filename.slice(dotIdx) : ''
-      let counter = 1
-      let candidate = join(attachmentsDir, `${baseName}-${counter}${ext}`)
-      while (usedPaths.has(candidate) || existsSync(candidate)) {
-        counter++
-        candidate = join(attachmentsDir, `${baseName}-${counter}${ext}`)
-      }
-      targetPath = candidate
+    return {
+      file,
+      initialTargetPath: resolveSafeWorkspaceFilePath(attachmentsDir, file.filename),
+      buffer,
     }
-    usedPaths.add(targetPath)
+  })
+  const results: AgentSavedFile[] = []
+  const usedPaths = new Set<string>()
 
-    mkdirSync(dirname(targetPath), { recursive: true })
-    writeFileSync(targetPath, buffer)
-
-    const actualFilename = targetPath.slice(sessionDir.length + 1)
+  for (const { file, initialTargetPath, buffer } of decodedFiles) {
+    const targetPath = await writeUniqueWorkspaceFile(attachmentsDir, initialTargetPath, buffer, usedPaths)
+    const actualFilename = relative(sessionDir, targetPath)
     results.push({ filename: actualFilename, targetPath })
     console.log(`[Agent 服务] 文件已保存: ${targetPath} (${buffer.length} bytes)`)
   }

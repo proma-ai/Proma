@@ -1506,6 +1506,59 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
     }
   }, [attachSessionFile, makeUniqueFilename, setPendingFiles])
 
+  /**
+   * 将外部 File 保存为会话私有副本，并插入与普通拖拽相同的可编辑 @ 文件引用 chip。
+   * 没有可用工作区或无法保存的文件仍回退到既有附件流程，避免丢失用户文件。
+   */
+  const addFilesAsSessionReferences = React.useCallback(async (
+    files: File[],
+    sourcePaths?: Map<File, string>,
+  ): Promise<void> => {
+    if (files.length === 0) return
+
+    const workspace = workspaces.find((item) => item.id === currentWorkspaceId)
+    const savedRefs: Array<{ path: string; name: string }> = []
+    const fallbackFiles: File[] = []
+
+    for (const file of files) {
+      if (!workspace?.slug || file.size > MAX_ATTACHMENT_SIZE) {
+        fallbackFiles.push(file)
+        continue
+      }
+
+      try {
+        const data = await fileToBase64(file)
+        const saved = await window.electronAPI.saveFilesToAgentSession({
+          workspaceSlug: workspace.slug,
+          sessionId,
+          files: [{ filename: file.name, data }],
+        })
+        const savedFile = saved[0]
+        if (savedFile) {
+          savedRefs.push({ path: savedFile.targetPath, name: savedFile.filename })
+        } else {
+          fallbackFiles.push(file)
+        }
+      } catch (error) {
+        console.error('[AgentView] 外部文件复制到会话目录失败:', error)
+        fallbackFiles.push(file)
+      }
+    }
+
+    if (savedRefs.length > 0) {
+      richTextInputRef.current?.insertFileMentions(savedRefs.map((file) => ({
+        path: file.path,
+        name: file.name,
+        isDirectory: false,
+        scope: 'session',
+      })))
+      toast.success(`已引用 ${savedRefs.length} 个文件`)
+    }
+    if (fallbackFiles.length > 0) {
+      await addFilesAsAttachments(fallbackFiles, sourcePaths)
+    }
+  }, [addFilesAsAttachments, currentWorkspaceId, sessionId, workspaces])
+
   const addLargeDialogFilesAsReferences = React.useCallback(async (files: FileDialogLargeFile[]): Promise<void> => {
     if (files.length === 0) return
     const usedNames: string[] = pendingFilesRef.current.map((f) => f.filename)
@@ -1713,10 +1766,10 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
     return pending
   }, [setPendingFiles])
 
-  /** 粘贴文件处理 */
+  /** 粘贴文件与普通拖拽共用会话副本 + 可编辑 @ 文件引用 chip 路径。 */
   const handlePasteFiles = React.useCallback((files: File[]): void => {
-    addFilesAsAttachments(files)
-  }, [addFilesAsAttachments])
+    void addFilesAsSessionReferences(files)
+  }, [addFilesAsSessionReferences])
 
   /** 粘贴超长文本时转为待发送附件，避免把大段内容直接塞进输入框 */
   const handlePasteLongText = React.useCallback((text: string): void => {
@@ -1870,51 +1923,7 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
             if (file) sourcePaths.set(file, path)
           }
 
-          const workspace = workspaces.find((w) => w.id === currentWorkspaceId)
-          const canSave = Boolean(workspace?.slug)
-          const savedRefs: Array<{ path: string; name: string }> = []
-          const fallbackFiles: File[] = []
-
-          for (const file of regularFiles) {
-            if (!canSave || file.size > MAX_ATTACHMENT_SIZE) {
-              fallbackFiles.push(file)
-              continue
-            }
-            try {
-              const data = await fileToBase64(file)
-              const saved = await window.electronAPI.saveFilesToAgentSession({
-                workspaceSlug: workspace!.slug,
-                sessionId,
-                files: [{ filename: file.name, data }],
-              })
-              if (saved && saved.length > 0) {
-                const [savedFile] = saved
-                if (savedFile) {
-                  savedRefs.push({ path: savedFile.targetPath, name: savedFile.filename })
-                } else {
-                  fallbackFiles.push(file)
-                }
-              } else {
-                fallbackFiles.push(file)
-              }
-            } catch (error) {
-              console.error('[AgentView] 外部文件复制到会话目录失败:', error)
-              fallbackFiles.push(file)
-            }
-          }
-
-          if (savedRefs.length > 0) {
-            richTextInputRef.current?.insertFileMentions(savedRefs.map((r) => ({
-              path: r.path,
-              name: r.name,
-              isDirectory: false,
-              scope: 'session',
-            })))
-            toast.success(`已引用 ${savedRefs.length} 个文件`)
-          }
-          if (fallbackFiles.length > 0) {
-            addFilesAsAttachments(fallbackFiles, sourcePaths)
-          }
+          await addFilesAsSessionReferences(regularFiles, sourcePaths)
         }
       } catch (error) {
         console.error('[AgentView] 路径检测失败，回退处理:', error)
@@ -1924,7 +1933,7 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
       // 无路径信息：回退，所有项按普通文件处理
       addFilesAsAttachments(droppedFiles)
     }
-  }, [sessionId, addFilesAsAttachments, addPanelDirectory, setAttachedDirsMap, workspaces, currentWorkspaceId, isComposerDisabled])
+  }, [sessionId, addFilesAsAttachments, addFilesAsSessionReferences, addPanelDirectory, setAttachedDirsMap, isComposerDisabled])
 
   /** ModelSelector 选择回调 */
   const handleModelSelect = React.useCallback((option: ModelOption): void => {
