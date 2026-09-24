@@ -18,11 +18,12 @@
  */
 
 import * as React from 'react'
+import { createPortal } from 'react-dom'
 import Markdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
-import { CalendarDays, ChevronDown, ChevronUp, Paperclip, FileText, ListTodo, Sparkles, Server, Download, MessageSquareText, Quote } from 'lucide-react'
+import { CalendarDays, ChevronDown, ChevronUp, Paperclip, FileText, ListTodo, Sparkles, Server, Download, MessageSquareText, Quote, ExternalLink } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { shouldInspectMermaidCodeBlock, shouldRenderMermaidCodeBlock } from '@/lib/mermaid-detection'
 import { normalizeLatexDelimiters } from '@/lib/normalize-latex'
@@ -45,6 +46,7 @@ import { createMentionPattern } from '@/lib/mention-patterns'
 import { resolveSkillMentionName } from '@/lib/skill-mention-name'
 import { useSkillMentionNames } from '@/components/agent/SkillMentionNamesProvider'
 import { useAgentBrowserLink } from '@/components/browser/AgentBrowserLinkProvider'
+import { getSafeExternalUrl } from '@/components/selection/external-link'
 import type { HTMLAttributes, ComponentProps, ReactNode } from 'react'
 import type { FileAttachment } from '@proma/shared'
 import type { QuotedSelection } from '@/atoms/preview-atoms'
@@ -544,16 +546,172 @@ function mentionUrlTransform(url: string): string {
 /** mention:// URL 匹配 */
 const MENTION_URL_RE = /^mention:\/\/(file|skill|mcp|session|todo|calendar_event|quote)\/(.+)$/
 
-/** 外部链接 / mention chip 渲染器 */
-const MarkdownLink = React.memo(function MarkdownLink({
+/** 外部链接 hover bar 渲染器 */
+const ExternalMarkdownLink = React.memo(function ExternalMarkdownLink({
   href,
   children: linkChildren,
   ...linkProps
 }: React.AnchorHTMLAttributes<HTMLAnchorElement>): React.ReactElement {
   const agentBrowserLink = useAgentBrowserLink()
+  const externalUrl = getSafeExternalUrl(href)
+  const linkRef = React.useRef<HTMLAnchorElement>(null)
+  const barRef = React.useRef<HTMLSpanElement>(null)
+  const hideTimerRef = React.useRef<number | null>(null)
+  const repositionFrameRef = React.useRef<number | null>(null)
+  const [showAbove, setShowAbove] = React.useState(false)
+  const [isHovering, setIsHovering] = React.useState(false)
+  const [barPosition, setBarPosition] = React.useState<{ left: number; top: number } | null>(null)
+
+  const clearHideTimer = React.useCallback((): void => {
+    if (hideTimerRef.current !== null) {
+      window.clearTimeout(hideTimerRef.current)
+      hideTimerRef.current = null
+    }
+  }, [])
+
+  const updateBarPosition = React.useCallback((): void => {
+    const rect = linkRef.current?.getBoundingClientRect()
+    if (!rect) return
+
+    const gap = 6
+    const viewportPadding = 12
+    const barElement = barRef.current
+    const barHeight = barElement?.getBoundingClientRect().height ?? 48
+    const barWidth = barElement?.getBoundingClientRect().width ?? 0
+    const maxLeft = Math.max(viewportPadding, window.innerWidth - viewportPadding - barWidth)
+    const left = Math.min(Math.max(rect.left, viewportPadding), maxLeft)
+    const nextShowAbove = rect.bottom + barHeight + gap > window.innerHeight
+    const top = nextShowAbove ? Math.max(8, rect.top - barHeight - gap) : rect.bottom
+
+    setShowAbove((previous) => previous === nextShowAbove ? previous : nextShowAbove)
+    setBarPosition((previous) => (
+      previous?.left === left && previous.top === top ? previous : { left, top }
+    ))
+  }, [])
+
+  const scheduleReposition = React.useCallback((): void => {
+    if (repositionFrameRef.current !== null) return
+    repositionFrameRef.current = window.requestAnimationFrame(() => {
+      repositionFrameRef.current = null
+      updateBarPosition()
+    })
+  }, [updateBarPosition])
+
+  const scheduleHide = React.useCallback((): void => {
+    clearHideTimer()
+    hideTimerRef.current = window.setTimeout(() => {
+      setIsHovering(false)
+      setBarPosition(null)
+      hideTimerRef.current = null
+    }, 180)
+  }, [clearHideTimer])
+
+  React.useEffect(() => () => {
+    clearHideTimer()
+    if (repositionFrameRef.current !== null) {
+      window.cancelAnimationFrame(repositionFrameRef.current)
+    }
+  }, [clearHideTimer])
+
+  React.useEffect(() => {
+    if (!isHovering || !externalUrl) return
+
+    // 仅在 hover bar 可见时监听，并用 rAF 合并滚动事件，避免每个 scroll 事件触发 React 重渲染。
+    const handleViewportChange = (): void => scheduleReposition()
+    window.addEventListener('resize', handleViewportChange)
+    window.addEventListener('scroll', handleViewportChange, { capture: true, passive: true })
+    scheduleReposition()
+
+    return () => {
+      window.removeEventListener('resize', handleViewportChange)
+      window.removeEventListener('scroll', handleViewportChange, { capture: true })
+    }
+  }, [externalUrl, isHovering, scheduleReposition])
+
+  const handleMouseEnter = (): void => {
+    clearHideTimer()
+    setIsHovering(true)
+    updateBarPosition()
+  }
+
+  const handleBarMouseEnter = (): void => {
+    clearHideTimer()
+    setIsHovering(true)
+  }
+
+  const link = (
+    <a
+      {...linkProps}
+      ref={linkRef}
+      href={href}
+      onClick={(e) => {
+        e.preventDefault()
+        if (externalUrl) {
+          if (agentBrowserLink) agentBrowserLink.openLink(externalUrl)
+          else void window.electronAPI.openExternal(externalUrl)
+        }
+      }}
+    >
+      {linkChildren}
+    </a>
+  )
+
+  const linkWrapper = (
+    <span
+      className="relative inline-block max-w-full align-baseline"
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={scheduleHide}
+    >
+      {link}
+    </span>
+  )
+
+  if (!externalUrl || !barPosition || !isHovering) return linkWrapper
+
+  const bar = (
+    <span
+      ref={barRef}
+      className={`fixed z-[10050] pointer-events-auto w-max max-w-[min(36rem,calc(100vw-2rem))] ${showAbove ? 'pb-1.5' : 'pt-1.5'}`}
+      style={{ left: barPosition.left, top: barPosition.top }}
+      onMouseEnter={handleBarMouseEnter}
+      onMouseLeave={scheduleHide}
+    >
+      <span className="flex max-w-full items-center gap-2 rounded-lg bg-popover/95 p-1.5 text-popover-foreground shadow-xl ring-1 ring-border/50 backdrop-blur">
+        <span className="min-w-0 max-w-[min(28rem,calc(100vw-8rem))] truncate px-1.5 text-xs text-muted-foreground">
+          {externalUrl}
+        </span>
+        <button
+          type="button"
+          className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+          onClick={() => {
+            void window.electronAPI.openExternal(externalUrl)
+          }}
+          aria-label="在默认浏览器中打开"
+        >
+          <ExternalLink className="size-3.5" />
+          在默认浏览器中打开
+        </button>
+      </span>
+    </span>
+  )
+
+  return (
+    <>
+      {linkWrapper}
+      {createPortal(bar, document.body)}
+    </>
+  )
+})
+
+/** mention:// 和本地文件链接保持原有 chip 行为；外部链接交给带 hover bar 的子组件。 */
+const MarkdownLink = React.memo(function MarkdownLink({
+  href,
+  children: linkChildren,
+  ...linkProps
+}: React.AnchorHTMLAttributes<HTMLAnchorElement>): React.ReactElement {
   const pathResolutionContext = React.useContext(BasePathsContext)
   const contextBasePaths = pathResolutionContext?.basePaths
-  // mention:// 协议 → 渲染为 MentionChip
+
   if (href) {
     const mentionMatch = MENTION_URL_RE.exec(href)
     if (mentionMatch) {
@@ -573,22 +731,7 @@ const MarkdownLink = React.memo(function MarkdownLink({
     }
   }
 
-  return (
-    <a
-      {...linkProps}
-      href={href}
-      onClick={(e) => {
-        e.preventDefault()
-        if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
-          if (agentBrowserLink) agentBrowserLink.openLink(href)
-          else void window.electronAPI.openExternal(href)
-        }
-      }}
-      title={href}
-    >
-      {linkChildren}
-    </a>
-  )
+  return <ExternalMarkdownLink href={href} {...linkProps}>{linkChildren}</ExternalMarkdownLink>
 })
 
 /**
