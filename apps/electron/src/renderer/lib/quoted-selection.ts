@@ -193,6 +193,33 @@ export function buildQuotedSelectionLabel(quote: QuotedSelection): string {
   return `${filename}：${preview}`
 }
 
+/** 将右侧文档选区转换为已发送消息可渲染的 @file chip marker。 */
+export function serializeQuotedSelectionFileMention(quote: Pick<QuotedSelection, 'sourceType' | 'filePath'>): string | null {
+  if (quote.sourceType !== 'file' || !isNonEmptyString(quote.filePath)) return null
+  return `@file:${encodeURIComponent(quote.filePath)}`
+}
+
+/**
+ * 将已发送消息中的文件选区 XML 原位替换为 @file marker。
+ * 选区正文仍已持久化在历史消息中，但展示层只保留文件 chip，并保持其原始文档顺序。
+ */
+export function replaceQuotedFileBlocksWithFileMentions(content: string): string {
+  QUOTED_FILE_REGEX.lastIndex = 0
+  return content.replace(QUOTED_FILE_REGEX, (block) => {
+    const pathMatch = block.match(/path="([^"]*)"/)
+    if (!pathMatch) return block
+
+    const filePath = decodeXmlAttribute(pathMatch[1]!)
+    const marker = serializeQuotedSelectionFileMention({ sourceType: 'file', filePath })
+    if (!marker) return block
+
+    // buildQuotedSelectionBlock() 为模型上下文追加了两个换行；它们不属于用户正文，
+    // 展示时收敛成一个空格，避免文件 chip 被强制放到独立一行。
+    const hasTrailingLineBreak = /(?:\r?\n)+$/.test(block)
+    return hasTrailingLineBreak ? `${marker} ` : marker
+  })
+}
+
 /** 为已发送消息生成展示用历史引用 marker，允许缺少旧版本的定位字段。 */
 export function serializeAgentHistoryQuoteDisplayMention(quote: QuotedSelection): string | null {
   if (quote.sourceType !== 'agent-history' || !isNonEmptyString(quote.text) || !isNonEmptyString(quote.messageId)) {

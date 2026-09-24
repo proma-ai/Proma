@@ -12,7 +12,7 @@
  */
 
 import * as React from 'react'
-import { Bot, Loader2, AlertTriangle, FileText, FileImage, Download, Split, Undo2, RotateCw, Plus, Minimize2, Wrench, Settings, Cpu, ExternalLink, Quote, Clock, CreditCard, FolderInput, FolderPlus, ListTodo } from 'lucide-react'
+import { Bot, Loader2, AlertTriangle, FileText, FileImage, Download, Split, Undo2, RotateCw, Plus, Minimize2, Wrench, Settings, Cpu, ExternalLink, Clock, CreditCard, FolderInput, FolderPlus, ListTodo } from 'lucide-react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { cn } from '@/lib/utils'
 import { ImageLightbox, type LightboxImage } from '@/components/ui/image-lightbox'
@@ -64,7 +64,11 @@ import { environmentCheckDialogOpenAtom } from '@/atoms/environment'
 import { settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
 import { useOpenPreview } from '@/components/diff/preview-opener'
 import { getFileParentPath } from '@/lib/file-utils'
-import { parseQuotedSelectionRefs, replaceAgentHistoryQuoteMentionsWithLabels } from '@/lib/quoted-selection'
+import {
+  parseQuotedSelectionRefs,
+  replaceAgentHistoryQuoteMentionsWithLabels,
+  replaceQuotedFileBlocksWithFileMentions,
+} from '@/lib/quoted-selection'
 import type { QuotedSelection } from '@/atoms/preview-atoms'
 import type { ParsedQuotedSelectionRef } from '@/lib/quoted-selection'
 import type {
@@ -926,17 +930,6 @@ function AttachedFileChip({ file }: { file: AttachedFileRef }): React.ReactEleme
 }
 
 
-/** 引用文件 Chip（显示在用户消息中，表示该消息引用了某个文件的选中内容） */
-function QuoteChip({ quote }: { quote: QuotedFileRef }): React.ReactElement {
-  const label = quote.label ?? quote.filename
-  return (
-    <div className="inline-flex items-center gap-1.5 rounded-md bg-primary/8 border border-primary/20 px-2.5 py-1 text-[12px] text-muted-foreground">
-      <Quote className="size-3.5 shrink-0 text-primary/60" />
-      <span className="truncate max-w-[200px]">{label}</span>
-    </div>
-  )
-}
-
 // ===== 用户输入消息渲染 =====
 
 
@@ -985,8 +978,9 @@ function UserInputMessage({ message, onAgentHistoryQuoteClick }: {
   const userProfile = useAtomValue(userProfileAtom)
   const rawText = extractUserText(message) ?? ''
   const isScheduledRun = rawText.includes(SCHEDULED_RUN_MARKER)
-  const { files: attachedFiles, quotes, text } = parseAttachedFiles(
-    stripScheduledRunMarker(rawText),
+  const displaySourceText = replaceQuotedFileBlocksWithFileMentions(stripScheduledRunMarker(rawText))
+  const { files: attachedFiles, text } = parseAttachedFiles(
+    displaySourceText,
     { inlineAgentHistoryQuotes: true },
   )
   const imageFiles = attachedFiles.filter((f) => isImageFile(f.filename))
@@ -1066,16 +1060,6 @@ function UserInputMessage({ message, onAgentHistoryQuoteClick }: {
         </div>
       </div>
       <MessageContent>
-        {/* 引用文件 Chip */}
-        {quotes.filter((quote) => quote.sourceType !== 'agent-history').length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mb-2">
-            {quotes
-              .filter((quote) => quote.sourceType !== 'agent-history')
-              .map((q, i) => (
-                <QuoteChip key={`${q.path}:${i}`} quote={q} />
-              ))}
-          </div>
-        )}
         {/* 图片缩略图 */}
         {imageFiles.length > 0 && (
           <div className="flex flex-wrap gap-2.5 mb-2">
