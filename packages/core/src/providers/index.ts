@@ -40,9 +40,7 @@ const adapterRegistry = new Map<ProviderType, ProviderAdapter>([
   ['zhipu', new OpenAIAdapter()],         // 智谱 AI 使用 OpenAI 兼容协议
   ['zhipu-coding', new AnthropicAdapter('zhipu-coding')], // 智谱 Coding Plan 订阅制（强制 User-Agent）
   ['zhipu-coding-team', new AnthropicAdapter('zhipu-coding-team')], // 智谱 Coding Plan 团队版
-  ['ark-coding-plan', new AnthropicAdapter('ark-coding-plan')], // 火山方舟 Agent Plan 使用 Anthropic 兼容协议
   ['minimax', new AnthropicAdapter('minimax')], // MiniMax 使用 Anthropic 兼容协议
-  ['doubao', new OpenAIAdapter()],        // 火山方舟 Coding Plan 使用 OpenAI 兼容协议
   ['doubao-api', new OpenAIAdapter()],    // 豆包 API 使用 OpenAI 兼容协议
   ['qwen', new OpenAIAdapter()],          // 通义千问使用 OpenAI 兼容协议
   ['qwen-anthropic', new AnthropicAdapter('qwen-anthropic')],       // 通义千问 DashScope Anthropic 兼容协议

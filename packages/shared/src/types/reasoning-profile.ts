@@ -19,7 +19,6 @@ export function inferReasoningTransport(provider: ProviderType | undefined): Rea
   switch (provider) {
     case 'openai':
     case 'zhipu':
-    case 'doubao':
     case 'doubao-api':
     case 'qwen':
     case 'custom':
