@@ -98,7 +98,6 @@ export function detectThinkingCapability(
     || providerType === 'kimi-coding'
     || providerType === 'zhipu-coding'
     || providerType === 'zhipu-coding-team'
-    || providerType === 'ark-coding-plan'
     || providerType === 'minimax'
     || providerType === 'qwen-token-plan'
     || providerType === 'xiaomi-token-plan'

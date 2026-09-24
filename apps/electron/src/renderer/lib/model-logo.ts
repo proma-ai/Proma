@@ -262,9 +262,9 @@ const PROVIDER_LOGO_MAP: Record<ProviderType, string> = {
   zhipu: ZhipuLogo,
   'zhipu-coding': ZhipuLogo,
   'zhipu-coding-team': ZhipuLogo,
-  'ark-coding-plan': VolcengineLogo,
+  'ark-coding-plan': DefaultLogo, // 存量配置迁移占位，不提供渠道支持。
   minimax: MiniMaxLogo,
-  doubao: VolcengineLogo,
+  doubao: DefaultLogo, // 存量配置迁移占位，不提供渠道支持。
   'doubao-api': VolcengineLogo,
   qwen: QwenLogo,
   'qwen-anthropic': QwenLogo,

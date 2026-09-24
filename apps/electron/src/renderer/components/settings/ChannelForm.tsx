@@ -33,7 +33,6 @@ import {
   PROVIDER_DEFAULT_URLS,
   PROVIDER_LABELS,
   PROMA_OFFICIAL_CHANNEL_ID,
-  VOLCENGINE_CODING_PLAN_MODELS,
   parseZhipuTeamCredentials,
   parseCodexCredentials,
   parseGithubCopilotCredentials,
@@ -78,7 +77,7 @@ interface ChannelFormProps {
 }
 
 /** 商业版仅开放供应商官方 API；`qwen-anthropic` 仅兼容存量配置。 */
-const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'openai', 'openai-responses', 'openai-codex', 'github-copilot', 'xai', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'zhipu', 'zhipu-coding', 'zhipu-coding-team', 'ark-coding-plan', 'doubao', 'doubao-api', 'minimax', 'qwen', 'qwen-token-plan', 'xiaomi', 'xiaomi-token-plan']
+const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'openai', 'openai-responses', 'openai-codex', 'github-copilot', 'xai', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'zhipu', 'zhipu-coding', 'zhipu-coding-team', 'doubao-api', 'minimax', 'qwen', 'qwen-token-plan', 'xiaomi', 'xiaomi-token-plan']
 
 
 /** 需要用 messages 端点测试的供应商预设模型 */
@@ -386,23 +385,6 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
           { id: 'glm-5.3-flashx', name: 'GLM-5.3-FlashX', enabled: true },
           { id: 'glm-5.1', name: 'GLM-5.1', enabled: false },
         ])
-      } else if (p === 'ark-coding-plan') {
-        setModels([
-          { id: 'doubao-seed-2.1-pro', name: 'Doubao Seed 2.1 Pro', enabled: true },
-          { id: 'doubao-seed-2.1-turbo', name: 'Doubao Seed 2.1 Turbo', enabled: true },
-          { id: 'doubao-seed-2.0-code', name: 'Doubao Seed 2.0 Code', enabled: true },
-          { id: 'doubao-seed-2.0-pro', name: 'Doubao Seed 2.0 Pro', enabled: true },
-          { id: 'doubao-seed-2.0-lite', name: 'Doubao Seed 2.0 Lite', enabled: true },
-          { id: 'glm-5.3', name: 'GLM-5.3', enabled: true },
-          { id: 'k3', name: 'Kimi K3', enabled: true },
-          { id: 'kimi-k2.7-code', name: 'Kimi K2.7 Code', enabled: true },
-          { id: 'minimax-m3', name: 'MiniMax M3', enabled: true },
-          { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true },
-          { id: 'deepseek-flash', name: 'DeepSeek Flash', enabled: true },
-          { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', enabled: true },
-        ])
-      } else if (p === 'doubao') {
-        setModels(VOLCENGINE_CODING_PLAN_MODELS.map((model) => ({ ...model })))
       } else if (p === 'minimax') {
         setModels([
           { id: 'MiniMax-M3', name: 'MiniMax-M3', enabled: true },

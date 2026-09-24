@@ -227,7 +227,6 @@ export function normalizeAnthropicProviderUrl(baseUrl: string, provider: Provide
     || provider === 'qwen-token-plan'
     || provider === 'zhipu-coding'
     || provider === 'zhipu-coding-team'
-    || provider === 'ark-coding-plan'
     || provider === 'deepseek'
     || provider === 'kimi-api'
     || provider === 'kimi-coding'

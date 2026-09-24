@@ -512,7 +512,6 @@ function normalizePiApi(
     case 'openai':
     case 'xai':
     case 'zhipu':
-    case 'doubao':
     case 'doubao-api':
     case 'qwen':
     case 'custom':
@@ -787,7 +786,7 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
   const api = resolvePiApi(input.provider, catalogModel?.api, input.model, input.modelApiProtocol)
   const providerSpecificCapabilities = compilePiReasoningCapabilities(api, input.model)
   const glmModelId = input.model?.toLowerCase()
-  const isVolcengineGlm5x = (input.provider === 'doubao' || input.provider === 'doubao-api' || input.provider === 'ark-coding-plan')
+  const isVolcengineGlm5x = input.provider === 'doubao-api'
     && (glmModelId === 'glm-5.2' || glmModelId === 'glm-5.3')
   const isCatalogMissingGlm53Family = !catalogModel
     && (glmModelId === 'glm-5.3' || glmModelId === 'glm-5.3-flash' || glmModelId === 'glm-5.3-flashx')
@@ -817,7 +816,7 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
     // Proma 后端下发的规格优先；其次 Codex 对齐策略，最后才是 catalog 与 shared inference 的较大值。
     contextWindow: configuredContextWindow ?? codexAlignedCapabilities?.contextWindow ?? Math.max(catalogContextWindow, inferredContextWindow),
     // 同样后端下发优先（configuredMaxTokens 只会来自 provider === 'proma' 的官方渠道，
-    // 与仅对 doubao / ark-coding-plan 生效的方舟上限天然互斥）。Pi catalog 缺少时，
+    // 与仅对 doubao-api 生效的火山 API 上限天然互斥）。Pi catalog 缺少时，
     // GLM-5.3 系列均按官方 128K 输出上限注册。
     maxTokens: configuredMaxTokens
       ?? (isVolcengineGlm5x
