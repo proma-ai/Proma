@@ -163,6 +163,8 @@ interface RichTextInputProps {
   autoFocusTrigger?: string | null
   /** 是否支持手动折叠（内容较长时显示折叠按钮） */
   collapsible?: boolean
+  /** 是否填满由外部 resize 容器提供的固定高度。 */
+  fillHeight?: boolean
   /** 是否启用文件、Skill、MCP、会话和规划引用 chip。 */
   enableMentions?: boolean
   /** 工作区根路径（启用 @ 文件引用功能时需要） */
@@ -226,6 +228,7 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
   disabled = false,
   autoFocusTrigger,
   collapsible = false,
+  fillHeight = false,
   enableMentions,
   workspacePath,
   workspaceSlug,
@@ -1251,22 +1254,28 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
   }, [editor, disabled])
 
   // 是否显示折叠按钮：启用 collapsible 且内容已自动扩展
-  const showCollapseToggle = collapsible && isExpanded
+  const showCollapseToggle = collapsible && isExpanded && !fillHeight
 
   return (
     <div
       onKeyDownCapture={(event) => forwardSessionQuickSwitchKeyEvent(event, 'keydown')}
       onKeyUpCapture={(event) => forwardSessionQuickSwitchKeyEvent(event, 'keyup')}
+      data-fill-height={fillHeight ? 'true' : undefined}
       className={cn(
-        'rich-text-input relative w-full overflow-y-auto overscroll-contain scrollbar-thin transition-[max-height] duration-200 ease-in-out',
-        isManuallyCollapsed
-          ? 'max-h-[101px]'
-          : isExpanded ? 'max-h-[500px]' : 'max-h-[200px]',
+        'rich-text-input relative w-full overflow-y-auto overscroll-contain scrollbar-thin',
+        fillHeight
+          ? 'h-full max-h-none'
+          : cn(
+            'transition-[max-height] duration-200 ease-in-out',
+            isManuallyCollapsed
+              ? 'max-h-[101px]'
+              : isExpanded ? 'max-h-[500px]' : 'max-h-[200px]',
+          ),
         disabled && 'opacity-50 cursor-not-allowed',
         className
       )}
     >
-      <EditorContent editor={editor} className="w-full" />
+      <EditorContent editor={editor} className="rich-text-editor-content w-full" />
       {/* 折叠/展开切换按钮 — sticky 悬浮在滚动区域内 */}
       {showCollapseToggle && (
         <Tooltip>
@@ -1293,6 +1302,16 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
           outline: none;
           padding: 9px 15px 0px;
           font-style: normal;
+        }
+        .rich-text-input[data-fill-height='true'] .rich-text-editor-content,
+        .rich-text-input[data-fill-height='true'] .ProseMirror {
+          min-height: 100%;
+        }
+        .rich-text-input[data-fill-height='true'] .rich-text-editor-content {
+          height: 100%;
+        }
+        .rich-text-input[data-fill-height='true'] .ProseMirror {
+          box-sizing: border-box;
         }
         .ProseMirror p {
           font-style: normal;
