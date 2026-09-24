@@ -526,9 +526,15 @@ class PiMcpClientManager {
 
 const manager = new PiMcpClientManager()
 
+export function getPiMcpToolDescription(serverName: string, toolName: string, sourceDescription?: string): string {
+  const description = sourceDescription || `Call MCP tool ${toolName} from server ${serverName}`
+  if (serverName !== 'anysearch' || toolName !== 'search') return description
+  return `${description}\nFor code.doc, use library only for a known public package or framework, not an arbitrary product or repository. Check that returned titles and URLs match the requested subject before citing them. If specialized results are unrelated, retry a general search and say why.`
+}
+
 function createPiMcpToolDefinition(binding: McpToolBinding): ToolDefinition {
   const toolName = mcpToolName(binding.serverName, binding.originalToolName)
-  const description = binding.tool.description || `Call MCP tool ${binding.originalToolName} from server ${binding.serverName}`
+  const description = getPiMcpToolDescription(binding.serverName, binding.originalToolName, binding.tool.description)
 
   return {
     name: toolName,

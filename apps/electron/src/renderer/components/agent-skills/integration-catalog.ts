@@ -326,6 +326,14 @@ export const MCP_INTEGRATION_CATALOG: CatalogIntegration[] = [
     },
   },
   {
+    id: 'anysearch-mcp', name: 'AnySearch', iconSlug: 'lucide-search', kind: 'mcp', authentication: 'none', priority: 8,
+    description: '连接 AnySearch 官方远程 MCP，匿名使用网页、垂直和并行搜索及正文提取。',
+    capabilities: ['通用与垂直搜索', '并行搜索', '网页正文提取'],
+    setupUrl: 'https://github.com/anysearch-ai/anysearch-mcp-server',
+    serverName: 'anysearch',
+    entry: { ...remoteMcp('https://api.anysearch.com/mcp'), enabled: true },
+  },
+  {
     id: 'brave-search-mcp', name: 'Brave Search', iconSlug: 'asset:brave', kind: 'credential', priority: 5,
     description: '接入 Brave 官方搜索 MCP，提供网页、新闻、图片、视频、本地和地点搜索。',
     capabilities: ['网页与新闻搜索', '图片与视频搜索', '地点与本地搜索'],
