@@ -53,7 +53,7 @@ import { isStaleActiveQueueError } from './agent-queue-routing'
 import { decryptApiKey, getChannelById, listChannels, persistCodexOAuthCredentials, persistGithubCopilotOAuthCredentials, persistXaiOAuthCredentials, resolveChannelRuntimeApiKey, resolveCodexOAuthCredentials, resolveGithubCopilotOAuthCredentials, resolveXaiOAuthCredentials } from './channel-manager'
 import { getAdapter, fetchTitle } from '@proma/core'
 import { getCloudApiConfig, isApiError } from '@proma/cloud'
-import { getSystemApiKey, clearSystemKeyCache } from './cloud-channel-service'
+import { getSystemApiKey, refreshSystemKeyNow } from './cloud-channel-service'
 import { getAuthState, getAuthToken, getCloudSessionRevision, tryRefreshAuthToken } from './cloud-auth-service'
 import pkg from '../../../package.json' with { type: 'json' }
 import { getFetchFn } from './proxy-fetch'
@@ -914,16 +914,12 @@ export class AgentOrchestrator {
         try {
           apiKey = await getSystemApiKey(cloudSessionRevision)
         } catch (initialError) {
-          // Only a confirmed auth failure benefits from refresh. Retrying refresh
-          // for network/timeout/5xx conditions multiplies an outage and can make
-          // the client look logged out even though its session is still valid.
+          // System-key 端点已在 CloudApiClient 内部共享一次 401 token refresh。
+          // 这里只重取 key，绝不再盲刷 token；network/timeout/5xx 同样不会进入此分支。
           if (!isApiError(initialError) || initialError.kind !== 'auth') throw initialError
           if (!getAuthState().isAuthenticated) throw initialError
-          const refreshed = await tryRefreshAuthToken(cloudSessionRevision)
-          if (!refreshed) throw initialError
           if (cloudSessionRevision !== getCloudSessionRevision()) throw new Error('Cloud 账号已切换，请重新运行')
-          clearSystemKeyCache()
-          apiKey = await getSystemApiKey(cloudSessionRevision)
+          apiKey = await refreshSystemKeyNow(cloudSessionRevision)
           if (cloudSessionRevision !== getCloudSessionRevision()) throw new Error('Cloud 账号已切换，请重新运行')
         }
       // 订阅 OAuth 渠道必须保留完整凭据给 Pi runtime，才能在执行中按真实 expires
@@ -2027,24 +2023,22 @@ export class AgentOrchestrator {
                   isPromaChannel: channel.provider === 'proma',
                 })
 
-                // Proma system key 会随登录 token 轮换。仅官方渠道的 401 在同一运行内刷新一次；
-                // 第三方渠道绝不触发 Proma token 刷新。
+                // 官方渠道的 key 401 每个 turn 仅做一次强制恢复；第三方渠道绝不触发 Proma token 刷新。
+                // 网络、超时和 5xx 不会走此路径，避免在控制面异常时放大刷新请求。
                 if (channel.provider === 'proma'
                   && extractHttpStatusFromErrorText(detailedMessage, originalError) === 401
                   && attempt < MAX_QUERY_ATTEMPTS) {
-                  const refreshed = await tryRefreshAuthToken(cloudSessionRevision)
-                  if (refreshed) {
-                    try {
-                      clearSystemKeyCache()
-                      if (cloudSessionRevision !== getCloudSessionRevision()) throw new Error('Cloud 账号已切换，请重新运行')
-                      queryOptions.apiKey = await getSystemApiKey(cloudSessionRevision)
-                      if (cloudSessionRevision !== getCloudSessionRevision()) throw new Error('Cloud 账号已切换，请重新运行')
-                      queryOptions.resumeSessionId = undefined
-                      shouldRetryFromError = true
-                      break
-                    } catch (error) {
-                      console.warn('[Agent 编排] 刷新 Proma system key 失败:', error)
-                    }
+                  try {
+                    if (cloudSessionRevision !== getCloudSessionRevision()) throw new Error('Cloud 账号已切换，请重新运行')
+                    // system-key 端点自身会在 access token 真的过期时复用 CloudApiClient 的单飞刷新；
+                    // 不先盲刷 token，避免把上游 key 401 放大为控制面刷新风暴。
+                    queryOptions.apiKey = await refreshSystemKeyNow(cloudSessionRevision)
+                    if (cloudSessionRevision !== getCloudSessionRevision()) throw new Error('Cloud 账号已切换，请重新运行')
+                    queryOptions.resumeSessionId = undefined
+                    shouldRetryFromError = true
+                    break
+                  } catch (error) {
+                    console.warn('[Agent 编排] 强制刷新 Proma system key 失败:', error)
                   }
                   if (!getAuthState().isAuthenticated) {
                     typedError = {

@@ -45,6 +45,8 @@ export type {
   UsageApi,
   NotificationsApi,
   NotificationsApiClient,
+  CloudFetch,
+  CloudFetchScope,
 } from './api/index'
 
 // 主进程目录预热复用相同的完整请求deadline。

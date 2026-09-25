@@ -152,7 +152,7 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
     planningPrompt,
 
     ctx.collaborationAvailable
-      ? '## 协作\n独立并行探索或对抗审查才使用 \`collaboration\`；先建可见进度项，委派说明保持自包含，收敛结果后更新父任务。子会话不得继续委派。'
+      ? '## 协作\n独立并行探索或对抗审查才使用 \`collaboration\`；先建可见进度项，委派说明保持自包含，子会话不得继续委派。**只要调用 \`delegate_agent\` 或 \`delegate_agents\` 派发任一子会话，主会话就必须在向用户回复前调用 \`wait_for_delegations\` 收敛全部已派发结果。** 派发只代表已启动，不得只报告“已启动”、承诺稍后汇总，或把仍在运行的子会话当作已有结论；若等待超时或仍在运行，必须如实说明未收敛状态。'
       : undefined,
     workspace
       ? `## 工作区与 Context

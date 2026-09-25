@@ -21,6 +21,7 @@ import type {
   SkillMeta,
 } from '@proma/shared'
 import { getAuthToken, getApiClient, getCloudSessionRevision, tryRefreshAuthToken } from './cloud-auth-service'
+import { withCloudFetch } from './cloud-network-service'
 import { getDefaultSkillsDir, getInactiveSkillsDir, getWorkspaceSkillsDir } from './config-paths'
 
 const API_PATH = '/enterprise/skills'
@@ -170,19 +171,25 @@ function savePublishedEnterpriseSource(input: {
   writeFileSync(join(input.skillDir, SOURCE_FILE), JSON.stringify(source, null, 2), 'utf-8')
 }
 
-async function authenticatedFetch(path: string, init: RequestInit): Promise<Response> {
+async function withAuthenticatedCloudResponse<T>(
+  path: string,
+  init: RequestInit,
+  consume: (response: Response) => Promise<T>,
+): Promise<T> {
   const revision = getCloudSessionRevision()
-  const request = async (token: string | null): Promise<Response> => fetch(`${getCloudApiConfig().baseUrl}${path}`, {
-    ...init,
-    headers: { ...(init.headers ?? {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  return withCloudFetch(async (fetchFn) => {
+    const request = async (token: string | null): Promise<Response> => fetchFn(`${getCloudApiConfig().baseUrl}${path}`, {
+      ...init,
+      headers: { ...(init.headers ?? {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    })
+    let response = await request(getAuthToken())
+    if (response.status === 401) {
+      const token = await tryRefreshAuthToken(revision)
+      if (token && revision === getCloudSessionRevision()) response = await request(token)
+    }
+    if (revision !== getCloudSessionRevision()) throw new EnterpriseSkillsError('Cloud 账号已切换，请重试', 'NETWORK')
+    return consume(response)
   })
-  let response = await request(getAuthToken())
-  if (response.status === 401) {
-    const token = await tryRefreshAuthToken(revision)
-    if (token && revision === getCloudSessionRevision()) response = await request(token)
-  }
-  if (revision !== getCloudSessionRevision()) throw new EnterpriseSkillsError('Cloud 账号已切换，请重试', 'NETWORK')
-  return response
 }
 
 async function parseResponse<T>(response: Response): Promise<T> {
@@ -219,8 +226,11 @@ export async function publishEnterpriseSkill(workspaceSlug: string, input: Enter
   form.append('changelog', input.changelog ?? '')
   if (input.name) form.append('name', input.name)
   if (input.description) form.append('description', input.description)
-  const response = await authenticatedFetch(API_PATH, { method: 'POST', body: form })
-  const published = await parseResponse<EnterpriseSkillDetail>(response)
+  const published = await withAuthenticatedCloudResponse(
+    API_PATH,
+    { method: 'POST', body: form },
+    parseResponse<EnterpriseSkillDetail>,
+  )
   const enterpriseId = published.policy?.enterpriseId
   if (enterpriseId) {
     savePublishedEnterpriseSource({ skillDir, enterpriseId, skillId: published.id, version: published.latestVersion })
@@ -237,8 +247,11 @@ export async function publishEnterpriseSkillVersion(workspaceSlug: string, skill
   form.append('file', new Blob([new Uint8Array(artifact).buffer], { type: 'application/zip' }), 'artifact.zip')
   form.append('version', input.version)
   form.append('changelog', input.changelog ?? '')
-  const response = await authenticatedFetch(`${API_PATH}/${encodeURIComponent(skillId)}/versions`, { method: 'POST', body: form })
-  const published = await parseResponse<EnterpriseSkillVersion>(response)
+  const published = await withAuthenticatedCloudResponse(
+    `${API_PATH}/${encodeURIComponent(skillId)}/versions`,
+    { method: 'POST', body: form },
+    parseResponse<EnterpriseSkillVersion>,
+  )
   const source = readSource(skillDir)
   if (source?.skillId === skillId) {
     savePublishedEnterpriseSource({ skillDir, enterpriseId: source.enterpriseId, skillId, version: published })
@@ -252,9 +265,11 @@ async function downloadArtifact(skillId: string, versionId: string): Promise<Dow
   const descriptor = await getApiClient().post<EnterpriseSkillDownload>(`${API_PATH}/${encodeURIComponent(skillId)}/versions/${encodeURIComponent(versionId)}/download`)
   const download = descriptor.data
   if (!download.url || !/^[a-fA-F0-9]{64}$/.test(download.artifactSha256)) throw new EnterpriseSkillsError('服务端返回的制品信息无效', 'INTEGRITY')
-  const response = await fetch(download.url)
-  if (!response.ok) throw new EnterpriseSkillsError(`制品下载失败 (${response.status})`, 'NETWORK')
-  const buffer = Buffer.from(await response.arrayBuffer())
+  const buffer = await withCloudFetch(async (fetchFn) => {
+    const response = await fetchFn(download.url)
+    if (!response.ok) throw new EnterpriseSkillsError(`制品下载失败 (${response.status})`, 'NETWORK')
+    return Buffer.from(await response.arrayBuffer())
+  })
   if (buffer.length > MAX_ARCHIVE_BYTES || sha256(buffer) !== download.artifactSha256.toLowerCase()) throw new EnterpriseSkillsError('制品完整性校验失败', 'INTEGRITY')
   return { ...download, artifact: buffer }
 }

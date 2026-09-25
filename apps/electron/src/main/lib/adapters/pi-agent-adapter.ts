@@ -95,9 +95,9 @@ type PowerShellToolOptions = import('@earendil-works/pi-coding-agent').PowerShel
 type SkillLoadResult = ReturnType<ResourceLoader['getSkills']>
 
 // Pi 0.86 将单次 agent retry 退避限制为 maxAgentDelayMs（默认 60 秒）。
-// Proma 保持用户可等待约十分钟、但每次等待都可及时取消的策略：1 + 2 + 4 + 8 + 16 +
-// 32 + (8 × 60) = 543 秒。不能沿用 9 次，否则新上游默认上限会把总预算缩短为约 4 分钟。
-export const PI_NATIVE_MAX_RETRIES = 14
+// Pi 不提供可取消的顶层累计 retry hook，因此 Proma 将每个连续失败段限制为 5 次：
+// 1 + 2 + 4 + 8 + 16 = 31 秒。不能让网络故障在同一段内静默等待近十分钟。
+export const PI_NATIVE_MAX_RETRIES = 5
 export const PI_NATIVE_RETRY_BASE_DELAY_MS = 1_000
 export const PI_NATIVE_MAX_DELAY_MS = 60_000
 const MAX_AUTOMATIC_COMPACTION_CONTINUATIONS = 20
@@ -1482,7 +1482,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         compaction: { enabled: true, reserveTokens: autoCompactionReserveTokens },
         // Pi 原生 retry 通过 agent.continue() 在同一 transcript 中恢复，能保留已完成的
         // tool_result；不能用外层重投原始 prompt 替代，否则会重复执行副作用工具。
-        // Pi 0.86 的每次退避由 maxAgentDelayMs 限制；14 次的累计上限为 543 秒。
+        // Pi 0.86 的每次退避由 maxAgentDelayMs 限制；本产品每个连续失败段最多等待 31 秒。
         // provider retry 保持默认 0，避免嵌套计数。
         retry: {
           enabled: true,

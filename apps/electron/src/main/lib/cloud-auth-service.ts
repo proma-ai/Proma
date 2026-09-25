@@ -14,6 +14,7 @@ import { writeTextFileAtomic } from './safe-file'
 import { getCloudAuthPath } from './config-paths'
 import { updateUserProfile } from './user-profile-service'
 import { cloudUserToProfile } from '../../lib/user-profile'
+import { withCloudFetch } from './cloud-network-service'
 import {
   createApiClient,
   createAuthApi,
@@ -321,6 +322,7 @@ export function getApiClient(): CloudApiClient {
   if (!apiClient) {
     apiClient = createApiClient({
       tokenStorage,
+      withFetch: withCloudFetch,
       onQuotaExceeded: () => {
         quotaExceededHandler?.()
       },
@@ -458,13 +460,19 @@ export async function getMe(): Promise<CloudAuthIpcResponse> {
     return { success: false, error: '未登录' }
   }
 
+  const expected = sessionRevision
   try {
-    const expected = sessionRevision
     const user = await getAuthApi().getMe()
     assertSessionRevision(expected)
     cachedUser = toUserInfo(user)
+    saveTokensToFile()
+    syncCloudUserToLocalProfile(cachedUser)
+    broadcastAuthStateChanged()
     return { success: true, user: cachedUser }
   } catch (error) {
+    if (isApiError(error) && error.kind === 'auth' && expected === sessionRevision) {
+      invalidateExpiredCloudSession()
+    }
     const message = isApiError(error) ? error.message : '获取用户信息失败'
     return { success: false, error: message }
   }
@@ -474,6 +482,7 @@ export async function getMe(): Promise<CloudAuthIpcResponse> {
 export function getAuthState(): CloudAuthState {
   return {
     isAuthenticated: cachedAccessToken !== null && cachedUser !== null,
+    recoveryPending: cachedAccessToken !== null && cachedUser === null,
     user: cachedUser,
   }
 }

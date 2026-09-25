@@ -22,6 +22,9 @@ export const cloudUserAtom = atom<CloudUserInfo | null>(null)
 /** Cloud 认证加载中（启动恢复阶段） */
 export const cloudAuthLoadingAtom = atom<boolean>(true)
 
+/** 有 token、但主进程尚未从 Cloud 恢复用户身份。 */
+export const cloudAuthRecoveryPendingAtom = atom<boolean>(false)
+
 /** 当前认证视图 */
 export const cloudAuthViewAtom = atom<CloudAuthView>('login')
 
@@ -45,6 +48,7 @@ export const isCloudAuthenticatedAtom = atom<boolean>(
 export function initializeCloudAuth(
   setUser: (user: CloudUserInfo | null) => void,
   setLoading: (loading: boolean) => void,
+  setRecoveryPending: (pending: boolean) => void,
 ): () => void {
   let disposed = false
   let receivedChange = false
@@ -54,6 +58,7 @@ export function initializeCloudAuth(
     receivedChange = true
     if (disposed) return
     setUser(state.user)
+    setRecoveryPending(state.recoveryPending)
     setLoading(false)
   })
 
@@ -62,12 +67,14 @@ export function initializeCloudAuth(
     .then((state) => {
       if (disposed || receivedChange) return
       setUser(state.user)
+      setRecoveryPending(state.recoveryPending)
       setLoading(false)
     })
     .catch((error) => {
       if (disposed || receivedChange) return
       console.error('[Cloud Auth] 获取认证状态失败:', error)
       setUser(null)
+      setRecoveryPending(false)
       setLoading(false)
     })
 

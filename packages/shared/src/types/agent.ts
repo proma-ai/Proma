@@ -529,6 +529,9 @@ export interface TaskUsage {
  *
  * 记录每次重试尝试的详细信息，用于错误诊断和 UI 展示。
  */
+/** 经过脱敏、可安全展示的自动恢复失败分类。 */
+export type AgentRetryReasonKind = 'connection' | 'rate_limited' | 'service' | 'stream_interrupted' | 'response_malformed' | 'unknown'
+
 export interface RetryAttempt {
   /** 第几次 retry（1-based；不含初始请求） */
   attempt: number
@@ -540,6 +543,8 @@ export interface RetryAttempt {
   timestamp: number
   /** 错误原因（简短描述，如"SDK 响应超时"） */
   reason: string
+  /** 可安全展示的错误分类。 */
+  reasonKind?: AgentRetryReasonKind
   /** 完整错误消息 */
   errorMessage: string
   /** stderr 输出（可选） */
@@ -605,11 +610,11 @@ export type AgentEvent =
   | { type: 'typed_error'; error: TypedError }
   // 重试机制
   // `retrying` 表示已安排 retry（仍可能正在 backoff），`retry_attempt` 才表示实际开始请求。
-  | { type: 'retrying'; attempt: number; maxAttempts: number; delaySeconds: number; reason: string; scheduledAt?: number; runStartedAt?: number; totalAttempt?: number; maxTotalAttempts?: number }
+  | { type: 'retrying'; attempt: number; maxAttempts: number; delaySeconds: number; reason: string; reasonKind?: AgentRetryReasonKind; scheduledAt?: number; runStartedAt?: number; totalAttempt?: number; maxTotalAttempts?: number }
   | { type: 'retry_attempt'; attemptData: RetryAttempt; runStartedAt?: number; maxAttempts?: number; totalAttempt?: number; maxTotalAttempts?: number }
   | { type: 'retry_cleared'; runStartedAt?: number; attempt?: number; maxAttempts?: number; totalAttempt?: number; maxTotalAttempts?: number }
   | { type: 'retry_failed'; finalAttempt: RetryAttempt; runStartedAt?: number; maxAttempts?: number; totalAttempt?: number; maxTotalAttempts?: number }
-  | { type: 'retry_cancelled'; runStartedAt?: number; attempt: number; maxAttempts: number; totalAttempt?: number; maxTotalAttempts?: number; reason?: string }
+  | { type: 'retry_cancelled'; runStartedAt?: number; attempt: number; maxAttempts: number; totalAttempt?: number; maxTotalAttempts?: number; reason?: string; reasonKind?: AgentRetryReasonKind }
   // Usage 更新
   | { type: 'usage_update'; usage: AgentEventUsage }
   // 上下文压缩
@@ -653,7 +658,7 @@ export type PromaEvent =
   | { type: 'exit_plan_mode_resolved'; requestId: string }
   | { type: 'enter_plan_mode'; sessionId: string }
   | { type: 'plan_mode_changed'; sessionId: string; active: boolean; source: AgentPlanModeChangeSource }
-  | { type: 'retry'; status: 'starting' | 'attempt' | 'cleared' | 'failed' | 'cancelled'; attempt?: number; maxAttempts?: number; delaySeconds?: number; reason?: string; attemptData?: RetryAttempt; runStartedAt?: number; scheduledAt?: number; totalAttempt?: number; maxTotalAttempts?: number; error?: TypedError }
+  | { type: 'retry'; status: 'starting' | 'attempt' | 'cleared' | 'failed' | 'cancelled'; attempt?: number; maxAttempts?: number; delaySeconds?: number; reason?: string; reasonKind?: AgentRetryReasonKind; attemptData?: RetryAttempt; runStartedAt?: number; scheduledAt?: number; totalAttempt?: number; maxTotalAttempts?: number; error?: TypedError }
   | { type: 'model_resolved'; model: string }
   | { type: 'context_window'; contextWindow: number }
   | { type: 'permission_mode_changed'; mode: PromaPermissionMode }

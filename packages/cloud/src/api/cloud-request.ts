@@ -80,11 +80,22 @@ export async function withCloudDeadline<T>(
 }
 
 export type CloudOperation = 'login' | 'refresh' | 'system_key' | 'catalog' | 'cloud'
-interface CloudRequestOptions {
+
+/** 可由宿主注入的 fetch；Cloud package 不依赖 Electron 或具体代理实现。 */
+export type CloudFetch = typeof globalThis.fetch
+
+/** 在完整 HTTP 读取生命周期内持有的 transport scope。 */
+export type CloudFetchScope = <T>(work: (fetchFn: CloudFetch) => Promise<T>) => Promise<T>
+
+export const withDefaultCloudFetch: CloudFetchScope = async (work) => work(globalThis.fetch)
+
+export interface CloudRequestOptions {
   timeoutMs: number
   operation: CloudOperation
   attempt?: number
   allowNotModified?: boolean
+  /** 仅供宿主 transport scope 注入；未传时使用标准 fetch。 */
+  fetchFn?: CloudFetch
 }
 
 const SAFE_CAUSE_CODES = new Set([
@@ -111,7 +122,7 @@ export async function withCloudRequest<T>(
   let status = 0
   try {
     return await withCloudDeadline(async signal => {
-      const response = await fetch(url, { ...init, signal })
+      const response = await (options.fetchFn ?? globalThis.fetch)(url, { ...init, signal })
       assertCloudRequestActive(signal)
       status = response.status
       if (!response.ok && !(options.allowNotModified && status === 304)) {

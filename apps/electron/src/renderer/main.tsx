@@ -85,7 +85,7 @@ import { VoiceDictationApp } from './components/voice-dictation/VoiceDictationAp
 import { TabSwitcher } from './components/tabs/TabSwitcher'
 import { PromaLogo } from './lib/model-logo'
 import { ModelHealthInitializer } from './components/ModelHealthInitializer'
-import { cloudUserAtom, cloudAuthLoadingAtom, initializeCloudAuth } from './atoms/cloud-auth'
+import { cloudUserAtom, cloudAuthLoadingAtom, cloudAuthRecoveryPendingAtom, initializeCloudAuth } from './atoms/cloud-auth'
 import { cloudNotificationsAtom, initializeCloudNotifications } from './atoms/cloud-notifications'
 import { normalizeUserProfile } from '../lib/user-profile'
 import { userProfileAtom } from './atoms/user-profile'
@@ -652,6 +652,7 @@ function UserProfileInitializer(): null {
 function CloudInitializer(): null {
   const setUser = useSetAtom(cloudUserAtom)
   const setAuthLoading = useSetAtom(cloudAuthLoadingAtom)
+  const setRecoveryPending = useSetAtom(cloudAuthRecoveryPendingAtom)
   const setBilling = useSetAtom(billingInfoAtom)
   const setBillingLoading = useSetAtom(billingLoadingAtom)
   const setQuotaExceeded = useSetAtom(quotaExceededDialogAtom)
@@ -660,8 +661,8 @@ function CloudInitializer(): null {
 
   useEffect(() => {
     if (!isCloudMode()) return
-    return initializeCloudAuth(setUser, setAuthLoading)
-  }, [setAuthLoading, setUser])
+    return initializeCloudAuth(setUser, setAuthLoading, setRecoveryPending)
+  }, [setAuthLoading, setRecoveryPending, setUser])
 
   useEffect(() => {
     if (!isCloudMode()) return

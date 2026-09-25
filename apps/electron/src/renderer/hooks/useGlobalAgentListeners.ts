@@ -302,6 +302,7 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
             maxAttempts: evt.maxAttempts,
             delaySeconds: evt.delaySeconds ?? 0,
             reason: evt.reason ?? '',
+            reasonKind: evt.reasonKind,
             scheduledAt: evt.scheduledAt,
             ...retryScope,
           })
@@ -336,6 +337,7 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
             attempt: evt.attempt,
             maxAttempts: evt.maxAttempts,
             reason: evt.reason,
+            reasonKind: evt.reasonKind,
             ...retryScope,
           })
         }

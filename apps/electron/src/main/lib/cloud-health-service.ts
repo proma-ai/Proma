@@ -17,6 +17,7 @@ import type {
   HealthCheckRecord,
 } from '@proma/shared'
 import { getAuthToken } from './cloud-auth-service'
+import { withCloudFetch } from './cloud-network-service'
 import { AsyncTtlCache } from './async-ttl-cache'
 
 // ===== 缓存配置 =====
@@ -127,19 +128,21 @@ export async function getModelHealth(): Promise<ModelHealthIpcResponse> {
       const config = getCloudApiConfig()
       const rootUrl = config.baseUrl.replace(/\/api\/v\d+$/, '')
       const token = getAuthToken()
-      const response = await fetch(`${rootUrl}/api/v1/model-health`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+      return withCloudFetch(async (fetchFn) => {
+        const response = await fetchFn(`${rootUrl}/api/v1/model-health`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        })
+        if (!response.ok) {
+          const text = await response.text().catch(() => '')
+          throw new Error(`请求失败 (${response.status}): ${text.slice(0, 100)}`)
+        }
+        const json = (await response.json()) as { data: ModelHealthResponse }
+        return transformToSummaries(json.data)
       })
-      if (!response.ok) {
-        const text = await response.text().catch(() => '')
-        throw new Error(`请求失败 (${response.status}): ${text.slice(0, 100)}`)
-      }
-      const json = (await response.json()) as { data: ModelHealthResponse }
-      return transformToSummaries(json.data)
     })
     return { success: true, data }
   } catch (error) {

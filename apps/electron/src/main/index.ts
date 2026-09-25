@@ -126,6 +126,7 @@ import { registerCloudIpcHandlers } from './cloud-ipc'
 import { registerSyncIpcHandlers } from './sync-ipc'
 import { scheduleAutoSync } from './lib/sync-service'
 import { handleOAuthCallback } from './lib/cloud-auth-service'
+import { stopSystemKeyRenewal } from './lib/cloud-channel-service'
 import { getMainWindow as getStoredMainWindow, setMainWindow as setStoredMainWindow } from './lib/main-window-store'
 import {
   registerBridge,
@@ -1075,6 +1076,8 @@ app.on('before-quit', () => {
   stopScheduler()
   stopPlanningReminderScheduler()
   stopPlanningNativeSyncCoordinator()
+  // 停止 Cloud system key 后台续期，避免退出中触发新的控制面请求。
+  stopSystemKeyRenewal()
   // 释放飞书同步防休眠
   stopFeishuSyncSleepBlocker()
   // 注销全局快捷键

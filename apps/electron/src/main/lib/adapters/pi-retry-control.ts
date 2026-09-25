@@ -1,7 +1,7 @@
-import type { RetryAttempt } from '@proma/shared'
+import type { AgentRetryReasonKind, RetryAttempt } from '@proma/shared'
 
-/** 前 N 次 Pi native retry 不通知 UI，与 Claude runtime 的自动恢复体验保持一致。 */
-export const PI_RETRY_VISIBILITY_THRESHOLD = 5
+/** 第一次自动恢复即应告知用户，避免无反馈的长时间等待。 */
+export const PI_RETRY_VISIBILITY_THRESHOLD = 0
 
 /** 将 Pi native retry 与当前 renderer stream 绑定，拒绝迟到事件污染下一轮。 */
 export interface PiRetryEventContext {
@@ -17,11 +17,11 @@ interface PiRetryMetadata {
 }
 
 export type PiRetryUpdate =
-  | ({ status: 'starting'; delaySeconds: number; reason: string; scheduledAt: number } & PiRetryMetadata)
+  | ({ status: 'starting'; delaySeconds: number; reason: string; reasonKind: AgentRetryReasonKind; scheduledAt: number } & PiRetryMetadata)
   | ({ status: 'attempt'; attemptData: RetryAttempt } & PiRetryMetadata)
   | ({ status: 'cleared' } & PiRetryMetadata)
   | ({ status: 'failed'; attemptData: RetryAttempt } & PiRetryMetadata)
-  | ({ status: 'cancelled'; reason: string } & PiRetryMetadata)
+  | ({ status: 'cancelled'; reason: string; reasonKind: AgentRetryReasonKind } & PiRetryMetadata)
 
 type PiNativeRetryDetails = {
   attempt: number
@@ -72,6 +72,31 @@ function retryMetadata(event: PiNativeRetryDetails, context: PiRetryEventContext
   }
 }
 
+function extractExplicitHttpStatus(message: string): number | undefined {
+  const patterns = [
+    /\b(?:api|http)\s+(?:error|status|code)?\s*:?\s*(\d{3})\b/i,
+    /\b(?:error|status|code)\s*:\s*(\d{3})\b/i,
+    /\b(\d{3})\s+(?:internal server error|bad gateway|service unavailable|gateway timeout)\b/i,
+  ]
+  for (const pattern of patterns) {
+    const match = pattern.exec(message)
+    if (match?.[1]) return Number(match[1])
+  }
+  return undefined
+}
+
+export function classifyPiRetryReason(errorMessage: string): AgentRetryReasonKind {
+  const message = errorMessage.toLowerCase()
+  const status = extractExplicitHttpStatus(errorMessage)
+  if (status === 429 || /rate.?limit|too many requests/.test(message)) return 'rate_limited'
+  if (status != null && status >= 500 && status <= 599) return 'service'
+  if (/stream.*(?:ended|interrupted|closed)|(?:ended|interrupted|closed).*stream|incomplete chunked|terminal (?:event|response)/.test(message)) return 'stream_interrupted'
+  if (/unexpected (?:token|non-whitespace)|invalid (?:json|response)|json.*(?:parse|syntax)/.test(message)) return 'response_malformed'
+  if (/service unavailable|bad gateway|gateway timeout/.test(message)) return 'service'
+  if (/connection|network|failed to fetch|fetch failed|socket|econn|etimedout|enotfound|dns|peer closed|connect timeout/.test(message)) return 'connection'
+  return 'unknown'
+}
+
 function retryAttempt(event: PiNativeRetryDetails, timestamp: number, errorMessage: string): RetryAttempt {
   return {
     attempt: event.attempt,
@@ -79,20 +104,21 @@ function retryAttempt(event: PiNativeRetryDetails, timestamp: number, errorMessa
     maxTotalAttempts: event.maxAttempts ?? event.attempt,
     timestamp,
     reason: errorMessage,
+    reasonKind: classifyPiRetryReason(errorMessage),
     errorMessage,
     // 这里记录的是本次 retry 实际开始前已经等待的退避时间。
     delaySeconds: (event.delayMs ?? 0) / 1_000,
   }
 }
 
-/** Pi 0.84 只暴露连续失败段的 attempt；超过前五次才向 UI 展示重试生命周期。 */
+/** Pi 只暴露当前连续失败段的 attempt；从第一次起向 UI 展示。 */
 function shouldExposePiRetry(event: PiNativeRetryDetails): boolean {
   return event.attempt > PI_RETRY_VISIBILITY_THRESHOLD
 }
 
 /**
  * 将 Pi native retry 生命周期转换为 Proma UI 已识别的 retry 事件。
- * 前五次恢复的完整生命周期都会被过滤；若最终未恢复，终态 assistant error 仍会正常展示。
+ * Pi 只报告连续失败段，因此 attempt 不能被解释为整个顶层 run 的总预算。
  */
 export function mapPiNativeRetryEvent(
   event: PiNativeRetryEvent,
@@ -110,6 +136,7 @@ export function mapPiNativeRetryEvent(
       scheduledAt: timestamp,
       delaySeconds: (event.delayMs ?? 0) / 1_000,
       reason: event.errorMessage ?? '未知错误',
+      reasonKind: classifyPiRetryReason(event.errorMessage ?? '未知错误'),
     }]
   }
 
@@ -118,6 +145,14 @@ export function mapPiNativeRetryEvent(
   }
 
   const error = event.type === 'auto_retry_end' ? event.finalError ?? '未知错误' : 'Retry cancelled'
+  if (event.type === 'auto_retry_end' && /(?:retry\s+)?cancelled/i.test(error)) {
+    return [{
+      status: 'cancelled',
+      ...metadata,
+      reason: error,
+      reasonKind: classifyPiRetryReason(error),
+    }]
+  }
   return [{
     status: 'failed',
     ...metadata,

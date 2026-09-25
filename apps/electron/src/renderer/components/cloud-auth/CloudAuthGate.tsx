@@ -14,6 +14,7 @@ import { isCloudMode } from '@/lib/mode'
 import {
   cloudUserAtom,
   cloudAuthLoadingAtom,
+  cloudAuthRecoveryPendingAtom,
   cloudAuthViewAtom,
 } from '@/atoms/cloud-auth'
 import { agentSettingsReadyAtom } from '@/atoms/agent-atoms'
@@ -24,6 +25,7 @@ import { VerifyEmailPage } from './VerifyEmailPage'
 import { ForgotPasswordPage } from './ForgotPasswordPage'
 import { ResetPasswordPage } from './ResetPasswordPage'
 import { PendingPage } from './PendingPage'
+import { CloudRecoveryPage } from './CloudRecoveryPage'
 import { AuthSplitLayout } from './AuthSplitLayout'
 import { WindowControls } from '@/components/WindowControls'
 import { detectIsWindows } from '@/lib/platform'
@@ -63,6 +65,7 @@ export function CloudAuthScreen(): React.ReactElement {
 function CloudAuthGuard({ children }: CloudAuthGateProps): React.ReactElement {
   const user = useAtomValue(cloudUserAtom)
   const loading = useAtomValue(cloudAuthLoadingAtom)
+  const recoveryPending = useAtomValue(cloudAuthRecoveryPendingAtom)
   const agentSettingsReady = useAtomValue(agentSettingsReadyAtom)
   const isWindows = React.useMemo(() => detectIsWindows(), [])
 
@@ -74,6 +77,17 @@ function CloudAuthGuard({ children }: CloudAuthGateProps): React.ReactElement {
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           <p className="text-sm text-muted-foreground">{loading ? '正在验证登录状态...' : '正在准备工作空间...'}</p>
         </div>
+      </div>
+    )
+  }
+
+  // 旧认证文件没有 userSnapshot 时，临时网络错误不应直接误导为登录失效。
+  if (!user && recoveryPending) {
+    return (
+      <div className="relative min-h-full">
+        <div className="app-drag-region absolute left-0 top-0 z-10 h-8" style={getWindowTitlebarDragInsetStyle(isWindows)} />
+        <WindowControls />
+        <AuthSplitLayout><CloudRecoveryPage /></AuthSplitLayout>
       </div>
     )
   }

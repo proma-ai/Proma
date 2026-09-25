@@ -18,6 +18,8 @@ export interface CloudUserInfo {
 /** Cloud 认证状态快照 */
 export interface CloudAuthState {
   isAuthenticated: boolean
+  /** 有本地 token、但旧认证文件没有用户快照且 Cloud 暂时不可达。 */
+  recoveryPending: boolean
   user: CloudUserInfo | null
 }
 

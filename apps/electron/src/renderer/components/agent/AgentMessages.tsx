@@ -7,7 +7,7 @@
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { RotateCw, AlertTriangle, CheckCircle2, Ban, ChevronDown, ChevronRight } from 'lucide-react'
+import { RotateCw, CheckCircle2 } from 'lucide-react'
 import { WelcomeEmptyState } from '@/components/welcome/WelcomeEmptyState'
 import {
   BasePathsProvider,
@@ -28,7 +28,6 @@ import { userProfileAtom } from '@/atoms/user-profile'
 import { tabMinimapCacheAtom } from '@/atoms/tab-atoms'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import { ScrollPositionManager } from '@/hooks/useScrollPositionMemory'
-import { cn } from '@/lib/utils'
 import {
   createLocalSearchRecords,
   searchLocalSessionMessages,
@@ -45,7 +44,7 @@ import { AgentBrowserLinkProvider } from '@/components/browser/AgentBrowserLinkP
 import { AgentHistorySelectionLayer } from './AgentHistorySelectionLayer'
 import { TaskProgressOverlay, type ContextCompactionProgress } from './TaskProgressOverlay'
 import { createMessageGroupRenderCache, groupMessagesForRendering } from './message-group-rendering'
-import type { AgentEventUsage, RetryAttempt, SDKAssistantMessage, SDKMessage, SDKSystemMessage, SDKTextBlock, SDKThinkingBlock } from '@proma/shared'
+import type { AgentEventUsage, SDKAssistantMessage, SDKMessage, SDKSystemMessage, SDKTextBlock, SDKThinkingBlock } from '@proma/shared'
 import { getSDKCompactStatus } from '@proma/shared'
 import { agentLiveMessagesAtomFamily, agentSessionChannelMapAtom, agentSessionStreamingStateAtomFamily, type AgentStreamState } from '@/atoms/agent-atoms'
 import type { QuotedSelection } from '@/atoms/preview-atoms'
@@ -326,12 +325,40 @@ function EmptyState(): React.ReactElement {
   return <WelcomeEmptyState />
 }
 
-/** 重试提示组件 - 折叠式 */
+/** navigator.onLine 是即时 UI 线索，不作为真实 retry 或请求失败的依据。 */
+function useBrowserOffline(): boolean {
+  const [offline, setOffline] = React.useState(() => typeof navigator !== 'undefined' && !navigator.onLine)
+
+  React.useEffect(() => {
+    const markOffline = (): void => setOffline(true)
+    const markOnline = (): void => setOffline(false)
+    window.addEventListener('offline', markOffline)
+    window.addEventListener('online', markOnline)
+    return () => {
+      window.removeEventListener('offline', markOffline)
+      window.removeEventListener('online', markOnline)
+    }
+  }, [])
+
+  return offline
+}
+
+/** 浏览器确认离线时的低打扰等待提示；Pi 仍负责实际失败判定与重试。 */
+function OfflineWaitingNotice(): React.ReactElement {
+  return (
+    <div className="mb-2 flex items-center gap-2 px-1 py-1 text-xs text-muted-foreground" role="status">
+      <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground/60" aria-hidden="true" />
+      <span>网络似乎已断开，正在等待恢复…</span>
+    </div>
+  )
+}
+
+/**
+ * 简洁的后台恢复提示：异常细节保留在诊断日志，不在对话区制造持续的失败感。
+ */
 function RetryingNotice({ retrying }: { retrying: NonNullable<AgentStreamState['retrying']> }): React.ReactElement {
-  const [expanded, setExpanded] = React.useState(false)
   const [countdown, setCountdown] = React.useState(0)
 
-  // 仅 scheduled 阶段显示倒计时：此时 Pi 仍在 backoff，尚未重新发起模型请求。
   React.useEffect(() => {
     if (retrying.phase !== 'scheduled' || retrying.scheduledAt == null || retrying.delaySeconds == null) {
       setCountdown(0)
@@ -349,178 +376,31 @@ function RetryingNotice({ retrying }: { retrying: NonNullable<AgentStreamState['
   }, [retrying.delaySeconds, retrying.phase, retrying.scheduledAt])
 
   const statusText = (() => {
-    const suffix = `第 ${retrying.currentAttempt}/${retrying.maxAttempts} 次继续当前回答`
     switch (retrying.phase) {
       case 'scheduled':
-        return countdown > 0 ? `网络暂时中断，${countdown} 秒后开始${suffix}` : `网络暂时中断，即将开始${suffix}`
+        return countdown > 0 ? `正在恢复回答 · ${countdown} 秒后继续` : '正在恢复回答…'
       case 'running':
-        return `正在${suffix}…`
+        return '正在恢复回答…'
       case 'succeeded':
-        return `已在${suffix}时恢复`
+        return '已恢复，继续回答'
       case 'exhausted':
-        return retrying.totalAttempt != null && retrying.maxTotalAttempts != null
-          ? `本轮自动恢复已耗尽（${retrying.totalAttempt}/${retrying.maxTotalAttempts}）`
-          : `自动恢复已耗尽（${retrying.currentAttempt}/${retrying.maxAttempts}）`
+        return '自动恢复未完成，请稍后重试'
       case 'cancelled':
-        return '自动恢复已取消'
+        return '已暂停自动恢复'
     }
   })()
 
+  const isSuccess = retrying.phase === 'succeeded'
   const isTerminal = retrying.phase === 'exhausted' || retrying.phase === 'cancelled'
 
   return (
-    <div className="rounded-lg border border-amber-200 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/20 p-3 mb-3">
-      <button
-        type="button"
-        className="flex items-center gap-2 w-full text-left hover:opacity-80 transition-opacity"
-        onClick={() => setExpanded(!expanded)}
-      >
-        {retrying.phase === 'succeeded' ? (
-          <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-        ) : isTerminal ? (
-          retrying.phase === 'cancelled'
-            ? <Ban className="size-4 text-amber-600 dark:text-amber-400 shrink-0" />
-            : <AlertTriangle className="size-4 text-amber-600 dark:text-amber-400 shrink-0" />
-        ) : (
-          <RotateCw className="size-4 animate-spin text-amber-600 dark:text-amber-400 shrink-0" />
-        )}
-        <span className="text-sm text-amber-900 dark:text-amber-100 flex-1 tabular-nums">
-          {statusText}
-          {retrying.reason && ` · ${retrying.reason}`}
-        </span>
-        {expanded ? (
-          <ChevronDown className="size-4 text-amber-600 dark:text-amber-400 shrink-0" />
-        ) : (
-          <ChevronRight className="size-4 text-amber-600 dark:text-amber-400 shrink-0" />
-        )}
-      </button>
-
-      {expanded && (
-        <div className="mt-3 space-y-3 border-t border-amber-200 dark:border-amber-800 pt-3">
-          {retrying.maxTotalAttempts != null && (
-            <div className="text-xs text-amber-700 dark:text-amber-300 tabular-nums">
-              本轮已安排 {retrying.totalAttempt ?? 0}/{retrying.maxTotalAttempts} 次自动恢复
-            </div>
-          )}
-          {retrying.history.length > 0 && (
-            <>
-              <div className="text-xs font-medium text-amber-900 dark:text-amber-100">
-                已执行的恢复记录：
-              </div>
-              {retrying.history.map((attempt, index) => (
-                <RetryAttemptItem
-                  key={attempt.attempt}
-                  attempt={attempt}
-                  isLatest={index === retrying.history.length - 1}
-                />
-              ))}
-            </>
-          )}
-          {retrying.phase === 'scheduled' && (
-            <div className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300 pl-6 tabular-nums">
-              <RotateCw className="size-3 animate-spin" />
-              <span>{countdown > 0 ? `等待 ${countdown} 秒后开始第 ${retrying.currentAttempt} 次继续当前回答` : `即将开始第 ${retrying.currentAttempt} 次继续当前回答`}</span>
-            </div>
-          )}
-          {retrying.phase === 'running' && (
-            <div className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300 pl-6 tabular-nums">
-              <RotateCw className="size-3 animate-spin" />
-              <span>正在执行第 {retrying.currentAttempt} 次继续当前回答…</span>
-            </div>
-          )}
-        </div>
+    <div className="mb-2 flex items-center gap-2 px-1 py-1 text-xs text-muted-foreground" role="status">
+      {isSuccess ? (
+        <CheckCircle2 className="size-3.5 shrink-0 text-emerald-600/80 dark:text-emerald-400/80" aria-hidden="true" />
+      ) : (
+        <RotateCw className={`size-3.5 shrink-0 ${isTerminal ? 'text-muted-foreground/70' : 'animate-spin text-muted-foreground'}`} aria-hidden="true" />
       )}
-    </div>
-  )
-}
-
-/** 单条重试尝试记录 */
-function RetryAttemptItem({
-  attempt,
-  isLatest,
-}: {
-  attempt: RetryAttempt
-  isLatest: boolean
-}): React.ReactElement {
-  const [showStderr, setShowStderr] = React.useState(false)
-  const [showStack, setShowStack] = React.useState(false)
-
-  const time = new Date(attempt.timestamp).toLocaleTimeString('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  })
-
-  return (
-    <div className={cn('pl-6 space-y-2', isLatest && 'font-medium')}>
-      {/* 尝试头部 */}
-      <div className="flex items-start gap-2">
-        <span className="text-destructive shrink-0">❌</span>
-        <div className="flex-1 min-w-0 space-y-1">
-          <div className="text-xs text-amber-900 dark:text-amber-100 tabular-nums">
-            第 {attempt.attempt} 次恢复前的错误（{time}）- {attempt.reason}
-          </div>
-          <div className="text-xs text-amber-700 dark:text-amber-300 font-mono break-words">
-            {attempt.errorMessage}
-          </div>
-
-          {/* 环境信息 */}
-          {attempt.environment && (
-            <div className="text-[11px] text-amber-600 dark:text-amber-400 space-y-0.5">
-              <div>运行时: {attempt.environment.runtime}</div>
-              <div>平台: {attempt.environment.platform}</div>
-              <div>模型: {attempt.environment.model}</div>
-              {attempt.environment.workspace && <div>项目: {attempt.environment.workspace}</div>}
-            </div>
-          )}
-
-          {/* 可展开的 stderr */}
-          {attempt.stderr && (
-            <div className="mt-2">
-              <button
-                type="button"
-                className="text-[11px] text-amber-700 dark:text-amber-300 hover:underline flex items-center gap-1"
-                onClick={() => setShowStderr(!showStderr)}
-              >
-                {showStderr ? (
-                  <ChevronDown className="size-3" />
-                ) : (
-                  <ChevronRight className="size-3" />
-                )}
-                显示 stderr 输出
-              </button>
-              {showStderr && (
-                <pre className="mt-1 text-[10px] text-amber-800 dark:text-amber-200 bg-amber-100 dark:bg-amber-900/30 p-2 rounded overflow-x-auto max-h-[200px] overflow-y-auto">
-                  {attempt.stderr}
-                </pre>
-              )}
-            </div>
-          )}
-
-          {/* 可展开的堆栈跟踪 */}
-          {attempt.stack && (
-            <div className="mt-2">
-              <button
-                type="button"
-                className="text-[11px] text-amber-700 dark:text-amber-300 hover:underline flex items-center gap-1"
-                onClick={() => setShowStack(!showStack)}
-              >
-                {showStack ? (
-                  <ChevronDown className="size-3" />
-                ) : (
-                  <ChevronRight className="size-3" />
-                )}
-                显示堆栈跟踪
-              </button>
-              {showStack && (
-                <pre className="mt-1 text-[10px] text-amber-800 dark:text-amber-200 bg-amber-100 dark:bg-amber-900/30 p-2 rounded overflow-x-auto max-h-[200px] overflow-y-auto">
-                  {attempt.stack}
-                </pre>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
+      <span className="tabular-nums">{statusText}</span>
     </div>
   )
 }
@@ -907,6 +787,7 @@ export const AgentMessages = React.memo(function AgentMessages({
   const streamState = useAtomValue(agentSessionStreamingStateAtomFamily(sessionId))
   const liveMessages = useAtomValue(agentLiveMessagesAtomFamily(sessionId))
   const streaming = streamState?.running ?? false
+  const browserOffline = useBrowserOffline()
   const userProfile = useAtomValue(userProfileAtom)
   const channels = useAtomValue(channelsAtom)
   const setMinimapCache = useSetAtom(tabMinimapCacheAtom)
@@ -991,6 +872,7 @@ export const AgentMessages = React.memo(function AgentMessages({
   // 实时文本仅从 liveMessages 读取。AgentStreamState 只保留运行/控制状态，
   // 避免每个 sdk_delta 同时更新 transcript 和 legacy content 两条路径。
   const retrying = streamState?.retrying
+  const showOfflineWaiting = streaming && browserOffline && !retrying
   const startedAt = streamState?.startedAt
   const optimisticModelId = streamState?.model || sessionModelId
   // 多渠道同名模型场景下，流式 header 显示名必须结合当前会话 channelId 精确匹配。
@@ -1236,7 +1118,7 @@ export const AgentMessages = React.memo(function AgentMessages({
                   匹配内部 MessageActions 的 gap-0.5(2px)+mt-0.5(2px)=4px 间距 */}
               {hasLiveAssistantContent && !suppressAgentRunning && (
                 <div className="pl-[56px] min-h-[28px]">
-                  {retrying && <RetryingNotice retrying={retrying} />}
+                  {retrying ? <RetryingNotice retrying={retrying} /> : showOfflineWaiting ? <OfflineWaitingNotice /> : null}
                   {streaming && <AgentRunningIndicator startedAt={startedAt} />}
                 </div>
               )}
@@ -1250,7 +1132,7 @@ export const AgentMessages = React.memo(function AgentMessages({
                     logo={<AssistantLogo model={optimisticModelId} channelId={optimisticChannelId} />}
                   />
                   <MessageContent>
-                    {retrying && <RetryingNotice retrying={retrying} />}
+                    {retrying ? <RetryingNotice retrying={retrying} /> : showOfflineWaiting ? <OfflineWaitingNotice /> : null}
                     {streaming && <AgentRunningIndicator startedAt={startedAt} />}
                   </MessageContent>
                 </Message>

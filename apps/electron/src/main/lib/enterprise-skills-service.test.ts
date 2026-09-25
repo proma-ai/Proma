@@ -12,6 +12,7 @@ mock.module('electron', () => ({
 mock.module('./cloud-auth-service', () => ({
   getApiClient: () => ({ get: async () => ({ data: {} }), post: async () => ({ data: {} }) }),
   getAuthToken: () => null,
+  getCloudSessionRevision: () => 0,
   tryRefreshAuthToken: async () => null,
 }))
 

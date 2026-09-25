@@ -20,10 +20,9 @@ import type { ApiKeysApi } from '@proma/cloud'
 import type { ChannelModel, BillingIpcResponse, CloudModelGroup } from '@proma/shared'
 import { CLOUD_IPC_CHANNELS, PROMA_OFFICIAL_CHANNEL_ID } from '@proma/shared'
 import { getApiClient, getCloudSessionRevision } from './cloud-auth-service'
+import { withCloudFetch } from './cloud-network-service'
 import { listChannels, removeOfficialChannel, syncOfficialModelCatalog } from './channel-manager'
 import { getRawChatToolsConfig, updateToolCredentials, updateToolState } from './chat-tool-config'
-import { AsyncTtlCache } from './async-ttl-cache'
-
 // ===== API 实例（延迟初始化） =====
 
 let apiKeysApi: ApiKeysApi | null = null
@@ -35,38 +34,197 @@ function getApiKeysApi(): ApiKeysApi {
   return apiKeysApi
 }
 
-// ===== System API Key 缓存（Agent SDK 使用） =====
-
-/** 缓存有效期：1 小时（与 proma-frontend ApiKeyService 一致） */
-const SYSTEM_KEY_CACHE_DURATION = 60 * 60 * 1000
-
-const systemKeyCache = new AsyncTtlCache<string>(SYSTEM_KEY_CACHE_DURATION)
-let systemKeyRevision = -1
+// ===== System API Key 软租约与主动续期（Agent SDK 使用） =====
 
 /**
- * 获取 system API key（pk_xxx 格式）
- *
- * Agent SDK 通过此 key 走后端代理请求 Anthropic 并完成计费。
- * 结果缓存 1 小时，API client 内置 401 token 刷新机制。
+ * 服务端目前不会为 SYSTEM key 返回 expiresAt；一小时只是旧客户端的重新拉取周期。
+ * 这里将其变为软租约：控制面短暂异常时，已验证的 key 仍可继续完成 Agent 预检。
  */
-export async function getSystemApiKey(revision = getCloudSessionRevision()): Promise<string> {
-  if (revision !== getCloudSessionRevision()) throw cancelledCloudRequest()
-  if (systemKeyRevision !== revision) {
-    systemKeyCache.invalidate()
-    systemKeyRevision = revision
-  }
-  const key = await systemKeyCache.getOrLoad(async () => {
-    const result = await getApiKeysApi().getSystemApiKey()
-    console.log('[Cloud Channel] System API Key 已获取并缓存')
-    return result.key
-  })
-  if (revision !== getCloudSessionRevision()) throw cancelledCloudRequest()
-  return key
+const SYSTEM_KEY_REFRESH_INTERVAL_MS = 60 * 60 * 1000
+const SYSTEM_KEY_PREFETCH_LEAD_MS = 10 * 60 * 1000
+const SYSTEM_KEY_PREFETCH_JITTER_MS = 2 * 60 * 1000
+const SYSTEM_KEY_RETRY_DELAYS_MS = [30_000, 2 * 60_000, 5 * 60_000, 10 * 60_000, 15 * 60_000]
+
+interface SystemKeyLease {
+  key: string
+  revision: number
+  obtainedAt: number
+  refreshDueAt: number
 }
 
-/** 清除 system API key 缓存（token 刷新后调用，强制重新获取） */
+let systemKeyLease: SystemKeyLease | null = null
+let systemKeyGeneration = 0
+/** 退出、登出或账号切换时递增；迟到的完成回调不得重建 timer。 */
+let systemKeySchedulingEpoch = 0
+
+interface SystemKeyFlight {
+  revision: number
+  generation: number
+  schedulingEpoch: number
+  promise: Promise<string>
+}
+
+let systemKeyRefresh: SystemKeyFlight | null = null
+let systemKeyBackgroundRefresh: { revision: number; generation: number; schedulingEpoch: number; promise: Promise<void> } | null = null
+let forcedSystemKeyRefresh: SystemKeyFlight | null = null
+let systemKeyRenewalTimer: NodeJS.Timeout | null = null
+let systemKeyRetryAttempt = 0
+
+function assertSystemKeyRevision(revision: number): void {
+  if (revision !== getCloudSessionRevision()) throw cancelledCloudRequest()
+}
+
+function isCurrentSystemKeyState(revision: number, generation: number, schedulingEpoch: number): boolean {
+  return revision === getCloudSessionRevision()
+    && generation === systemKeyGeneration
+    && schedulingEpoch === systemKeySchedulingEpoch
+}
+
+function stopSystemKeyRenewalTimer(): void {
+  if (!systemKeyRenewalTimer) return
+  clearTimeout(systemKeyRenewalTimer)
+  systemKeyRenewalTimer = null
+}
+
+/** 停止仅限主进程内存的续期调度；在途请求的迟到回调也失去重排 timer 的资格。 */
+export function stopSystemKeyRenewal(): void {
+  systemKeySchedulingEpoch += 1
+  stopSystemKeyRenewalTimer()
+  systemKeyRetryAttempt = 0
+}
+
+function getPrefetchDelay(): number {
+  // 每台客户端随机提前 0–2 分钟，避免整点同时命中控制面。
+  const jitter = Math.floor(Math.random() * SYSTEM_KEY_PREFETCH_JITTER_MS)
+  return Math.max(0, SYSTEM_KEY_REFRESH_INTERVAL_MS - SYSTEM_KEY_PREFETCH_LEAD_MS - jitter)
+}
+
+function scheduleSystemKeyRefresh(revision: number, generation: number, schedulingEpoch: number, delayMs: number): void {
+  stopSystemKeyRenewalTimer()
+  if (!isCurrentSystemKeyState(revision, generation, schedulingEpoch)) return
+  systemKeyRenewalTimer = setTimeout(() => {
+    systemKeyRenewalTimer = null
+    void refreshSystemKeyInBackground(revision, generation, schedulingEpoch)
+  }, delayMs)
+}
+
+function scheduleSystemKeyRetry(revision: number, generation: number, schedulingEpoch: number): void {
+  if (!isCurrentSystemKeyState(revision, generation, schedulingEpoch)) return
+  const baseDelay = SYSTEM_KEY_RETRY_DELAYS_MS[Math.min(systemKeyRetryAttempt, SYSTEM_KEY_RETRY_DELAYS_MS.length - 1)]!
+  systemKeyRetryAttempt += 1
+  // ±25% 抖动，以免故障恢复后多客户端再次同步放大。
+  const delay = Math.round(baseDelay * (0.75 + Math.random() * 0.5))
+  scheduleSystemKeyRefresh(revision, generation, schedulingEpoch, delay)
+}
+
+async function loadSystemKey(revision: number, generation = systemKeyGeneration, schedulingEpoch = systemKeySchedulingEpoch): Promise<string> {
+  assertSystemKeyRevision(revision)
+  if (!isCurrentSystemKeyState(revision, generation, schedulingEpoch)) throw cancelledCloudRequest()
+  if (systemKeyRefresh?.revision === revision
+    && systemKeyRefresh.generation === generation
+    && systemKeyRefresh.schedulingEpoch === schedulingEpoch) {
+    return systemKeyRefresh.promise
+  }
+
+  const promise = (async () => {
+    const startedAt = Date.now()
+    const result = await getApiKeysApi().getSystemApiKey()
+    if (!isCurrentSystemKeyState(revision, generation, schedulingEpoch)) throw cancelledCloudRequest()
+
+    const obtainedAt = Date.now()
+    const refreshDueAt = obtainedAt + getPrefetchDelay()
+    systemKeyLease = { key: result.key, revision, obtainedAt, refreshDueAt }
+    systemKeyRetryAttempt = 0
+    scheduleSystemKeyRefresh(revision, generation, schedulingEpoch, Math.max(0, refreshDueAt - obtainedAt))
+    console.log(`[Cloud Channel] System API Key 已获取；下次后台预检约 ${Math.round((refreshDueAt - obtainedAt) / 60_000)} 分钟后执行，耗时 ${obtainedAt - startedAt}ms`)
+    return result.key
+  })()
+  const flight: SystemKeyFlight = { revision, generation, schedulingEpoch, promise }
+  systemKeyRefresh = flight
+  const clear = () => { if (systemKeyRefresh === flight) systemKeyRefresh = null }
+  void promise.then(clear, clear)
+  return promise
+}
+
+/** 后台预检相同账号代际只保留一个 owner，避免并发前台读取放大 retry backoff。 */
+function refreshSystemKeyInBackground(
+  revision: number,
+  generation = systemKeyGeneration,
+  schedulingEpoch = systemKeySchedulingEpoch,
+): Promise<void> {
+  if (!isCurrentSystemKeyState(revision, generation, schedulingEpoch)) return Promise.resolve()
+  if (systemKeyBackgroundRefresh?.revision === revision
+    && systemKeyBackgroundRefresh.generation === generation
+    && systemKeyBackgroundRefresh.schedulingEpoch === schedulingEpoch) {
+    return systemKeyBackgroundRefresh.promise
+  }
+
+  const promise = (async () => {
+    try {
+      console.log('[Cloud Channel] 开始后台预检 System API Key')
+      await loadSystemKey(revision, generation, schedulingEpoch)
+      if (isCurrentSystemKeyState(revision, generation, schedulingEpoch)) {
+        console.log('[Cloud Channel] System API Key 后台预检完成')
+      }
+    } catch (error) {
+      if (!isCurrentSystemKeyState(revision, generation, schedulingEpoch)) return
+      const kind = isApiError(error) ? error.kind : 'unknown'
+      console.warn(`[Cloud Channel] System API Key 后台预检失败（${kind}），保留现有 key 并稍后重试`)
+      scheduleSystemKeyRetry(revision, generation, schedulingEpoch)
+    }
+  })()
+  const flight = { revision, generation, schedulingEpoch, promise }
+  systemKeyBackgroundRefresh = flight
+  const clear = () => { if (systemKeyBackgroundRefresh === flight) systemKeyBackgroundRefresh = null }
+  void promise.then(clear, clear)
+  return promise
+}
+
+/**
+ * 获取可立即用于 Agent 的 system key。lease 临近预检点时只触发后台刷新，
+ * 不让前台 Agent 请求等待控制面响应。
+ */
+export async function getSystemApiKey(revision = getCloudSessionRevision()): Promise<string> {
+  assertSystemKeyRevision(revision)
+  const lease = systemKeyLease
+  if (lease?.revision === revision) {
+    if (Date.now() >= lease.refreshDueAt && !systemKeyRenewalTimer) {
+      void refreshSystemKeyInBackground(revision)
+    }
+    return lease.key
+  }
+  return loadSystemKey(revision)
+}
+
+/**
+ * 服务端明确拒绝 system key 时使用：同一账号代际的并发恢复共用一次强制请求。
+ * 不用于 network/timeout/5xx，避免放大控制面故障。
+ */
+export function refreshSystemKeyNow(revision = getCloudSessionRevision()): Promise<string> {
+  assertSystemKeyRevision(revision)
+  const existing = forcedSystemKeyRefresh
+  if (existing?.revision === revision
+    && existing.generation === systemKeyGeneration
+    && existing.schedulingEpoch === systemKeySchedulingEpoch) {
+    return existing.promise
+  }
+
+  clearSystemKeyCache()
+  const generation = systemKeyGeneration
+  const schedulingEpoch = systemKeySchedulingEpoch
+  const promise = loadSystemKey(revision, generation, schedulingEpoch)
+  const flight: SystemKeyFlight = { revision, generation, schedulingEpoch, promise }
+  forcedSystemKeyRefresh = flight
+  const clear = () => { if (forcedSystemKeyRefresh === flight) forcedSystemKeyRefresh = null }
+  void promise.then(clear, clear)
+  return promise
+}
+
+/** 清除 system key lease；旧请求即使迟到成功也不能回填当前代际。 */
 export function clearSystemKeyCache(): void {
-  systemKeyCache.invalidate()
+  systemKeyGeneration += 1
+  systemKeyLease = null
+  stopSystemKeyRenewal()
 }
 
 // ===== 模型转换 =====
@@ -169,7 +327,7 @@ async function fetchAndSyncOfficialModelCatalog(signal: AbortSignal, generation:
   const config = getCloudApiConfig()
   const revision = getCloudSessionRevision()
   const etag = getOfficialCatalogEtag()
-  const result = await withCloudRequest(
+  const result = await withCloudFetch((fetchFn: typeof globalThis.fetch) => withCloudRequest(
     `${config.baseUrl}/model-catalog`,
     { method: 'GET', headers: etag ? { 'If-None-Match': etag } : undefined, cache: 'no-store', signal },
     async response => {
@@ -181,8 +339,8 @@ async function fetchAndSyncOfficialModelCatalog(signal: AbortSignal, generation:
       }
       return { snapshot, nextEtag }
     },
-    { timeoutMs: config.timeout, operation: 'catalog', allowNotModified: true },
-  )
+    { timeoutMs: config.timeout, operation: 'catalog', allowNotModified: true, fetchFn },
+  ))
   if (signal.aborted || generation !== catalogGeneration || revision !== getCloudSessionRevision()) {
     throw cancelledCloudRequest()
   }

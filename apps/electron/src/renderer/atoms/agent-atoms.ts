@@ -9,7 +9,7 @@ import { atom } from 'jotai'
 import type { Getter } from 'jotai'
 import { atomWithStorage, selectAtom } from 'jotai/utils'
 import { atomFamily } from 'jotai-family'
-import type { AgentSessionMeta, AgentEvent, AgentWorkspace, AgentPendingFile, RetryAttempt, PromaPermissionMode, PermissionRequest, AskUserRequest, ExitPlanModeRequest, ThinkingConfig, AgentEffort, SDKMessage, UnstagedChangesResult } from '@proma/shared'
+import type { AgentSessionMeta, AgentEvent, AgentWorkspace, AgentPendingFile, RetryAttempt, AgentRetryReasonKind, PromaPermissionMode, PermissionRequest, AskUserRequest, ExitPlanModeRequest, ThinkingConfig, AgentEffort, SDKMessage, UnstagedChangesResult } from '@proma/shared'
 import { PROMA_DEFAULT_PERMISSION_MODE } from '@proma/shared'
 import { calculateDockBadgeCount, countPendingRequests } from '@/lib/dock-badge-count'
 import type { AgentQueuedMessage } from '@/lib/agent-message-queue'
@@ -77,6 +77,8 @@ export interface AgentRetryState {
   delaySeconds?: number
   /** 当前或最后一次失败原因。 */
   reason?: string
+  /** 可安全展示的失败分类。 */
+  reasonKind?: AgentRetryReasonKind
 }
 
 /** Agent 会话的流式状态 */
@@ -1401,6 +1403,7 @@ export function applyAgentEvent(
           scheduledAt: event.scheduledAt ?? Date.now(),
           delaySeconds: event.delaySeconds,
           reason: event.reason,
+          reasonKind: event.reasonKind,
         },
       }
     }
@@ -1427,6 +1430,7 @@ export function applyAgentEvent(
           maxTotalAttempts: event.maxTotalAttempts ?? event.attemptData.maxTotalAttempts ?? previousRetry?.maxTotalAttempts,
           history,
           reason: event.attemptData.reason,
+          reasonKind: event.attemptData.reasonKind,
         },
       }
     }
@@ -1445,6 +1449,7 @@ export function applyAgentEvent(
           totalAttempt: event.totalAttempt ?? prev.retrying.totalAttempt,
           maxTotalAttempts: event.maxTotalAttempts ?? prev.retrying.maxTotalAttempts,
           reason: undefined,
+          reasonKind: undefined,
         },
       }
     }
@@ -1464,6 +1469,7 @@ export function applyAgentEvent(
           maxTotalAttempts: event.maxTotalAttempts ?? event.finalAttempt.maxTotalAttempts ?? previousRetry?.maxTotalAttempts,
           history: upsertRetryAttempt(previousRetry?.history ?? [], event.finalAttempt),
           reason: event.finalAttempt.reason,
+          reasonKind: event.finalAttempt.reasonKind,
         },
       }
     }
@@ -1483,6 +1489,7 @@ export function applyAgentEvent(
           maxTotalAttempts: event.maxTotalAttempts ?? previousRetry?.maxTotalAttempts,
           history: previousRetry?.history ?? [],
           reason: event.reason ?? previousRetry?.reason,
+          reasonKind: event.reasonKind ?? previousRetry?.reasonKind,
         },
       }
     }

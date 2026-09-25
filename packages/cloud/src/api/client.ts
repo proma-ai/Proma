@@ -3,11 +3,11 @@ import { getCloudApiConfig } from '../config'
 import type { RefreshTokenResponse } from '../types/user'
 import {
   assertCloudRequestActive, cancelledCloudRequest, createApiError, invalidCloudResponse,
-  isApiError, withCloudDeadline, withCloudRequest,
+  isApiError, withCloudDeadline, withCloudRequest, withDefaultCloudFetch,
 } from './cloud-request'
-import type { CloudOperation } from './cloud-request'
+import type { CloudOperation, CloudFetchScope } from './cloud-request'
 export { isApiError, getSafeCloudFailureMessage } from './cloud-request'
-export type { ApiError, CloudFailureKind } from './cloud-request'
+export type { ApiError, CloudFailureKind, CloudFetch, CloudFetchScope } from './cloud-request'
 
 export interface ApiResponse<T> { data: T; status: number; ok: boolean }
 
@@ -38,6 +38,8 @@ interface ClientOptions {
   attemptTimeoutMs?: number
   operationTimeoutMs?: number
   retryDelayMs?: number
+  /** 主进程可在每个完整 Cloud HTTP 生命周期中注入代理 transport。 */
+  withFetch?: CloudFetchScope
 }
 
 export function createApiClient(options: ClientOptions = {}): CloudApiClient {
@@ -45,6 +47,7 @@ export function createApiClient(options: ClientOptions = {}): CloudApiClient {
   const storage = options.tokenStorage
   const attemptTimeout = options.attemptTimeoutMs ?? config.timeout
   const operationTimeout = options.operationTimeoutMs ?? config.timeout * 2 + 1_000
+  const withFetch = options.withFetch ?? withDefaultCloudFetch
   let refreshing: { revision: number; promise: Promise<string> } | null = null
   const revision = () => storage?.getSessionRevision() ?? 0
   const assertSession = (expected: number) => {
@@ -58,7 +61,7 @@ export function createApiClient(options: ClientOptions = {}): CloudApiClient {
       try {
         const refreshToken = storage?.getRefreshToken()
         if (!storage || !refreshToken) throw createApiError(401)
-        const data = await withCloudRequest(
+        const data = await withFetch(fetchFn => withCloudRequest(
           `${config.baseUrl}/auth/refresh`,
           { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refresh_token: refreshToken }) },
           async response => {
@@ -69,8 +72,8 @@ export function createApiClient(options: ClientOptions = {}): CloudApiClient {
                 && (typeof body.refresh_token !== 'string' || !body.refresh_token.trim()))) throw invalidCloudResponse()
             return body as RefreshTokenResponse
           },
-          { timeoutMs: attemptTimeout, operation: 'refresh' },
-        )
+          { timeoutMs: attemptTimeout, operation: 'refresh', fetchFn },
+        ))
         assertSession(expected)
         storage.setToken(data.access_token)
         if (data.refresh_token) storage.setRefreshToken(data.refresh_token)
@@ -110,11 +113,11 @@ export function createApiClient(options: ClientOptions = {}): CloudApiClient {
         if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
         if (token) headers.set('Authorization', `Bearer ${token}`)
         try {
-          const result = await withCloudRequest(
+          const result = await withFetch(fetchFn => withCloudRequest(
             `${config.baseUrl}${path}`, { ...init, headers, signal },
             async response => ({ data: response.status === 204 ? undefined as T : await response.json() as T, status: response.status, ok: true }),
-            { timeoutMs: attemptTimeout, operation, attempt: attempt++ },
-          )
+            { timeoutMs: attemptTimeout, operation, attempt: attempt++, fetchFn },
+          ))
           assertCloudRequestActive(signal)
           assertSession(expected)
           return result
