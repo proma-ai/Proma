@@ -10,7 +10,7 @@ export interface NotificationMediaLayout {
   dialogWidth: number
 }
 
-/** 图片遵循原始比例；横图按约 300px 可见高度布局，同时给右侧文案留出空间。 */
+/** 图片遵循原始比例；横图按约 360px 可见高度布局，同时给右侧文案留出空间。 */
 export function getNotificationMediaLayout(
   width: number,
   height: number,
@@ -19,16 +19,16 @@ export function getNotificationMediaLayout(
   const validSize = Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
   const aspect = validSize ? width / height : 1
   if (type === 'video') {
-    const mediaColumnWidth = Math.min(592, Math.max(292, Math.round(aspect * 360)))
-    return { mediaColumnWidth, dialogWidth: Math.min(1080, mediaColumnWidth + 496) }
+    const mediaColumnWidth = Math.min(720, Math.max(340, Math.round(aspect * 440)))
+    return { mediaColumnWidth, dialogWidth: Math.min(1280, mediaColumnWidth + 496) }
   }
   const landscape = aspect > 1.2
-  const targetHeight = landscape ? 300 : 400
+  const targetHeight = landscape ? 360 : 520
   const naturalWidth = validSize ? Math.min(width, aspect * targetHeight) : 400
-  const mediaWidth = Math.min(landscape ? 600 : 400, Math.max(168, Math.round(naturalWidth)))
+  const mediaWidth = Math.min(landscape ? 720 : 520, Math.max(168, Math.round(naturalWidth)))
   // 图片贴齐弹窗外缘，不再为独立媒体卡片预留两侧内边距。
   const mediaColumnWidth = mediaWidth
-  return { mediaColumnWidth, dialogWidth: Math.min(1120, mediaColumnWidth + 496) }
+  return { mediaColumnWidth, dialogWidth: Math.min(1320, mediaColumnWidth + 496) }
 }
 
 /** 旧服务端没有媒体字段时保持单栏；异常媒体地址不交给浏览器加载。 */

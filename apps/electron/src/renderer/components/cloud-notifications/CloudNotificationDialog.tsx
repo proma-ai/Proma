@@ -70,7 +70,7 @@ function NotificationVideoPlayer({
       <video
         ref={videoRef}
         className={inline
-          ? 'block max-h-[min(50vh,320px)] w-full bg-black object-contain'
+          ? 'block max-h-[min(58vh,420px)] w-full bg-black object-contain'
           : 'absolute inset-0 block h-full w-full bg-black object-cover'}
         src={src}
         autoPlay
@@ -129,7 +129,7 @@ export const markdownComponents: Components = {
       )
     }
     if (!isHttpsUrl(src)) return null
-    return <img src={src} alt={alt ?? ''} className="my-3 max-h-80 w-auto max-w-full rounded-lg border border-border/60 object-contain" />
+    return <img src={src} alt={alt ?? ''} className="my-3 max-h-[min(54vh,520px)] w-auto max-w-full rounded-lg border border-border/60 object-contain" />
   },
 }
 
@@ -149,10 +149,10 @@ export function NotificationMediaView({
   const isVideo = media.type === 'video'
   return (
     <div
-      className={`relative min-w-0 w-full self-stretch overflow-hidden ${isVideo ? 'min-h-[min(50vh,300px)] bg-black' : 'min-h-44'}`}
+      className={`relative min-w-0 w-full self-stretch overflow-hidden ${isVideo ? 'min-h-[min(58vh,360px)] bg-black' : 'min-h-52'}`}
       style={{
         aspectRatio: aspectRatio && aspectRatio > 0 ? aspectRatio : isVideo ? 16 / 9 : 1,
-        maxHeight: isVideo ? 'min(70vh, 520px)' : 'min(62vh, 420px)',
+        maxHeight: isVideo ? 'min(76vh, 640px)' : 'min(70vh, 560px)',
       }}
       role="group"
       aria-label="通知媒体"
@@ -224,7 +224,7 @@ function NotificationDialogContent({
     <DialogContent
       hideClose
       className={media
-        ? `max-h-[calc(100vh-4rem)] w-[calc(100vw-3rem)] gap-0 overflow-hidden border-0 p-0 transition-[width] duration-200 motion-reduce:transition-none ${media.type === 'video' ? 'max-w-[1080px]' : 'max-w-[1120px]'}`
+        ? `max-h-[calc(100vh-4rem)] w-[calc(100vw-3rem)] gap-0 overflow-hidden border-0 p-0 transition-[width] duration-200 motion-reduce:transition-none ${media.type === 'video' ? 'max-w-[1280px]' : 'max-w-[1320px]'}`
         : 'max-h-[calc(100vh-5rem)] max-w-2xl overflow-y-auto'}
       style={layout ? { width: `min(calc(100vw - 3rem), ${layout.dialogWidth}px)` } : undefined}
       onEscapeKeyDown={(event) => event.preventDefault()}
@@ -233,11 +233,11 @@ function NotificationDialogContent({
     >
       <div
         className={media
-          ? `grid min-h-0 transition-[grid-template-columns] duration-200 motion-reduce:transition-none ${media.type === 'video' ? 'max-h-[min(70vh,520px)]' : 'max-h-[min(62vh,420px)]'}`
+          ? `grid min-h-0 transition-[grid-template-columns] duration-200 motion-reduce:transition-none ${media.type === 'video' ? 'max-h-[min(76vh,640px)]' : 'max-h-[min(70vh,560px)]'}`
           : 'contents'}
         style={layout ? { gridTemplateColumns: media?.type === 'video'
-          ? `minmax(0, min(${layout.mediaColumnWidth}px, 54%, calc(100% - 350px))) minmax(0, 1fr)`
-          : `minmax(0, min(${layout.mediaColumnWidth}px, 57%, calc(100% - 320px))) minmax(0, 1fr)` } : undefined}
+          ? `minmax(0, min(${layout.mediaColumnWidth}px, 58%, calc(100% - 390px))) minmax(0, 1fr)`
+          : `minmax(0, min(${layout.mediaColumnWidth}px, 60%, calc(100% - 350px))) minmax(0, 1fr)` } : undefined}
       >
         {media && <NotificationMediaView
           key={`${notification.id}:${media.url}`}
@@ -257,7 +257,7 @@ function NotificationDialogContent({
           </DialogHeader>
 
           <div className={media
-            ? 'prose prose-sm dark:prose-invert min-h-0 max-h-[min(60vh,420px)] max-w-none flex-1 overflow-y-auto break-words pr-1 [text-wrap:pretty]'
+            ? 'prose prose-sm dark:prose-invert min-h-0 max-h-[min(66vh,520px)] max-w-none flex-1 overflow-y-auto break-words pr-1 [text-wrap:pretty]'
             : 'prose prose-sm dark:prose-invert max-w-none break-words'}>
             <Markdown
               remarkPlugins={REMARK_PLUGINS}
