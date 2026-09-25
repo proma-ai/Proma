@@ -27,6 +27,7 @@ const PATH_SEP_RE = /[\\/]/
 const WIN_DRIVE_RE = /^[A-Za-z]:[\\/]/
 const UNC_PATH_RE = /^\\\\/
 const HOME_DIRECTORY_RE = /^~(?:[\\/]|$)/
+const SANDBOX_LOCAL_FILE_PREFIX = 'sandbox:'
 
 function getExtension(filename: string): string {
   const dot = filename.lastIndexOf('.')
@@ -100,6 +101,30 @@ export function isRelativeFilePath(text: string): boolean {
 /** 可安全交给主进程解析的本地文件引用（绝对或相对）。 */
 export function isLocalFileReference(text: string): boolean {
   return isAbsoluteFilePath(text) || isRelativeFilePath(text)
+}
+
+/**
+ * 将历史消息中的 sandbox: 本地交付链接还原为可校验的绝对文件路径。
+ * 不接受 host 形式、远程 URL、相对路径或无法解码的值；文件存在性和授权范围仍由主进程验证。
+ */
+export function getSandboxLocalFilePath(value: string): string | null {
+  const trimmed = value.trim()
+  if (!trimmed.startsWith(SANDBOX_LOCAL_FILE_PREFIX)) return null
+
+  const encodedPath = trimmed.slice(SANDBOX_LOCAL_FILE_PREFIX.length)
+  if (!encodedPath || encodedPath.startsWith('//')) return null
+
+  try {
+    const decodedPath = decodeURIComponent(encodedPath)
+    if (decodedPath.startsWith('//')) return null
+
+    // URL 风格的 Windows 绝对路径会写作 /C:/Users/...；移除 URI 路径前导
+    // slash 后才能交给 Windows path.resolve()。仅匹配驱动器前缀，不影响 POSIX 路径。
+    const filePath = decodedPath.replace(/^\/([A-Za-z]:[\\/])/, '$1')
+    return isAbsoluteFilePath(filePath) ? filePath : null
+  } catch {
+    return null
+  }
 }
 
 export interface FilePathDisplayInput {

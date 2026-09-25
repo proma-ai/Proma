@@ -40,7 +40,7 @@ import {
 import { LoadingIndicator } from '@/components/ui/loading-indicator'
 import { CodeBlock, MermaidBlock } from '@proma/ui'
 import { detectLanguage } from '@proma/core'
-import { FilePathChip, ResolvableFilePathChip, isAbsoluteFilePath, isImageFilePath, isLocalFileReference, isRelativeFilePath } from './file-path-chip'
+import { FilePathChip, ResolvableFilePathChip, getSandboxLocalFilePath, isAbsoluteFilePath, isImageFilePath, isLocalFileReference, isRelativeFilePath } from './file-path-chip'
 import { buildAgentHistoryQuoteLabel, parseAgentHistoryQuoteMention } from '@/lib/quoted-selection'
 import { createMentionPattern } from '@/lib/mention-patterns'
 import { resolveSkillMentionName } from '@/lib/skill-mention-name'
@@ -537,7 +537,7 @@ const REHYPE_PLUGINS = [rehypeKatex]
 
 /** 允许 mention:// 和本地绝对路径通过 URL 清洗 */
 function mentionUrlTransform(url: string): string {
-  if (url.startsWith('mention://') || isAbsoluteFilePath(safeDecode(url))) return url
+  if (url.startsWith('mention://') || isAbsoluteFilePath(safeDecode(url)) || getSandboxLocalFilePath(url)) return url
   return defaultUrlTransform(url)
 }
 
@@ -718,8 +718,9 @@ const MarkdownLink = React.memo(function MarkdownLink({
       return <MentionChip type={mentionMatch[1] as MentionType} value={mentionMatch[2] ?? ''} />
     }
 
-    const filePath = safeDecode(href)
-    if (isLocalFileReference(filePath)) {
+    const sandboxFilePath = getSandboxLocalFilePath(href)
+    const filePath = sandboxFilePath ?? safeDecode(href)
+    if (sandboxFilePath || isLocalFileReference(filePath)) {
       return (
         <ResolvableFilePathChip
           filePath={filePath}

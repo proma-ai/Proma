@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/context-menu'
 import {
   getFileName,
+  getSandboxLocalFilePath,
   getFilePathDisplayPath,
   isAbsoluteFilePath,
   isAsyncResultCurrent,
@@ -274,4 +275,4 @@ export function ResolvableFilePathChip({ fallback, filePath, basePath, basePaths
   return <FilePathChip filePath={filePath} basePath={basePath} basePaths={basePaths} sessionId={sessionId} className={className} />
 }
 
-export { isAbsoluteFilePath, isImageFilePath, isLocalFileReference, isRelativeFilePath }
+export { getSandboxLocalFilePath, isAbsoluteFilePath, isImageFilePath, isLocalFileReference, isRelativeFilePath }
