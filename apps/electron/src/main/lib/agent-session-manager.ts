@@ -309,22 +309,51 @@ export function listAgentSessions(): AgentSessionMeta[] {
   return sortSessionsByUpdatedAtDesc(index.sessions)
 }
 
+/** Resolve a session's effective workspace, preserving the default-project fallback for legacy metadata. */
+function resolveEffectiveWorkspaceId(
+  session: Pick<AgentSessionMeta, 'workspaceId'>,
+  workspaces: readonly AgentWorkspace[],
+): string | undefined {
+  if (session.workspaceId && workspaces.some((workspace) => workspace.id === session.workspaceId)) {
+    return session.workspaceId
+  }
+  return workspaces.find((workspace) => workspace.slug === 'default')?.id ?? workspaces[0]?.id
+}
+
+function getArchivedWorkspaceIds(workspaces: readonly AgentWorkspace[]): Set<string> {
+  return new Set(workspaces.filter((workspace) => workspace.archived).map((workspace) => workspace.id))
+}
+
 /** 获取未归档会话，供侧栏 active 视图按需读取。 */
 export function listActiveAgentSessions(): AgentSessionMeta[] {
   const index = readIndex()
-  return sortSessionsByUpdatedAtDesc(index.sessions.filter((session) => !session.archived))
+  const workspaces = listAgentWorkspaces()
+  const archivedWorkspaceIds = getArchivedWorkspaceIds(workspaces)
+  return sortSessionsByUpdatedAtDesc(index.sessions.filter((session) => (
+    !session.archived && !archivedWorkspaceIds.has(resolveEffectiveWorkspaceId(session, workspaces) ?? '')
+  )))
 }
 
-/** 获取归档会话，只有用户进入归档视图时才调用。 */
+/** 获取归档会话，只有用户进入归档视图时才调用。
+ * 项目归档优先于会话归档：已归档项目的未归档会话也仅在此列表展示。
+ */
 export function listArchivedAgentSessions(): AgentSessionMeta[] {
   const index = readIndex()
-  return sortSessionsByUpdatedAtDesc(index.sessions.filter((session) => session.archived && !session.isDraft))
+  const workspaces = listAgentWorkspaces()
+  const archivedWorkspaceIds = getArchivedWorkspaceIds(workspaces)
+  return sortSessionsByUpdatedAtDesc(index.sessions.filter((session) => (
+    !session.isDraft && (session.archived || archivedWorkspaceIds.has(resolveEffectiveWorkspaceId(session, workspaces) ?? ''))
+  )))
 }
 
 /** 获取归档数量，不把归档会话元数据传到 renderer。 */
 export function countArchivedAgentSessions(): number {
   const index = readIndex()
-  return index.sessions.reduce((count, session) => count + (session.archived && !session.isDraft ? 1 : 0), 0)
+  const workspaces = listAgentWorkspaces()
+  const archivedWorkspaceIds = getArchivedWorkspaceIds(workspaces)
+  return index.sessions.reduce((count, session) => (
+    count + (!session.isDraft && (session.archived || archivedWorkspaceIds.has(resolveEffectiveWorkspaceId(session, workspaces) ?? '')) ? 1 : 0)
+  ), 0)
 }
 
 /**
@@ -406,6 +435,10 @@ export function createAgentSession(
   sessionWorkbenchLayout?: SessionWorkbenchLayout,
   isDraft?: boolean,
 ): AgentSessionMeta {
+  if (workspaceId && getAgentWorkspace(workspaceId)?.archived) {
+    throw new Error('归档项目不能创建新会话，请先恢复项目。')
+  }
+
   const index = readIndex()
   const now = Date.now()
 

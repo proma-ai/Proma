@@ -25,7 +25,7 @@ import {
 } from '@proma/shared'
 import type { AgentStreamPayload } from '@proma/shared'
 import { agentEventBus } from './agent-service'
-import { getAgentSessionMeta, listAgentSessions } from './agent-session-manager'
+import { getAgentSessionMeta, listActiveAgentSessions } from './agent-session-manager'
 import { isMacAgentIslandNativeHostReady, publishMacAgentIslandSnapshot } from './mac-agent-island-native-host'
 import { getAgentIslandTodoAttentionKeys, selectAgentIslandTodos } from './agent-island-planning'
 import { selectAgentIslandCompactPlanQuota } from './agent-island-plan-quota'
@@ -491,8 +491,7 @@ function buildState(now: number): AgentIslandState {
   // launchpad from the session index. It deliberately does not affect pill
   // counts or Agent priority semantics.
   const recentSessions = sessionsOut.length === 0
-    ? listAgentSessions()
-      .filter((session) => !session.archived)
+    ? listActiveAgentSessions()
       .slice(0, 3)
       .map((session): AgentIslandSessionSnapshot => ({
         sessionId: session.id,

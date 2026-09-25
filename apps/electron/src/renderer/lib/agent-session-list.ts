@@ -80,10 +80,10 @@ const ARCHIVED_AUTOMATION_GROUP_ID = '__archived-automations__'
 const ARCHIVED_UNASSIGNED_GROUP_ID = '__archived-unassigned__'
 
 /**
- * 将归档会话按所属项目组织，保留自动任务和遗留无归属会话的独立入口。
+ * 将归档会话及已归档项目中的会话按所属项目组织，保留自动任务和遗留无归属会话的独立入口。
  *
- * 只输出非空分组：真实项目顺序跟随当前工作区顺序，自动任务与未归属项目
- * 固定置后，避免历史会话被误归入默认项目。
+ * 已归档项目即使没有会话也会保留空分组以便恢复；其余真实项目仅在含有归档会话时显示。
+ * 真实项目顺序跟随当前工作区顺序，自动任务与未归属项目固定置后，避免历史会话被误归入默认项目。
  */
 export function groupArchivedAgentSessionsByProject({
   sessions,
@@ -97,18 +97,24 @@ export function groupArchivedAgentSessionsByProject({
   const sessionsByWorkspaceId = new Map<string, AgentSessionMeta[]>(
     workspaces.map((workspace) => [workspace.id, []]),
   )
+  const archivedWorkspaceIds = new Set(
+    workspaces.filter((workspace) => workspace.archived).map((workspace) => workspace.id),
+  )
   const automationSessions: AgentSessionMeta[] = []
   const unassignedSessions: AgentSessionMeta[] = []
 
   for (const session of sessions) {
-    if (!session.archived || session.isDraft || excludedSessionIds.has(session.id)) continue
+    if (session.isDraft || excludedSessionIds.has(session.id)) continue
+    const effectiveWorkspaceId = resolveAgentSessionWorkspaceId(session, workspaces)
+    const belongsToArchivedWorkspace = !!effectiveWorkspaceId && archivedWorkspaceIds.has(effectiveWorkspaceId)
+    if (!session.archived && !belongsToArchivedWorkspace) continue
     if (session.sourceAutomationId) {
       automationSessions.push(session)
       continue
     }
 
-    const workspaceSessions = session.workspaceId
-      ? sessionsByWorkspaceId.get(session.workspaceId)
+    const workspaceSessions = effectiveWorkspaceId
+      ? sessionsByWorkspaceId.get(effectiveWorkspaceId)
       : undefined
     if (workspaceSessions) {
       workspaceSessions.push(session)
@@ -120,7 +126,7 @@ export function groupArchivedAgentSessionsByProject({
   const groups: ArchivedAgentSessionProjectGroup[] = []
   for (const workspace of workspaces) {
     const workspaceSessions = sessionsByWorkspaceId.get(workspace.id) ?? []
-    if (workspaceSessions.length === 0) continue
+    if (!workspace.archived && workspaceSessions.length === 0) continue
     groups.push({
       id: workspace.id,
       label: workspace.name,

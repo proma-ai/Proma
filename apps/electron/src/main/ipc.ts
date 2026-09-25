@@ -317,6 +317,7 @@ import {
   listAgentWorkspacesWithProjectRootStatus,
   createAgentWorkspace,
   updateAgentWorkspace,
+  toggleAgentWorkspaceArchive,
   relinkAgentWorkspaceProjectRoot,
   restoreAgentWorkspaceProjectRoot,
   deleteAgentWorkspace,
@@ -2933,6 +2934,14 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.UPDATE_WORKSPACE,
     async (_, id: string, updates: { name: string }): Promise<AgentWorkspace> => {
       return updateAgentWorkspace(id, updates)
+    }
+  )
+
+  // 切换项目归档状态。归档仅影响侧边栏组织，不删除会话或项目文件。
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.TOGGLE_WORKSPACE_ARCHIVE,
+    async (_, id: string): Promise<AgentWorkspace> => {
+      return toggleAgentWorkspaceArchive(id)
     }
   )
 

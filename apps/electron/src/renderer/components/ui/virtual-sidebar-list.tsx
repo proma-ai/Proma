@@ -18,6 +18,42 @@ interface VirtualSidebarListProps {
   overscan?: number
 }
 
+interface VirtualSidebarListItemProps {
+  /** 列表行复用时使用的数据索引；随索引变化重新创建 ref callback，让虚拟器重新测量 DOM。 */
+  index: number
+  start: number
+  content: React.ReactNode
+  measureElement: (node: Element | null) => void
+}
+
+/**
+ * Virtualizer 行包装器。
+ *
+ * 行 ID 是虚拟器的稳定身份；index 只用于更新测量节点的 data-index 和位置，不参与 React key。
+ * 这样展开/收起时，React 会按行身份移动/替换 DOM，而不会因为整体 index 偏移而重建整段可见列表。
+ */
+function VirtualSidebarListItem({
+  index,
+  start,
+  content,
+  measureElement,
+}: VirtualSidebarListItemProps): React.ReactElement {
+  const measureRef = React.useCallback((node: HTMLDivElement | null): void => {
+    measureElement(node)
+  }, [index, measureElement])
+
+  return (
+    <div
+      ref={measureRef}
+      data-index={index}
+      className="absolute left-0 top-0 w-full"
+      style={{ transform: `translateY(${start}px)` }}
+    >
+      {content}
+    </div>
+  )
+}
+
 /**
  * 左侧栏统一虚拟列表容器。
  *
@@ -38,6 +74,19 @@ export function VirtualSidebarList({
     getItemKey: (index) => rows[index]?.id ?? index,
     overscan,
   })
+  const rowsSignature = React.useMemo(
+    () => rows.map((row) => `${row.id}:${row.estimateSize}`).join('|'),
+    [rows],
+  )
+  const previousRowsSignatureRef = React.useRef(rowsSignature)
+
+  React.useLayoutEffect(() => {
+    if (previousRowsSignatureRef.current === rowsSignature) return
+    previousRowsSignatureRef.current = rowsSignature
+    // 行集合或顺序变化时，清除 TanStack Virtual 的旧尺寸缓存。
+    // 否则恢复项目/折叠项目后，旧 index 可能复用相邻行的高度，造成选中串行和残影。
+    virtualizer.measure()
+  }, [rowsSignature, virtualizer])
   const items = virtualizer.getVirtualItems()
   const lastAutoScrolledRowIdRef = React.useRef<string | null>(null)
 
@@ -66,15 +115,13 @@ export function VirtualSidebarList({
           const row = rows[item.index]
           if (!row) return null
           return (
-            <div
+            <VirtualSidebarListItem
               key={item.key}
-              ref={virtualizer.measureElement}
-              data-index={item.index}
-              className="absolute left-0 top-0 w-full"
-              style={{ transform: `translateY(${item.start}px)` }}
-            >
-              {row.content}
-            </div>
+              index={item.index}
+              start={item.start}
+              content={row.content}
+              measureElement={virtualizer.measureElement}
+            />
           )
         })}
       </div>

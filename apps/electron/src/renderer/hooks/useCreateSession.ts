@@ -5,6 +5,7 @@
  */
 
 import { useAtomValue, useSetAtom } from 'jotai'
+import { toast } from 'sonner'
 import {
   conversationsAtom,
   selectedModelAtom,
@@ -96,6 +97,7 @@ export function useCreateSession(): CreateSessionActions {
       return meta.id
     } catch (error) {
       console.error('[创建会话] 创建 Agent 会话失败:', error)
+      toast.error(error instanceof Error ? error.message : '创建 Agent 会话失败')
       return undefined
     }
   }

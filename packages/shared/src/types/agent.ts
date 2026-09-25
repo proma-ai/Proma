@@ -27,6 +27,8 @@ export interface AgentWorkspace {
   projectRootPath?: string
   /** 本地项目根目录的运行时状态；Proma 托管项目不设置此字段。 */
   projectRootStatus?: LocalProjectRootStatus
+  /** 是否已归档；缺失时兼容旧索引并视为未归档。 */
+  archived?: boolean
   /** 创建时间戳 */
   createdAt: number
   /** 更新时间戳 */
@@ -1971,6 +1973,8 @@ export const AGENT_IPC_CHANNELS = {
   CREATE_PROJECT: 'agent:create-project',
   /** 更新工作区 */
   UPDATE_WORKSPACE: 'agent:update-workspace',
+  /** 切换项目归档状态 */
+  TOGGLE_WORKSPACE_ARCHIVE: 'agent:toggle-workspace-archive',
   /** 为本地项目重新选择已有项目根目录 */
   RELINK_WORKSPACE_PROJECT_ROOT: 'agent:relink-workspace-project-root',
   /** 在丢失的本地项目原路径重新创建空目录 */

@@ -364,6 +364,25 @@ export async function updateAgentWorkspace(
   return projectRootStatus ? { ...updated, projectRootStatus } : updated
 }
 
+/** 切换项目归档状态；不修改其会话、项目根目录或配置。 */
+export async function toggleAgentWorkspaceArchive(id: string): Promise<AgentWorkspace> {
+  const index = readIndex()
+  const idx = index.workspaces.findIndex((workspace) => workspace.id === id)
+  if (idx === -1) throw new Error(`项目不存在: ${id}`)
+
+  const updated: AgentWorkspace = {
+    ...index.workspaces[idx]!,
+    archived: !index.workspaces[idx]!.archived,
+    updatedAt: Date.now(),
+  }
+  index.workspaces[idx] = updated
+  writeIndex(index)
+
+  console.log(`[Agent 工作区] 已${updated.archived ? '归档' : '恢复'}项目: ${updated.name} (${updated.id})`)
+  const projectRootStatus = await getLocalProjectRootStatus(updated.projectRootPath)
+  return projectRootStatus ? { ...updated, projectRootStatus } : updated
+}
+
 /** 将本地项目重新关联到一个已有文件夹，保留项目、会话与配置。 */
 export async function relinkAgentWorkspaceProjectRoot(id: string, projectRootPath: string): Promise<AgentWorkspace> {
   let normalizedProjectRootPath: string

@@ -2571,6 +2571,7 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
       }).catch(console.error)
     } catch (error) {
       console.error('[AgentView] 在新会话中重试失败:', error)
+      toast.error(error instanceof Error ? error.message : '创建 Agent 会话失败')
     }
   }, [sessionId, agentChannelId, agentModelId, currentWorkspaceId, openSession, setAgentSessions, setStreamingStates, permissionMode])
 

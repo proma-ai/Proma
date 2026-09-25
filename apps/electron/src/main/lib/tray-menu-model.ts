@@ -38,8 +38,12 @@ export function createTrayMenuModel(
   runningSessionIds: Set<string> = new Set(),
 ): TrayMenuModel {
   const workspacesById = new Map(workspaces.map((workspace) => [workspace.id, workspace]))
+  const archivedWorkspaceIds = new Set(workspaces.filter((workspace) => workspace.archived).map((workspace) => workspace.id))
   const visibleSessions = sessions
-    .filter((session) => !session.archived || runningSessionIds.has(session.id))
+    // 运行中会话保留状态提醒，但已归档项目绝不作为最近会话入口展示。
+    .filter((session) => runningSessionIds.has(session.id) || (
+      !session.archived && !archivedWorkspaceIds.has(session.workspaceId ?? '')
+    ))
     .slice()
     .sort((a, b) => b.updatedAt - a.updatedAt)
 

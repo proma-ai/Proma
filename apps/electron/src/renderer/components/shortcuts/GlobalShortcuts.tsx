@@ -11,6 +11,7 @@
 
 import { useEffect, useCallback } from 'react'
 import { useAtomValue, useSetAtom, useAtom, useStore } from 'jotai'
+import { toast } from 'sonner'
 import { appModeAtom } from '@/atoms/app-mode'
 import { settingsOpenAtom, channelFormDirtyAtom, settingsCloseRequestedAtom } from '@/atoms/settings-tab'
 import { searchDialogOpenAtom } from '@/atoms/search-atoms'
@@ -398,6 +399,7 @@ export function GlobalShortcuts(): null {
         }
       } catch (error) {
         console.error('[快速任务] 创建会话失败:', error)
+        toast.error(error instanceof Error ? error.message : '创建会话失败')
       }
     })
     return cleanup
