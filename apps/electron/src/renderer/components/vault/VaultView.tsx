@@ -78,6 +78,8 @@ function VaultFileList({
   focusedFolder,
   onSelect,
   onFocusFolder,
+  onOpenFolder,
+  onShowFileInFolder,
   onDelete,
   onCreateNote,
   onCreateFolder,
@@ -89,6 +91,8 @@ function VaultFileList({
   focusedFolder: string | null
   onSelect: (relativePath: string) => void
   onFocusFolder: (relativePath: string) => void
+  onOpenFolder: (relativePath: string) => void
+  onShowFileInFolder: (relativePath: string) => void
   onDelete: (file: VaultFileEntry) => void
   onCreateNote: (folderPath: string) => void
   onCreateFolder: (folderPath: string) => void
@@ -184,7 +188,8 @@ function VaultFileList({
                     <span className="min-w-0 truncate">{child.name}</span>
                   </button>
                 </ContextMenuTrigger>
-                <ContextMenuContent className="z-[9999] w-40 min-w-0 p-0.5">
+                <ContextMenuContent className="z-[9999] w-48 min-w-0 p-0.5">
+                  <ContextMenuItem onSelect={() => onOpenFolder(child.relativePath)}>在文件管理器中打开</ContextMenuItem>
                   <ContextMenuItem disabled={!canCreate} onSelect={() => onCreateNote(child.relativePath)}>新建笔记</ContextMenuItem>
                   <ContextMenuItem disabled={!canCreate} onSelect={() => onCreateFolder(child.relativePath)}>新建文件夹</ContextMenuItem>
                 </ContextMenuContent>
@@ -208,36 +213,42 @@ function VaultFileList({
         .map((file) => {
           const selected = selectedPath === file.relativePath
           return (
-            <div
-              key={file.relativePath}
-              className={cn(
-                'group flex h-8 w-full min-w-0 items-center rounded-md transition-colors',
-                selected ? 'bg-accent text-accent-foreground shadow-sm' : 'text-foreground/70 hover:bg-muted/70 hover:text-foreground',
-              )}
-              style={{ paddingLeft: `${18 + Math.min(depth, 6) * 14}px` }}
-            >
-              <button
-                type="button"
-                title={file.relativePath}
-                onClick={() => onSelect(file.relativePath)}
-                className="h-full min-w-0 flex-1 truncate text-left text-[13px]"
-              >
-                {displayDocumentTitle(file.name)}
-              </button>
-              <Tooltip>
-                <TooltipTrigger asChild>
+            <ContextMenu key={file.relativePath}>
+              <ContextMenuTrigger asChild>
+                <div
+                  className={cn(
+                    'group flex h-8 w-full min-w-0 items-center rounded-md transition-colors',
+                    selected ? 'bg-accent text-accent-foreground shadow-sm' : 'text-foreground/70 hover:bg-muted/70 hover:text-foreground',
+                  )}
+                  style={{ paddingLeft: `${18 + Math.min(depth, 6) * 14}px` }}
+                >
                   <button
                     type="button"
-                    aria-label={`删除笔记 ${displayDocumentTitle(file.name)}`}
-                    onClick={() => onDelete(file)}
-                    className="mr-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-[opacity,color,background-color] hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
+                    title={file.relativePath}
+                    onClick={() => onSelect(file.relativePath)}
+                    className="h-full min-w-0 flex-1 truncate text-left text-[13px]"
                   >
-                    <Trash2 size={13} />
+                    {displayDocumentTitle(file.name)}
                   </button>
-                </TooltipTrigger>
-                <TooltipContent side="right">删除笔记</TooltipContent>
-              </Tooltip>
-            </div>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label={`删除笔记 ${displayDocumentTitle(file.name)}`}
+                        onClick={() => onDelete(file)}
+                        className="mr-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-[opacity,color,background-color] hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">删除笔记</TooltipContent>
+                  </Tooltip>
+                </div>
+              </ContextMenuTrigger>
+              <ContextMenuContent className="z-[9999] w-48 min-w-0 p-0.5">
+                <ContextMenuItem onSelect={() => onShowFileInFolder(file.relativePath)}>在文件管理器中打开</ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
           )
         })}
     </>
@@ -1171,6 +1182,16 @@ export function VaultView({ embedded = false, sessionId }: { embedded?: boolean;
                 focusedFolder={focusedFolder}
                 onSelect={(path) => { setFocusedFolder(null); void openFile(path) }}
                 onFocusFolder={(relativePath) => { setFocusedFolder(relativePath); updateAgentFocus({ kind: 'folder', relativePath }) }}
+                onOpenFolder={(relativePath) => {
+                  void window.electronAPI.openVaultFolder(relativePath).catch((error: unknown) => {
+                    toast.error(error instanceof Error ? error.message : '无法打开文件夹')
+                  })
+                }}
+                onShowFileInFolder={(relativePath) => {
+                  void window.electronAPI.showVaultFileInFolder(relativePath).catch((error: unknown) => {
+                    toast.error(error instanceof Error ? error.message : '无法在文件管理器中显示笔记')
+                  })
+                }}
                 onDelete={setDeleteTarget}
                 onCreateNote={(folderPath) => { void createNoteInFolder(folderPath) }}
                 onCreateFolder={openCreateFolderDialog}

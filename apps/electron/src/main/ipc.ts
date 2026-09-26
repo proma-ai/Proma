@@ -6186,6 +6186,19 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(VAULT_IPC_CHANNELS.LIST_FILES, async () => getConfiguredVaultFileSystem().listFiles())
 
+  ipcMain.handle(VAULT_IPC_CHANNELS.OPEN_FOLDER, async (_, relativePath: unknown): Promise<void> => {
+    if (typeof relativePath !== 'string') throw new Error('Vault 文件夹路径非法')
+    const folderPath = getConfiguredVaultFileSystem().resolveFolderPath(relativePath)
+    const error = await shell.openPath(folderPath)
+    if (error) throw new Error(error)
+  })
+
+  ipcMain.handle(VAULT_IPC_CHANNELS.SHOW_FILE_IN_FOLDER, async (_, relativePath: unknown): Promise<void> => {
+    if (typeof relativePath !== 'string') throw new Error('Vault 文件路径非法')
+    const filePath = getConfiguredVaultFileSystem().resolveFilePath(relativePath)
+    shell.showItemInFolder(filePath)
+  })
+
   ipcMain.handle(VAULT_IPC_CHANNELS.READ_FILE, async (_, relativePath: unknown) => {
     if (typeof relativePath !== 'string') throw new Error('Vault relativePath 必填')
     return getConfiguredVaultFileSystem().readFile(relativePath)

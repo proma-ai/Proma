@@ -238,6 +238,8 @@ export function getVaultUserContext(sessionId: string): VaultUserContextSnapshot
 
 export interface VaultFileSystem {
   listFiles(): VaultTreeEntry[]
+  resolveFolderPath(relativePath: string): string
+  resolveFilePath(relativePath: string): string
   readFile(relativePath: string): VaultReadResult
   resolveMedia(noteRelativePath: string, src: string): string | null
   savePastedImage(input: VaultSavePastedImageInput): { src: string } | null
@@ -304,6 +306,21 @@ export function createVaultFileSystem(rootPath: string): VaultFileSystem {
 
     walk(root, 0)
     return entries.sort((left, right) => left.relativePath.localeCompare(right.relativePath))
+  }
+
+  const resolveFolderPath = (relativePath: string): string => {
+    const target = getSafeVaultFolderTarget(root, relativePath)
+    if (!target.relativePath) throw new Error('不能打开 Vault 根文件夹')
+    if (!existsSync(target.absolutePath)) throw new Error(`Vault 文件夹不存在: ${target.relativePath}`)
+    if (!lstatSync(target.absolutePath).isDirectory()) throw new Error('Vault 目标不是文件夹')
+    return target.absolutePath
+  }
+
+  const resolveFilePath = (relativePath: string): string => {
+    const target = getSafeVaultTarget(root, relativePath)
+    if (!existsSync(target.absolutePath)) throw new Error(`Vault 文件不存在: ${target.relativePath}`)
+    if (!lstatSync(target.absolutePath).isFile()) throw new Error('Vault 目标不是普通文件')
+    return target.absolutePath
   }
 
   const readFile = (relativePath: string): VaultReadResult => {
@@ -500,7 +517,7 @@ export function createVaultFileSystem(rootPath: string): VaultFileSystem {
     unlinkSync(revalidated.absolutePath)
   }
 
-  return { listFiles, readFile, resolveMedia, savePastedImage, writeFile, createUntitledNote, createUntitledNoteInFolder, createFolder, renameFile, deleteFile }
+  return { listFiles, resolveFolderPath, resolveFilePath, readFile, resolveMedia, savePastedImage, writeFile, createUntitledNote, createUntitledNoteInFolder, createFolder, renameFile, deleteFile }
 }
 
 

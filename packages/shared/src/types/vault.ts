@@ -98,6 +98,8 @@ export const VAULT_IPC_CHANNELS = {
   SELECT: 'vault:select',
   AUTHORIZE_CANDIDATE: 'vault:authorize-candidate',
   LIST_FILES: 'vault:list-files',
+  OPEN_FOLDER: 'vault:open-folder',
+  SHOW_FILE_IN_FOLDER: 'vault:show-file-in-folder',
   READ_FILE: 'vault:read-file',
   RESOLVE_MEDIA: 'vault:resolve-media',
   SAVE_PASTED_IMAGE: 'vault:save-pasted-image',
