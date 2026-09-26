@@ -32,6 +32,19 @@ test('Given the MCP connection catalog When listing search providers Then Brave 
   })
 })
 
+test('Given the MCP connection catalog When listing Serply Search Then it connects to the official remote MCP with only an X-Api-Key header', () => {
+  const serply = credentialIntegration('serply-search-mcp')
+
+  expect(serply.entry).toEqual({ type: 'http', url: 'https://api.serply.io/mcp', enabled: false })
+  expect(serply.credential).toMatchObject({
+    headerName: 'X-Api-Key',
+    credentialStorageUrl: 'https://api.serply.io/mcp',
+    acquisitionUrl: 'https://serply.io',
+  })
+  expect(serply.credential.valuePrefix).toBeUndefined()
+  expect(serply.credential.envName).toBeUndefined()
+})
+
 test('搜索服务目录顺序固定为飞书、钉钉、企业微信、Tavily、Brave，再到其他集成', () => {
   const expected = ['feishu-cli', 'dingtalk-cli', 'wecom-cli', 'tavily-search-mcp', 'brave-search-mcp']
   const actual = [...MCP_INTEGRATION_CATALOG]
