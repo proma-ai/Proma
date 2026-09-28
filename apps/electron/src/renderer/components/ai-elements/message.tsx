@@ -215,12 +215,14 @@ export function MessageAction({
 interface MdastTextNode {
   type: 'text'
   value: string
+  position?: { start: { offset?: number } }
 }
 
 interface MdastLinkNode {
   type: 'link'
   url: string
   children: MdastNode[]
+  position?: { start: { offset?: number } }
 }
 
 interface MdastBreakNode {
@@ -501,6 +503,49 @@ export function remarkPreserveBreaks() {
   }
 }
 
+/**
+ * GFM 会把紧邻裸 URL 的中文标点和后文一起纳入链接。
+ * 只修正「链接文字等于目标地址」的自动链接；显式 Markdown 链接保留原目标。
+ */
+export function remarkTrimCjkAutolinks() {
+  return (tree: MdastParent) => {
+    const visit = (parent: MdastParent): void => {
+      for (let index = 0; index < parent.children.length; index++) {
+        const child = parent.children[index]!
+        if (child.type === 'link') {
+          const link = child as MdastLinkNode
+          const label = link.children.length === 1 && link.children[0]?.type === 'text'
+            ? (link.children[0] as MdastTextNode).value
+            : undefined
+          const linkStart = link.position?.start.offset
+          const labelStart = (link.children[0] as MdastTextNode | undefined)?.position?.start.offset
+          if (label === link.url && linkStart !== undefined && linkStart === labelStart && /^https?:\/\//i.test(link.url)) {
+            const boundary = link.url.search(/[；，。！？、]/u)
+            if (boundary > 0) {
+              const target = link.url.slice(0, boundary)
+              try {
+                const parsed = new URL(target)
+                if (parsed.hostname) {
+                  link.url = target
+                  link.children = [{ type: 'text', value: target }]
+                  parent.children.splice(index + 1, 0, { type: 'text', value: label.slice(boundary) })
+                  index++
+                }
+              } catch {
+                // 不是合法 URL 时保持 Markdown 原样，避免改写普通文本。
+              }
+            }
+          }
+        } else if (child.type !== 'code' && child.type !== 'inlineCode') {
+          const nested = child as MdastParent
+          if (nested.children) visit(nested)
+        }
+      }
+    }
+    visit(tree)
+  }
+}
+
 /** remark 插件函数签名 */
 export type RemarkPluginFn = () => (tree: MdastParent) => void
 
@@ -530,7 +575,7 @@ interface MessageResponseProps {
 }
 
 /** 稳定引用的插件数组，避免 react-markdown 每帧重建插件管线 */
-const REMARK_PLUGINS = [remarkGfm, remarkMath]
+const REMARK_PLUGINS = [remarkGfm, remarkMath, remarkTrimCjkAutolinks]
 const REHYPE_PLUGINS = [rehypeKatex]
 
 /** 允许 mention:// 和本地绝对路径通过 URL 清洗 */

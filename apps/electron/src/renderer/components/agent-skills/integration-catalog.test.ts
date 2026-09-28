@@ -32,6 +32,17 @@ test('Given the MCP connection catalog When listing search providers Then Brave 
   })
 })
 
+test('Given no AnySearch API key When choosing the built-in AnySearch card Then an anonymous official MCP connection is available', () => {
+  const anysearch = MCP_INTEGRATION_CATALOG.find((item) => item.id === 'anysearch-mcp')
+  expect(anysearch).toMatchObject({
+    kind: 'mcp',
+    authentication: 'none',
+    serverName: 'anysearch',
+    entry: { type: 'http', url: 'https://api.anysearch.com/mcp', enabled: true },
+  })
+  expect(anysearch?.capabilities).toEqual(['通用与垂直搜索', '并行搜索', '网页正文提取'])
+})
+
 test('搜索服务目录顺序固定为飞书、钉钉、企业微信、Tavily、Brave，再到其他集成', () => {
   const expected = ['feishu-cli', 'dingtalk-cli', 'wecom-cli', 'tavily-search-mcp', 'brave-search-mcp']
   const actual = [...MCP_INTEGRATION_CATALOG]
