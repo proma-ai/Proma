@@ -678,31 +678,36 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
       <div className="flex flex-col h-full flex-1 min-w-0">
         {/* Header 在 max-w 外，按钮可到达最右侧 */}
         <ChatHeader conversation={conversation} />
-        <div className="flex flex-col flex-1 w-full max-w-[min(72rem,100%)] mx-auto overflow-hidden min-h-0">
+        <div
+          className="flex flex-col flex-1 w-full max-w-[min(72rem,100%)] mx-auto overflow-hidden min-h-0"
+          data-composer-viewport
+        >
           {/* 中间：消息区域 */}
-          <ChatMessages
-            conversationId={conversationId}
-            messages={messages}
-            messagesLoaded={messagesLoaded}
-            streaming={isStreaming}
-            streamingContent={streamingContent}
-            streamingReasoning={streamingReasoning}
-            streamingModel={streamingModel}
-            startedAt={streamState?.startedAt}
-            toolActivities={toolActivities}
-            contextDividers={contextDividers}
-            hasMore={hasMoreMessages}
-            onDeleteMessage={handleDeleteMessage}
-            onResendMessage={handleResendMessage}
-            onStartInlineEdit={handleStartInlineEdit}
-            onSubmitInlineEdit={handleSubmitInlineEdit}
-            onCancelInlineEdit={handleCancelInlineEdit}
-            inlineEditingMessageId={inlineEditingMessageId}
-            onDeleteDivider={handleDeleteDivider}
-            onLoadMore={handleLoadMore}
-            onLoadMessagesAround={handleLoadMessagesAround}
-            onImageEditComplete={handleImageEditComplete}
-          />
+          <div className="flex min-h-0 flex-1 flex-col" data-composer-message-viewport>
+            <ChatMessages
+              conversationId={conversationId}
+              messages={messages}
+              messagesLoaded={messagesLoaded}
+              streaming={isStreaming}
+              streamingContent={streamingContent}
+              streamingReasoning={streamingReasoning}
+              streamingModel={streamingModel}
+              startedAt={streamState?.startedAt}
+              toolActivities={toolActivities}
+              contextDividers={contextDividers}
+              hasMore={hasMoreMessages}
+              onDeleteMessage={handleDeleteMessage}
+              onResendMessage={handleResendMessage}
+              onStartInlineEdit={handleStartInlineEdit}
+              onSubmitInlineEdit={handleSubmitInlineEdit}
+              onCancelInlineEdit={handleCancelInlineEdit}
+              inlineEditingMessageId={inlineEditingMessageId}
+              onDeleteDivider={handleDeleteDivider}
+              onLoadMore={handleLoadMore}
+              onLoadMessagesAround={handleLoadMessagesAround}
+              onImageEditComplete={handleImageEditComplete}
+            />
+          </div>
 
           {/* 错误提示 */}
           {chatError && (
