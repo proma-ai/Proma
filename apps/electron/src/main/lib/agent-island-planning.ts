@@ -33,3 +33,16 @@ export function getAgentIslandTodoAttentionKeys<T extends AgentIslandPlanningTod
     .filter((todo) => todo.dueAt < now || todo.dueAt <= now + attentionWindowMs)
     .map((todo) => `t:${todo.id}:${todo.dueAt}`)
 }
+
+/** setTimeout 的延迟是 32 位有符号整数，超过上限时 Node 会改用 1ms。 */
+const MAX_TIMER_DELAY_MS = 2_147_483_647
+
+/**
+ * 计算等待下一个提醒时间点的定时器延迟。
+ *
+ * 时间点超过定时器上限时先等到上限，触发后由调用方重新计算；
+ * 否则延迟会溢出成 1ms，定时器不断重排并持续推送快照。
+ */
+export function getAgentIslandPlanningTimerDelay(next: number, now: number): number {
+  return Math.min(MAX_TIMER_DELAY_MS, Math.max(1_000, next - now + 25))
+}

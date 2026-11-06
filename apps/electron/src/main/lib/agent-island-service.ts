@@ -27,7 +27,11 @@ import type { AgentStreamPayload } from '@proma/shared'
 import { agentEventBus } from './agent-service'
 import { getAgentSessionMeta, listAgentSessions } from './agent-session-manager'
 import { isMacAgentIslandNativeHostReady, publishMacAgentIslandSnapshot } from './mac-agent-island-native-host'
-import { getAgentIslandTodoAttentionKeys, selectAgentIslandTodos } from './agent-island-planning'
+import {
+  getAgentIslandPlanningTimerDelay,
+  getAgentIslandTodoAttentionKeys,
+  selectAgentIslandTodos,
+} from './agent-island-planning'
 import { selectAgentIslandCompactPlanQuota } from './agent-island-plan-quota'
 import { getAgentIslandPhasePriority } from './agent-island-priority'
 import { buildVisibilityKey } from './agent-island-visibility'
@@ -730,7 +734,7 @@ function scheduleNextPlanningAttention(): void {
     planningRevision += 1
     schedulePush()
     scheduleNextPlanningAttention()
-  }, Math.max(1_000, next - now + 25))
+  }, getAgentIslandPlanningTimerDelay(next, now))
 }
 
 function schedulePush(throttleMs = PUSH_THROTTLE_MS): void {
