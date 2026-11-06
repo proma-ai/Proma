@@ -964,15 +964,21 @@ struct PromaAgentIslandHost {
 
     DispatchQueue.global(qos: .userInitiated).async {
       while let line = readLine(strippingNewline: true) {
-        guard let data = line.data(using: .utf8),
-              let type = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["type"] as? String else { continue }
-        if type == "shutdown" {
-          DispatchQueue.main.async { controller.close(); app.terminate(nil) }
-          return
+        // 这个闭包在 stdin 关闭前不会返回，GCD 的自动释放池不会排空；
+        // 必须逐行排空，否则 JSONSerialization 产生的对象会一直累积。
+        let shouldExit = autoreleasepool { () -> Bool in
+          guard let data = line.data(using: .utf8),
+                let type = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["type"] as? String else { return false }
+          if type == "shutdown" {
+            DispatchQueue.main.async { controller.close(); app.terminate(nil) }
+            return true
+          }
+          if type == "snapshot", let message = try? JSONDecoder().decode(SnapshotMessage.self, from: data) {
+            DispatchQueue.main.async { controller.apply(message) }
+          }
+          return false
         }
-        if type == "snapshot", let message = try? JSONDecoder().decode(SnapshotMessage.self, from: data) {
-          DispatchQueue.main.async { controller.apply(message) }
-        }
+        if shouldExit { return }
       }
       DispatchQueue.main.async { controller.close(); app.terminate(nil) }
     }
