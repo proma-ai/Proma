@@ -14,10 +14,15 @@
  *
  * 缩放交互：仅头部按钮（缩小 / 重置 / 放大）。不响应滚轮和拖拽，
  * 让滚轮事件正常冒泡到页面滚动；放大后用容器原生 overflow scrollbar 浏览。
+ *
+ * 全屏预览：头部提供全屏按钮（Esc / 点击遮罩 / 头部按钮退出），
+ * 在全屏遮罩内单独维护一份缩放比例与滚动位置，宽度受限的长图可以铺满窗口阅读。
  */
 
 import * as React from 'react'
+import { createPortal } from 'react-dom'
 import type { DiagramColors, RenderOptions } from 'beautiful-mermaid'
+import { INITIAL_SCALE, toZoomPercent, zoomIn, zoomOut } from './zoom.ts'
 
 interface MermaidBlockProps {
   /** mermaid 源码 */
@@ -28,11 +33,6 @@ interface MermaidBlockProps {
 
 /** 防抖间隔（ms） */
 const DEBOUNCE_MS = 350
-/** 缩放范围 */
-const ZOOM_MIN = 0.25
-const ZOOM_MAX = 3
-const ZOOM_STEP = 0.15
-const INITIAL_SCALE = 1
 let mermaidRenderId = 0
 
 function isDarkMode(): boolean {
@@ -92,10 +92,6 @@ async function renderMermaidSvg(code: string): Promise<string> {
   return renderWithOfficialMermaid(code)
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max)
-}
-
 // ===== 图标（与 CodeBlock 一致） =====
 
 const ICON_ATTRS = {
@@ -125,6 +121,96 @@ const zoomOutPath = (
     <line x1="8" y1="11" x2="14" y2="11" />
   </>
 )
+/** 展开：四角向外（进入全屏） */
+const maximizePath = (
+  <>
+    <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+    <path d="M16 3h3a2 2 0 0 1 2 2v3" />
+    <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+    <path d="M8 21H5a2 2 0 0 1-2-2v-3" />
+  </>
+)
+/** 收起：四角向内（退出全屏） */
+const minimizePath = (
+  <>
+    <path d="M8 3v3a2 2 0 0 1-2 2H3" />
+    <path d="M16 3v3a2 2 0 0 0 2 2h3" />
+    <path d="M16 21v-3a2 2 0 0 1 2-2h3" />
+    <path d="M8 21v-3a2 2 0 0 0-2-2H3" />
+  </>
+)
+
+// ===== 头部栏（内联卡片与全屏预览共用） =====
+
+interface MermaidHeaderProps {
+  /** 是否展示缩放控件（SVG 尚未渲染时只有复制） */
+  showZoom: boolean
+  /** 是否展示全屏入口（与缩放同步：没有 SVG 就没有可放大阅读的内容） */
+  showFullscreen: boolean
+  zoomPercent: number
+  copied: boolean
+  /** 当前是否处于全屏预览 */
+  fullscreen: boolean
+  onZoomIn: () => void
+  onZoomOut: () => void
+  onZoomReset: () => void
+  onCopy: () => void
+  onToggleFullscreen: () => void
+}
+
+function MermaidHeader({
+  showZoom,
+  showFullscreen,
+  zoomPercent,
+  copied,
+  fullscreen,
+  onZoomIn,
+  onZoomOut,
+  onZoomReset,
+  onCopy,
+  onToggleFullscreen,
+}: MermaidHeaderProps): React.ReactElement {
+  return (
+    <div className="flex items-center justify-between h-[34px] px-2 py-1 bg-muted/60 text-muted-foreground text-xs shrink-0">
+      <span className="font-medium select-none">Mermaid</span>
+      <div className="flex items-center gap-1">
+        {showZoom && (
+          <div className="flex items-center gap-0.5 mr-2">
+            <button type="button" onClick={onZoomOut} className="p-0.5 rounded hover:bg-foreground/10 transition-colors" title="缩小">
+              <svg {...ICON_ATTRS}>{zoomOutPath}</svg>
+            </button>
+            <button type="button" onClick={onZoomReset} className="px-1 py-0.5 rounded hover:bg-foreground/10 transition-colors min-w-[40px] text-center tabular-nums" title="重置缩放">
+              {zoomPercent}%
+            </button>
+            <button type="button" onClick={onZoomIn} className="p-0.5 rounded hover:bg-foreground/10 transition-colors" title="放大">
+              <svg {...ICON_ATTRS}>{zoomInPath}</svg>
+            </button>
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={onCopy}
+          className="flex items-center gap-1.5 px-1.5 py-0.5 rounded hover:bg-foreground/10 transition-colors text-muted-foreground hover:text-foreground"
+        >
+          <svg {...ICON_ATTRS}>{copied ? checkIconPath : copyIconPath}</svg>
+          <span>{copied ? '已复制' : '复制'}</span>
+        </button>
+        {showFullscreen && (
+          <button
+            type="button"
+            onClick={onToggleFullscreen}
+            className="flex items-center gap-1.5 px-1.5 py-0.5 rounded hover:bg-foreground/10 transition-colors text-muted-foreground hover:text-foreground"
+            title={fullscreen ? '退出全屏（Esc）' : '全屏查看'}
+            aria-label={fullscreen ? '退出全屏' : '全屏查看'}
+          >
+            <svg {...ICON_ATTRS}>{fullscreen ? minimizePath : maximizePath}</svg>
+            <span>{fullscreen ? '退出全屏' : '全屏'}</span>
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
 
 // ===== 主组件 =====
 
@@ -132,6 +218,10 @@ export function MermaidBlock({ code, onCopy }: MermaidBlockProps): React.ReactEl
   const [renderedSvg, setRenderedSvg] = React.useState<string | null>(null)
   const [copied, setCopied] = React.useState(false)
   const [scale, setScale] = React.useState<number>(INITIAL_SCALE)
+  const [fullscreenOpen, setFullscreenOpen] = React.useState(false)
+  /** 全屏内单独维护缩放，避免把内联卡片的缩放状态带进大窗口 */
+  const [fullscreenScale, setFullscreenScale] = React.useState<number>(INITIAL_SCALE)
+  const fullscreenPanelRef = React.useRef<HTMLDivElement | null>(null)
 
   const codeRef = React.useRef(code)
   const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -179,12 +269,26 @@ export function MermaidBlock({ code, onCopy }: MermaidBlockProps): React.ReactEl
   }, [renderCurrentCode])
 
   const handleZoomIn = React.useCallback(() => {
-    setScale((prev) => clamp(prev + ZOOM_STEP, ZOOM_MIN, ZOOM_MAX))
+    setScale((prev) => zoomIn(prev))
   }, [])
   const handleZoomOut = React.useCallback(() => {
-    setScale((prev) => clamp(prev - ZOOM_STEP, ZOOM_MIN, ZOOM_MAX))
+    setScale((prev) => zoomOut(prev))
   }, [])
   const handleZoomReset = React.useCallback(() => setScale(INITIAL_SCALE), [])
+
+  const handleFullscreenZoomIn = React.useCallback(() => {
+    setFullscreenScale((prev) => zoomIn(prev))
+  }, [])
+  const handleFullscreenZoomOut = React.useCallback(() => {
+    setFullscreenScale((prev) => zoomOut(prev))
+  }, [])
+  const handleFullscreenZoomReset = React.useCallback(() => setFullscreenScale(INITIAL_SCALE), [])
+
+  const closeFullscreen = React.useCallback(() => setFullscreenOpen(false), [])
+  const toggleFullscreen = React.useCallback(() => {
+    if (!fullscreenOpen) setFullscreenScale(INITIAL_SCALE)
+    setFullscreenOpen(!fullscreenOpen)
+  }, [fullscreenOpen])
 
   const handleCopy = React.useCallback(async () => {
     try {
@@ -194,35 +298,54 @@ export function MermaidBlock({ code, onCopy }: MermaidBlockProps): React.ReactEl
     } catch (error) {
       console.error('[MermaidBlock] 复制失败:', error)
     }
-  }, [code])
+  }, [code, onCopy])
 
-  const zoomPercent = Math.round(scale * 100)
+  // ---- 全屏：Esc 退出、锁定背景滚动、把焦点交给面板 ----
+  React.useEffect(() => {
+    if (!fullscreenOpen) return undefined
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      // 抢占捕获阶段，避免 Esc 同时关掉外层弹层或中断当前输入
+      event.stopPropagation()
+      setFullscreenOpen(false)
+    }
+
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    fullscreenPanelRef.current?.focus()
+
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true)
+      document.body.style.overflow = previousOverflow
+    }
+  }, [fullscreenOpen])
+
+  // 源码变化导致重新渲染时，全屏里的内容会短暂消失，直接收起全屏更稳
+  React.useEffect(() => {
+    if (!renderedSvg) setFullscreenOpen(false)
+  }, [renderedSvg])
+
+  const zoomPercent = toZoomPercent(scale)
+  const fullscreenZoomPercent = toZoomPercent(fullscreenScale)
+  const canFullscreen = Boolean(renderedSvg)
 
   return (
     <div className="mermaid-block-wrapper group/mermaid rounded-lg overflow-hidden my-2 border border-border/50">
       {/* 头部栏 */}
-      <div className="flex items-center justify-between h-[34px] px-2 py-1 bg-muted/60 text-muted-foreground text-xs">
-        <span className="font-medium select-none">Mermaid</span>
-        <div className="flex items-center gap-1">
-          {renderedSvg && (
-            <div className="flex items-center gap-0.5 mr-2">
-              <button type="button" onClick={handleZoomOut} className="p-0.5 rounded hover:bg-foreground/10 transition-colors" title="缩小">
-                <svg {...ICON_ATTRS}>{zoomOutPath}</svg>
-              </button>
-              <button type="button" onClick={handleZoomReset} className="px-1 py-0.5 rounded hover:bg-foreground/10 transition-colors min-w-[40px] text-center tabular-nums" title="重置缩放">
-                {zoomPercent}%
-              </button>
-              <button type="button" onClick={handleZoomIn} className="p-0.5 rounded hover:bg-foreground/10 transition-colors" title="放大">
-                <svg {...ICON_ATTRS}>{zoomInPath}</svg>
-              </button>
-            </div>
-          )}
-          <button type="button" onClick={handleCopy} className="flex items-center gap-1.5 px-1.5 py-0.5 rounded hover:bg-foreground/10 transition-colors text-muted-foreground hover:text-foreground">
-            <svg {...ICON_ATTRS}>{copied ? checkIconPath : copyIconPath}</svg>
-            <span>{copied ? '已复制' : '复制'}</span>
-          </button>
-        </div>
-      </div>
+      <MermaidHeader
+        showZoom={canFullscreen}
+        showFullscreen={canFullscreen}
+        zoomPercent={zoomPercent}
+        copied={copied}
+        fullscreen={false}
+        onZoomIn={handleZoomIn}
+        onZoomOut={handleZoomOut}
+        onZoomReset={handleZoomReset}
+        onCopy={handleCopy}
+        onToggleFullscreen={toggleFullscreen}
+      />
 
       <div className="overflow-hidden">
         {!renderedSvg ? (
@@ -243,6 +366,48 @@ export function MermaidBlock({ code, onCopy }: MermaidBlockProps): React.ReactEl
           </div>
         )}
       </div>
+
+      {/* 全屏预览：遮罩与 Dialog 保持一致的层级与配色 */}
+      {fullscreenOpen && renderedSvg && createPortal(
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 p-4 animate-in fade-in-0 duration-200"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Mermaid 图表全屏预览"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closeFullscreen()
+          }}
+        >
+          <div
+            ref={fullscreenPanelRef}
+            tabIndex={-1}
+            className="flex h-[88vh] w-[92vw] flex-col overflow-hidden rounded-lg border border-border/50 bg-background shadow-2xl outline-none animate-in fade-in-0 zoom-in-95 duration-200"
+          >
+            <MermaidHeader
+              showZoom
+              showFullscreen
+              zoomPercent={fullscreenZoomPercent}
+              copied={copied}
+              fullscreen
+              onZoomIn={handleFullscreenZoomIn}
+              onZoomOut={handleFullscreenZoomOut}
+              onZoomReset={handleFullscreenZoomReset}
+              onCopy={handleCopy}
+              onToggleFullscreen={closeFullscreen}
+            />
+            <div className="mermaid-block-scroll flex-1 overflow-auto overscroll-contain bg-background">
+              <div className="flex min-h-full w-max min-w-full items-center justify-center p-8">
+                <div
+                  className="mermaid-svg inline-block [&>svg]:block [&>svg]:h-auto"
+                  style={{ zoom: fullscreenScale }}
+                  dangerouslySetInnerHTML={{ __html: renderedSvg }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
     </div>
   )
 }

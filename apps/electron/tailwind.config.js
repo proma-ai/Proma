@@ -3,6 +3,9 @@ export default {
   darkMode: 'class',
   content: [
     './src/renderer/**/*.{js,ts,jsx,tsx}',
+    // @proma/ui 的组件按源码被 renderer 直接引用，必须一并扫描，
+    // 否则只在该包里出现的工具类（任意值尺寸、group 变体等）不会进入构建产物。
+    '../../packages/ui/src/**/*.{js,ts,jsx,tsx}',
   ],
   // 主题 class 由运行时根据设置拼接到 <html>，Tailwind 无法从 TSX 静态扫描到。
   // 必须 safelist，否则 @layer base 中对应的 CSS 变量块会在构建时被裁掉。
